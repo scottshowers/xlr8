@@ -1810,6 +1810,8 @@ async def check_data_integrity(project: Optional[str] = None):
     """
     Check data quality across all tables for a project.
     Returns table list with health metrics for frontend display.
+    
+    Uses document_registry as source of truth.
     """
     if not STRUCTURED_AVAILABLE:
         return {"error": "Structured data not available", "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
@@ -1821,75 +1823,96 @@ async def check_data_integrity(project: Optional[str] = None):
         total_rows = 0
         total_issues = 0
         
-        # Get tables to check - either from metadata or information_schema
-        tables_to_check = []
-        
-        # Try to get tables from metadata first (respects project)
+        # =================================================================
+        # STEP 1: Get valid files from REGISTRY (source of truth)
+        # =================================================================
+        valid_files = set()
         try:
             if project:
-                project_lower = project.lower()
+                # Try to get project_id from project name
+                from utils.database.models import ProjectModel
+                proj_record = ProjectModel.get_by_name(project)
+                project_id = proj_record.get('id') if proj_record else None
                 
-                # Get tables for specific project from metadata
-                meta_result = handler.conn.execute("""
-                    SELECT DISTINCT table_name, project
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
-                """).fetchall()
+                registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=False)
+            else:
+                registry_entries = DocumentRegistryModel.get_all()
+            
+            # Filter to only DuckDB files
+            for entry in registry_entries:
+                storage = entry.get('storage_type', '')
+                if storage in ('duckdb', 'both'):
+                    valid_files.add(entry.get('filename', '').lower())
+            
+            logger.info(f"[INTEGRITY] Registry has {len(valid_files)} valid DuckDB files")
+            
+            # If registry is empty, return empty result
+            if not valid_files:
+                return {
+                    "status": "healthy",
+                    "tables": [],
+                    "total_rows": 0,
+                    "health_score": 100,
+                    "issues_count": 0
+                }
                 
-                for table_name, proj in meta_result:
-                    # Match by project name OR by table name prefix (tables start with project code)
-                    if (proj and project_lower in proj.lower()) or table_name.lower().startswith(project_lower + '__'):
+        except Exception as reg_e:
+            logger.warning(f"[INTEGRITY] Registry query failed: {reg_e}")
+            return {"error": f"Registry unavailable: {reg_e}", "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
+        
+        # =================================================================
+        # STEP 2: Get tables that belong to registered files
+        # =================================================================
+        tables_to_check = []
+        
+        try:
+            # Get from _schema_metadata
+            meta_result = handler.conn.execute("""
+                SELECT DISTINCT table_name, file_name, project
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """).fetchall()
+            
+            for table_name, file_name, proj in meta_result:
+                # Only include if file is in registry
+                if file_name and file_name.lower() in valid_files:
+                    # Apply project filter if specified
+                    if project:
+                        if proj and project.lower() in proj.lower():
+                            tables_to_check.append(table_name)
+                    else:
                         tables_to_check.append(table_name)
+            
+            # Also check _pdf_tables
+            try:
+                table_check = handler.conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
                 
-                # Also check PDF tables
-                try:
+                if table_check and table_check[0] > 0:
                     pdf_result = handler.conn.execute("""
-                        SELECT DISTINCT table_name, project, project_id
+                        SELECT DISTINCT table_name, source_file, project
                         FROM _pdf_tables
                     """).fetchall()
-                    for table_name, proj, proj_id in pdf_result:
-                        # Match by project name, project_id, or table name prefix
-                        if ((proj and project_lower in proj.lower()) or 
-                            (proj_id and project_lower in proj_id.lower()) or
-                            table_name.lower().startswith(project_lower + '__')):
-                            if table_name not in tables_to_check:
-                                tables_to_check.append(table_name)
-                except:
-                    pass
-                
-                # If still no tables, try filtering from information_schema by table prefix
-                if not tables_to_check:
-                    logger.info(f"[INTEGRITY] No metadata matches, trying table prefix filter for {project}")
-                    tables_result = handler.conn.execute("""
-                        SELECT DISTINCT table_name 
-                        FROM information_schema.columns 
-                        WHERE table_schema = 'main'
-                        AND table_name NOT LIKE '_%'
-                    """).fetchall()
-                    for (table_name,) in tables_result:
-                        if table_name.lower().startswith(project_lower + '__') or table_name.lower().startswith(project_lower.replace('-', '') + '__'):
-                            tables_to_check.append(table_name)
                     
-                logger.info(f"[INTEGRITY] Project filter: {project}, found {len(tables_to_check)} tables")
-            else:
-                # No project filter - get all non-system tables
-                tables_result = handler.conn.execute("""
-                    SELECT DISTINCT table_name 
-                    FROM information_schema.columns 
-                    WHERE table_schema = 'main'
-                    AND table_name NOT LIKE '_%'
-                """).fetchall()
-                tables_to_check = [t[0] for t in tables_result]
+                    for table_name, source_file, proj in pdf_result:
+                        if source_file and source_file.lower() in valid_files:
+                            if project:
+                                if proj and project.lower() in proj.lower():
+                                    if table_name not in tables_to_check:
+                                        tables_to_check.append(table_name)
+                            else:
+                                if table_name not in tables_to_check:
+                                    tables_to_check.append(table_name)
+            except:
+                pass
                 
+            logger.info(f"[INTEGRITY] Found {len(tables_to_check)} tables for registered files")
+            
         except Exception as meta_e:
-            logger.warning(f"Metadata query failed, using information_schema: {meta_e}")
-            tables_result = handler.conn.execute("""
-                SELECT DISTINCT table_name 
-                FROM information_schema.columns 
-                WHERE table_schema = 'main'
-                AND table_name NOT LIKE '_%'
-            """).fetchall()
-            tables_to_check = [t[0] for t in tables_result]
+            logger.warning(f"[INTEGRITY] Metadata query failed: {meta_e}")
+            return {"error": str(meta_e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0}
         
         # Expanded patterns for bad column detection
         bad_column_patterns = [
