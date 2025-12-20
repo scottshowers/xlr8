@@ -94,9 +94,29 @@ async def get_structured_data_status(project: Optional[str] = None):
                     valid_files.add(entry.get('filename', '').lower())
             
             logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
+            
+            # If registry is empty, return empty - no fallback to stale metadata
+            if not valid_files:
+                logger.info("[STATUS/STRUCTURED] Registry is empty, returning empty result")
+                return {
+                    "available": True,
+                    "files": [],
+                    "total_files": 0,
+                    "total_tables": 0,
+                    "total_rows": 0
+                }
+                
         except Exception as reg_e:
-            logger.warning(f"[STATUS/STRUCTURED] Registry query failed: {reg_e}, falling back to direct query")
-            valid_files = None  # Fall back to showing all
+            logger.warning(f"[STATUS/STRUCTURED] Registry query failed: {reg_e}")
+            # Don't fall back - return empty if registry fails
+            return {
+                "available": True,
+                "files": [],
+                "total_files": 0,
+                "total_tables": 0,
+                "total_rows": 0,
+                "registry_error": str(reg_e)
+            }
         
         # =================================================================
         # STEP 2: Get table details from DuckDB metadata
@@ -955,8 +975,47 @@ async def reset_all_documents():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/status/registry")
+async def get_registry_status():
+    """
+    Get current registry status - shows what's in the registry.
+    Use this to verify registry is working.
+    """
+    try:
+        registry_entries = DocumentRegistryModel.get_all(limit=100)
+        
+        # Group by storage type
+        by_storage = {}
+        for entry in registry_entries:
+            st = entry.get('storage_type', 'unknown')
+            if st not in by_storage:
+                by_storage[st] = []
+            by_storage[st].append(entry.get('filename'))
+        
+        return {
+            "total_entries": len(registry_entries),
+            "by_storage_type": {k: len(v) for k, v in by_storage.items()},
+            "sample_files": [e.get('filename') for e in registry_entries[:10]],
+            "registry_working": True
+        }
+    except Exception as e:
+        return {
+            "total_entries": 0,
+            "error": str(e),
+            "registry_working": False
+        }
+
+
 @router.post("/status/registry/sync")
 async def sync_document_registry():
+    """
+    Sync document registry with actual data in backends.
+    
+    This is a one-time cleanup to fix orphaned registry entries
+    and add missing entries for existing files.
+    
+    Run this ONCE after deploying the registry-aware delete.
+    """
     """
     Sync document registry with actual data in backends.
     
