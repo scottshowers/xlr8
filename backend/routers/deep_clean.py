@@ -31,6 +31,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
     - DuckDB orphan metadata (_schema_metadata, _pdf_tables pointing to non-existent tables)
     - DuckDB orphan support tables (file_metadata, column_profiles for deleted files)
     - Supabase orphan documents (if applicable)
+    - Supabase project_relationships (stale relationship analysis)
     - Playbook progress cache for deleted files
     
     Args:
@@ -52,6 +53,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
         "duckdb_metadata": {"cleaned": 0, "errors": []},
         "duckdb_tables": {"cleaned": 0, "errors": []},
         "supabase": {"cleaned": 0, "errors": []},
+        "relationships": {"cleaned": 0, "errors": []},
         "playbook_cache": {"cleaned": 0, "errors": []},
     }
     
@@ -324,6 +326,23 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
                         logger.info(f"[DEEP-CLEAN] Removed Supabase registry: {doc['filename']}")
             except Exception as e:
                 results["supabase"]["errors"].append(f"document_registry: {str(e)}")
+            
+            # Clean project_relationships table (stale relationship analysis)
+            try:
+                if project_id:
+                    # Delete relationships for this specific project
+                    rel_result = supabase.table("project_relationships").delete().eq("project_name", project_id).execute()
+                    count = len(rel_result.data) if rel_result.data else 0
+                else:
+                    # Delete ALL relationships (full deep clean)
+                    rel_result = supabase.table("project_relationships").delete().neq("project_name", "").execute()
+                    count = len(rel_result.data) if rel_result.data else 0
+                
+                if count > 0:
+                    results["relationships"]["cleaned"] = count
+                    logger.info(f"[DEEP-CLEAN] Removed {count} stale relationships")
+            except Exception as e:
+                results["relationships"]["errors"].append(f"project_relationships: {str(e)}")
                 
     except Exception as e:
         logger.error(f"[DEEP-CLEAN] Supabase cleanup failed: {e}")
@@ -375,6 +394,7 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
         "duckdb_metadata_orphans": 0,
         "chromadb_orphans": 0,
         "supabase_orphans": 0,
+        "relationships": 0,
     }
     
     try:
@@ -403,6 +423,19 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
         except:
             pass
             
+    except:
+        pass
+    
+    # Count relationships
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        if supabase:
+            if project_id:
+                rel_result = supabase.table("project_relationships").select("id").eq("project_name", project_id).execute()
+            else:
+                rel_result = supabase.table("project_relationships").select("id").execute()
+            preview["relationships"] = len(rel_result.data) if rel_result.data else 0
     except:
         pass
     
