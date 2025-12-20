@@ -394,7 +394,7 @@ export default function ProjectsPage() {
             {/* Table Header */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1.3fr 1.5fr 0.9fr 1.6fr 0.7fr 1.5fr',
+              gridTemplateColumns: '1.2fr 1.4fr 0.8fr 1.8fr 80px 150px',
               padding: '0.75rem 1rem',
               background: colors.inputBg,
               borderBottom: `1px solid ${colors.divider}`,
@@ -422,7 +422,7 @@ export default function ProjectsPage() {
                   key={project.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1.3fr 1.5fr 0.9fr 1.6fr 0.7fr 1.5fr',
+                    gridTemplateColumns: '1.2fr 1.4fr 0.8fr 1.8fr 80px 150px',
                     padding: '0.875rem 1rem',
                     borderBottom: `1px solid ${colors.divider}`,
                     borderLeft: `3px solid ${isSelected ? customerColors.primary : 'transparent'}`,
