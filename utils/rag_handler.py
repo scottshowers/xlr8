@@ -1,1366 +1,725 @@
 """
-Database Models for XLR8
-CRUD operations for projects, documents, chat history, suppressions, and entity config
-
-Uses Supabase for persistent storage.
+RAG Handler for XLR8
+Handles all RAG operations including document processing, embedding, and retrieval.
 
 Version: 2.0 - Universal Classification Architecture
-Updated: December 2024
+- Added truth_type filtering for Three Truths architecture
+- Added custom where clause support
+- Added helper methods for truth-type specific searches
+
+NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
+- Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+- Adaptive chunking strategy per document type
+- Rich metadata preservation (structure, strategy, parent_section, etc.)
+- Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
+
+PROJECT ISOLATION:
+- Preserves project_id in chunk metadata
+- Filters search by project_id (optional)
+- Filters search by truth_type (optional)
 """
 
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime
-import uuid
-import hashlib
+import os
 import re
+import numpy as np
+from typing import List, Dict, Any, Optional
+import chromadb
+from chromadb.config import Settings
+import requests
+from requests.auth import HTTPBasicAuth
 import logging
 
-from .supabase_client import get_supabase
+# Import universal document intelligence system
+try:
+    from utils.universal_chunker import chunk_intelligently
+    from utils.document_analyzer import DocumentAnalyzer
+    UNIVERSAL_CHUNKING_AVAILABLE = True
+    logging.info("✅ Universal Document Intelligence System loaded")
+except ImportError as e:
+    UNIVERSAL_CHUNKING_AVAILABLE = False
+    logging.warning(f"Universal chunker not available ({e}), falling back to basic chunking")
 
 logger = logging.getLogger(__name__)
 
 
-class ProjectModel:
-    """Project database operations"""
-    
-    @staticmethod
-    def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
-              notes: str = None, product: str = None) -> Optional[Dict[str, Any]]:
-        """Create a new project"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            data = {
-                'name': name,
-                'customer': client_name or '',
-                'status': 'active',
-                'metadata': {
-                    'type': project_type,
-                    'notes': notes,
-                    'product': product
-                }
-            }
-            
-            response = supabase.table('projects').insert(data).execute()
-            return response.data[0] if response.data else None
-        
-        except Exception as e:
-            print(f"Error creating project: {e}")
-            return None
-    
-    @staticmethod
-    def get_all(status: str = 'active') -> List[Dict[str, Any]]:
-        """Get all projects"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('projects').select('*').order('created_at', desc=True)
-            if status:
-                query = query.eq('status', status)
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting projects: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(project_id: str) -> Optional[Dict[str, Any]]:
-        """Get project by ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('projects').select('*').eq('id', project_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting project: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_name(name: str) -> Optional[Dict[str, Any]]:
-        """Get project by name"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('projects').select('*').eq('name', name).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting project by name: {e}")
-            return None
-    
-    @staticmethod
-    def update(project_id: str, **kwargs) -> Optional[Dict[str, Any]]:
-        """Update project"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            kwargs['updated_at'] = datetime.utcnow().isoformat()
-            response = supabase.table('projects').update(kwargs).eq('id', project_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error updating project: {e}")
-            return None
-    
-    @staticmethod
-    def delete(project_id: str) -> bool:
-        """Delete project"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            supabase.table('projects').delete().eq('id', project_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting project: {e}")
-            return False
-
-
-class DocumentModel:
-    """Document database operations"""
-    
-    @staticmethod
-    def create(project_id: str, name: str, category: str, 
-              content: str = None, file_type: str = None,
-              file_size: int = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        """Create a new document"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            data = {
-                'project_id': project_id,
-                'name': name,
-                'category': category,
-                'content': content,
-                'file_type': file_type,
-                'file_size': file_size,
-                'metadata': metadata or {}
-            }
-            response = supabase.table('documents').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating document: {e}")
-            return None
-    
-    @staticmethod
-    def get_all(limit: int = 500) -> List[Dict[str, Any]]:
-        """Get all documents"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            response = supabase.table('documents') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting all documents: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(document_id: str) -> Optional[Dict[str, Any]]:
-        """Get document by ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('documents').select('*').eq('id', document_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting document: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_project(project_id: str, category: str = None) -> List[Dict[str, Any]]:
-        """Get documents for a project"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('documents').select('*').eq('project_id', project_id).order('created_at', desc=True)
-            if category:
-                query = query.eq('category', category)
-            response = query.execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting documents: {e}")
-            return []
-    
-    @staticmethod
-    def delete(document_id: str) -> bool:
-        """Delete document"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            supabase.table('documents').delete().eq('id', document_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting document: {e}")
-            return False
-    
-    @staticmethod
-    def delete_all() -> int:
-        """Delete all documents - returns count deleted"""
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        
-        try:
-            count_response = supabase.table('documents').select('id', count='exact').execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting all documents: {e}")
-            return 0
-
-
-# =============================================================================
-# DOCUMENT REGISTRY MODEL - Universal Classification Architecture
-# =============================================================================
-
-class DocumentRegistryModel:
+class RAGHandler:
     """
-    Document Registry - THE SOURCE OF TRUTH for all uploaded files.
+    Handles all RAG operations including document processing, embedding, and retrieval.
     
-    Tracks ALL files in ChromaDB and/or DuckDB with unified metadata.
-    All components should query this registry instead of backends directly.
+    NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
+    - Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
+    - Adaptive chunking strategy per document type
+    - Rich metadata preservation (structure, strategy, parent_section, etc.)
+    - Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
     
-    Classification Architecture (Three Truths):
-    - REALITY: Customer's actual data (queryable in DuckDB)
-    - INTENT: Customer's documentation (searchable in ChromaDB)
-    - REFERENCE: Standards, best practices (global, searchable)
-    - CONFIGURATION: Mapping/lookup files (queryable AND searchable)
-    - OUTPUT: Generated deliverables (archive only)
+    PROJECT ISOLATION:
+    - Preserves project_id in chunk metadata
+    - Filters search by project_id (optional)
     
-    truth_type determines WHAT the file is
-    storage_type determines WHERE it's stored
-    Routing is determined by truth_type, NOT file extension
+    TRUTH TYPE FILTERING (v2.0):
+    - Preserves truth_type in chunk metadata
+    - Filters search by truth_type (intent, reference, etc.)
     """
     
-    # ==========================================================================
-    # TRUTH TYPES - The core classification
-    # ==========================================================================
-    TRUTH_REALITY = 'reality'
-    TRUTH_INTENT = 'intent'
-    TRUTH_REFERENCE = 'reference'
-    TRUTH_CONFIGURATION = 'configuration'
-    TRUTH_OUTPUT = 'output'
-    
-    VALID_TRUTH_TYPES = [TRUTH_REALITY, TRUTH_INTENT, TRUTH_REFERENCE, TRUTH_CONFIGURATION, TRUTH_OUTPUT]
-    
-    # ==========================================================================
-    # STORAGE TYPES
-    # ==========================================================================
-    STORAGE_CHROMADB = 'chromadb'
-    STORAGE_DUCKDB = 'duckdb'
-    STORAGE_BOTH = 'both'
-    
-    VALID_STORAGE_TYPES = [STORAGE_CHROMADB, STORAGE_DUCKDB, STORAGE_BOTH]
-    
-    # ==========================================================================
-    # CLASSIFICATION METHODS
-    # ==========================================================================
-    CLASS_USER_SELECTED = 'user_selected'
-    CLASS_AUTO_DETECTED = 'auto_detected'
-    CLASS_FILENAME_INFERRED = 'filename_inferred'
-    
-    VALID_CLASSIFICATION_METHODS = [CLASS_USER_SELECTED, CLASS_AUTO_DETECTED, CLASS_FILENAME_INFERRED]
-    
-    # ==========================================================================
-    # PARSE STATUS
-    # ==========================================================================
-    PARSE_PENDING = 'pending'
-    PARSE_SUCCESS = 'success'
-    PARSE_PARTIAL = 'partial'
-    PARSE_FAILED = 'failed'
-    
-    # ==========================================================================
-    # LEGACY USAGE TYPES - Backward compatibility
-    # ==========================================================================
-    USAGE_RAG_KNOWLEDGE = 'rag_knowledge'
-    USAGE_STRUCTURED_DATA = 'structured_data'
-    USAGE_PLAYBOOK = 'playbook'
-    USAGE_PLAYBOOK_SOURCE = 'playbook_source'
-    USAGE_TEMPLATE = 'template'
-    
-    # ==========================================================================
-    # ROUTING RULES
-    # ==========================================================================
-    
-    @classmethod
-    def get_storage_for_truth_type(cls, truth_type: str) -> str:
-        """Determine storage type based on truth_type."""
-        routing = {
-            cls.TRUTH_REALITY: cls.STORAGE_DUCKDB,
-            cls.TRUTH_INTENT: cls.STORAGE_CHROMADB,
-            cls.TRUTH_REFERENCE: cls.STORAGE_CHROMADB,
-            cls.TRUTH_CONFIGURATION: cls.STORAGE_BOTH,
-            cls.TRUTH_OUTPUT: cls.STORAGE_CHROMADB,
-        }
-        return routing.get(truth_type, cls.STORAGE_CHROMADB)
-    
-    @classmethod
-    def get_legacy_usage_type(cls, truth_type: str, is_global: bool) -> str:
-        """Map truth_type to legacy usage_type for backward compatibility."""
-        if truth_type == cls.TRUTH_REALITY:
-            return cls.USAGE_STRUCTURED_DATA
-        elif truth_type == cls.TRUTH_REFERENCE:
-            return cls.USAGE_PLAYBOOK_SOURCE if is_global else cls.USAGE_TEMPLATE
-        elif truth_type == cls.TRUTH_CONFIGURATION:
-            return cls.USAGE_STRUCTURED_DATA
-        else:
-            return cls.USAGE_RAG_KNOWLEDGE
-    
-    # ==========================================================================
-    # REGISTRATION
-    # ==========================================================================
-    
-    @staticmethod
-    def register(
-        filename: str,
-        truth_type: str = None,
-        classification_method: str = None,
-        file_type: str = None,
-        storage_type: str = None,
-        usage_type: str = None,
-        project_id: str = None,
-        is_global: bool = False,
-        classification_confidence: float = 0.5,
-        content_domain: List[str] = None,
-        chunk_count: int = 0,
-        file_size: int = None,
-        duckdb_tables: List[str] = None,
-        chromadb_collection: str = None,
-        row_count: int = None,
-        sheet_count: int = None,
-        page_count: int = None,
-        parse_status: str = 'success',
-        parse_errors: List[str] = None,
-        schema_confidence: float = None,
-        metadata: dict = None
-    ) -> Optional[Dict[str, Any]]:
-        """Register a document in the registry."""
-        supabase = get_supabase()
-        if not supabase:
-            logger.error("[REGISTRY] No Supabase connection")
-            return None
-        
-        # Handle backward compatibility
-        if truth_type is None and usage_type is not None:
-            if usage_type == DocumentRegistryModel.USAGE_STRUCTURED_DATA:
-                truth_type = DocumentRegistryModel.TRUTH_REALITY
-            elif usage_type in [DocumentRegistryModel.USAGE_PLAYBOOK_SOURCE, DocumentRegistryModel.USAGE_TEMPLATE]:
-                truth_type = DocumentRegistryModel.TRUTH_REFERENCE
+    def __init__(
+        self, 
+        persist_directory: Optional[str] = None,
+        embed_endpoint: Optional[str] = None,
+        llm_endpoint: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
+        **kwargs
+    ):
+        """Initialize the RAG handler with ChromaDB and embedding configuration."""
+        try:
+            if persist_directory is None:
+                if os.path.exists("/data") or os.access("/", os.W_OK):
+                    try:
+                        persist_directory = "/data/chromadb"
+                        os.makedirs(persist_directory, exist_ok=True)
+                        logger.info(f"Using persistent storage at {persist_directory}")
+                    except (OSError, PermissionError) as e:
+                        logger.warning(f"Cannot use /data: {e}, falling back to local storage")
+                        persist_directory = None
+                
+                if persist_directory is None:
+                    persist_directory = os.path.join(os.getcwd(), ".chromadb")
+                    os.makedirs(persist_directory, exist_ok=True)
+                    logger.warning(f"Using local storage at {persist_directory} (will reset on deploy)")
             else:
-                truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
-            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if truth_type is None:
-            truth_type = DocumentRegistryModel.TRUTH_INTENT if not is_global else DocumentRegistryModel.TRUTH_REFERENCE
-            classification_method = classification_method or DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if classification_method is None:
-            classification_method = DocumentRegistryModel.CLASS_FILENAME_INFERRED
-        
-        if storage_type is None:
-            storage_type = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
-        
-        if usage_type is None:
-            usage_type = DocumentRegistryModel.get_legacy_usage_type(truth_type, is_global)
-        
-        intelligence_ready = True
-        readiness_blockers = []
-        
-        if parse_status == 'failed':
-            intelligence_ready = False
-            readiness_blockers.append('parse_failed')
-        elif parse_status == 'partial':
-            readiness_blockers.append('parse_partial')
-        
-        if classification_confidence < 0.4:
-            readiness_blockers.append('low_classification_confidence')
-        
-        try:
-            data = {
-                'filename': filename,
-                'file_type': file_type,
-                'truth_type': truth_type,
-                'classification_method': classification_method,
-                'classification_confidence': classification_confidence,
-                'content_domain': content_domain or [],
-                'storage_type': storage_type,
-                'usage_type': usage_type,
-                'project_id': project_id,
-                'is_global': is_global,
-                'chunk_count': chunk_count,
-                'file_size': file_size,
-                'row_count': row_count,
-                'sheet_count': sheet_count,
-                'page_count': page_count,
-                'parse_status': parse_status,
-                'parse_errors': parse_errors or [],
-                'schema_confidence': schema_confidence,
-                'intelligence_ready': intelligence_ready,
-                'readiness_blockers': readiness_blockers,
-                'citation_count': 0,
-                'positive_feedback': 0,
-                'negative_feedback': 0,
-                'metadata': metadata or {}
-            }
+                os.makedirs(persist_directory, exist_ok=True)
+                logger.info(f"Using provided storage at {persist_directory}")
             
-            data = {k: v for k, v in data.items() if v is not None}
-            
-            response = supabase.table('document_registry').insert(data).execute()
-            
-            if response.data:
-                logger.info(f"[REGISTRY] Registered: {filename} as {truth_type} -> {storage_type}")
-                return response.data[0]
-            return None
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error registering {filename}: {e}")
-            return None
-    
-    # ==========================================================================
-    # BASIC QUERIES
-    # ==========================================================================
-    
-    @staticmethod
-    def get_all(limit: int = 1000) -> List[Dict[str, Any]]:
-        """Get all registered documents"""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            response = supabase.table('document_registry') \
-                .select('*') \
-                .order('created_at', desc=True) \
-                .limit(limit) \
-                .execute()
-            return response.data if response.data else []
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting all: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_project(
-        project_id: str = None, 
-        include_global: bool = True,
-        truth_type: str = None,
-        storage_type: str = None,
-        intelligence_ready_only: bool = False
-    ) -> List[Dict[str, Any]]:
-        """Get documents for a project with optional filters."""
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        
-        try:
-            query = supabase.table('document_registry').select('*')
-            
-            if project_id:
-                if include_global:
-                    query = query.or_(f'project_id.eq.{project_id},is_global.eq.true')
-                else:
-                    query = query.eq('project_id', project_id)
-            else:
-                query = query.eq('is_global', True)
-            
-            if truth_type:
-                if isinstance(truth_type, list):
-                    query = query.in_('truth_type', truth_type)
-                else:
-                    query = query.eq('truth_type', truth_type)
-            
-            if storage_type:
-                if isinstance(storage_type, list):
-                    query = query.in_('storage_type', storage_type)
-                else:
-                    query = query.eq('storage_type', storage_type)
-            
-            if intelligence_ready_only:
-                query = query.eq('intelligence_ready', True)
-            
-            response = query.order('created_at', desc=True).execute()
-            return response.data if response.data else []
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting by project: {e}")
-            return []
-    
-    @staticmethod
-    def find_by_filename(filename: str, project_id: str = None) -> Optional[Dict[str, Any]]:
-        """Find a document by filename"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            query = supabase.table('document_registry').select('*').eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            response = query.limit(1).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error finding {filename}: {e}")
-            return None
-    
-    @staticmethod
-    def find_by_id(registry_id: str) -> Optional[Dict[str, Any]]:
-        """Find a document by registry ID"""
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        try:
-            response = supabase.table('document_registry').select('*').eq('id', registry_id).limit(1).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error finding by ID {registry_id}: {e}")
-            return None
-    
-    # ==========================================================================
-    # TRUTH-TYPE SPECIFIC QUERIES
-    # ==========================================================================
-    
-    @staticmethod
-    def get_reality_files(project_id: str, include_global: bool = False) -> List[Dict[str, Any]]:
-        """Get REALITY files (customer data) for a project."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=DocumentRegistryModel.TRUTH_REALITY,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_intent_files(project_id: str) -> List[Dict[str, Any]]:
-        """Get INTENT files (customer documentation) for a project."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=False,
-            truth_type=DocumentRegistryModel.TRUTH_INTENT,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_reference_files() -> List[Dict[str, Any]]:
-        """Get REFERENCE files (standards, checklists)."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=None,
-            include_global=True,
-            truth_type=DocumentRegistryModel.TRUTH_REFERENCE,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_configuration_files(project_id: str = None, include_global: bool = True) -> List[Dict[str, Any]]:
-        """Get CONFIGURATION files (mappings, lookups)."""
-        return DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=DocumentRegistryModel.TRUTH_CONFIGURATION,
-            intelligence_ready_only=True
-        )
-    
-    @staticmethod
-    def get_queryable_tables(project_id: str, include_global: bool = False) -> List[str]:
-        """Get list of DuckDB table names that are queryable for a project."""
-        files = DocumentRegistryModel.get_by_project(
-            project_id=project_id,
-            include_global=include_global,
-            truth_type=[DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.TRUTH_CONFIGURATION],
-            storage_type=[DocumentRegistryModel.STORAGE_DUCKDB, DocumentRegistryModel.STORAGE_BOTH],
-            intelligence_ready_only=True
-        )
-        
-        tables = []
-        for f in files:
-            metadata = f.get('metadata', {})
-            if isinstance(metadata, dict) and 'tables' in metadata:
-                tables.extend(metadata['tables'])
-            if f.get('duckdb_tables'):
-                tables.extend(f['duckdb_tables'])
-        
-        return list(set(tables))
-    
-    @staticmethod
-    def get_for_intelligence(project_id: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Get all files organized by truth type for the Intelligence Engine."""
-        return {
-            'reality': DocumentRegistryModel.get_reality_files(project_id),
-            'intent': DocumentRegistryModel.get_intent_files(project_id),
-            'reference': DocumentRegistryModel.get_reference_files(),
-            'configuration': DocumentRegistryModel.get_configuration_files(project_id)
-        }
-    
-    # ==========================================================================
-    # UNREGISTER / DELETE
-    # ==========================================================================
-    
-    @staticmethod
-    def unregister(filename: str, project_id: str = None) -> bool:
-        """Remove a document from the registry."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            if project_id:
-                result = supabase.table('document_registry').delete().eq('filename', filename).eq('project_id', project_id).execute()
-            else:
-                result = supabase.table('document_registry').delete().eq('filename', filename).execute()
-            
-            deleted_count = len(result.data) if result.data else 0
-            if deleted_count > 0:
-                logger.info(f"[REGISTRY] Unregistered: {filename}")
-            return deleted_count > 0 or True
-            
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error unregistering {filename}: {e}")
-            return False
-    
-    # ==========================================================================
-    # UPDATES
-    # ==========================================================================
-    
-    @staticmethod
-    def update(filename: str, project_id: str = None, **updates) -> bool:
-        """Update fields for a document."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            updates['updated_at'] = datetime.utcnow().isoformat()
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error updating {filename}: {e}")
-            return False
-    
-    @staticmethod
-    def update_chunk_count(filename: str, chunk_count: int, project_id: str = None) -> bool:
-        """Update the chunk count for a document"""
-        return DocumentRegistryModel.update(filename, project_id, chunk_count=chunk_count)
-    
-    @staticmethod
-    def reclassify(filename: str, truth_type: str, classification_method: str = 'user_selected',
-                   classification_confidence: float = 1.0, project_id: str = None) -> bool:
-        """Reclassify a document with a new truth_type."""
-        if truth_type not in DocumentRegistryModel.VALID_TRUTH_TYPES:
-            return False
-        new_storage = DocumentRegistryModel.get_storage_for_truth_type(truth_type)
-        return DocumentRegistryModel.update(filename, project_id, truth_type=truth_type,
-                                            storage_type=new_storage, classification_method=classification_method,
-                                            classification_confidence=classification_confidence)
-    
-    # ==========================================================================
-    # LEARNING METRICS
-    # ==========================================================================
-    
-    @staticmethod
-    def increment_citation(filename: str, project_id: str = None) -> bool:
-        """Increment citation count when a file is used in an answer."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
-            if not doc:
-                return False
-            
-            current_count = doc.get('citation_count', 0) or 0
-            updates = {
-                'citation_count': current_count + 1,
-                'last_cited_at': datetime.utcnow().isoformat(),
-                'updated_at': datetime.utcnow().isoformat()
-            }
-            
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error incrementing citation for {filename}: {e}")
-            return False
-    
-    @staticmethod
-    def record_feedback(filename: str, positive: bool, project_id: str = None) -> bool:
-        """Record feedback for a file (thumbs up/down)."""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        
-        try:
-            doc = DocumentRegistryModel.find_by_filename(filename, project_id)
-            if not doc:
-                return False
-            
-            if positive:
-                current = doc.get('positive_feedback', 0) or 0
-                updates = {'positive_feedback': current + 1}
-            else:
-                current = doc.get('negative_feedback', 0) or 0
-                updates = {'negative_feedback': current + 1}
-            
-            updates['updated_at'] = datetime.utcnow().isoformat()
-            
-            query = supabase.table('document_registry').update(updates).eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
-            query.execute()
-            return True
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error recording feedback for {filename}: {e}")
-            return False
-    
-    # ==========================================================================
-    # DIAGNOSTICS
-    # ==========================================================================
-    
-    @staticmethod
-    def get_classification_stats(project_id: str = None) -> Dict[str, Any]:
-        """Get classification statistics for diagnostics dashboard."""
-        supabase = get_supabase()
-        if not supabase:
-            return {}
-        
-        try:
-            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
-            
-            stats = {
-                'total_files': len(files),
-                'by_truth_type': {},
-                'by_classification_method': {},
-                'by_parse_status': {},
-                'intelligence_ready': 0,
-                'not_ready': 0,
-                'low_confidence': 0,
-                'never_cited': 0,
-                'avg_feedback_score': 0.0
-            }
-            
-            total_feedback = 0
-            positive_total = 0
-            
-            for f in files:
-                tt = f.get('truth_type', 'unknown')
-                stats['by_truth_type'][tt] = stats['by_truth_type'].get(tt, 0) + 1
-                
-                cm = f.get('classification_method', 'unknown')
-                stats['by_classification_method'][cm] = stats['by_classification_method'].get(cm, 0) + 1
-                
-                ps = f.get('parse_status', 'unknown')
-                stats['by_parse_status'][ps] = stats['by_parse_status'].get(ps, 0) + 1
-                
-                if f.get('intelligence_ready', True):
-                    stats['intelligence_ready'] += 1
-                else:
-                    stats['not_ready'] += 1
-                
-                conf = f.get('classification_confidence')
-                if conf is not None and conf < 0.5:
-                    stats['low_confidence'] += 1
-                
-                if (f.get('citation_count') or 0) == 0:
-                    stats['never_cited'] += 1
-                
-                pos = f.get('positive_feedback') or 0
-                neg = f.get('negative_feedback') or 0
-                if pos + neg > 0:
-                    total_feedback += pos + neg
-                    positive_total += pos
-            
-            if total_feedback > 0:
-                stats['avg_feedback_score'] = round(positive_total / total_feedback, 2)
-            
-            return stats
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting stats: {e}")
-            return {}
-    
-    @staticmethod
-    def get_files_needing_review(project_id: str = None) -> List[Dict[str, Any]]:
-        """Get files that need manual review."""
-        try:
-            files = DocumentRegistryModel.get_by_project(project_id, include_global=True) if project_id else DocumentRegistryModel.get_all()
-            
-            needs_review = []
-            for f in files:
-                reasons = []
-                if not f.get('intelligence_ready', True):
-                    reasons.append('not_intelligence_ready')
-                conf = f.get('classification_confidence')
-                if conf is not None and conf < 0.5:
-                    reasons.append('low_confidence')
-                ps = f.get('parse_status', 'success')
-                if ps in ['partial', 'failed']:
-                    reasons.append(f'parse_{ps}')
-                blockers = f.get('readiness_blockers', [])
-                if blockers:
-                    reasons.extend(blockers)
-                if reasons:
-                    f['review_reasons'] = reasons
-                    needs_review.append(f)
-            
-            return needs_review
-        except Exception as e:
-            logger.error(f"[REGISTRY] Error getting files needing review: {e}")
-            return []
-    
-    # ==========================================================================
-    # UTILITY
-    # ==========================================================================
-    
-    @staticmethod
-    def table_exists() -> bool:
-        """Check if the document_registry table exists"""
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('document_registry').select('id').limit(1).execute()
-            return True
-        except Exception:
-            return False
-    
-    @staticmethod
-    def validate_truth_type(truth_type: str) -> bool:
-        return truth_type in DocumentRegistryModel.VALID_TRUTH_TYPES
-    
-    @staticmethod
-    def validate_classification_method(method: str) -> bool:
-        return method in DocumentRegistryModel.VALID_CLASSIFICATION_METHODS
-
-
-# =============================================================================
-# AUTO-CLASSIFICATION HELPER
-# =============================================================================
-
-def auto_classify_file(filename: str, file_extension: str, project_name: str, 
-                       file_content_sample: str = None) -> Tuple[str, str, float]:
-    """Auto-classify a file based on filename, extension, and optionally content."""
-    filename_lower = filename.lower()
-    is_global = project_name.lower() in ['global', '__global__', 'global/universal', 'reference library']
-    
-    reality_keywords = ['register', 'export', 'report', 'data', 'payroll', 'employee', 'hr_', 'audit']
-    intent_keywords = ['sow', 'requirement', 'statement of work', 'notes', 'meeting', 'spec', 'scope']
-    reference_keywords = ['checklist', 'standard', 'guide', 'reference', 'compliance', 'template', 
-                          'best_practice', 'best-practice', 'year-end', 'yearend', 'year_end']
-    config_keywords = ['mapping', 'lookup', 'codes', 'config', 'crosswalk', 'translation', 'xref']
-    
-    if any(kw in filename_lower for kw in reference_keywords):
-        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in config_keywords):
-        return (DocumentRegistryModel.TRUTH_CONFIGURATION, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in intent_keywords):
-        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if any(kw in filename_lower for kw in reality_keywords) and not is_global:
-        return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
-    
-    if file_extension in ['xlsx', 'xls', 'csv']:
-        if is_global:
-            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.5)
-        else:
-            return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-    
-    if file_extension in ['docx', 'doc', 'pdf']:
-        if is_global:
-            return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-        else:
-            return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
-    
-    if is_global:
-        return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
-    else:
-        return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
-
-
-# =============================================================================
-# CHAT HISTORY MODEL
-# =============================================================================
-
-class ChatHistoryModel:
-    """Chat history database operations"""
-    
-    @staticmethod
-    def add_message(project_id: str, session_id: str, role: str,
-                   content: str, sources: list = None, metadata: dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            data = {
-                'project_id': project_id, 'session_id': session_id, 'role': role,
-                'content': content, 'sources': sources or [], 'metadata': metadata or {}
-            }
-            response = supabase.table('chat_history').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error adding chat message: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_session(session_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('chat_history').select('*').eq('session_id', session_id).order('created_at', desc=False).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting chat history: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_project(project_id: str, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('chat_history').select('*').eq('project_id', project_id).order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting chat history: {e}")
-            return []
-    
-    @staticmethod
-    def delete_session(session_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('chat_history').delete().eq('session_id', session_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting session: {e}")
-            return False
-
-
-# =============================================================================
-# PROCESSING JOB MODEL
-# =============================================================================
-
-class ProcessingJobModel:
-    """Processing job database operations"""
-    
-    @staticmethod
-    def create(job_type: str, project_id: str = None, filename: str = None, input_data: dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            data = {'job_type': job_type, 'project_id': project_id, 'status': 'queued',
-                    'progress': {'percent': 0, 'step': 'Queued...'}, 'input_data': input_data or {'filename': filename}}
-            response = supabase.table('processing_jobs').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating job: {e}")
-            return None
-    
-    @staticmethod
-    def update_progress(job_id: str, percent: int, step: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'processing', 'progress': {'percent': percent, 'step': step}, 'updated_at': datetime.utcnow().isoformat()}
-            if percent == 0:
-                data['started_at'] = datetime.utcnow().isoformat()
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error updating job progress: {e}")
-            return False
-    
-    @staticmethod
-    def complete(job_id: str, result_data: dict = None) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'completed', 'progress': {'percent': 100, 'step': 'Complete'},
-                    'result_data': result_data or {}, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error completing job: {e}")
-            return False
-    
-    @staticmethod
-    def fail(job_id: str, error_message: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            data = {'status': 'failed', 'error_message': error_message, 'completed_at': datetime.utcnow().isoformat(), 'updated_at': datetime.utcnow().isoformat()}
-            supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error failing job: {e}")
-            return False
-    
-    @staticmethod
-    def get_all(limit: int = 50) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            response = supabase.table('processing_jobs').select('*').order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting jobs: {e}")
-            return []
-    
-    @staticmethod
-    def get_by_id(job_id: str) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error getting job: {e}")
-            return None
-    
-    @staticmethod
-    def delete(job_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('processing_jobs').delete().eq('id', job_id).execute()
-            return True
-        except Exception as e:
-            print(f"Error deleting job: {e}")
-            return False
-    
-    @staticmethod
-    def delete_all() -> int:
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        try:
-            count_response = supabase.table('processing_jobs').select('id', count='exact').execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('processing_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting all jobs: {e}")
-            return 0
-    
-    @staticmethod
-    def delete_older_than(days: int = 7) -> int:
-        supabase = get_supabase()
-        if not supabase:
-            return 0
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            count_response = supabase.table('processing_jobs').select('id', count='exact').lt('created_at', cutoff).execute()
-            count = count_response.count or 0
-            if count > 0:
-                supabase.table('processing_jobs').delete().lt('created_at', cutoff).execute()
-            return count
-        except Exception as e:
-            print(f"Error deleting old jobs: {e}")
-            return 0
-    
-    @staticmethod
-    def get_recent(days: int = 7, limit: int = 100) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            from datetime import timedelta
-            cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
-            response = supabase.table('processing_jobs').select('*').gte('created_at', cutoff).order('created_at', desc=True).limit(limit).execute()
-            return response.data if response.data else []
-        except Exception as e:
-            print(f"Error getting recent jobs: {e}")
-            return []
-
-
-# =============================================================================
-# FINDING SUPPRESSION MODEL
-# =============================================================================
-
-class FindingSuppressionModel:
-    """Finding Suppression - Manage acknowledged/suppressed findings"""
-    
-    @staticmethod
-    def _hash_finding(finding_text: str) -> str:
-        normalized = finding_text.lower().strip()
-        normalized = re.sub(r'\d+\.?\d*%?', 'N', normalized)
-        normalized = re.sub(r'\s+', ' ', normalized)
-        return hashlib.sha256(normalized.encode()).hexdigest()[:32]
-    
-    @staticmethod
-    def create(project_id: str, playbook_type: str, suppression_type: str, reason: str,
-               action_id: str = None, finding_text: str = None, pattern: str = None,
-               category: str = None, document_filter: str = None, state_filter: List[str] = None,
-               keyword_filter: List[str] = None, fein_filter: List[str] = None,
-               notes: str = None, expires_at: str = None, created_by: str = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        try:
-            finding_hash = None
-            if finding_text and suppression_type in ('suppress', 'acknowledge'):
-                finding_hash = FindingSuppressionModel._hash_finding(finding_text)
-            data = {
-                'project_id': project_id, 'playbook_type': playbook_type, 'action_id': action_id,
-                'suppression_type': suppression_type, 'finding_hash': finding_hash, 'pattern': pattern,
-                'category': category, 'document_filter': document_filter, 'state_filter': state_filter,
-                'keyword_filter': keyword_filter, 'fein_filter': fein_filter, 'reason': reason,
-                'notes': notes, 'expires_at': expires_at, 'created_by': created_by, 'is_active': True
-            }
-            data = {k: v for k, v in data.items() if v is not None}
-            response = supabase.table('finding_suppressions').insert(data).execute()
-            return response.data[0] if response.data else None
-        except Exception as e:
-            print(f"Error creating suppression: {e}")
-            return None
-    
-    @staticmethod
-    def get_active_rules(project_id: str, playbook_type: str, action_id: str = None) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return []
-        try:
-            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).eq('is_active', True)
-            response = query.execute()
-            rules = response.data if response.data else []
-            now = datetime.utcnow().isoformat()
-            filtered = []
-            for rule in rules:
-                if rule.get('expires_at') and rule['expires_at'] < now:
-                    continue
-                if rule.get('action_id') and action_id and rule['action_id'] != action_id:
-                    continue
-                filtered.append(rule)
-            return filtered
-        except Exception as e:
-            print(f"Error getting suppression rules: {e}")
-            return []
-    
-    @staticmethod
-    def check_finding(project_id: str, playbook_type: str, finding_text: str, action_id: str = None,
-                      document_name: str = None, state: str = None, fein: str = None) -> Optional[Dict[str, Any]]:
-        rules = FindingSuppressionModel.get_active_rules(project_id, playbook_type, action_id)
-        if not rules:
-            return None
-        finding_hash = FindingSuppressionModel._hash_finding(finding_text)
-        finding_lower = finding_text.lower()
-        for rule in rules:
-            if rule.get('fein_filter') and fein and fein not in rule['fein_filter']:
-                continue
-            if rule.get('finding_hash') and rule['finding_hash'] == finding_hash:
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('pattern'):
-                try:
-                    if re.search(rule['pattern'], finding_text, re.IGNORECASE):
-                        FindingSuppressionModel._record_match(rule['id'])
-                        return rule
-                except re.error:
-                    pass
-            if rule.get('document_filter') and document_name and rule['document_filter'].lower() in document_name.lower():
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('state_filter') and state and state.upper() in [s.upper() for s in rule['state_filter']]:
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-            if rule.get('keyword_filter') and any(kw.lower() in finding_lower for kw in rule['keyword_filter']):
-                FindingSuppressionModel._record_match(rule['id'])
-                return rule
-        return None
-    
-    @staticmethod
-    def _record_match(rule_id: str) -> None:
-        supabase = get_supabase()
-        if not supabase:
-            return
-        try:
-            supabase.rpc('increment_suppression_match', {'rule_id': rule_id}).execute()
-        except Exception:
             try:
-                supabase.table('finding_suppressions').update({
-                    'match_count': supabase.table('finding_suppressions').select('match_count').eq('id', rule_id).execute().data[0].get('match_count', 0) + 1,
-                    'last_matched_at': datetime.utcnow().isoformat()
-                }).eq('id', rule_id).execute()
-            except Exception:
-                pass
-    
-    @staticmethod
-    def deactivate(rule_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
-        try:
-            supabase.table('finding_suppressions').update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
-            return True
+                self.client = chromadb.PersistentClient(
+                    path=persist_directory,
+                    settings=Settings(anonymized_telemetry=False, allow_reset=True)
+                )
+                logger.info(f"ChromaDB client initialized successfully at {persist_directory}")
+            except Exception as e:
+                logger.error(f"Failed to initialize ChromaDB PersistentClient: {e}")
+                logger.warning("Falling back to in-memory ChromaDB (data will not persist)")
+                self.client = chromadb.Client()
+            
+            self.ollama_base_url = embed_endpoint or llm_endpoint or os.getenv("LLM_ENDPOINT")
+            
+            if not self.ollama_base_url:
+                logger.error("LLM_ENDPOINT environment variable not set! Embeddings will fail.")
+                self.ollama_base_url = "http://localhost:11434"
+            
+            self.ollama_username = username or os.getenv("LLM_USERNAME", "")
+            self.ollama_password = password or os.getenv("LLM_PASSWORD", "")
+            
+            self.embedding_model = "nomic-embed-text"
+            self.chunk_size = 800
+            self.chunk_overlap = 100
+            
+            if UNIVERSAL_CHUNKING_AVAILABLE:
+                self.analyzer = DocumentAnalyzer()
+                logger.info("✅ Universal Document Intelligence System initialized")
+                self.use_universal_chunking = True
+            else:
+                self.analyzer = None
+                self.use_universal_chunking = False
+                logger.warning("Using fallback basic chunking")
+            
+            logger.info("RAGHandler initialized successfully")
+            logger.info(f"Ollama endpoint: {self.ollama_base_url}")
+            
         except Exception as e:
-            print(f"Error deactivating suppression: {e}")
-            return False
-    
-    @staticmethod
-    def reactivate(rule_id: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
+            logger.error(f"Critical error in RAGHandler initialization: {e}")
+            raise RuntimeError(f"Failed to initialize RAGHandler: {e}")
+
+    def _normalize_embedding(self, embedding: List[float]) -> List[float]:
+        """Normalize embedding to unit length (L2 norm = 1.0)."""
+        embedding_array = np.array(embedding)
+        norm = np.linalg.norm(embedding_array)
+        
+        if norm == 0:
+            logger.warning("Zero norm embedding detected, returning as-is")
+            return embedding
+            
+        normalized = embedding_array / norm
+        return normalized.tolist()
+
+    def get_embedding(self, text: str) -> Optional[List[float]]:
+        """Get normalized embedding from Ollama for the given text."""
         try:
-            supabase.table('finding_suppressions').update({'is_active': True, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
-            return True
+            url = f"{self.ollama_base_url}/api/embeddings"
+            payload = {"model": self.embedding_model, "prompt": text}
+            
+            logger.info(f"Getting embedding from {url} (text length: {len(text)})")
+            
+            response = requests.post(
+                url, json=payload,
+                auth=HTTPBasicAuth(self.ollama_username, self.ollama_password),
+                timeout=120
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Ollama returned status {response.status_code}: {response.text}")
+                return None
+                
+            response.raise_for_status()
+            raw_embedding = response.json()["embedding"]
+            normalized_embedding = self._normalize_embedding(raw_embedding)
+            
+            logger.debug(f"Successfully got embedding (dimension: {len(normalized_embedding)})")
+            return normalized_embedding
+            
+        except requests.exceptions.Timeout:
+            logger.error(f"Timeout connecting to Ollama at {self.ollama_base_url}")
+            return None
+        except requests.exceptions.ConnectionError:
+            logger.error(f"Cannot connect to Ollama at {self.ollama_base_url}")
+            return None
         except Exception as e:
-            print(f"Error reactivating suppression: {e}")
-            return False
-    
-    @staticmethod
-    def get_by_project(project_id: str, playbook_type: str, include_inactive: bool = False) -> List[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
+            logger.error(f"Error getting embedding: {str(e)}", exc_info=True)
+            return None
+
+    def get_embeddings_batch(self, texts: List[str], batch_size: int = 10) -> List[Optional[List[float]]]:
+        """Get embeddings for multiple texts using PARALLEL PROCESSING."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import time
+        
+        if not texts:
             return []
+        
+        max_workers = min(batch_size, 10)
+        logger.info(f"[PARALLEL] Getting embeddings for {len(texts)} chunks with {max_workers} workers")
+        start_time = time.time()
+        
+        embeddings = [None] * len(texts)
+        failed_count = 0
+        completed = 0
+        
+        def get_embedding_with_index(args):
+            index, text = args
+            embedding = self.get_embedding(text)
+            return index, embedding
+        
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(get_embedding_with_index, (i, text)): i 
+                for i, text in enumerate(texts)
+            }
+            
+            for future in as_completed(future_to_index):
+                try:
+                    index, embedding = future.result()
+                    embeddings[index] = embedding
+                    completed += 1
+                    
+                    if embedding is None:
+                        failed_count += 1
+                    
+                    if completed % 50 == 0 or completed == len(texts):
+                        elapsed = time.time() - start_time
+                        rate = completed / elapsed if elapsed > 0 else 0
+                        eta = (len(texts) - completed) / rate if rate > 0 else 0
+                        logger.info(f"[PARALLEL] Progress: {completed}/{len(texts)} ({rate:.1f}/sec, ETA: {eta:.0f}s)")
+                        
+                except Exception as e:
+                    logger.error(f"[PARALLEL] Error in embedding task: {e}")
+                    failed_count += 1
+        
+        elapsed = time.time() - start_time
+        success_count = len(texts) - failed_count
+        rate = len(texts) / elapsed if elapsed > 0 else 0
+        
+        logger.info(f"[PARALLEL] Completed: {success_count}/{len(texts)} successful, {failed_count} failed")
+        logger.info(f"[PARALLEL] Total time: {elapsed:.1f}s ({rate:.1f} embeddings/sec)")
+        
+        return embeddings
+
+    def chunk_text(self, text: str, file_type: str = 'txt', filename: str = 'unknown') -> List[str]:
+        """Chunk text using UNIVERSAL DOCUMENT INTELLIGENCE."""
+        logger.info(f"[CHUNK] Starting, text length: {len(text)}, file_type: {file_type}")
+        
+        if self.use_universal_chunking:
+            try:
+                logger.info(f"[CHUNK] Using Universal Document Intelligence...")
+                
+                chunk_dicts = chunk_intelligently(text=text, filename=filename, file_type=file_type, metadata=None)
+                
+                if not isinstance(chunk_dicts, list):
+                    raise TypeError(f"Universal chunker returned {type(chunk_dicts)}, expected list")
+                
+                if not chunk_dicts:
+                    raise ValueError("Universal chunker returned empty list")
+                
+                chunks = []
+                for i, c in enumerate(chunk_dicts):
+                    if not isinstance(c, dict):
+                        raise TypeError(f"Chunk {i} is {type(c)}, expected dict")
+                    if 'text' not in c:
+                        raise KeyError(f"Chunk {i} missing 'text' key")
+                    chunks.append(c['text'])
+                
+                self._last_chunk_metadata = chunk_dicts
+                
+                logger.info(f"[CHUNK] Universal chunking complete: {len(chunks)} chunks created")
+                
+                if chunk_dicts and 'metadata' in chunk_dicts[0]:
+                    first_meta = chunk_dicts[0]['metadata']
+                    logger.info(f"[CHUNK] Document structure: {first_meta.get('structure', 'unknown')}")
+                    logger.info(f"[CHUNK] Strategy used: {first_meta.get('strategy', 'unknown')}")
+                
+                avg_chunk_size = len(text) / len(chunks) if chunks else 0
+                if len(text) > 5000 and len(chunks) <= 2 and avg_chunk_size > 4000:
+                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: forcing basic chunking fallback")
+                    raise ValueError("Chunks too large - forcing basic chunking fallback")
+                
+                return chunks
+                
+            except Exception as e:
+                logger.error(f"[CHUNK] Universal chunking failed: {e}", exc_info=True)
+                logger.warning("[CHUNK] Falling back to basic chunking")
+        else:
+            logger.info("[CHUNK] Universal chunker not available")
+        
+        # Fallback: Basic chunking
+        logger.warning("[CHUNK] Using basic chunking")
+        
+        if file_type in ['xlsx', 'xls', 'csv']:
+            chunk_size = 2000
+            chunk_overlap = 200
+        else:
+            chunk_size = self.chunk_size
+            chunk_overlap = self.chunk_overlap
+        
+        text = re.sub(r'\s+', ' ', text).strip()
+        
+        chunks = []
+        position = 0
+        
+        while position < len(text):
+            end = min(position + chunk_size, len(text))
+            chunk = text[position:end].strip()
+            
+            if chunk:
+                chunks.append(chunk)
+            
+            if end < len(text):
+                position = end - chunk_overlap
+            else:
+                position = len(text)
+        
+        logger.info(f"[CHUNK] COMPLETED: {len(chunks)} basic chunks created")
+        return chunks
+
+    def add_document(
+        self, 
+        collection_name: str, 
+        text: str, 
+        metadata: Dict[str, Any],
+        progress_callback: Optional[callable] = None
+    ) -> bool:
+        """Add a document to a ChromaDB collection with optional progress reporting."""
         try:
-            query = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).order('created_at', desc=True)
-            if not include_inactive:
-                query = query.eq('is_active', True)
-            response = query.execute()
-            return response.data if response.data else []
+            collection = self.client.get_or_create_collection(
+                name=collection_name,
+                metadata={"hnsw:space": "cosine"}
+            )
+            
+            project_id = metadata.get('project_id')
+            truth_type = metadata.get('truth_type')  # NEW: Extract truth_type
+            
+            if project_id:
+                logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
+            if truth_type:
+                logger.info(f"[TRUTH_TYPE] Document tagged with truth_type: {truth_type}")
+            
+            file_type = metadata.get('file_type', 'txt')
+            filename = metadata.get('filename', metadata.get('source', 'unknown'))
+            
+            if progress_callback:
+                progress_callback(0, 100, "Analyzing document structure...")
+            
+            chunks = self.chunk_text(text, file_type=file_type, filename=filename)
+            chunk_metadata_enhanced = getattr(self, '_last_chunk_metadata', None)
+            
+            if progress_callback:
+                progress_callback(10, 100, f"Chunked into {len(chunks)} pieces, getting embeddings...")
+            
+            logger.info(f"[BATCH] Getting embeddings for {len(chunks)} chunks...")
+            embeddings = self.get_embeddings_batch(chunks, batch_size=10)
+            
+            if progress_callback:
+                progress_callback(60, 100, f"Embeddings complete, adding to database...")
+            
+            chunks_added = 0
+            batch_size = 50
+            
+            valid_chunks = []
+            valid_embeddings = []
+            valid_metadatas = []
+            valid_ids = []
+            
+            for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+                if embedding is None:
+                    logger.warning(f"Failed to get embedding for chunk {i}, skipping")
+                    continue
+                
+                doc_id = f"{metadata.get('source', 'unknown')}_{i}"
+                base_metadata = {k: v for k, v in metadata.items() if v is not None}
+                
+                chunk_metadata = {**base_metadata, "chunk_index": i}
+                
+                # Preserve project_id and truth_type in chunk metadata
+                if project_id:
+                    chunk_metadata['project_id'] = project_id
+                if truth_type:
+                    chunk_metadata['truth_type'] = truth_type  # NEW: Preserve truth_type
+                
+                if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
+                    chunk_dict = chunk_metadata_enhanced[i]
+                    
+                    if 'metadata' in chunk_dict:
+                        enhanced = chunk_dict['metadata']
+                        enhanced_metadata = {
+                            'structure': enhanced.get('structure', 'unknown'),
+                            'strategy': enhanced.get('strategy', 'unknown'),
+                            'chunk_type': enhanced.get('chunk_type', 'unknown'),
+                            'parent_section': enhanced.get('parent_section', 'unknown'),
+                            'has_header': enhanced.get('has_header', False),
+                            'row_start': enhanced.get('row_start'),
+                            'row_end': enhanced.get('row_end'),
+                            'line_start': enhanced.get('line_start'),
+                            'line_end': enhanced.get('line_end'),
+                            'hierarchy_level': enhanced.get('hierarchy_level'),
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        }
+                        enhanced_metadata = {k: v for k, v in enhanced_metadata.items() if v is not None}
+                        chunk_metadata.update(enhanced_metadata)
+                    else:
+                        fallback_metadata = {
+                            'chunk_type': chunk_dict.get('chunk_type', 'unknown'),
+                            'parent_section': chunk_dict.get('parent_section', 'unknown'),
+                            'has_header': chunk_dict.get('has_header', False),
+                            'tokens_estimate': len(chunk) // 4,
+                            'position': f"{i+1}/{len(chunks)}"
+                        }
+                        fallback_metadata = {k: v for k, v in fallback_metadata.items() if v is not None}
+                        chunk_metadata.update(fallback_metadata)
+                
+                chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
+                
+                valid_chunks.append(chunk)
+                valid_embeddings.append(embedding)
+                valid_metadatas.append(chunk_metadata)
+                valid_ids.append(doc_id)
+            
+            total_valid = len(valid_chunks)
+            for batch_start in range(0, total_valid, batch_size):
+                batch_end = min(batch_start + batch_size, total_valid)
+                
+                collection.add(
+                    embeddings=valid_embeddings[batch_start:batch_end],
+                    documents=valid_chunks[batch_start:batch_end],
+                    metadatas=valid_metadatas[batch_start:batch_end],
+                    ids=valid_ids[batch_start:batch_end]
+                )
+                
+                chunks_added += (batch_end - batch_start)
+                
+                if progress_callback:
+                    pct = 70 + int((batch_end / total_valid) * 25)
+                    progress_callback(pct, 100, f"Adding to database... ({batch_end}/{total_valid} chunks)")
+                
+                logger.info(f"Added batch {batch_start}-{batch_end} ({batch_end - batch_start} chunks)")
+            
+            if progress_callback:
+                progress_callback(100, 100, f"Complete! Added {chunks_added} chunks")
+            
+            logger.info(f"Added {chunks_added}/{len(chunks)} chunks to collection '{collection_name}'")
+            if project_id:
+                logger.info(f"[PROJECT] All chunks tagged with project_id: {project_id}")
+            if truth_type:
+                logger.info(f"[TRUTH_TYPE] All chunks tagged with truth_type: {truth_type}")
+            
+            return chunks_added > 0
+            
         except Exception as e:
-            print(f"Error getting suppressions by project: {e}")
-            return []
-    
-    @staticmethod
-    def get_stats(project_id: str, playbook_type: str) -> Dict[str, Any]:
-        supabase = get_supabase()
-        if not supabase:
-            return {}
+            logger.error(f"Error adding document to collection: {str(e)}")
+            return False
+
+    def search(
+        self, 
+        collection_name: str, 
+        query: str, 
+        n_results: int = 12,
+        project_id: Optional[str] = None,
+        functional_areas: Optional[List[str]] = None,
+        truth_type: Optional[str] = None,  # NEW: Filter by truth_type
+        where: Optional[Dict] = None  # NEW: Custom where clause
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for relevant documents in a collection.
+        
+        SUPPORTS PROJECT, FUNCTIONAL AREA, AND TRUTH_TYPE FILTERING
+        
+        Args:
+            collection_name: Name of the collection to search
+            query: Search query
+            n_results: Number of results to return
+            project_id: Optional project ID to filter by
+            functional_areas: Optional list of functional areas to filter by
+            truth_type: Optional truth_type to filter by (intent, reference, etc.)
+            where: Optional custom where clause (overrides other filters)
+            
+        Returns:
+            List of search results with documents, metadata, and distances
+        """
         try:
-            response = supabase.table('finding_suppressions').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
-            rules = response.data or []
-            active = [r for r in rules if r.get('is_active')]
-            return {
-                'total_rules': len(rules), 'active_rules': len(active), 'inactive_rules': len(rules) - len(active),
-                'total_matches': sum(r.get('match_count', 0) for r in rules),
-                'by_type': {
-                    'acknowledge': len([r for r in active if r.get('suppression_type') == 'acknowledge']),
-                    'suppress': len([r for r in active if r.get('suppression_type') == 'suppress']),
-                    'pattern': len([r for r in active if r.get('suppression_type') == 'pattern'])
+            collection = self.client.get_collection(name=collection_name)
+            
+            query_embedding = self.get_embedding(query)
+            if query_embedding is None:
+                logger.error("Failed to get query embedding")
+                return []
+            
+            # Build where clause
+            where_clause = None
+            
+            # NEW: If custom where clause provided, use it directly
+            if where is not None:
+                where_clause = where
+                logger.info(f"[FILTER] Using custom where clause")
+            
+            # NEW: truth_type filter (takes precedence over legacy filters when no custom where)
+            elif truth_type:
+                conditions = [{"truth_type": truth_type}]
+                
+                if project_id and project_id != "Global/Universal":
+                    conditions.append({"project_id": project_id})
+                
+                if functional_areas:
+                    conditions.append({"functional_area": {"$in": functional_areas}})
+                
+                if len(conditions) == 1:
+                    where_clause = conditions[0]
+                else:
+                    where_clause = {"$and": conditions}
+                
+                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id}")
+            
+            # Legacy filter logic (kept for backward compatibility)
+            elif project_id and functional_areas:
+                if project_id == "Global/Universal":
+                    where_clause = {
+                        "$and": [
+                            {"project_id": "Global/Universal"},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                else:
+                    where_clause = {
+                        "$and": [
+                            {"$or": [
+                                {"project_id": project_id},
+                                {"project_id": "Global/Universal"}
+                            ]},
+                            {"functional_area": {"$in": functional_areas}}
+                        ]
+                    }
+                logger.info(f"[PROJECT] Filtering by project_id: {project_id} + Global/Universal")
+                logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
+            elif project_id:
+                if project_id == "Global/Universal":
+                    where_clause = {"project_id": "Global/Universal"}
+                    logger.info(f"[PROJECT] Filtering search by Global/Universal only")
+                else:
+                    where_clause = {
+                        "$or": [
+                            {"project_id": project_id},
+                            {"project_id": "Global/Universal"}
+                        ]
+                    }
+                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} + Global/Universal")
+            elif functional_areas:
+                where_clause = {"functional_area": {"$in": functional_areas}}
+                logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
+            else:
+                logger.info("[FILTER] No filters - searching all documents")
+            
+            results = collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where_clause,
+                include=["documents", "metadatas", "distances"]
+            )
+            
+            formatted_results = []
+            
+            if not results or not results.get('documents'):
+                logger.info(f"No results found in collection '{collection_name}'")
+                return []
+            
+            documents = results['documents']
+            if not documents or (isinstance(documents, list) and len(documents) > 0 and not documents[0]):
+                logger.info(f"Empty documents in search results for collection '{collection_name}'")
+                return []
+            
+            docs = results['documents'][0] if results['documents'] else []
+            metadatas = results['metadatas'][0] if results.get('metadatas') else []
+            distances = results['distances'][0] if results.get('distances') else []
+            
+            for i, doc in enumerate(docs):
+                result = {
+                    'document': doc,
+                    'metadata': metadatas[i] if i < len(metadatas) else {},
+                    'distance': distances[i] if i < len(distances) else None
                 }
-            }
+                formatted_results.append(result)
+            
+            logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
+            if truth_type:
+                logger.info(f"[TRUTH_TYPE] Results filtered by: {truth_type}")
+            if project_id:
+                if project_id == "Global/Universal":
+                    logger.info(f"[PROJECT] Results filtered by: Global/Universal only")
+                else:
+                    logger.info(f"[PROJECT] Results filtered by: {project_id} + Global/Universal")
+            if formatted_results and formatted_results[0].get('distance') is not None:
+                logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
+            
+            return formatted_results
+            
         except Exception as e:
-            print(f"Error getting suppression stats: {e}")
-            return {}
+            logger.error(f"Error searching collection '{collection_name}': {str(e)}")
+            return []
 
-
-# =============================================================================
-# ENTITY CONFIGURATION MODEL
-# =============================================================================
-
-class EntityConfigModel:
-    """Entity Configuration - Track which FEINs/BNs are being analyzed per project"""
+    # ==========================================================================
+    # TRUTH-TYPE SPECIFIC SEARCH HELPERS
+    # ==========================================================================
     
-    @staticmethod
-    def save(project_id: str, playbook_type: str, analysis_scope: str, selected_entities: List[str],
-             primary_entity: str = None, country_mode: str = 'us_only', detected_entities: Dict = None) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
+    def search_intent(
+        self,
+        collection_name: str,
+        query: str,
+        project_id: str,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for INTENT documents (customer documentation).
+        
+        Args:
+            collection_name: Collection to search
+            query: Search query
+            project_id: Project to search within
+            n_results: Number of results
+            
+        Returns:
+            List of search results filtered to intent documents
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type='intent',
+            project_id=project_id
+        )
+    
+    def search_reference(
+        self,
+        collection_name: str,
+        query: str,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for REFERENCE documents (standards, checklists).
+        Reference is always global - no project filter needed.
+        
+        Args:
+            collection_name: Collection to search
+            query: Search query
+            n_results: Number of results
+            
+        Returns:
+            List of search results filtered to reference documents
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type='reference'
+        )
+    
+    def search_by_truth_type(
+        self,
+        collection_name: str,
+        query: str,
+        truth_type: str,
+        project_id: Optional[str] = None,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search filtered by truth_type.
+        
+        Args:
+            collection_name: Collection to search
+            query: Search query
+            truth_type: 'reality', 'intent', 'reference', 'configuration', 'output'
+            project_id: Optional project filter
+            n_results: Number of results
+            
+        Returns:
+            List of search results
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type=truth_type,
+            project_id=project_id
+        )
+
+    # ==========================================================================
+    # COLLECTION MANAGEMENT
+    # ==========================================================================
+
+    def list_collections(self) -> List[str]:
+        """List all available collections."""
         try:
-            data = {
-                'project_id': project_id, 'playbook_type': playbook_type, 'analysis_scope': analysis_scope,
-                'selected_entities': selected_entities, 'primary_entity': primary_entity,
-                'country_mode': country_mode, 'configured_at': datetime.utcnow().isoformat()
-            }
-            response = supabase.table('project_entity_config').upsert(data, on_conflict='project_id,playbook_type').execute()
-            return response.data[0] if response.data else None
+            collections = self.client.list_collections()
+            return [col.name for col in collections]
         except Exception as e:
-            print(f"Error saving entity config: {e}")
-            return None
-    
-    @staticmethod
-    def get(project_id: str, playbook_type: str) -> Optional[Dict[str, Any]]:
-        supabase = get_supabase()
-        if not supabase:
-            return None
+            logger.error(f"Error listing collections: {str(e)}")
+            return []
+
+    def get_collection_count(self, collection_name: str) -> int:
+        """Get the number of documents in a collection."""
         try:
-            response = supabase.table('project_entity_config').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
-            return response.data[0] if response.data else None
+            collection = self.client.get_collection(name=collection_name)
+            return collection.count()
         except Exception as e:
-            print(f"Error getting entity config: {e}")
-            return None
-    
-    @staticmethod
-    def delete(project_id: str, playbook_type: str) -> bool:
-        supabase = get_supabase()
-        if not supabase:
-            return False
+            logger.error(f"Error getting collection count: {str(e)}")
+            return 0
+
+    def delete_collection(self, collection_name: str) -> bool:
+        """Delete a collection."""
         try:
-            supabase.table('project_entity_config').delete().eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
+            self.client.delete_collection(name=collection_name)
+            logger.info(f"Deleted collection '{collection_name}'")
             return True
         except Exception as e:
-            print(f"Error deleting entity config: {e}")
+            logger.error(f"Error deleting collection: {str(e)}")
+            return False
+
+    def reset_all(self) -> bool:
+        """Delete all collections and reset the database."""
+        try:
+            collections = self.list_collections()
+            for collection_name in collections:
+                self.delete_collection(collection_name)
+            logger.info("Reset all collections")
+            return True
+        except Exception as e:
+            logger.error(f"Error resetting database: {str(e)}")
             return False
 
 
-# =============================================================================
-# CONVENIENCE FUNCTIONS
-# =============================================================================
-
-def create_project(name: str, **kwargs) -> Optional[Dict]:
-    return ProjectModel.create(name, **kwargs)
-
-def get_projects() -> List[Dict]:
-    return ProjectModel.get_all()
-
-def add_chat_message(session_id: str, role: str, content: str, **kwargs) -> Optional[Dict]:
-    project_id = kwargs.pop('project_id', None)
-    return ChatHistoryModel.add_message(project_id, session_id, role, content, **kwargs)
-
-def get_chat_history(session_id: str) -> List[Dict]:
-    return ChatHistoryModel.get_by_session(session_id)
-
-def create_job(job_type: str, **kwargs) -> Optional[Dict]:
-    return ProcessingJobModel.create(job_type, **kwargs)
-
-def update_job_progress(job_id: str, percent: int, step: str) -> bool:
-    return ProcessingJobModel.update_progress(job_id, percent, step)
-
-def complete_job(job_id: str, result_data: dict = None) -> bool:
-    return ProcessingJobModel.complete(job_id, result_data)
-
-def fail_job(job_id: str, error: str) -> bool:
-    return ProcessingJobModel.fail(job_id, error)
+# Backward compatibility alias
+AdvancedRAGHandler = RAGHandler
