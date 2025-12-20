@@ -800,9 +800,14 @@ class StructuredDataHandler:
         Returns empty list for normal single-table sheets.
         """
         try:
+            logger.info(f"[HORIZONTAL-DETECT] Checking sheet '{sheet_name}' for side-by-side tables")
+            
             raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
+            logger.info(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)} rows, {raw_df.shape[1]} columns")
+            
             if raw_df.empty or raw_df.shape[1] < 4:
+                logger.info(f"[HORIZONTAL-DETECT] Sheet too small, skipping")
                 return []
             
             # Find COMPLETELY blank columns (all NaN or empty in data rows)
@@ -816,12 +821,15 @@ class StructuredDataHandler:
                 if is_blank:
                     blank_cols.append(col_idx)
             
+            logger.info(f"[HORIZONTAL-DETECT] Found {len(blank_cols)} blank columns: {blank_cols[:10]}{'...' if len(blank_cols) > 10 else ''}")
+            
             # Find blank columns as separators
             # Only trigger horizontal split if there are multiple separators
             # (single blank column could be accidental, multiple = intentional layout)
             separators = blank_cols.copy()
             
             if len(separators) < 2:
+                logger.info(f"[HORIZONTAL-DETECT] Less than 2 separators, treating as single table")
                 return []  # Need multiple separators to confirm multi-table layout
             
             logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}': Found {len(separators)} separator(s) at columns {separators}")
@@ -890,10 +898,15 @@ class StructuredDataHandler:
         Returns list of (table_name, dataframe) tuples, or empty list for single-table sheets.
         """
         try:
+            logger.info(f"[VERTICAL-DETECT] Checking sheet '{sheet_name}' for stacked tables")
+            
             # Read full sheet first
             raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
+            logger.info(f"[VERTICAL-DETECT] Sheet has {len(raw_df)} rows, {len(raw_df.columns)} columns")
+            
             if len(raw_df) < 3:
+                logger.info(f"[VERTICAL-DETECT] Sheet too small, skipping")
                 return []
             
             separator_rows = set()
@@ -906,9 +919,13 @@ class StructuredDataHandler:
                     if sheet_name in wb.sheetnames:
                         ws = wb[sheet_name]
                         
+                        merge_count = len(list(ws.merged_cells.ranges))
+                        logger.info(f"[VERTICAL-DETECT] Found {merge_count} merged cell ranges")
+                        
                         for merged_range in ws.merged_cells.ranges:
+                            col_span = merged_range.max_col - merged_range.min_col
                             # If merge spans 5+ columns, it's a title/separator row
-                            if merged_range.max_col - merged_range.min_col >= 4:
+                            if col_span >= 4:
                                 for row in range(merged_range.min_row, merged_range.max_row + 1):
                                     row_idx = row - 1  # 0-indexed
                                     separator_rows.add(row_idx)
@@ -916,9 +933,12 @@ class StructuredDataHandler:
                                     cell_val = ws.cell(merged_range.min_row, merged_range.min_col).value
                                     if cell_val and str(cell_val).strip():
                                         title_rows[row_idx] = str(cell_val).strip()
+                                        logger.info(f"[VERTICAL-DETECT] Merged title at row {row_idx}: {str(cell_val)[:50]}")
                         wb.close()
                 except Exception as e:
                     logger.warning(f"Merged cell detection failed for vertical split: {e}")
+            
+            logger.info(f"[VERTICAL-DETECT] After merged cell check: {len(separator_rows)} separator rows")
             
             # Method 2: Find title rows (text in col A only, rest empty or mostly empty)
             for row_idx in range(len(raw_df)):
@@ -946,9 +966,12 @@ class StructuredDataHandler:
                     # Likely a section title
                     separator_rows.add(row_idx)
                     title_rows[row_idx] = first_text
-                    logger.debug(f"[VERTICAL-DETECT] Found title row {row_idx}: {first_text[:50]}")
+                    logger.info(f"[VERTICAL-DETECT] Title row {row_idx}: '{first_text[:50]}'")
+            
+            logger.info(f"[VERTICAL-DETECT] Total separator rows found: {len(separator_rows)}")
             
             if not separator_rows:
+                logger.info(f"[VERTICAL-DETECT] No separators found, treating as single table")
                 return []  # No separators = probably single table
             
             # Find table boundaries
@@ -992,8 +1015,11 @@ class StructuredDataHandler:
                 table_name = current_title or f"Table_{len(tables)+1}"
                 tables.append((table_name, current_header, current_start, len(raw_df)))
             
+            logger.info(f"[VERTICAL-DETECT] Tables found: {len(tables)}")
+            
             # Only return if we found multiple tables
             if len(tables) < 2:
+                logger.info(f"[VERTICAL-DETECT] Less than 2 tables, treating as single table")
                 return []
             
             logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}': Found {len(tables)} stacked tables")
