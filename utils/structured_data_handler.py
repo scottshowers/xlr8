@@ -882,15 +882,24 @@ class StructuredDataHandler:
         """
         Detect and split vertically stacked tables within a single sheet.
         
-        Looks for merged title rows that separate distinct tables.
-        Common in config reports where org definitions and org values are on same sheet.
+        Detection methods:
+        1. Merged title rows that span 5+ columns (config reports)
+        2. Title rows: text in col A only, rest of row empty (section headers)
+        3. Completely blank rows as separators
         
         Returns list of (table_name, dataframe) tuples, or empty list for single-table sheets.
         """
         try:
-            # First, find merged rows using openpyxl (can't use read_only for merged_cells)
-            merged_rows = set()
+            # Read full sheet first
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
+            if len(raw_df) < 3:
+                return []
+            
+            separator_rows = set()
+            title_rows = {}  # row_idx -> title text
+            
+            # Method 1: Find merged rows using openpyxl
             if OPENPYXL_AVAILABLE:
                 try:
                     wb = load_workbook(file_path, data_only=True)
@@ -901,37 +910,71 @@ class StructuredDataHandler:
                             # If merge spans 5+ columns, it's a title/separator row
                             if merged_range.max_col - merged_range.min_col >= 4:
                                 for row in range(merged_range.min_row, merged_range.max_row + 1):
-                                    merged_rows.add(row - 1)  # 0-indexed
+                                    row_idx = row - 1  # 0-indexed
+                                    separator_rows.add(row_idx)
+                                    # Get the title text
+                                    cell_val = ws.cell(merged_range.min_row, merged_range.min_col).value
+                                    if cell_val and str(cell_val).strip():
+                                        title_rows[row_idx] = str(cell_val).strip()
                         wb.close()
                 except Exception as e:
                     logger.warning(f"Merged cell detection failed for vertical split: {e}")
-                    return []
             
-            if not merged_rows:
-                return []  # No merged rows = probably single table
+            # Method 2: Find title rows (text in col A only, rest empty or mostly empty)
+            for row_idx in range(len(raw_df)):
+                if row_idx in separator_rows:
+                    continue  # Already marked
+                
+                row = raw_df.iloc[row_idx]
+                first_val = row.iloc[0] if len(row) > 0 else None
+                
+                # Check if first cell has text
+                if pd.isna(first_val) or not str(first_val).strip():
+                    # Completely blank row is also a separator
+                    if row.isna().all() or (row.astype(str).str.strip() == '').all():
+                        separator_rows.add(row_idx)
+                    continue
+                
+                first_text = str(first_val).strip()
+                
+                # Check if rest of row is empty (allowing for 1-2 stray values)
+                other_values = row.iloc[1:] if len(row) > 1 else pd.Series()
+                non_empty_others = sum(1 for v in other_values if pd.notna(v) and str(v).strip())
+                
+                # Title row pattern: text in A, and 90%+ of rest is empty, and text is short-ish
+                if len(row) > 4 and non_empty_others <= max(1, len(row) * 0.1) and len(first_text) < 100:
+                    # Likely a section title
+                    separator_rows.add(row_idx)
+                    title_rows[row_idx] = first_text
+                    logger.debug(f"[VERTICAL-DETECT] Found title row {row_idx}: {first_text[:50]}")
             
-            # Read full sheet
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
-            
-            if len(raw_df) < 3:
-                return []
+            if not separator_rows:
+                return []  # No separators = probably single table
             
             # Find table boundaries
-            # A header row is: not merged, has 2+ unique text values
+            # A header row is: not a separator, has 2+ unique text values
             tables = []
+            current_title = None
             current_header = None
             current_start = None
             
             for row_idx in range(len(raw_df)):
-                is_separator = row_idx in merged_rows or raw_df.iloc[row_idx].isna().all()
+                is_separator = row_idx in separator_rows
                 
                 if is_separator:
                     # End current table if exists
                     if current_header is not None and current_start is not None:
                         if current_start < row_idx:  # Has at least some data rows
-                            tables.append((current_header, current_start, row_idx))
+                            table_name = current_title or f"Table_{len(tables)+1}"
+                            tables.append((table_name, current_header, current_start, row_idx))
                         current_header = None
                         current_start = None
+                    
+                    # Capture title for next table
+                    if row_idx in title_rows:
+                        current_title = title_rows[row_idx]
+                    else:
+                        current_title = None
                 else:
                     # Check if this could be a header row (first non-separator after separator)
                     if current_header is None:
@@ -946,7 +989,8 @@ class StructuredDataHandler:
             
             # Don't forget last table
             if current_header is not None and current_start is not None:
-                tables.append((current_header, current_start, len(raw_df)))
+                table_name = current_title or f"Table_{len(tables)+1}"
+                tables.append((table_name, current_header, current_start, len(raw_df)))
             
             # Only return if we found multiple tables
             if len(tables) < 2:
@@ -955,9 +999,8 @@ class StructuredDataHandler:
             logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}': Found {len(tables)} stacked tables")
             
             result = []
-            prev_table_end = -1  # Track where previous table ended
             
-            for idx, (header_row, data_start, data_end) in enumerate(tables):
+            for idx, (title, header_row, data_start, data_end) in enumerate(tables):
                 # Extract this table's data
                 header_vals = raw_df.iloc[header_row].tolist()
                 data_df = raw_df.iloc[data_start:data_end].copy()
@@ -970,31 +1013,13 @@ class StructuredDataHandler:
                 data_df = data_df.dropna(how='all')
                 
                 if len(data_df) > 0:
-                    # Look for title in preceding merged rows (but stop at previous table's boundary)
-                    table_title = None
-                    search_start = max(prev_table_end, 0)  # Don't search into previous table
-                    
-                    for prev_row in range(header_row - 1, search_start - 1, -1):
-                        if prev_row in merged_rows:
-                            # Get first non-empty value from this row
-                            for val in raw_df.iloc[prev_row]:
-                                if pd.notna(val) and str(val).strip():
-                                    table_title = str(val).strip()
-                                    break
-                            if table_title:
-                                break
-                    
-                    # Use title if found, otherwise first header value
-                    if table_title:
-                        table_name = table_title[:40]
-                    else:
-                        first_header = str(header_vals[0]).strip() if pd.notna(header_vals[0]) else f"table_{idx + 1}"
-                        table_name = first_header[:40]
+                    # Sanitize table name from title
+                    table_name = re.sub(r'[^a-zA-Z0-9_\s]', '', title)[:40].strip()
+                    if not table_name:
+                        table_name = f"table_{idx + 1}"
                     
                     result.append((table_name, data_df))
                     logger.info(f"[VERTICAL-DETECT]   Table {idx + 1}: '{table_name}' - header row {header_row}, {len(data_df)} data rows")
-                
-                prev_table_end = data_end  # Update boundary for next iteration
             
             return result
             
