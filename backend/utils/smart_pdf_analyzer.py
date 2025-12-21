@@ -483,9 +483,10 @@ JSON RESPONSE:"""
         return {"is_tabular": False, "error": str(e)}
 
 
-def parse_tabular_pdf_with_llm(text: str, columns: List[str]) -> List[Dict[str, str]]:
+def parse_tabular_pdf_with_llm(text: str, columns: List[str], file_path: str = None) -> List[Dict[str, str]]:
     """
     Ask LLM to parse tabular PDF text into structured rows.
+    Falls back to pdfplumber if LLM unavailable.
     """
     
     # Redact PII
@@ -555,6 +556,86 @@ JSON ARRAY:"""
                 logger.warning(f"[LLM] Parse error on chunk {chunk_num+1}: {e}")
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
+    
+    # If LLM failed and we have file path, try pdfplumber extraction
+    if len(all_rows) == 0 and file_path and PDFPLUMBER_AVAILABLE:
+        logger.warning("[LLM] LLM parsing failed, trying pdfplumber table extraction...")
+        all_rows = parse_tabular_pdf_with_pdfplumber(file_path, columns)
+    
+    return all_rows
+
+
+def parse_tabular_pdf_with_pdfplumber(file_path: str, columns: List[str]) -> List[Dict[str, str]]:
+    """
+    Extract tables from PDF using pdfplumber when LLM is unavailable.
+    
+    This is a fallback that uses pdfplumber's built-in table detection.
+    """
+    if not PDFPLUMBER_AVAILABLE:
+        logger.warning("[PDFPLUMBER] pdfplumber not available")
+        return []
+    
+    all_rows = []
+    
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            logger.warning(f"[PDFPLUMBER] Processing {len(pdf.pages)} pages...")
+            
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    # Extract tables from page
+                    tables = page.extract_tables()
+                    
+                    if not tables:
+                        continue
+                    
+                    for table in tables:
+                        if not table or len(table) < 2:
+                            continue
+                        
+                        # First row might be header
+                        header_row = table[0] if table else []
+                        data_rows = table[1:] if len(table) > 1 else []
+                        
+                        # Check if first row looks like data (starts with code pattern)
+                        if header_row and header_row[0]:
+                            first_cell = str(header_row[0]).strip()
+                            if re.match(r'^\d{4,6}$', first_cell) or re.match(r'^[A-Z]{2,5}\d*$', first_cell):
+                                # First row is data, not header
+                                data_rows = table
+                        
+                        for row in data_rows:
+                            if not row or not any(row):
+                                continue
+                            
+                            # Skip page headers/footers
+                            row_text = ' '.join(str(c) for c in row if c)
+                            if 'Page' in row_text and 'of' in row_text:
+                                continue
+                            if 'Select: All' in row_text or 'Last Page' in row_text:
+                                continue
+                            
+                            # Create row dict using provided columns
+                            row_dict = {}
+                            for i, col in enumerate(columns):
+                                if i < len(row) and row[i]:
+                                    row_dict[col] = str(row[i]).strip()
+                                else:
+                                    row_dict[col] = ''
+                            
+                            # Only add if we have some data
+                            if any(v for v in row_dict.values()):
+                                all_rows.append(row_dict)
+                
+                except Exception as page_e:
+                    logger.warning(f"[PDFPLUMBER] Page {page_num+1} error: {page_e}")
+                    continue
+        
+        logger.warning(f"[PDFPLUMBER] Extracted {len(all_rows)} rows from PDF")
+        
+    except Exception as e:
+        logger.error(f"[PDFPLUMBER] Table extraction failed: {e}")
+    
     return all_rows
 
 
@@ -693,8 +774,8 @@ def process_pdf_intelligently(
             columns = analysis['columns']
             update_status(f"Detected tabular data with {len(columns)} columns, parsing...", 50)
             
-            # Parse with LLM
-            rows = parse_tabular_pdf_with_llm(text, columns)
+            # Parse with LLM (falls back to pdfplumber if LLM unavailable)
+            rows = parse_tabular_pdf_with_llm(text, columns, file_path=file_path)
             
             if rows:
                 update_status(f"Parsed {len(rows)} rows, storing to DuckDB...", 70)
