@@ -981,40 +981,71 @@ class DocumentRegistryModel:
 
 def auto_classify_file(filename: str, file_extension: str, project_name: str, 
                        file_content_sample: str = None) -> Tuple[str, str, float]:
-    """Auto-classify a file based on filename, extension, and optionally content."""
+    """
+    Auto-classify a file based on filename, extension, and optionally content.
+    
+    Truth Types:
+    - REALITY: Customer data (employee records, payroll exports, registers)
+    - INTENT: Customer documents (their setup, requirements, SOWs)
+    - REFERENCE: Standards/best practices (global, checklists, guides)
+    - CONFIGURATION: Mapping/lookup tables (ONLY for structured files xlsx/csv)
+    
+    Key insight: A PDF about "Earnings Codes" is documenting the customer's setup (INTENT),
+    not a config file itself. Configuration only applies to actual data files.
+    """
     filename_lower = filename.lower()
     is_global = project_name.lower() in ['global', '__global__', 'global/universal', 'reference library']
+    is_structured = file_extension in ['xlsx', 'xls', 'csv']
+    is_document = file_extension in ['pdf', 'docx', 'doc', 'txt']
     
+    # Keywords for classification
     reality_keywords = ['register', 'export', 'report', 'data', 'payroll', 'employee', 'hr_', 'audit']
     intent_keywords = ['sow', 'requirement', 'statement of work', 'notes', 'meeting', 'spec', 'scope']
     reference_keywords = ['checklist', 'standard', 'guide', 'reference', 'compliance', 'template', 
                           'best_practice', 'best-practice', 'year-end', 'yearend', 'year_end']
-    config_keywords = ['mapping', 'lookup', 'codes', 'config', 'crosswalk', 'translation', 'xref']
+    # Config keywords only apply to structured files - PDFs with these words are documentation
+    config_keywords = ['mapping', 'lookup', 'config', 'crosswalk', 'translation', 'xref']
+    # "codes" is special - structured file with codes = config, PDF with codes = intent (documenting codes)
+    codes_keywords = ['codes', 'code_list', 'earnings_codes', 'deduction_codes']
     
+    # 1. Reference materials (any file type - checklists, guides, standards)
     if any(kw in filename_lower for kw in reference_keywords):
         return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
     
-    if any(kw in filename_lower for kw in config_keywords):
+    # 2. Configuration - ONLY for structured files (xlsx/csv) with mapping/lookup data
+    if is_structured and any(kw in filename_lower for kw in config_keywords):
         return (DocumentRegistryModel.TRUTH_CONFIGURATION, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
     
+    # 3. "Codes" in filename - structured = config data, document = documentation about codes
+    if any(kw in filename_lower for kw in codes_keywords):
+        if is_structured:
+            return (DocumentRegistryModel.TRUTH_CONFIGURATION, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+        else:
+            # PDF/doc about codes = customer documentation of their setup
+            return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
+    
+    # 4. Intent keywords (requirements, SOWs, specs)
     if any(kw in filename_lower for kw in intent_keywords):
         return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
     
+    # 5. Reality keywords (data exports, registers) - only for non-global
     if any(kw in filename_lower for kw in reality_keywords) and not is_global:
         return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.8)
     
-    if file_extension in ['xlsx', 'xls', 'csv']:
+    # 6. Default by file extension
+    if is_structured:
         if is_global:
             return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.5)
         else:
             return (DocumentRegistryModel.TRUTH_REALITY, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
     
-    if file_extension in ['docx', 'doc', 'pdf']:
+    if is_document:
         if is_global:
             return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
         else:
             return (DocumentRegistryModel.TRUTH_INTENT, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.6)
     
+    # 7. Ultimate fallback
     if is_global:
         return (DocumentRegistryModel.TRUTH_REFERENCE, DocumentRegistryModel.CLASS_FILENAME_INFERRED, 0.4)
     else:
