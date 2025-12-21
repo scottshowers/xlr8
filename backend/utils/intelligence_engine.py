@@ -566,8 +566,9 @@ SEMANTIC_TYPES = {
 class IntelligenceEngine:
     """The brain of XLR8."""
     
-    def __init__(self, project_name: str):
+    def __init__(self, project_name: str, project_id: str = None):
         self.project = project_name
+        self.project_id = project_id  # UUID for RAG filtering
         self.structured_handler = None
         self.rag_handler = None
         self.schema = {}
@@ -4404,14 +4405,19 @@ SQL:"""
         
         Excludes reference/standards materials (those are global best practices).
         """
+        logger.warning(f"[GATHER_INTENT] Starting - rag_handler={'SET' if self.rag_handler else 'NONE'}, project={self.project}, project_id={self.project_id}")
+        
         if not self.rag_handler:
+            logger.warning(f"[GATHER_INTENT] No RAG handler - returning empty")
             return []
         
         truths = []
         
         try:
             collection_name = self._get_document_collection_name()
+            logger.warning(f"[GATHER_INTENT] Collection name: {collection_name}")
             if not collection_name:
+                logger.warning(f"[GATHER_INTENT] No collection found - returning empty")
                 return []
             
             # Search customer documents - both intent AND configuration types
@@ -4421,27 +4427,31 @@ SQL:"""
             all_results = []
             for truth_type in customer_truth_types:
                 try:
+                    logger.warning(f"[GATHER_INTENT] Searching truth_type={truth_type}...")
                     results = self.rag_handler.search(
                         collection_name=collection_name,
                         query=question,
                         n_results=5,  # Get fewer per type to avoid overwhelming
                         truth_type=truth_type,
-                        project_id=self.project if self.project else None
+                        project_id=self.project_id  # Use UUID, not name
                     )
+                    logger.warning(f"[GATHER_INTENT] {truth_type} returned {len(results)} results")
                     all_results.extend(results)
                 except Exception as e:
                     logger.warning(f"[GATHER_INTENT] Search for {truth_type} failed: {e}")
             
             # Also try without truth_type filter as fallback (catches any miscategorized docs)
             if not all_results:
+                logger.warning(f"[GATHER_INTENT] No results from typed search, trying fallback...")
                 try:
                     results = self.rag_handler.search(
                         collection_name=collection_name,
                         query=question,
                         n_results=10,
-                        project_id=self.project if self.project else None
+                        project_id=self.project_id  # Use UUID, not name
                         # No truth_type filter - get any project docs
                     )
+                    logger.warning(f"[GATHER_INTENT] Fallback returned {len(results)} results")
                     # Filter out reference/global docs manually
                     for r in results:
                         metadata = r.get('metadata', {})
@@ -4449,6 +4459,8 @@ SQL:"""
                             all_results.append(r)
                 except Exception as e:
                     logger.warning(f"[GATHER_INTENT] Fallback search failed: {e}")
+            
+            logger.warning(f"[GATHER_INTENT] Total results after all searches: {len(all_results)}")
             
             # Sort by relevance (distance) and take top results
             all_results.sort(key=lambda x: x.get('distance', 1.0))
@@ -4465,6 +4477,8 @@ SQL:"""
                     confidence=max(0.3, 1.0 - distance) if distance else 0.7,
                     location=f"Page {metadata.get('page', '?')}"
                 ))
+            
+            logger.warning(f"[GATHER_INTENT] Returning {len(truths)} truths")
         
         except Exception as e:
             logger.error(f"Error gathering intent: {e}")
