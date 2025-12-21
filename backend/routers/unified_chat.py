@@ -2100,6 +2100,7 @@ async def unified_chat(request: UnifiedChatRequest):
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
+                logger.info(f"[UNIFIED] from_intent count: {len(answer.from_intent) if answer.from_intent else 0}")
                 logger.info(f"[UNIFIED] is_garbage: {is_garbage_response}, is_no_data: {is_no_data_placeholder}")
                 
                 try:
@@ -2108,7 +2109,7 @@ async def unified_chat(request: UnifiedChatRequest):
                     # Build context from what we have
                     context_parts = [f"User Question: {message}", ""]
                     
-                    # Include any real data we found
+                    # Include any real data we found from DuckDB (from_reality)
                     has_real_data = False
                     if answer.from_reality:
                         for truth in answer.from_reality:
@@ -2128,9 +2129,32 @@ async def unified_chat(request: UnifiedChatRequest):
                                         context_parts.append(f"  ... and {len(rows) - len(rows_to_show)} more rows")
                                     logger.info(f"[UNIFIED] Added {len(rows)} rows from {truth.source_name}")
                     
+                    # =========================================================
+                    # FALLBACK TO RAG (from_intent) when no DuckDB data
+                    # This handles PDFs and documents stored in ChromaDB
+                    # =========================================================
+                    if not has_real_data and answer.from_intent:
+                        logger.info(f"[UNIFIED] No DuckDB data - falling back to RAG documents ({len(answer.from_intent)} results)")
+                        context_parts.append("Information found in uploaded documents:")
+                        context_parts.append("")
+                        
+                        for truth in answer.from_intent[:5]:  # Limit to top 5 most relevant
+                            source_name = getattr(truth, 'source_name', 'Document')
+                            content = getattr(truth, 'content', '')
+                            confidence = getattr(truth, 'confidence', 0.5)
+                            
+                            if content:
+                                has_real_data = True
+                                context_parts.append(f"From {source_name} (relevance: {confidence:.0%}):")
+                                # Truncate very long content
+                                content_preview = content[:1500] if len(content) > 1500 else content
+                                context_parts.append(content_preview)
+                                context_parts.append("")
+                                logger.info(f"[UNIFIED] Added RAG content from {source_name} ({len(content)} chars)")
+                    
                     if not has_real_data:
-                        context_parts.append("No relevant data was found in the available tables.")
-                        context_parts.append("This could mean: the data hasn't been uploaded yet, or it's stored with different column names.")
+                        context_parts.append("No relevant data was found in the available tables or documents.")
+                        context_parts.append("This could mean: the data hasn't been uploaded yet, or it's stored with different names.")
                         logger.warning(f"[UNIFIED] No real data found for analytical question")
                     
                     # Add table context
