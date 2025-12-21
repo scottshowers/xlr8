@@ -2726,6 +2726,137 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             raise
     
     # =========================================================================
+    # STORE DATAFRAME - For PDF and other sources that provide DataFrames
+    # =========================================================================
+    
+    def store_dataframe(
+        self,
+        df: pd.DataFrame,
+        project: str,
+        file_name: str,
+        sheet_name: str = 'data',
+        source_type: str = 'pdf'
+    ) -> Dict[str, Any]:
+        """
+        Store a DataFrame in DuckDB with proper metadata.
+        
+        Used by smart_pdf_analyzer and other sources that produce DataFrames
+        directly instead of files.
+        
+        Args:
+            df: DataFrame to store
+            project: Project name
+            file_name: Original source filename
+            sheet_name: Sheet/section name (default 'data')
+            source_type: Source type for metadata (default 'pdf')
+            
+        Returns:
+            Dict with storage results including table_name, row_count, etc.
+        """
+        results = {
+            'success': False,
+            'project': project,
+            'file_name': file_name,
+            'table_name': None,
+            'tables_created': [],
+            'row_count': 0,
+            'total_rows': 0,
+            'columns': [],
+            'source_type': source_type
+        }
+        
+        try:
+            if df is None or df.empty:
+                results['error'] = 'DataFrame is empty'
+                return results
+            
+            # Clean up DataFrame
+            df = df.dropna(how='all').dropna(axis=1, how='all')
+            
+            if df.empty:
+                results['error'] = 'DataFrame is empty after cleanup'
+                return results
+            
+            # Sanitize column names
+            df.columns = [self._sanitize_name(str(c)) for c in df.columns]
+            
+            # Force all columns to string for consistency
+            for col in df.columns:
+                df[col] = df[col].fillna('').astype(str)
+                df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+            
+            # Generate table name
+            table_name = self._generate_table_name(project, file_name, sheet_name)
+            
+            # Clean up any existing data for this file
+            try:
+                existing = self.safe_fetchall("""
+                    SELECT table_name FROM _schema_metadata 
+                    WHERE project = ? AND file_name = ?
+                """, [project, file_name])
+                
+                for (old_table,) in existing:
+                    try:
+                        self.safe_execute(f'DROP TABLE IF EXISTS "{old_table}"')
+                        logger.info(f"[STORE_DF] Dropped existing table: {old_table}")
+                    except:
+                        pass
+                
+                self.safe_execute("""
+                    DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
+                """, [project, file_name])
+            except Exception as cleanup_e:
+                logger.warning(f"[STORE_DF] Cleanup warning: {cleanup_e}")
+            
+            # Get version number
+            version = self._get_next_version(project, file_name)
+            
+            # Create table (thread-safe)
+            self.safe_create_table_from_df(table_name, df)
+            
+            # Build columns info
+            columns_info = [
+                {'name': col, 'type': 'VARCHAR', 'encrypted': False}
+                for col in df.columns
+            ]
+            
+            # Store metadata
+            self.safe_execute("""
+                INSERT INTO _schema_metadata 
+                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+            """, [
+                project,
+                file_name,
+                sheet_name,
+                table_name,
+                json.dumps(columns_info),
+                len(df),
+                json.dumps([]),  # likely_keys - could detect later
+                json.dumps([]),  # encrypted_columns
+                version
+            ])
+            
+            logger.warning(f"[STORE_DF] Stored {len(df)} rows to {table_name} from {source_type}")
+            
+            results['success'] = True
+            results['table_name'] = table_name
+            results['tables_created'] = [table_name]
+            results['row_count'] = len(df)
+            results['total_rows'] = len(df)
+            results['columns'] = list(df.columns)
+            results['version'] = version
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"[STORE_DF] Error storing DataFrame: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            results['error'] = str(e)
+            return results
+    
+    # =========================================================================
     # COLUMN PROFILING - v5.0 SQL-Based (OPTIMIZED)
     # =========================================================================
     
