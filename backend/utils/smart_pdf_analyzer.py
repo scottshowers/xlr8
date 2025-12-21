@@ -856,7 +856,12 @@ def parse_line_with_pattern(match, line: str, pattern_def: Dict, patterns: Dict,
 # =============================================================================
 
 def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: str = None) -> Dict[str, Any]:
-    """Store parsed rows to DuckDB."""
+    """
+    Store parsed rows to DuckDB using the shared structured data handler.
+    
+    This ensures consistency with how Excel/CSV files are stored and
+    makes the data immediately visible to all status/query endpoints.
+    """
     if not PANDAS_AVAILABLE:
         return {"success": False, "error": "pandas not available"}
     
@@ -864,118 +869,39 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         return {"success": False, "error": "No rows to store"}
     
     try:
-        import duckdb
-        
-        # Create DataFrame
         df = pd.DataFrame(rows)
         
         if df.empty:
             return {"success": False, "error": "DataFrame is empty"}
         
-        # Clean table name
-        clean_project = re.sub(r'[^a-zA-Z0-9_]', '_', project)
-        clean_filename = re.sub(r'[^a-zA-Z0-9_]', '_', filename.rsplit('.', 1)[0])
-        table_name = f"{clean_project}__{clean_filename}"
-        
-        # Connect to DuckDB
-        db_path = os.getenv('DUCKDB_PATH', '/data/structured_data.duckdb')
-        logger.warning(f"[DUCKDB] Connecting to: {db_path}")
-        conn = duckdb.connect(db_path)
-        
-        # Create/replace table
-        conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-        conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM df')
-        
-        row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-        
-        # Store metadata in _pdf_tables
+        # Use the shared handler for consistent connection
         try:
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS _pdf_tables (
-                    table_name VARCHAR PRIMARY KEY,
-                    source_file VARCHAR,
-                    project VARCHAR,
-                    project_id VARCHAR,
-                    row_count INTEGER,
-                    columns VARCHAR,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            conn.execute("""
-                INSERT OR REPLACE INTO _pdf_tables (table_name, source_file, project, project_id, row_count, columns)
-                VALUES (?, ?, ?, ?, ?, ?)
-            """, [table_name, filename, project, project_id, row_count, json.dumps(list(df.columns))])
-        except Exception as e:
-            logger.warning(f"[DUCKDB] Could not store _pdf_tables metadata: {e}")
-        
-        # Also store in _schema_metadata for status endpoint compatibility
-        try:
-            # Ensure _schema_metadata table exists (matching structured_data_handler schema)
-            conn.execute("""
-                CREATE TABLE IF NOT EXISTS _schema_metadata (
-                    id INTEGER PRIMARY KEY,
-                    project VARCHAR NOT NULL,
-                    file_name VARCHAR NOT NULL,
-                    sheet_name VARCHAR NOT NULL,
-                    table_name VARCHAR NOT NULL,
-                    columns JSON NOT NULL,
-                    row_count INTEGER,
-                    likely_keys JSON,
-                    encrypted_columns JSON,
-                    version INTEGER DEFAULT 1,
-                    is_current BOOLEAN DEFAULT TRUE,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
             
-            # Ensure sequence exists
-            conn.execute("CREATE SEQUENCE IF NOT EXISTS schema_metadata_seq START 1")
+            result = handler.store_dataframe(
+                df=df,
+                project=project,
+                file_name=filename,
+                sheet_name='PDF',
+                source_type='pdf'
+            )
             
-            # Delete any existing entry for this table/project
-            conn.execute("""
-                DELETE FROM _schema_metadata 
-                WHERE table_name = ? AND project = ?
-            """, [table_name, project])
+            if result.get('success'):
+                logger.warning(f"[DUCKDB] Stored {result['row_count']} rows to table '{result['table_name']}'")
+            else:
+                logger.warning(f"[DUCKDB] Storage failed: {result.get('error')}")
             
-            # Build columns_info like the handler does
-            columns_info = [
-                {'name': col, 'type': 'VARCHAR', 'encrypted': False}
-                for col in df.columns
-            ]
+            return result
             
-            # Insert new entry matching handler's schema (using sequence for id)
-            conn.execute("""
-                INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, 1, TRUE)
-            """, [
-                project, 
-                filename, 
-                'PDF',  # sheet_name
-                table_name, 
-                json.dumps(columns_info), 
-                row_count,
-                json.dumps([]),  # likely_keys
-                json.dumps([])   # encrypted_columns
-            ])
-            logger.warning(f"[DUCKDB] Added _schema_metadata entry for {table_name}")
-        except Exception as e:
-            logger.warning(f"[DUCKDB] Could not store _schema_metadata: {e}")
+        except ImportError as ie:
+            logger.error(f"[DUCKDB] Handler not available: {ie}")
+            return {"success": False, "error": f"Handler not available: {ie}"}
+        except Exception as he:
+            logger.error(f"[DUCKDB] Handler error: {he}")
             import traceback
-            logger.warning(traceback.format_exc())
-        
-        conn.close()
-        
-        logger.warning(f"[DUCKDB] Stored {row_count} rows to table '{table_name}'")
-        
-        return {
-            "success": True,
-            "table_name": table_name,
-            "tables_created": [table_name],  # For upload.py compatibility
-            "row_count": row_count,
-            "total_rows": row_count,  # For upload.py compatibility
-            "columns": list(df.columns)
-        }
+            logger.error(traceback.format_exc())
+            return {"success": False, "error": str(he)}
         
     except Exception as e:
         logger.error(f"[DUCKDB] Storage failed: {e}")
