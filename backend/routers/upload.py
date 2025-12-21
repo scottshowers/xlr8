@@ -1496,7 +1496,7 @@ def process_file_background(
         ProcessingJobModel.complete(job_id, {
             'filename': filename,
             'type': 'unstructured',
-            'chunks_created': len(text) // 500,
+            'chunks_created': chunks_added,  # Actual count from RAG
             'project': project,
             'functional_area': functional_area
         })
