@@ -910,28 +910,54 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         
         # Also store in _schema_metadata for status endpoint compatibility
         try:
+            # Ensure _schema_metadata table exists (matching structured_data_handler schema)
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS _schema_metadata (
-                    table_name VARCHAR,
-                    project VARCHAR,
-                    file_name VARCHAR,
-                    sheet_name VARCHAR,
-                    columns JSON,
+                    id INTEGER PRIMARY KEY,
+                    project VARCHAR NOT NULL,
+                    file_name VARCHAR NOT NULL,
+                    sheet_name VARCHAR NOT NULL,
+                    table_name VARCHAR NOT NULL,
+                    columns JSON NOT NULL,
                     row_count INTEGER,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_current BOOLEAN DEFAULT TRUE
+                    likely_keys JSON,
+                    encrypted_columns JSON,
+                    version INTEGER DEFAULT 1,
+                    is_current BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Ensure sequence exists
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS schema_metadata_seq START 1")
+            
             # Delete any existing entry for this table/project
             conn.execute("""
                 DELETE FROM _schema_metadata 
                 WHERE table_name = ? AND project = ?
             """, [table_name, project])
-            # Insert new entry
+            
+            # Build columns_info like the handler does
+            columns_info = [
+                {'name': col, 'type': 'VARCHAR', 'encrypted': False}
+                for col in df.columns
+            ]
+            
+            # Insert new entry matching handler's schema (using sequence for id)
             conn.execute("""
-                INSERT INTO _schema_metadata (table_name, project, file_name, sheet_name, columns, row_count, is_current)
-                VALUES (?, ?, ?, ?, ?, ?, TRUE)
-            """, [table_name, project, filename, 'PDF', json.dumps(list(df.columns)), row_count])
+                INSERT INTO _schema_metadata 
+                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, 1, TRUE)
+            """, [
+                project, 
+                filename, 
+                'PDF',  # sheet_name
+                table_name, 
+                json.dumps(columns_info), 
+                row_count,
+                json.dumps([]),  # likely_keys
+                json.dumps([])   # encrypted_columns
+            ])
             logger.warning(f"[DUCKDB] Added _schema_metadata entry for {table_name}")
         except Exception as e:
             logger.warning(f"[DUCKDB] Could not store _schema_metadata: {e}")
