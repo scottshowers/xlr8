@@ -918,13 +918,12 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
                     columns JSON,
                     row_count INTEGER,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    is_current BOOLEAN DEFAULT TRUE,
-                    PRIMARY KEY (table_name, project)
+                    is_current BOOLEAN DEFAULT TRUE
                 )
             """)
-            # Mark any existing entry as not current
+            # Delete any existing entry for this table/project
             conn.execute("""
-                UPDATE _schema_metadata SET is_current = FALSE 
+                DELETE FROM _schema_metadata 
                 WHERE table_name = ? AND project = ?
             """, [table_name, project])
             # Insert new entry
@@ -932,9 +931,11 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
                 INSERT INTO _schema_metadata (table_name, project, file_name, sheet_name, columns, row_count, is_current)
                 VALUES (?, ?, ?, ?, ?, ?, TRUE)
             """, [table_name, project, filename, 'PDF', json.dumps(list(df.columns)), row_count])
-            logger.info(f"[DUCKDB] Added _schema_metadata entry for {table_name}")
+            logger.warning(f"[DUCKDB] Added _schema_metadata entry for {table_name}")
         except Exception as e:
             logger.warning(f"[DUCKDB] Could not store _schema_metadata: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
         
         conn.close()
         
