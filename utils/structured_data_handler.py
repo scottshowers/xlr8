@@ -2838,8 +2838,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 version
             ])
             
-            # Commit to ensure visibility
-            self.conn.commit()
+            # Commit to ensure visibility (thread-safe)
+            self.safe_commit()
             logger.warning(f"[STORE_DF] Committed _schema_metadata for {table_name}")
             
             logger.warning(f"[STORE_DF] Stored {len(df)} rows to {table_name} from {source_type}")
@@ -3802,6 +3802,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 return self.conn.execute(sql).fetchone()
             except Exception as e:
                 logger.error(f"[SAFE_FETCHONE] Error: {e}")
+                raise
+    
+    def safe_commit(self):
+        """Thread-safe commit wrapper."""
+        with self._db_lock:
+            try:
+                self.conn.commit()
+            except Exception as e:
+                logger.error(f"[SAFE_COMMIT] Error: {e}")
                 raise
     
     def safe_create_table_from_df(self, table_name: str, df: pd.DataFrame, drop_existing: bool = True):
