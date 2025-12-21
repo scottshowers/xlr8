@@ -6,6 +6,8 @@ Simple approach:
 2. Redact PII before sending to LLM
 3. Ask LLM: "Is this tabular? If yes, parse it"
 4. Route to DuckDB (tabular) or ChromaDB (text)
+
+Uses shared utilities from pdf_utils.py for consistency with register_extractor.
 """
 
 import os
@@ -32,59 +34,66 @@ try:
 except ImportError:
     PANDAS_AVAILABLE = False
 
-
 # =============================================================================
-# PII REDACTION PATTERNS
+# SHARED UTILITIES - Import from pdf_utils for consistency
 # =============================================================================
 
-PII_PATTERNS = {
-    # === IDENTITY ===
-    'ssn': (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),
-    'ssn_no_dash': (r'\b(?<!\d)\d{9}(?!\d)\b', '[SSN-REDACTED]'),  # 9 digits not part of larger number
-    
-    # === CONTACT ===
-    'phone': (r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]'),
-    'email': (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL-REDACTED]'),
-    
-    # === FINANCIAL ===
-    'credit_card': (r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b', '[CC-REDACTED]'),
-    'bank_account': (r'\b\d{8,17}\b', '[ACCT-REDACTED]'),  # Bank accounts typically 8-17 digits
-    'routing': (r'\b\d{9}\b', '[ROUTING-REDACTED]'),  # ABA routing numbers are 9 digits
-    'salary_amount': (r'\$\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b', '[AMOUNT-REDACTED]'),  # $50,000.00
-    'salary_plain': (r'\b\d{2,3},\d{3}(?:\.\d{2})?\b', '[AMOUNT-REDACTED]'),  # 50,000.00 without $
-    
-    # === DATES ===
-    'dob_slash': (r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '[DATE-REDACTED]'),  # MM/DD/YYYY or MM/DD/YY
-    'dob_dash': (r'\b\d{1,2}-\d{1,2}-\d{2,4}\b', '[DATE-REDACTED]'),  # MM-DD-YYYY
-    'iso_date': (r'\b\d{4}-\d{2}-\d{2}\b', '[DATE-REDACTED]'),  # YYYY-MM-DD
-    
-    # === ADDRESSES ===
-    'street_address': (r'\b\d{1,5}\s+(?:[A-Za-z]+\s+){1,3}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl)\.?\b', '[ADDRESS-REDACTED]'),
-    'zip_code': (r'\b\d{5}(?:-\d{4})?\b', '[ZIP-REDACTED]'),
-    'po_box': (r'\b[Pp]\.?[Oo]\.?\s*[Bb]ox\s+\d+\b', '[POBOX-REDACTED]'),
-    
-    # === EMPLOYEE IDENTIFIERS ===
-    'employee_id': (r'\b[Ee]mp(?:loyee)?[-\s]?(?:[Ii][Dd]|[Nn]o|[Nn]um(?:ber)?)?[-:\s]*\d{3,10}\b', '[EMPID-REDACTED]'),
-    'badge_id': (r'\b[Bb]adge[-\s]?(?:[Ii][Dd]|[Nn]o)?[-:\s]*\d{3,10}\b', '[BADGEID-REDACTED]'),
-    
-    # === NAMES (context-based - looks for labeled names) ===
-    # These catch "Name: John Smith" or "Employee Name: Jane Doe" patterns
-    'labeled_name': (r'(?:[Nn]ame|[Ee]mployee|[Aa]ssociate)[-:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})', '[NAME-REDACTED]'),
-    'name_first_last': (r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\s+(?=\d{3}-\d{2}-\d{4})', '[NAME-REDACTED]'),  # Name before SSN
-}
-
-# NOTE: EIN/FEIN removed - these are public business identifiers, not personal PII
-# 'ein': (r'\b\d{2}-\d{7}\b', '[EIN-REDACTED]'),
-
-def redact_pii(text: str) -> str:
-    """Redact PII from text before sending to LLM."""
-    redacted = text
-    
-    for name, (pattern, replacement) in PII_PATTERNS.items():
-        if replacement:
-            redacted = re.sub(pattern, replacement, redacted)
-    
-    return redacted
+# Try multiple import paths for deployment flexibility
+try:
+    from utils.pdf_utils import (
+        PIIRedactor, redact_pii, 
+        parse_json_array, repair_json, extract_json_objects,
+        call_groq, call_ollama, call_llm
+    )
+    PDF_UTILS_AVAILABLE = True
+    logger.info("[SMART-PDF] Using shared pdf_utils")
+except ImportError:
+    try:
+        from backend.utils.pdf_utils import (
+            PIIRedactor, redact_pii,
+            parse_json_array, repair_json, extract_json_objects,
+            call_groq, call_ollama, call_llm
+        )
+        PDF_UTILS_AVAILABLE = True
+        logger.info("[SMART-PDF] Using shared pdf_utils (backend path)")
+    except ImportError:
+        PDF_UTILS_AVAILABLE = False
+        logger.warning("[SMART-PDF] pdf_utils not available, using local fallbacks")
+        
+        # Local fallback for PII redaction if pdf_utils not available
+        def redact_pii(text: str) -> str:
+            """Fallback PII redaction if pdf_utils not available."""
+            patterns = [
+                (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),
+                (r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]'),
+                (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL-REDACTED]'),
+                (r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b', '[CC-REDACTED]'),
+            ]
+            redacted = text
+            for pattern, replacement in patterns:
+                redacted = re.sub(pattern, replacement, redacted)
+            return redacted
+        
+        def repair_json(text: str) -> str:
+            """Fallback JSON repair."""
+            text = re.sub(r'```json\s*', '', text)
+            text = re.sub(r'```\s*', '', text)
+            text = re.sub(r',\s*]', ']', text)
+            text = re.sub(r',\s*}', '}', text)
+            return text.strip()
+        
+        def parse_json_array(response_text: str, normalizer=None) -> List[Dict]:
+            """Fallback JSON array parser."""
+            text = repair_json(response_text)
+            match = re.search(r'\[[\s\S]*\]', text)
+            if match:
+                try:
+                    data = json.loads(match.group())
+                    if isinstance(data, list):
+                        return [d for d in data if isinstance(d, dict)]
+                except:
+                    pass
+            return []
 
 
 # =============================================================================
@@ -539,60 +548,15 @@ JSON RESPONSE:"""
         return {"is_tabular": False, "error": str(e)}
 
 
-def repair_json(text: str) -> str:
-    """
-    Attempt to repair common JSON errors from LLM output.
-    """
-    if not text:
-        return text
-    
-    # Remove markdown code blocks
-    text = re.sub(r'```json\s*', '', text)
-    text = re.sub(r'```\s*', '', text)
-    
-    # Remove leading/trailing whitespace
-    text = text.strip()
-    
-    # Fix trailing commas before ] or }
-    text = re.sub(r',\s*]', ']', text)
-    text = re.sub(r',\s*}', '}', text)
-    
-    # Fix missing quotes around keys (common LLM error)
-    # Match unquoted keys like {Code: "value"} -> {"Code": "value"}
-    text = re.sub(r'{\s*([a-zA-Z_][a-zA-Z0-9_\s]*)\s*:', r'{"\1":', text)
-    text = re.sub(r',\s*([a-zA-Z_][a-zA-Z0-9_\s]*)\s*:', r',"\1":', text)
-    
-    # Fix single quotes to double quotes
-    # Be careful - only fix quotes that look like JSON strings
-    # Look for patterns like 'value' that should be "value"
-    text = re.sub(r"'([^']*)'(\s*[,}\]])", r'"\1"\2', text)
-    
-    # Fix unescaped quotes inside strings (basic attempt)
-    # This is tricky - skip for now
-    
-    # Ensure array brackets
-    if not text.startswith('['):
-        # Try to find the array
-        array_start = text.find('[')
-        if array_start != -1:
-            text = text[array_start:]
-    
-    if not text.endswith(']'):
-        # Try to find the closing bracket
-        array_end = text.rfind(']')
-        if array_end != -1:
-            text = text[:array_end + 1]
-    
-    return text
-
-
 def parse_tabular_pdf_with_llm(text: str, columns: List[str], file_path: str = None) -> List[Dict[str, str]]:
     """
     Ask LLM to parse tabular PDF text into structured rows.
+    
+    Uses shared parse_json_array from pdf_utils for robust JSON parsing.
     Falls back to pdfplumber if LLM unavailable.
     """
     
-    # Redact PII
+    # Redact PII using shared utility
     redacted_text = redact_pii(text)
     
     # Process in chunks if text is large
@@ -651,39 +615,14 @@ JSON OUTPUT:"""
         response = call_llm(prompt, max_tokens=8000)
         
         if response:
-            # Apply JSON repair
-            repaired = repair_json(response)
+            # Use shared parse_json_array for robust parsing with fallbacks
+            rows = parse_json_array(response)
             
-            try:
-                # Find JSON array in response
-                array_match = re.search(r'\[[\s\S]*\]', repaired)
-                if array_match:
-                    json_str = array_match.group()
-                    rows = json.loads(json_str)
-                    if isinstance(rows, list):
-                        all_rows.extend(rows)
-                        logger.warning(f"[LLM] Chunk {chunk_num+1}: parsed {len(rows)} rows")
-                    else:
-                        logger.warning(f"[LLM] Chunk {chunk_num+1}: result not a list")
-                else:
-                    logger.warning(f"[LLM] Chunk {chunk_num+1}: no JSON array found")
-            except json.JSONDecodeError as e:
-                logger.warning(f"[LLM] Chunk {chunk_num+1} parse error: {e}")
-                logger.warning(f"[LLM] First 200 chars of repaired: {repaired[:200]}")
-                
-                # Try parsing row by row as last resort
-                row_matches = re.findall(r'\{[^{}]+\}', repaired)
-                rescued_rows = []
-                for rm in row_matches:
-                    try:
-                        obj = json.loads(rm)
-                        if isinstance(obj, dict):
-                            rescued_rows.append(obj)
-                    except:
-                        pass
-                if rescued_rows:
-                    all_rows.extend(rescued_rows)
-                    logger.warning(f"[LLM] Chunk {chunk_num+1}: rescued {len(rescued_rows)} individual rows")
+            if rows:
+                all_rows.extend(rows)
+                logger.warning(f"[LLM] Chunk {chunk_num+1}: parsed {len(rows)} rows")
+            else:
+                logger.warning(f"[LLM] Chunk {chunk_num+1}: no rows parsed")
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
     
@@ -827,9 +766,12 @@ def parse_tabular_text_by_patterns(file_path: str, columns: List[str]) -> List[D
 
 def load_pdf_parsing_patterns() -> Dict[str, Any]:
     """
-    Load PDF parsing patterns from config file or return defaults.
+    Load PDF parsing patterns from config file or return minimal generic defaults.
     
     Config file: /app/config/pdf_patterns.json
+    
+    NOTE: For domain-specific parsing (UKG, ADP, etc.), create a pdf_patterns.json
+    config file. The defaults here are intentionally minimal and generic.
     """
     config_paths = [
         '/app/config/pdf_patterns.json',
@@ -847,79 +789,40 @@ def load_pdf_parsing_patterns() -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"[TEXT-PARSE] Failed to load {path}: {e}")
     
-    # Default patterns - optimized for UKG payroll PDFs
+    # Minimal generic defaults - domain-specific patterns should come from config
+    # These catch only very obvious patterns without hardcoding vendor-specific terms
+    logger.info("[TEXT-PARSE] Using minimal generic defaults - consider adding pdf_patterns.json for better results")
     return {
         'skip_patterns': [
-            'Page ', 'Select: All', 'Last Page', 'First Page', 'Next Page',
-            'Code Tax Category', 'Description Rule', 'Calculation Rate',
-            'Report:', 'Printed:', 'User:', 'Company:', 'Run Date:',
-            'Total:', 'Subtotal:', 'Grand Total:', '---'
+            # Generic page/report markers
+            'Page ', 'page ', ' of ', 
+            'Total:', 'Subtotal:', 'Grand Total:',
+            'Report:', 'Printed:', 'Generated:',
+            '---', '===', '***'
         ],
         'code_patterns': [
             {
-                # 5-digit numeric codes: 20001, 20167, etc.
-                'name': 'numeric_5digit',
-                'regex': r'^(\d{5})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+                # Numeric codes followed by text: "12345 Some Description"
+                'name': 'numeric_code',
+                'regex': r'^(\d{4,6})\s+(.+)$',
+                'groups': {'Code': 1, 'Description': 2}
             },
             {
-                # 4-digit numeric codes: 1001, 2345
-                'name': 'numeric_4digit',
-                'regex': r'^(\d{4})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+                # Alpha codes followed by text: "ABC Some Description"
+                'name': 'alpha_code',
+                'regex': r'^([A-Z]{2,6})\s+(.+)$',
+                'groups': {'Code': 1, 'Description': 2}
             },
             {
-                # Short alpha codes: REG, OT, VAC, SICK, PTO
-                'name': 'alpha_short', 
-                'regex': r'^([A-Z]{2,4})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
-            },
-            {
-                # Longer alpha codes: REGPY, OTPAY, VACTN
-                'name': 'alpha_long',
-                'regex': r'^([A-Z]{3,8})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
-            },
-            {
-                # Alpha-numeric codes: REG1, OT15, VAC2
-                'name': 'alpha_numeric',
-                'regex': r'^([A-Z]{2,5}\d{1,3})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
-            },
-            {
-                # Spaced codes with description: "SPT WAGEP" or "SPOT BONUS"
-                'name': 'spaced_code',
-                'regex': r'^([A-Z]{2,5}\s+[A-Z]{2,8})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
-            },
-            {
-                # Percentage codes: 5% VAC, 6% HOL
-                'name': 'percentage_code',
-                'regex': r'^(\d+\.?\d*%\s*[A-Z]{2,5}(?:\s+[A-Z]{2,5})?)\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
-            },
-            {
-                # Fallback: Any code followed by common tax categories
-                'name': 'generic',
-                'regex': r'^([A-Z0-9][A-Z0-9\s\-%]{1,20}?)\s+(REGPY|SICPY|OTPAY|STTAX|FEDTX|FICA|NONTX|NOPAY)\s+(.*)$',
-                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+                # Alphanumeric codes: "ABC123 Some Description"
+                'name': 'alphanumeric_code',
+                'regex': r'^([A-Z]{2,4}\d{2,4})\s+(.+)$',
+                'groups': {'Code': 1, 'Description': 2}
             }
         ],
-        'calculation_rules': [
-            'Pay rate * hours * rate factor',
-            'Pay rate * hours',
-            'Flat amount',
-            'Expression',
-            'Hours * flat amount',
-            'Coefficient OT',
-            'Percentage',
-            'Per pay period',
-            'Annual'
-        ],
-        'flags': {
-            'reg_pay_markers': ['ü', '✓', '√', 'Y', 'Yes'],
-            'accumulator_markers': [' Z ', ' Z$', '\tZ\t', '\tZ$']
-        }
+        # Empty - no domain-specific extraction without config
+        'calculation_rules': [],
+        'flags': {}
     }
 
 
