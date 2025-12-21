@@ -3806,10 +3806,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 raise
     
     def safe_commit(self):
-        """Thread-safe commit wrapper."""
+        """
+        Thread-safe commit wrapper.
+        
+        Also runs CHECKPOINT to ensure data is flushed from WAL to main database file,
+        making it visible to other connections (e.g., in other worker processes).
+        """
         with self._db_lock:
             try:
                 self.conn.commit()
+                # Force WAL checkpoint so other connections see the data
+                self.conn.execute("CHECKPOINT")
             except Exception as e:
                 logger.error(f"[SAFE_COMMIT] Error: {e}")
                 raise
@@ -4365,8 +4372,12 @@ def get_structured_handler() -> StructuredDataHandler:
     """
     if _SINGLETON_KEY not in sys.modules:
         sys.modules[_SINGLETON_KEY] = StructuredDataHandler()
-        logging.getLogger(__name__).info(
-            f"[HANDLER] Created new singleton instance (id={id(sys.modules[_SINGLETON_KEY])})"
+        logging.getLogger(__name__).warning(
+            f"[HANDLER] Created singleton (id={id(sys.modules[_SINGLETON_KEY])}, db={sys.modules[_SINGLETON_KEY].db_path})"
+        )
+    else:
+        logging.getLogger(__name__).debug(
+            f"[HANDLER] Reusing singleton (id={id(sys.modules[_SINGLETON_KEY])})"
         )
     return sys.modules[_SINGLETON_KEY]
 
