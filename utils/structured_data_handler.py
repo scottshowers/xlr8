@@ -2822,7 +2822,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             ]
             
             # Store metadata
-            logger.warning(f"[STORE_DF] Inserting _schema_metadata for {table_name}")
+            logger.warning(f"[STORE_DF] Inserting _schema_metadata for {table_name}, conn_id={id(self.conn)}")
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
                 (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
@@ -2842,6 +2842,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             # Commit to ensure visibility (thread-safe)
             self.safe_commit()
             logger.warning(f"[STORE_DF] Committed _schema_metadata for {table_name}")
+            
+            # DIAGNOSTIC: Verify the data was actually written
+            try:
+                verify_count = self.conn.execute(
+                    "SELECT COUNT(*) FROM _schema_metadata WHERE table_name = ?", 
+                    [table_name]
+                ).fetchone()[0]
+                logger.warning(f"[STORE_DF] VERIFY: _schema_metadata has {verify_count} rows for {table_name}")
+                
+                # Also check total rows
+                total_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                logger.warning(f"[STORE_DF] VERIFY: _schema_metadata total rows: {total_count}")
+            except Exception as ve:
+                logger.warning(f"[STORE_DF] VERIFY failed: {ve}")
             
             logger.warning(f"[STORE_DF] Stored {len(df)} rows to {table_name} from {source_type}")
             
@@ -3797,9 +3811,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 except:
                     pass  # Ignore if no transaction active
                 
+                # Log the query for debugging
+                if '_schema_metadata' in sql:
+                    logger.warning(f"[SAFE_FETCHALL] Querying _schema_metadata, conn_id={id(self.conn)}")
+                
                 if params:
-                    return self.conn.execute(sql, params).fetchall()
-                return self.conn.execute(sql).fetchall()
+                    result = self.conn.execute(sql, params).fetchall()
+                else:
+                    result = self.conn.execute(sql).fetchall()
+                
+                # Log result count for _schema_metadata queries
+                if '_schema_metadata' in sql:
+                    logger.warning(f"[SAFE_FETCHALL] _schema_metadata returned {len(result)} rows")
+                
+                return result
             except Exception as e:
                 logger.error(f"[SAFE_FETCHALL] Error: {e}")
                 raise
@@ -4391,13 +4416,15 @@ def get_structured_handler() -> StructuredDataHandler:
     or 'backend.utils.structured_data_handler'.
     """
     if _SINGLETON_KEY not in sys.modules:
-        sys.modules[_SINGLETON_KEY] = StructuredDataHandler()
+        handler = StructuredDataHandler()
+        sys.modules[_SINGLETON_KEY] = handler
         logging.getLogger(__name__).warning(
-            f"[HANDLER] Created singleton (id={id(sys.modules[_SINGLETON_KEY])}, db={sys.modules[_SINGLETON_KEY].db_path})"
+            f"[HANDLER] Created singleton (id={id(handler)}, conn_id={id(handler.conn)}, db={handler.db_path})"
         )
     else:
+        handler = sys.modules[_SINGLETON_KEY]
         logging.getLogger(__name__).debug(
-            f"[HANDLER] Reusing singleton (id={id(sys.modules[_SINGLETON_KEY])})"
+            f"[HANDLER] Reusing singleton (id={id(handler)}, conn_id={id(handler.conn)})"
         )
     return sys.modules[_SINGLETON_KEY]
 
