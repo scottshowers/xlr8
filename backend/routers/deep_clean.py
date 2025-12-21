@@ -1,19 +1,18 @@
 """
-Deep Clean Router - Unified Orphan Cleanup
-==========================================
+Deep Clean Router - Registry-First Orphan Cleanup
+==================================================
 
-One endpoint to clean ALL orphaned data across ALL storage systems.
+FIXED: Registry is now the SOURCE OF TRUTH.
+- Files in Registry are VALID
+- Files in DuckDB/ChromaDB but NOT in Registry are ORPHANS
 
-Add to backend:
-1. Save as backend/routers/deep_clean.py
-2. In main.py add: from routers.deep_clean import router as deep_clean_router
-3. Add: app.include_router(deep_clean_router, prefix="/api")
+Deploy to: backend/routers/deep_clean.py
 
 Endpoint: POST /api/deep-clean
 """
 
 from fastapi import APIRouter, HTTPException
-from typing import Optional
+from typing import Optional, Set
 import logging
 
 logger = logging.getLogger(__name__)
@@ -21,17 +20,54 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+def _get_registry_files(project_id: Optional[str] = None) -> Set[str]:
+    """
+    Get all valid filenames from DocumentRegistry (the source of truth).
+    Returns lowercase filenames for case-insensitive matching.
+    """
+    valid_files = set()
+    
+    try:
+        from utils.database.models import DocumentRegistryModel, ProjectModel
+        
+        if project_id:
+            # Try to get project UUID from name if needed
+            if len(project_id) < 32:  # Likely a name, not UUID
+                proj = ProjectModel.get_by_name(project_id)
+                if proj:
+                    project_id = proj.get('id')
+            
+            entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+        else:
+            entries = DocumentRegistryModel.get_all()
+        
+        for entry in entries:
+            filename = entry.get('filename', '')
+            if filename:
+                valid_files.add(filename.lower())
+        
+        logger.info(f"[DEEP-CLEAN] Registry contains {len(valid_files)} valid files")
+        
+    except Exception as e:
+        logger.error(f"[DEEP-CLEAN] Failed to get registry files: {e}")
+    
+    return valid_files
+
+
 @router.post("/deep-clean")
 async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
     """
     Deep clean all orphaned data across all storage systems.
     
+    REGISTRY IS SOURCE OF TRUTH:
+    - Files in Registry are VALID
+    - Files in DuckDB/ChromaDB but NOT in Registry are ORPHANS and get deleted
+    
     This cleans:
-    - ChromaDB orphan chunks (files not in registry)
-    - DuckDB orphan metadata (_schema_metadata, _pdf_tables pointing to non-existent tables)
-    - DuckDB orphan support tables (file_metadata, column_profiles for deleted files)
-    - Supabase orphan documents (if applicable)
-    - Supabase project_relationships (stale relationship analysis)
+    - DuckDB orphan tables (tables for files not in registry)
+    - DuckDB orphan metadata (_schema_metadata, _pdf_tables for non-existent files)
+    - DuckDB orphan support data (file_metadata, column_profiles)
+    - ChromaDB orphan chunks (chunks for files not in registry)
     - Playbook progress cache for deleted files
     
     Args:
@@ -49,45 +85,54 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
         }
     
     results = {
-        "chromadb": {"cleaned": 0, "errors": []},
-        "duckdb_metadata": {"cleaned": 0, "errors": []},
         "duckdb_tables": {"cleaned": 0, "errors": []},
-        "supabase": {"cleaned": 0, "errors": []},
-        "relationships": {"cleaned": 0, "errors": []},
+        "duckdb_metadata": {"cleaned": 0, "errors": []},
+        "chromadb": {"cleaned": 0, "errors": []},
         "playbook_cache": {"cleaned": 0, "errors": []},
     }
     
     # =========================================================================
-    # 1. CLEAN DUCKDB ORPHANS
+    # STEP 1: Get valid files from REGISTRY (source of truth)
+    # =========================================================================
+    valid_files = _get_registry_files(project_id)
+    
+    if not valid_files:
+        logger.warning("[DEEP-CLEAN] Registry returned no files - skipping cleanup to prevent data loss")
+        return {
+            "success": False,
+            "error": "Registry returned no files. This could indicate a connection issue. Aborting to prevent data loss.",
+            "details": results
+        }
+    
+    # =========================================================================
+    # STEP 2: CLEAN DUCKDB ORPHANS
     # =========================================================================
     try:
         from utils.structured_data_handler import get_structured_handler
         handler = get_structured_handler()
         conn = handler.conn
         
-        # Get all actual tables
-        tables = conn.execute("SHOW TABLES").fetchall()
-        actual_tables = set(t[0] for t in tables)
-        
-        # Clean _schema_metadata orphans
+        # Get all files referenced in _schema_metadata
+        orphan_tables = []
         try:
             if project_id:
-                meta_result = conn.execute(
-                    "SELECT table_name FROM _schema_metadata WHERE LOWER(project) LIKE ?",
-                    [f"%{project_id.lower()}%"]
-                ).fetchall()
+                meta_result = conn.execute("""
+                    SELECT table_name, file_name FROM _schema_metadata 
+                    WHERE LOWER(project) LIKE ?
+                """, [f"%{project_id.lower()}%"]).fetchall()
             else:
-                meta_result = conn.execute("SELECT table_name FROM _schema_metadata").fetchall()
+                meta_result = conn.execute(
+                    "SELECT table_name, file_name FROM _schema_metadata"
+                ).fetchall()
             
-            for (table_name,) in meta_result:
-                if table_name not in actual_tables:
-                    conn.execute("DELETE FROM _schema_metadata WHERE table_name = ?", [table_name])
-                    results["duckdb_metadata"]["cleaned"] += 1
-                    logger.info(f"[DEEP-CLEAN] Removed orphan _schema_metadata: {table_name}")
+            for table_name, file_name in meta_result:
+                if file_name and file_name.lower() not in valid_files:
+                    orphan_tables.append((table_name, file_name, '_schema_metadata'))
+                    
         except Exception as e:
-            results["duckdb_metadata"]["errors"].append(f"_schema_metadata: {str(e)}")
+            results["duckdb_metadata"]["errors"].append(f"_schema_metadata query: {str(e)}")
         
-        # Clean _pdf_tables orphans
+        # Get all files referenced in _pdf_tables
         try:
             table_check = conn.execute("""
                 SELECT COUNT(*) FROM information_schema.tables 
@@ -96,22 +141,50 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
             
             if table_check[0] > 0:
                 if project_id:
-                    pdf_result = conn.execute(
-                        "SELECT table_name FROM _pdf_tables WHERE LOWER(project) LIKE ? OR LOWER(project_id) LIKE ?",
-                        [f"%{project_id.lower()}%", f"%{project_id.lower()}%"]
-                    ).fetchall()
+                    pdf_result = conn.execute("""
+                        SELECT table_name, source_file FROM _pdf_tables 
+                        WHERE LOWER(project) LIKE ? OR LOWER(project_id) LIKE ?
+                    """, [f"%{project_id.lower()}%", f"%{project_id.lower()}%"]).fetchall()
                 else:
-                    pdf_result = conn.execute("SELECT table_name FROM _pdf_tables").fetchall()
+                    pdf_result = conn.execute(
+                        "SELECT table_name, source_file FROM _pdf_tables"
+                    ).fetchall()
                 
-                for (table_name,) in pdf_result:
-                    if table_name not in actual_tables:
-                        conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
-                        results["duckdb_metadata"]["cleaned"] += 1
-                        logger.info(f"[DEEP-CLEAN] Removed orphan _pdf_tables: {table_name}")
+                for table_name, source_file in pdf_result:
+                    if source_file and source_file.lower() not in valid_files:
+                        # Avoid duplicates
+                        if not any(t[0] == table_name for t in orphan_tables):
+                            orphan_tables.append((table_name, source_file, '_pdf_tables'))
+                            
         except Exception as e:
-            results["duckdb_metadata"]["errors"].append(f"_pdf_tables: {str(e)}")
+            results["duckdb_metadata"]["errors"].append(f"_pdf_tables query: {str(e)}")
         
-        # Clean file_metadata orphans (files that no longer have tables)
+        # Drop orphan tables and clean metadata
+        for table_name, file_name, source_table in orphan_tables:
+            try:
+                # Try to drop the actual table
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    results["duckdb_tables"]["cleaned"] += 1
+                    logger.info(f"[DEEP-CLEAN] Dropped orphan table: {table_name}")
+                except Exception as drop_e:
+                    logger.warning(f"[DEEP-CLEAN] Could not drop {table_name}: {drop_e}")
+                
+                # Clean metadata regardless
+                conn.execute(f"DELETE FROM _schema_metadata WHERE table_name = ?", [table_name])
+                
+                try:
+                    conn.execute(f"DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
+                except:
+                    pass
+                
+                results["duckdb_metadata"]["cleaned"] += 1
+                logger.info(f"[DEEP-CLEAN] Cleaned metadata for: {table_name} (file: {file_name})")
+                
+            except Exception as e:
+                results["duckdb_metadata"]["errors"].append(f"{table_name}: {str(e)}")
+        
+        # Clean file_metadata orphans
         try:
             table_check = conn.execute("""
                 SELECT COUNT(*) FROM information_schema.tables 
@@ -119,26 +192,6 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
             """).fetchone()
             
             if table_check[0] > 0:
-                # Get all file names that have actual tables
-                files_with_tables = set()
-                
-                try:
-                    schema_files = conn.execute("SELECT DISTINCT file_name FROM _schema_metadata").fetchall()
-                    for (f,) in schema_files:
-                        if f:
-                            files_with_tables.add(f.lower())
-                except:
-                    pass
-                
-                try:
-                    pdf_files = conn.execute("SELECT DISTINCT source_file FROM _pdf_tables").fetchall()
-                    for (f,) in pdf_files:
-                        if f:
-                            files_with_tables.add(f.lower())
-                except:
-                    pass
-                
-                # Delete file_metadata entries for files that don't exist
                 if project_id:
                     fm_result = conn.execute(
                         "SELECT filename FROM file_metadata WHERE LOWER(project) LIKE ?",
@@ -148,38 +201,37 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
                     fm_result = conn.execute("SELECT filename FROM file_metadata").fetchall()
                 
                 for (filename,) in fm_result:
-                    if filename and filename.lower() not in files_with_tables:
+                    if filename and filename.lower() not in valid_files:
                         conn.execute("DELETE FROM file_metadata WHERE filename = ?", [filename])
                         results["duckdb_metadata"]["cleaned"] += 1
-                        logger.info(f"[DEEP-CLEAN] Removed orphan file_metadata: {filename}")
+                        logger.info(f"[DEEP-CLEAN] Cleaned file_metadata: {filename}")
         except Exception as e:
             results["duckdb_metadata"]["errors"].append(f"file_metadata: {str(e)}")
         
-        # Clean column_profiles orphans
+        # Clean column_profiles orphans (based on tables that no longer exist)
         try:
             table_check = conn.execute("""
                 SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = 'column_profiles'
+                WHERE table_name = '_column_profiles'
             """).fetchone()
             
             if table_check[0] > 0:
-                if project_id:
-                    cp_result = conn.execute(
-                        "SELECT DISTINCT table_name FROM column_profiles WHERE LOWER(project) LIKE ?",
-                        [f"%{project_id.lower()}%"]
-                    ).fetchall()
-                else:
-                    cp_result = conn.execute("SELECT DISTINCT table_name FROM column_profiles").fetchall()
+                # Get actual tables
+                actual_tables = set(t[0] for t in conn.execute("SHOW TABLES").fetchall())
                 
-                for (table_name,) in cp_result:
+                profile_tables = conn.execute(
+                    "SELECT DISTINCT table_name FROM _column_profiles"
+                ).fetchall()
+                
+                for (table_name,) in profile_tables:
                     if table_name not in actual_tables:
-                        conn.execute("DELETE FROM column_profiles WHERE table_name = ?", [table_name])
+                        conn.execute("DELETE FROM _column_profiles WHERE table_name = ?", [table_name])
                         results["duckdb_metadata"]["cleaned"] += 1
-                        logger.info(f"[DEEP-CLEAN] Removed orphan column_profiles for: {table_name}")
+                        logger.info(f"[DEEP-CLEAN] Cleaned _column_profiles for: {table_name}")
         except Exception as e:
-            results["duckdb_metadata"]["errors"].append(f"column_profiles: {str(e)}")
+            results["duckdb_metadata"]["errors"].append(f"_column_profiles: {str(e)}")
         
-        # Checkpoint to persist
+        # Checkpoint
         try:
             conn.execute("CHECKPOINT")
         except:
@@ -187,10 +239,10 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
             
     except Exception as e:
         logger.error(f"[DEEP-CLEAN] DuckDB cleanup failed: {e}")
-        results["duckdb_metadata"]["errors"].append(str(e))
+        results["duckdb_tables"]["errors"].append(str(e))
     
     # =========================================================================
-    # 2. CLEAN CHROMADB ORPHANS
+    # STEP 3: CLEAN CHROMADB ORPHANS
     # =========================================================================
     try:
         from utils.rag_handler import RAGHandler
@@ -201,43 +253,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
         # Get all ChromaDB documents
         all_chroma = collection.get(include=["metadatas"], limit=10000)
         
-        # Build set of valid files (from DuckDB metadata)
-        valid_files = set()
-        try:
-            handler = get_structured_handler()
-            conn = handler.conn
-            
-            try:
-                schema_files = conn.execute("SELECT DISTINCT file_name FROM _schema_metadata").fetchall()
-                for (f,) in schema_files:
-                    if f:
-                        valid_files.add(f.lower())
-            except:
-                pass
-            
-            try:
-                pdf_files = conn.execute("SELECT DISTINCT source_file FROM _pdf_tables").fetchall()
-                for (f,) in pdf_files:
-                    if f:
-                        valid_files.add(f.lower())
-            except:
-                pass
-        except:
-            pass
-        
-        # Also check Supabase document registry
-        try:
-            from utils.database.supabase_client import get_supabase
-            supabase = get_supabase()
-            if supabase:
-                docs = supabase.table("documents").select("name").execute()
-                for doc in docs.data or []:
-                    if doc.get("name"):
-                        valid_files.add(doc["name"].lower())
-        except:
-            pass
-        
-        # Find and delete orphans
+        # Find orphans (chunks for files not in registry)
         ids_to_delete = []
         for i, metadata in enumerate(all_chroma.get("metadatas", [])):
             filename = metadata.get("source", metadata.get("filename", ""))
@@ -246,10 +262,11 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
             # Filter by project if specified
             if project_id:
                 if not (doc_project == project_id or 
-                        str(doc_project).lower().startswith(project_id[:8].lower())):
+                        str(doc_project).lower().startswith(project_id[:8].lower()) or
+                        project_id.lower() in str(doc_project).lower()):
                     continue
             
-            # Check if file is orphaned
+            # Check if file is orphaned (not in registry)
             if filename and filename.lower() not in valid_files:
                 ids_to_delete.append(all_chroma["ids"][i])
         
@@ -266,93 +283,9 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
         results["chromadb"]["errors"].append(str(e))
     
     # =========================================================================
-    # 3. CLEAN SUPABASE ORPHANS
+    # STEP 4: INVALIDATE PLAYBOOK CACHE
     # =========================================================================
     try:
-        from utils.database.supabase_client import get_supabase
-        supabase = get_supabase()
-        
-        if supabase:
-            # Get valid files from DuckDB
-            valid_files = set()
-            try:
-                handler = get_structured_handler()
-                conn = handler.conn
-                
-                try:
-                    schema_files = conn.execute("SELECT DISTINCT file_name FROM _schema_metadata").fetchall()
-                    for (f,) in schema_files:
-                        if f:
-                            valid_files.add(f.lower())
-                except:
-                    pass
-                
-                try:
-                    pdf_files = conn.execute("SELECT DISTINCT source_file FROM _pdf_tables").fetchall()
-                    for (f,) in pdf_files:
-                        if f:
-                            valid_files.add(f.lower())
-                except:
-                    pass
-            except:
-                pass
-            
-            # Clean documents table
-            try:
-                if project_id:
-                    docs = supabase.table("documents").select("id, name").eq("project_id", project_id).execute()
-                else:
-                    docs = supabase.table("documents").select("id, name").execute()
-                
-                for doc in docs.data or []:
-                    if doc.get("name") and doc["name"].lower() not in valid_files:
-                        supabase.table("documents").delete().eq("id", doc["id"]).execute()
-                        results["supabase"]["cleaned"] += 1
-                        logger.info(f"[DEEP-CLEAN] Removed Supabase document: {doc['name']}")
-            except Exception as e:
-                results["supabase"]["errors"].append(f"documents: {str(e)}")
-            
-            # Clean document_registry table
-            try:
-                if project_id:
-                    registry = supabase.table("document_registry").select("id, filename").eq("project_id", project_id).execute()
-                else:
-                    registry = supabase.table("document_registry").select("id, filename").execute()
-                
-                for doc in registry.data or []:
-                    if doc.get("filename") and doc["filename"].lower() not in valid_files:
-                        supabase.table("document_registry").delete().eq("id", doc["id"]).execute()
-                        results["supabase"]["cleaned"] += 1
-                        logger.info(f"[DEEP-CLEAN] Removed Supabase registry: {doc['filename']}")
-            except Exception as e:
-                results["supabase"]["errors"].append(f"document_registry: {str(e)}")
-            
-            # Clean project_relationships table (stale relationship analysis)
-            try:
-                if project_id:
-                    # Delete relationships for this specific project
-                    rel_result = supabase.table("project_relationships").delete().eq("project_name", project_id).execute()
-                    count = len(rel_result.data) if rel_result.data else 0
-                else:
-                    # Delete ALL relationships (full deep clean)
-                    rel_result = supabase.table("project_relationships").delete().neq("project_name", "").execute()
-                    count = len(rel_result.data) if rel_result.data else 0
-                
-                if count > 0:
-                    results["relationships"]["cleaned"] = count
-                    logger.info(f"[DEEP-CLEAN] Removed {count} stale relationships")
-            except Exception as e:
-                results["relationships"]["errors"].append(f"project_relationships: {str(e)}")
-                
-    except Exception as e:
-        logger.error(f"[DEEP-CLEAN] Supabase cleanup failed: {e}")
-        results["supabase"]["errors"].append(str(e))
-    
-    # =========================================================================
-    # 4. INVALIDATE PLAYBOOK CACHE
-    # =========================================================================
-    try:
-        # Clear in-memory playbook progress cache
         from routers.playbooks import PLAYBOOK_PROGRESS, PLAYBOOK_CACHE
         
         if project_id:
@@ -382,6 +315,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
         "success": True,
         "total_cleaned": total_cleaned,
         "total_errors": total_errors,
+        "registry_file_count": len(valid_files),
         "details": results,
         "project_filter": project_id
     }
@@ -391,53 +325,68 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
     """Preview what would be cleaned without actually deleting."""
     
     preview = {
-        "duckdb_metadata_orphans": 0,
-        "chromadb_orphans": 0,
-        "supabase_orphans": 0,
-        "relationships": 0,
+        "registry_file_count": 0,
+        "duckdb_orphan_tables": 0,
+        "duckdb_orphan_metadata": 0,
+        "chromadb_orphan_chunks": 0,
+        "orphan_files": []
     }
     
+    # Get valid files from registry
+    valid_files = _get_registry_files(project_id)
+    preview["registry_file_count"] = len(valid_files)
+    
+    if not valid_files:
+        preview["warning"] = "Registry returned no files - cannot determine orphans"
+        return preview
+    
+    orphan_file_set = set()
+    
+    # Check DuckDB
     try:
         from utils.structured_data_handler import get_structured_handler
         handler = get_structured_handler()
         conn = handler.conn
         
-        tables = conn.execute("SHOW TABLES").fetchall()
-        actual_tables = set(t[0] for t in tables)
-        
-        # Count _schema_metadata orphans
+        # Check _schema_metadata
         try:
-            meta_result = conn.execute("SELECT table_name FROM _schema_metadata").fetchall()
-            for (table_name,) in meta_result:
-                if table_name not in actual_tables:
-                    preview["duckdb_metadata_orphans"] += 1
+            meta_result = conn.execute("SELECT table_name, file_name FROM _schema_metadata").fetchall()
+            for table_name, file_name in meta_result:
+                if file_name and file_name.lower() not in valid_files:
+                    preview["duckdb_orphan_tables"] += 1
+                    orphan_file_set.add(file_name)
         except:
             pass
         
-        # Count _pdf_tables orphans
+        # Check _pdf_tables
         try:
-            pdf_result = conn.execute("SELECT table_name FROM _pdf_tables").fetchall()
-            for (table_name,) in pdf_result:
-                if table_name not in actual_tables:
-                    preview["duckdb_metadata_orphans"] += 1
+            pdf_result = conn.execute("SELECT table_name, source_file FROM _pdf_tables").fetchall()
+            for table_name, source_file in pdf_result:
+                if source_file and source_file.lower() not in valid_files:
+                    preview["duckdb_orphan_tables"] += 1
+                    orphan_file_set.add(source_file)
         except:
             pass
             
     except:
         pass
     
-    # Count relationships
+    # Check ChromaDB
     try:
-        from utils.database.supabase_client import get_supabase
-        supabase = get_supabase()
-        if supabase:
-            if project_id:
-                rel_result = supabase.table("project_relationships").select("id").eq("project_name", project_id).execute()
-            else:
-                rel_result = supabase.table("project_relationships").select("id").execute()
-            preview["relationships"] = len(rel_result.data) if rel_result.data else 0
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        all_chroma = collection.get(include=["metadatas"], limit=10000)
+        
+        for metadata in all_chroma.get("metadatas", []):
+            filename = metadata.get("source", metadata.get("filename", ""))
+            if filename and filename.lower() not in valid_files:
+                preview["chromadb_orphan_chunks"] += 1
+                orphan_file_set.add(filename)
     except:
         pass
+    
+    preview["orphan_files"] = list(orphan_file_set)[:20]  # First 20
     
     return preview
 
