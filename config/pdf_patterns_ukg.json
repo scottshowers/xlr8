@@ -1,0 +1,73 @@
+{
+  "_comment": "UKG Payroll PDF parsing patterns - Deploy to /app/config/pdf_patterns.json",
+  "_version": "1.0.0",
+  
+  "skip_patterns": [
+    "Page ", "Select: All", "Last Page", "First Page", "Next Page",
+    "Code Tax Category", "Description Rule", "Calculation Rate",
+    "Report:", "Printed:", "User:", "Company:", "Run Date:",
+    "Total:", "Subtotal:", "Grand Total:", "---"
+  ],
+  
+  "code_patterns": [
+    {
+      "name": "numeric_5digit",
+      "description": "5-digit earnings codes like 20001, 20167",
+      "regex": "^(\\d{5})\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "numeric_4digit",
+      "description": "4-digit codes like 1001, 2345",
+      "regex": "^(\\d{4})\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "alpha_short",
+      "description": "Short alpha codes like REG, OT, VAC",
+      "regex": "^([A-Z]{2,4})\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "alpha_long",
+      "description": "Longer alpha codes like REGPY, OTPAY",
+      "regex": "^([A-Z]{3,8})\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "spaced_code",
+      "description": "Spaced codes like 'SPT WAGEP' or 'SPOT BONUS'",
+      "regex": "^([A-Z]{2,5}\\s+[A-Z]{2,8})\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "percentage_code",
+      "description": "Percentage codes like '5% VAC', '6% HOL'",
+      "regex": "^(\\d+\\.?\\d*%\\s*[A-Z]{2,5}(?:\\s+[A-Z]{2,5})?)\\s+([A-Z]{3,6}(?:PY|PM|TX)?)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "ukg_tax_category",
+      "description": "Fallback: any code followed by UKG tax categories",
+      "regex": "^([A-Z0-9][A-Z0-9\\s\\-%]{1,20}?)\\s+(REGPY|SICPY|OTPAY|STTAX|FEDTX|FICA|NONTX|NOPAY)\\s+(.*)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    }
+  ],
+  
+  "calculation_rules": [
+    "Pay rate * hours * rate factor",
+    "Pay rate * hours",
+    "Flat amount",
+    "Expression",
+    "Hours * flat amount",
+    "Coefficient OT",
+    "Percentage",
+    "Per pay period",
+    "Annual"
+  ],
+  
+  "flags": {
+    "reg_pay_markers": ["ü", "✓", "√", "Y", "Yes"],
+    "accumulator_markers": [" Z ", " Z$", "\tZ\t", "\tZ$"]
+  }
+}
