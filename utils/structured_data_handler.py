@@ -65,6 +65,7 @@ Author: XLR8 Team
 
 import os
 import re
+import sys
 import json
 import logging
 import threading
@@ -4337,20 +4338,49 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             self.conn.close()
 
 
-# Singleton instance
-_handler: Optional[StructuredDataHandler] = None
+# =============================================================================
+# PROCESS-LEVEL SINGLETON
+# =============================================================================
+# 
+# Python treats different import paths as different modules:
+#   - "utils.structured_data_handler" 
+#   - "backend.utils.structured_data_handler"
+# 
+# Each would get its own _handler variable and thus its own DuckDB connection.
+# Commits on one connection aren't visible to the other.
+#
+# Solution: Store the singleton in sys.modules under a canonical key.
+# This guarantees ONE instance per process regardless of import path.
+# =============================================================================
+
+_SINGLETON_KEY = '_xlr8_structured_data_handler_instance'
 
 def get_structured_handler() -> StructuredDataHandler:
-    """Get or create singleton handler"""
-    global _handler
-    if _handler is None:
-        _handler = StructuredDataHandler()
-    return _handler
+    """
+    Get or create the singleton handler.
+    
+    Uses sys.modules to ensure ONE instance per process, regardless of
+    whether this module is imported as 'utils.structured_data_handler'
+    or 'backend.utils.structured_data_handler'.
+    """
+    if _SINGLETON_KEY not in sys.modules:
+        sys.modules[_SINGLETON_KEY] = StructuredDataHandler()
+        logging.getLogger(__name__).info(
+            f"[HANDLER] Created new singleton instance (id={id(sys.modules[_SINGLETON_KEY])})"
+        )
+    return sys.modules[_SINGLETON_KEY]
 
 
 def reset_structured_handler():
-    """Reset the singleton handler (forces reconnection)"""
-    global _handler
-    if _handler:
-        _handler.close()
-    _handler = None
+    """
+    Reset the singleton handler (forces reconnection).
+    
+    Use this if you need to force a fresh connection, e.g., after
+    database file corruption or for testing.
+    """
+    if _SINGLETON_KEY in sys.modules:
+        handler = sys.modules[_SINGLETON_KEY]
+        if hasattr(handler, 'close'):
+            handler.close()
+        del sys.modules[_SINGLETON_KEY]
+        logging.getLogger(__name__).info("[HANDLER] Singleton instance reset")
