@@ -539,6 +539,53 @@ JSON RESPONSE:"""
         return {"is_tabular": False, "error": str(e)}
 
 
+def repair_json(text: str) -> str:
+    """
+    Attempt to repair common JSON errors from LLM output.
+    """
+    if not text:
+        return text
+    
+    # Remove markdown code blocks
+    text = re.sub(r'```json\s*', '', text)
+    text = re.sub(r'```\s*', '', text)
+    
+    # Remove leading/trailing whitespace
+    text = text.strip()
+    
+    # Fix trailing commas before ] or }
+    text = re.sub(r',\s*]', ']', text)
+    text = re.sub(r',\s*}', '}', text)
+    
+    # Fix missing quotes around keys (common LLM error)
+    # Match unquoted keys like {Code: "value"} -> {"Code": "value"}
+    text = re.sub(r'{\s*([a-zA-Z_][a-zA-Z0-9_\s]*)\s*:', r'{"\1":', text)
+    text = re.sub(r',\s*([a-zA-Z_][a-zA-Z0-9_\s]*)\s*:', r',"\1":', text)
+    
+    # Fix single quotes to double quotes
+    # Be careful - only fix quotes that look like JSON strings
+    # Look for patterns like 'value' that should be "value"
+    text = re.sub(r"'([^']*)'(\s*[,}\]])", r'"\1"\2', text)
+    
+    # Fix unescaped quotes inside strings (basic attempt)
+    # This is tricky - skip for now
+    
+    # Ensure array brackets
+    if not text.startswith('['):
+        # Try to find the array
+        array_start = text.find('[')
+        if array_start != -1:
+            text = text[array_start:]
+    
+    if not text.endswith(']'):
+        # Try to find the closing bracket
+        array_end = text.rfind(']')
+        if array_end != -1:
+            text = text[:array_end + 1]
+    
+    return text
+
+
 def parse_tabular_pdf_with_llm(text: str, columns: List[str], file_path: str = None) -> List[Dict[str, str]]:
     """
     Ask LLM to parse tabular PDF text into structured rows.
@@ -571,45 +618,72 @@ def parse_tabular_pdf_with_llm(text: str, columns: List[str], file_path: str = N
         chunks = [redacted_text[:max_chunk]]
     
     all_rows = []
-    col_json = json.dumps(columns)
+    col_json = json.dumps(columns[:8])  # Limit columns to reduce confusion
+    example_obj = ", ".join([f'"{col}": "value"' for col in columns[:4]])
     
     for chunk_num, chunk in enumerate(chunks):
         logger.warning(f"[LLM] Parsing chunk {chunk_num+1}/{len(chunks)} ({len(chunk)} chars)")
         
-        prompt = f"""Parse this tabular data into JSON rows.
+        # Improved prompt with stricter JSON requirements
+        prompt = f"""You are a precise JSON parser. Extract data rows from this text.
 
-EXPECTED COLUMNS: {col_json}
+COLUMNS TO EXTRACT: {col_json}
 
-DATA TO PARSE:
+TEXT DATA:
 {chunk}
 
-TASK: 
-1. Extract each data row as a JSON object
-2. Use the column names provided as keys
-3. Skip headers, page numbers, totals, and non-data lines
-4. Include ALL data rows you can find
+CRITICAL RULES:
+1. Return ONLY a valid JSON array - no text before or after
+2. Each row is an object with the column names as keys
+3. Use double quotes for all strings
+4. Skip headers, page numbers, footers, totals
+5. Include empty string "" for missing values
+6. Do NOT include trailing commas
 
-Return ONLY a valid JSON array of objects. Example:
+OUTPUT FORMAT - return exactly like this:
 [
-  {{{", ".join([f'"{col}": "value"' for col in columns[:3]])}}},
-  {{{", ".join([f'"{col}": "value"' for col in columns[:3]])}}}
+  {{{example_obj}}},
+  {{{example_obj}}}
 ]
 
-JSON ARRAY:"""
+JSON OUTPUT:"""
 
         response = call_llm(prompt, max_tokens=8000)
         
         if response:
+            # Apply JSON repair
+            repaired = repair_json(response)
+            
             try:
                 # Find JSON array in response
-                array_match = re.search(r'\[[\s\S]*\]', response)
+                array_match = re.search(r'\[[\s\S]*\]', repaired)
                 if array_match:
-                    rows = json.loads(array_match.group())
+                    json_str = array_match.group()
+                    rows = json.loads(json_str)
                     if isinstance(rows, list):
                         all_rows.extend(rows)
                         logger.warning(f"[LLM] Chunk {chunk_num+1}: parsed {len(rows)} rows")
+                    else:
+                        logger.warning(f"[LLM] Chunk {chunk_num+1}: result not a list")
+                else:
+                    logger.warning(f"[LLM] Chunk {chunk_num+1}: no JSON array found")
             except json.JSONDecodeError as e:
-                logger.warning(f"[LLM] Parse error on chunk {chunk_num+1}: {e}")
+                logger.warning(f"[LLM] Chunk {chunk_num+1} parse error: {e}")
+                logger.warning(f"[LLM] First 200 chars of repaired: {repaired[:200]}")
+                
+                # Try parsing row by row as last resort
+                row_matches = re.findall(r'\{[^{}]+\}', repaired)
+                rescued_rows = []
+                for rm in row_matches:
+                    try:
+                        obj = json.loads(rm)
+                        if isinstance(obj, dict):
+                            rescued_rows.append(obj)
+                    except:
+                        pass
+                if rescued_rows:
+                    all_rows.extend(rescued_rows)
+                    logger.warning(f"[LLM] Chunk {chunk_num+1}: rescued {len(rescued_rows)} individual rows")
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
     
@@ -773,34 +847,78 @@ def load_pdf_parsing_patterns() -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"[TEXT-PARSE] Failed to load {path}: {e}")
     
-    # Default patterns
+    # Default patterns - optimized for UKG payroll PDFs
     return {
         'skip_patterns': [
-            'Page ', 'Select: All', 'Last Page',
-            'Code Tax Category', 'Description Rule'
+            'Page ', 'Select: All', 'Last Page', 'First Page', 'Next Page',
+            'Code Tax Category', 'Description Rule', 'Calculation Rate',
+            'Report:', 'Printed:', 'User:', 'Company:', 'Run Date:',
+            'Total:', 'Subtotal:', 'Grand Total:', '---'
         ],
         'code_patterns': [
             {
-                'name': 'numeric_code',
-                'regex': r'^(\d{5})\s+([A-Z]{3,6})\s+(.+)$',
+                # 5-digit numeric codes: 20001, 20167, etc.
+                'name': 'numeric_5digit',
+                'regex': r'^(\d{5})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
                 'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
             },
             {
-                'name': 'alpha_code', 
-                'regex': r'^([A-Z][A-Z0-9]{1,5})\s+([A-Z]{3,6})\s+(.+)$',
+                # 4-digit numeric codes: 1001, 2345
+                'name': 'numeric_4digit',
+                'regex': r'^(\d{4})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Short alpha codes: REG, OT, VAC, SICK, PTO
+                'name': 'alpha_short', 
+                'regex': r'^([A-Z]{2,4})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Longer alpha codes: REGPY, OTPAY, VACTN
+                'name': 'alpha_long',
+                'regex': r'^([A-Z]{3,8})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Alpha-numeric codes: REG1, OT15, VAC2
+                'name': 'alpha_numeric',
+                'regex': r'^([A-Z]{2,5}\d{1,3})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Spaced codes with description: "SPT WAGEP" or "SPOT BONUS"
+                'name': 'spaced_code',
+                'regex': r'^([A-Z]{2,5}\s+[A-Z]{2,8})\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Percentage codes: 5% VAC, 6% HOL
+                'name': 'percentage_code',
+                'regex': r'^(\d+\.?\d*%\s*[A-Z]{2,5}(?:\s+[A-Z]{2,5})?)\s+([A-Z]{3,6}(?:PY|PM|TX)?)\s+(.*)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                # Fallback: Any code followed by common tax categories
+                'name': 'generic',
+                'regex': r'^([A-Z0-9][A-Z0-9\s\-%]{1,20}?)\s+(REGPY|SICPY|OTPAY|STTAX|FEDTX|FICA|NONTX|NOPAY)\s+(.*)$',
                 'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
             }
         ],
         'calculation_rules': [
             'Pay rate * hours * rate factor',
+            'Pay rate * hours',
             'Flat amount',
             'Expression',
             'Hours * flat amount',
-            'Coefficient OT'
+            'Coefficient OT',
+            'Percentage',
+            'Per pay period',
+            'Annual'
         ],
         'flags': {
-            'reg_pay_markers': ['ü', '✓'],
-            'accumulator_markers': [' Z ', ' Z$']
+            'reg_pay_markers': ['ü', '✓', '√', 'Y', 'Yes'],
+            'accumulator_markers': [' Z ', ' Z$', '\tZ\t', '\tZ$']
         }
     }
 
