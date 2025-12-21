@@ -55,7 +55,7 @@ def _get_registry_files(project_id: Optional[str] = None) -> Set[str]:
 
 
 @router.post("/deep-clean")
-async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
+async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, force: bool = False):
     """
     Deep clean all orphaned data across all storage systems.
     
@@ -73,6 +73,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
     Args:
         project_id: Optional - clean only this project. If None, cleans everything.
         confirm: Must be True to actually delete (safety check)
+        force: If True, proceed even if Registry is empty (for intentional full wipe)
     
     Returns:
         Summary of what was cleaned
@@ -96,13 +97,17 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False):
     # =========================================================================
     valid_files = _get_registry_files(project_id)
     
-    if not valid_files:
+    if not valid_files and not force:
         logger.warning("[DEEP-CLEAN] Registry returned no files - skipping cleanup to prevent data loss")
         return {
             "success": False,
-            "error": "Registry returned no files. This could indicate a connection issue. Aborting to prevent data loss.",
+            "error": "Registry returned no files. This could indicate a connection issue. Aborting to prevent data loss. Use force=true to proceed anyway (will delete ALL backend data).",
             "details": results
         }
+    
+    if not valid_files and force:
+        logger.warning("[DEEP-CLEAN] Registry empty but force=true - proceeding with full wipe")
+        valid_files = set()  # Empty set means everything is an orphan
     
     # =========================================================================
     # STEP 2: CLEAN DUCKDB ORPHANS
