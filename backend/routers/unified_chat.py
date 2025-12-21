@@ -1232,19 +1232,58 @@ def cleanup_old_sessions(max_sessions: int = 100) -> None:
 
 
 # =============================================================================
-# SCHEMA RETRIEVAL
+# SCHEMA RETRIEVAL - Registry-Filtered (v3.0)
 # =============================================================================
+
+def _get_valid_files_from_registry(project: str) -> set:
+    """
+    Get valid filenames from DocumentRegistry for this project.
+    Returns lowercase filenames for case-insensitive matching.
+    Returns None if registry unavailable (allows fallback to unfiltered).
+    
+    REGISTRY IS SOURCE OF TRUTH - if a file isn't registered, 
+    its data should not be visible to chat.
+    """
+    try:
+        from utils.database.models import DocumentRegistryModel, ProjectModel
+        
+        # Get project_id from project name
+        project_id = None
+        if project:
+            proj_record = ProjectModel.get_by_name(project)
+            if proj_record:
+                project_id = proj_record.get('id')
+        
+        # Get registered files for this project
+        if project_id:
+            entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+        else:
+            entries = DocumentRegistryModel.get_all()
+        
+        valid_files = set()
+        for entry in entries:
+            filename = entry.get('filename', '')
+            if filename:
+                valid_files.add(filename.lower())
+        
+        logger.info(f"[SCHEMA] Registry has {len(valid_files)} valid files for project '{project}'")
+        return valid_files
+        
+    except Exception as e:
+        logger.warning(f"[SCHEMA] Registry lookup failed: {e} - proceeding without filter")
+        return None  # Return None to indicate fallback (not empty set)
+
 
 async def get_project_schema(project: str, scope: str, handler) -> Dict:
     """
     Get comprehensive schema for project including column profiles.
     
-    v2.0 FIX (2025-12-17): Now uses handler.get_tables() which queries 
-    _schema_metadata with exact project match, instead of unreliable 
-    prefix guessing from SHOW TABLES.
+    v3.0 FIX (2025-12-21): Now filters through DocumentRegistry first.
+    Registry is the SOURCE OF TRUTH - if a file isn't in registry,
+    its tables should not be returned to chat.
     
-    This is the foundation for intelligent clarification - we need to know
-    what's in the data before we can ask smart questions.
+    v2.0 FIX (2025-12-17): Uses handler.get_tables() which queries 
+    _schema_metadata with exact project match.
     """
     tables = []
     filter_candidates = {}
@@ -1255,47 +1294,48 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
     
     try:
         # ================================================================
-        # FIX: Use get_tables() which queries _schema_metadata correctly
-        # This ensures we find tables by EXACT project match, not prefix
+        # STEP 1: Get valid files from Registry (SOURCE OF TRUTH)
+        # ================================================================
+        valid_files = _get_valid_files_from_registry(project)
+        registry_available = valid_files is not None
+        
+        if registry_available and not valid_files:
+            # Registry is available but has no files for this project
+            logger.warning(f"[SCHEMA] No files in registry for project '{project}'")
+            return {'tables': [], 'filter_candidates': {}}
+        
+        # ================================================================
+        # STEP 2: Get tables from metadata
         # ================================================================
         metadata_tables = handler.get_tables(project)
         
         logger.warning(f"[SCHEMA] get_tables('{project}') returned {len(metadata_tables)} tables")
         
         # If no tables found via metadata, try fallback to SHOW TABLES
-        # This handles edge cases where metadata might be missing
         if not metadata_tables:
             logger.warning(f"[SCHEMA] No tables in _schema_metadata for '{project}', trying SHOW TABLES fallback")
             
-            # Fallback: Get all tables from DuckDB directly
             all_tables = handler.conn.execute("SHOW TABLES").fetchall()
             logger.warning(f"[SCHEMA] DuckDB SHOW TABLES returned {len(all_tables)} total tables")
             
-            # Build project prefix for filtering (fallback only)
+            # Build project prefix for filtering
             project_clean = (project or '').strip()
-            # Sanitize the same way as _generate_table_name does
             sanitized_project = re.sub(r'[^\w\s]', '', project_clean)
             sanitized_project = re.sub(r'\s+', '_', sanitized_project.strip()).lower()
             
             project_prefixes = [
-                sanitized_project,  # Primary: sanitized version
+                sanitized_project,
                 project_clean.lower(),
                 project_clean.lower().replace(' ', '_'),
                 project_clean.lower().replace(' ', '_').replace('-', '_'),
             ]
-            # Remove empty and duplicate prefixes
             project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
             
-            logger.warning(f"[SCHEMA] Fallback prefixes: {project_prefixes}")
-            
             matched_tables = []
-            all_valid_tables = []
             
             for (table_name,) in all_tables:
                 if table_name.startswith('_'):
                     continue
-                
-                all_valid_tables.append(table_name)
                 
                 table_lower = table_name.lower()
                 matches_project = any(
@@ -1305,18 +1345,40 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                 
                 if matches_project:
                     matched_tables.append(table_name)
-                    logger.info(f"[SCHEMA] Matched table: {table_name}")
             
-            if matched_tables:
-                logger.warning(f"[SCHEMA] Fallback found {len(matched_tables)} matching tables")
-            else:
-                logger.warning(f"[SCHEMA] No tables match project '{project}', using all {len(all_valid_tables)} tables")
+            tables_to_process = matched_tables if matched_tables else [t[0] for t in all_tables if not t[0].startswith('_')]
             
-            tables_to_process = matched_tables if matched_tables else all_valid_tables
-            
-            # Build table info from fallback
             for table_name in tables_to_process:
                 try:
+                    # ================================================
+                    # REGISTRY FILTER: Skip tables for unregistered files
+                    # ================================================
+                    if registry_available and valid_files:
+                        source_file = None
+                        try:
+                            file_result = handler.conn.execute("""
+                                SELECT file_name FROM _schema_metadata WHERE table_name = ? LIMIT 1
+                            """, [table_name]).fetchone()
+                            if file_result:
+                                source_file = file_result[0]
+                        except:
+                            pass
+                        
+                        if not source_file:
+                            try:
+                                file_result = handler.conn.execute("""
+                                    SELECT source_file FROM _pdf_tables WHERE table_name = ? LIMIT 1
+                                """, [table_name]).fetchone()
+                                if file_result:
+                                    source_file = file_result[0]
+                            except:
+                                pass
+                        
+                        if source_file and source_file.lower() not in valid_files:
+                            logger.debug(f"[SCHEMA] Skipping {table_name} - file '{source_file}' not in registry")
+                            continue
+                    # ================================================
+                    
                     # Get columns
                     columns = []
                     try:
@@ -1360,6 +1422,16 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                 table_name = table_info.get('table_name', '')
                 if not table_name:
                     continue
+                
+                # ================================================
+                # REGISTRY FILTER: Skip tables for unregistered files
+                # ================================================
+                if registry_available and valid_files:
+                    source_file = table_info.get('file_name', table_info.get('source_file', ''))
+                    if source_file and source_file.lower() not in valid_files:
+                        logger.debug(f"[SCHEMA] Skipping {table_name} - file '{source_file}' not in registry")
+                        continue
+                # ================================================
                 
                 # Get columns - use metadata columns or query
                 columns = table_info.get('columns', [])
@@ -1445,7 +1517,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         except:
             pass
         
-        logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}'")
+        logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}' (registry_filtered={registry_available})")
         
     except Exception as e:
         logger.error(f"[SCHEMA] Failed: {e}")
