@@ -1045,6 +1045,10 @@ def process_file_background(
                     # Register in document registry with classification
                     try:
                         duckdb_result = pdf_result.get('duckdb_result', {})
+                        logger.warning(f"[BACKGROUND] duckdb_result keys: {duckdb_result.keys() if duckdb_result else 'None'}")
+                        logger.warning(f"[BACKGROUND] tables_created: {duckdb_result.get('tables_created', [])}")
+                        logger.warning(f"[BACKGROUND] total_rows: {duckdb_result.get('total_rows', 0)}")
+                        
                         analysis = pdf_result.get('analysis', {})
                         timing['parse_end'] = time.time()
                         timing['storage_end'] = time.time()
@@ -1079,9 +1083,11 @@ def process_file_background(
                                 'intelligence': pdf_result.get('intelligence')
                             }
                         )
-                        logger.info(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB")
+                        logger.warning(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB")
                     except Exception as e:
                         logger.warning(f"[BACKGROUND] Could not register PDF: {e}")
+                        import traceback
+                        logger.warning(traceback.format_exc())
                 
                 # Get text content for ChromaDB (either from analysis or re-extract)
                 chromadb_result = pdf_result.get('chromadb_result', {})
