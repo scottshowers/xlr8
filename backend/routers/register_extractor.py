@@ -79,63 +79,79 @@ except ImportError:
         REGISTRY_AVAILABLE = False
         logger.warning("[REGISTER] DocumentRegistryModel not available - no registry tracking")
 
+# Shared PDF utilities (PIIRedactor, JSON parsing)
+# Falls back to local implementation if not available
+try:
+    from utils.pdf_utils import PIIRedactor
+    PDF_UTILS_AVAILABLE = True
+    logger.info("[REGISTER] Using shared PIIRedactor from pdf_utils")
+except ImportError:
+    try:
+        from backend.utils.pdf_utils import PIIRedactor
+        PDF_UTILS_AVAILABLE = True
+        logger.info("[REGISTER] Using shared PIIRedactor from pdf_utils (backend path)")
+    except ImportError:
+        PDF_UTILS_AVAILABLE = False
+        logger.info("[REGISTER] pdf_utils not available, using local PIIRedactor")
+
 
 # =============================================================================
-# PII REDACTION
+# PII REDACTION (local fallback if pdf_utils not available)
 # =============================================================================
 
-class PIIRedactor:
-    """Redact PII before sending to any LLM."""
-    
-    PATTERNS = {
-        'ssn': [
-            r'\b\d{3}-\d{2}-\d{4}\b',
-            r'\b\d{3}\s\d{2}\s\d{4}\b',
-            r'\b\d{9}\b(?=.*(?:ssn|social))',
-        ],
-        'bank_account': [
-            r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))',
-            r'\b\d{9}\b(?=.*(?:routing|aba))',
-        ],
-        'credit_card': [
-            r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',
-        ],
-    }
-    
-    PLACEHOLDERS = {
-        'ssn': '[SSN-REDACTED]',
-        'bank_account': '[ACCOUNT-REDACTED]',
-        'credit_card': '[CC-REDACTED]',
-    }
-    
-    def __init__(self):
-        self.redaction_count = 0
-        self.redaction_log = []
-    
-    def redact(self, text: str) -> str:
-        """Redact all PII patterns from text."""
-        self.redaction_count = 0
-        self.redaction_log = []
+if not PDF_UTILS_AVAILABLE:
+    class PIIRedactor:
+        """Redact PII before sending to any LLM."""
         
-        redacted = text
-        
-        for pii_type, patterns in self.PATTERNS.items():
-            placeholder = self.PLACEHOLDERS.get(pii_type, '[REDACTED]')
-            
-            for pattern in patterns:
-                matches = re.findall(pattern, redacted, re.IGNORECASE)
-                if matches:
-                    self.redaction_count += len(matches)
-                    self.redaction_log.append(f"{pii_type}: {len(matches)} redacted")
-                    redacted = re.sub(pattern, placeholder, redacted, flags=re.IGNORECASE)
-        
-        return redacted
-    
-    def get_stats(self) -> Dict:
-        return {
-            'total_redacted': self.redaction_count,
-            'details': self.redaction_log
+        PATTERNS = {
+            'ssn': [
+                r'\b\d{3}-\d{2}-\d{4}\b',
+                r'\b\d{3}\s\d{2}\s\d{4}\b',
+                r'\b\d{9}\b(?=.*(?:ssn|social))',
+            ],
+            'bank_account': [
+                r'\b\d{8,17}\b(?=.*(?:account|acct|routing|aba))',
+                r'\b\d{9}\b(?=.*(?:routing|aba))',
+            ],
+            'credit_card': [
+                r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b',
+            ],
         }
+        
+        PLACEHOLDERS = {
+            'ssn': '[SSN-REDACTED]',
+            'bank_account': '[ACCOUNT-REDACTED]',
+            'credit_card': '[CC-REDACTED]',
+        }
+        
+        def __init__(self):
+            self.redaction_count = 0
+            self.redaction_log = []
+        
+        def redact(self, text: str) -> str:
+            """Redact all PII patterns from text."""
+            self.redaction_count = 0
+            self.redaction_log = []
+            
+            redacted = text
+            
+            for pii_type, patterns in self.PATTERNS.items():
+                placeholder = self.PLACEHOLDERS.get(pii_type, '[REDACTED]')
+                
+                for pattern in patterns:
+                    matches = re.findall(pattern, redacted, re.IGNORECASE)
+                    if matches:
+                        self.redaction_count += len(matches)
+                        self.redaction_log.append(f"{pii_type}: {len(matches)} redacted")
+                        redacted = re.sub(pattern, placeholder, redacted, flags=re.IGNORECASE)
+            
+            return redacted
+        
+        def get_stats(self) -> Dict:
+            return {
+                'total_redacted': self.redaction_count,
+                'details': self.redaction_log
+            }
 
 
 # =============================================================================
