@@ -38,16 +38,43 @@ except ImportError:
 # =============================================================================
 
 PII_PATTERNS = {
+    # === IDENTITY ===
     'ssn': (r'\b\d{3}-\d{2}-\d{4}\b', '[SSN-REDACTED]'),
     'ssn_no_dash': (r'\b(?<!\d)\d{9}(?!\d)\b', '[SSN-REDACTED]'),  # 9 digits not part of larger number
-    # NOTE: EIN/FEIN removed - these are public business identifiers, not personal PII
-    # 'ein': (r'\b\d{2}-\d{7}\b', '[EIN-REDACTED]'),
+    
+    # === CONTACT ===
     'phone': (r'\b\d{3}[-.\s]?\d{3}[-.\s]?\d{4}\b', '[PHONE-REDACTED]'),
     'email': (r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', '[EMAIL-REDACTED]'),
+    
+    # === FINANCIAL ===
     'credit_card': (r'\b\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}\b', '[CC-REDACTED]'),
+    'bank_account': (r'\b\d{8,17}\b', '[ACCT-REDACTED]'),  # Bank accounts typically 8-17 digits
+    'routing': (r'\b\d{9}\b', '[ROUTING-REDACTED]'),  # ABA routing numbers are 9 digits
+    'salary_amount': (r'\$\s*\d{1,3}(?:,\d{3})*(?:\.\d{2})?\b', '[AMOUNT-REDACTED]'),  # $50,000.00
+    'salary_plain': (r'\b\d{2,3},\d{3}(?:\.\d{2})?\b', '[AMOUNT-REDACTED]'),  # 50,000.00 without $
+    
+    # === DATES ===
     'dob_slash': (r'\b\d{1,2}/\d{1,2}/\d{2,4}\b', '[DATE-REDACTED]'),  # MM/DD/YYYY or MM/DD/YY
     'dob_dash': (r'\b\d{1,2}-\d{1,2}-\d{2,4}\b', '[DATE-REDACTED]'),  # MM-DD-YYYY
+    'iso_date': (r'\b\d{4}-\d{2}-\d{2}\b', '[DATE-REDACTED]'),  # YYYY-MM-DD
+    
+    # === ADDRESSES ===
+    'street_address': (r'\b\d{1,5}\s+(?:[A-Za-z]+\s+){1,3}(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln|Way|Court|Ct|Circle|Cir|Place|Pl)\.?\b', '[ADDRESS-REDACTED]'),
+    'zip_code': (r'\b\d{5}(?:-\d{4})?\b', '[ZIP-REDACTED]'),
+    'po_box': (r'\b[Pp]\.?[Oo]\.?\s*[Bb]ox\s+\d+\b', '[POBOX-REDACTED]'),
+    
+    # === EMPLOYEE IDENTIFIERS ===
+    'employee_id': (r'\b[Ee]mp(?:loyee)?[-\s]?(?:[Ii][Dd]|[Nn]o|[Nn]um(?:ber)?)?[-:\s]*\d{3,10}\b', '[EMPID-REDACTED]'),
+    'badge_id': (r'\b[Bb]adge[-\s]?(?:[Ii][Dd]|[Nn]o)?[-:\s]*\d{3,10}\b', '[BADGEID-REDACTED]'),
+    
+    # === NAMES (context-based - looks for labeled names) ===
+    # These catch "Name: John Smith" or "Employee Name: Jane Doe" patterns
+    'labeled_name': (r'(?:[Nn]ame|[Ee]mployee|[Aa]ssociate)[-:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+){1,2})', '[NAME-REDACTED]'),
+    'name_first_last': (r'\b([A-Z][a-z]+)\s+([A-Z][a-z]+)\s+(?=\d{3}-\d{2}-\d{4})', '[NAME-REDACTED]'),  # Name before SSN
 }
+
+# NOTE: EIN/FEIN removed - these are public business identifiers, not personal PII
+# 'ein': (r'\b\d{2}-\d{7}\b', '[EIN-REDACTED]'),
 
 def redact_pii(text: str) -> str:
     """Redact PII from text before sending to LLM."""
@@ -118,48 +145,17 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
             return llm_response
             
         except Exception as e:
-            logger.warning(f"[LLM] Ollama request failed: {e}, trying Groq fallback")
+            logger.warning(f"[LLM] Ollama request failed: {e}, falling back to rule-based detection")
     
-    # Fallback to Groq
-    groq_key = os.getenv('GROQ_API_KEY', '')
-    if groq_key:
-        logger.warning("[LLM] Using Groq fallback")
-        import time
-        start_time = time.time()
-        
-        try:
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": "llama-3.3-70b-versatile",  # Updated model name
-                    "messages": [{"role": "user", "content": prompt}],
-                    "max_tokens": max_tokens,
-                    "temperature": 0.1
-                },
-                timeout=120
-            )
-            response.raise_for_status()
-            result = response.json()
-            llm_response = result.get('choices', [{}])[0].get('message', {}).get('content', '')
-            
-            duration_ms = int((time.time() - start_time) * 1000)
-            try:
-                from backend.utils.cost_tracker import log_cost, CostService
-                log_cost(CostService.GROQ, operation, duration_ms=duration_ms, project_id=project_id)
-            except:
-                pass
-            
-            return llm_response
-            
-        except Exception as e:
-            logger.error(f"[LLM] Groq fallback also failed: {e}")
-            return None
+    # Groq fallback DISABLED for PII protection
+    # External LLM services should not receive customer data
+    # When Ollama is unavailable, we rely on rule-based detection
+    # 
+    # groq_key = os.getenv('GROQ_API_KEY', '')
+    # if groq_key:
+    #     ... Groq code removed for security ...
     
-    logger.error("[LLM] No LLM available (Ollama failed, no GROQ_API_KEY)")
+    logger.warning("[LLM] Ollama unavailable - using rule-based detection (Groq disabled for PII protection)")
     return None
 
 
