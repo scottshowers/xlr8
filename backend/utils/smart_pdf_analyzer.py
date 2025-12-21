@@ -88,8 +88,54 @@ def redact_pii(text: str) -> str:
 
 
 # =============================================================================
-# LLM CLIENT
+# LLM CLIENT - Smart Model Routing
 # =============================================================================
+
+# Model routing by task - uses available RunPod models
+TASK_MODEL_MAP = {
+    # PDF analysis - needs good instruction following
+    'pdf_parse': 'mistral:7b',
+    'pdf_analyze': 'mistral:7b',
+    
+    # SQL generation - code model excels here
+    'sql_generate': 'deepseek-coder:6.7b',
+    'sql': 'deepseek-coder:6.7b',
+    
+    # General code tasks - use larger code model for complex work
+    'code': 'qwen2.5-coder:14b',
+    'code_complex': 'qwen2.5-coder:14b',
+    'code_simple': 'deepseek-coder:6.7b',
+    
+    # Chat/synthesis - general purpose
+    'chat': 'mistral:7b',
+    'synthesis': 'mistral:7b',
+    'summarize': 'mistral:7b',
+    
+    # Embeddings - dedicated model
+    'embed': 'nomic-embed-text:latest',
+    'embedding': 'nomic-embed-text:latest',
+    
+    # Default fallback
+    'default': 'mistral:7b',
+}
+
+def get_model_for_task(task: str) -> str:
+    """
+    Get the appropriate model for a given task.
+    
+    Falls back to env var if set, then to mistral:7b as default.
+    """
+    # Check for env var override first (allows forcing specific model)
+    env_override = os.getenv('LLM_MODEL_OVERRIDE')
+    if env_override:
+        return env_override
+    
+    # Look up task in map
+    model = TASK_MODEL_MAP.get(task.lower(), TASK_MODEL_MAP['default'])
+    
+    logger.info(f"[LLM] Task '{task}' -> Model '{model}'")
+    return model
+
 
 def get_llm_config() -> Dict[str, str]:
     """Get LLM configuration from environment."""
@@ -97,20 +143,30 @@ def get_llm_config() -> Dict[str, str]:
         'url': os.getenv('LLM_INFERENCE_URL') or os.getenv('OLLAMA_URL') or os.getenv('RUNPOD_URL') or os.getenv('LLM_ENDPOINT'),
         'username': os.getenv('LLM_USERNAME', ''),
         'password': os.getenv('LLM_PASSWORD', ''),
-        'model': os.getenv('LLM_MODEL') or os.getenv('LLM_DEFAULT_MODEL', 'llama3.1:8b-instruct-q8_0')
+        # Note: model is now determined per-call by get_model_for_task()
+        'default_model': os.getenv('LLM_MODEL') or os.getenv('LLM_DEFAULT_MODEL', 'mistral:7b')
     }
 
 
 def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", project_id: str = None) -> Optional[str]:
-    """Call LLM for text generation with cost tracking. Uses Groq as fallback."""
+    """
+    Call LLM for text generation with smart model routing.
+    
+    The 'operation' parameter determines which model to use:
+    - pdf_parse, pdf_analyze -> mistral:7b
+    - sql_generate, sql -> deepseek-coder:6.7b  
+    - code, code_complex -> qwen2.5-coder:14b
+    - chat, synthesis -> mistral:7b
+    """
     config = get_llm_config()
+    model = get_model_for_task(operation)
     
     # Try Ollama-compatible endpoint first
     if config['url']:
         url = f"{config['url'].rstrip('/')}/api/generate"
         
         payload = {
-            "model": config['model'],
+            "model": model,
             "prompt": prompt,
             "stream": False,
             "options": {
@@ -127,7 +183,7 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
             if config['username'] and config['password']:
                 auth = HTTPBasicAuth(config['username'], config['password'])
             
-            logger.warning(f"[LLM] Calling {url} with model {config['model']}")
+            logger.warning(f"[LLM] Calling {url} with model {model}")
             response = requests.post(url, json=payload, auth=auth, timeout=180)
             response.raise_for_status()
             
