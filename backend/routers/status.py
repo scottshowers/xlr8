@@ -514,7 +514,48 @@ async def delete_structured_file(project: str, filename: str):
             logger.debug(f"[DELETE] Checkpoint failed (may not be needed): {cp_e}")
         
         # =================================================================
-        # STEP 6: Unregister from document registry (SOURCE OF TRUTH)
+        # STEP 6: Clean ChromaDB chunks (for files stored in BOTH places)
+        # =================================================================
+        chromadb_cleaned = 0
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            # Find and delete chunks for this filename
+            for field in ["filename", "source", "name"]:
+                try:
+                    # Try exact match
+                    results = collection.get(where={field: filename})
+                    if results and results['ids']:
+                        collection.delete(ids=results['ids'])
+                        chromadb_cleaned += len(results['ids'])
+                        logger.info(f"[DELETE] Deleted {len(results['ids'])} ChromaDB chunks (field: {field})")
+                        break
+                except Exception as ce:
+                    pass
+            
+            # Also try case-insensitive by getting all and filtering
+            if chromadb_cleaned == 0:
+                try:
+                    all_docs = collection.get(include=["metadatas"], limit=10000)
+                    ids_to_delete = []
+                    for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                        doc_filename = metadata.get("source", metadata.get("filename", ""))
+                        if doc_filename and doc_filename.lower() == filename.lower():
+                            ids_to_delete.append(all_docs["ids"][i])
+                    
+                    if ids_to_delete:
+                        collection.delete(ids=ids_to_delete)
+                        chromadb_cleaned = len(ids_to_delete)
+                        logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (case-insensitive)")
+                except Exception as ce2:
+                    logger.warning(f"[DELETE] ChromaDB case-insensitive cleanup failed: {ce2}")
+                    
+        except Exception as chroma_e:
+            logger.warning(f"[DELETE] ChromaDB cleanup failed: {chroma_e}")
+        
+        # =================================================================
+        # STEP 7: Unregister from document registry (SOURCE OF TRUTH)
         # =================================================================
         registry_cleaned = False
         try:
@@ -539,6 +580,7 @@ async def delete_structured_file(project: str, filename: str):
             "deleted_tables": deleted_tables,
             "count": len(deleted_tables),
             "metadata_cleaned": metadata_cleaned,
+            "chromadb_cleaned": chromadb_cleaned,
             "registry_cleaned": registry_cleaned
         }
         
