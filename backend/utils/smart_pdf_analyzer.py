@@ -135,7 +135,7 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
                     "Content-Type": "application/json"
                 },
                 json={
-                    "model": "llama-3.1-70b-versatile",
+                    "model": "llama-3.3-70b-versatile",  # Updated model name
                     "messages": [{"role": "user", "content": prompt}],
                     "max_tokens": max_tokens,
                     "temperature": 0.1
@@ -202,6 +202,7 @@ def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
     - Repeated line patterns
     - Column-like spacing
     - Numeric data patterns
+    - Config/setup document patterns
     """
     lines = [l for l in text_sample.split('\n') if l.strip()]
     
@@ -225,10 +226,27 @@ def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
     numeric_lines = sum(1 for l in lines if len(re.findall(r'\b\d+\.?\d*\b', l)) >= 2)
     numeric_ratio = numeric_lines / len(lines)
     
+    # Check for code-like patterns (5-digit codes, alphanumeric codes at line start)
+    code_lines = sum(1 for l in lines if re.match(r'^\s*\d{4,6}\s+', l.strip()) or re.match(r'^\s*[A-Z]{2,5}\d*\s+', l.strip()))
+    code_ratio = code_lines / len(lines) if lines else 0
+    
     # Check for UKG-specific patterns
     ukg_patterns = ['Earnings Code', 'Deduction Code', 'Company Code', 'Tax Category', 
-                    'Employee Number', 'Pay Group', 'Rate Table', 'Filing Status']
+                    'Employee Number', 'Pay Group', 'Rate Table', 'Filing Status',
+                    'Calculation', 'Rate Factor', 'Accumulators', 'General Ledger']
     has_ukg = any(p.lower() in text_sample.lower() for p in ukg_patterns)
+    ukg_matches = sum(1 for p in ukg_patterns if p.lower() in text_sample.lower())
+    
+    # Check for config/setup document patterns
+    config_patterns = ['Page 1', 'Page 2', 'Select: All', 'Last Page', 
+                       'Reg Pay', 'Flat amount', 'Pay rate', 'hours *']
+    has_config = any(p.lower() in text_sample.lower() for p in config_patterns)
+    config_matches = sum(1 for p in config_patterns if p.lower() in text_sample.lower())
+    
+    # Check for repeated header lines (common in multi-page PDF tables)
+    first_line = lines[0].strip() if lines else ""
+    header_repeats = sum(1 for l in lines if l.strip() == first_line)
+    has_repeated_headers = header_repeats >= 3
     
     # Decision logic
     is_tabular = False
@@ -250,16 +268,45 @@ def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
         confidence = max(confidence, spacing_ratio)
         reasons.append(f"column_spacing ({spacing_ratio:.0%}) + numeric ({numeric_ratio:.0%})")
     
-    if has_ukg and (spacing_ratio > 0.2 or numeric_ratio > 0.3):
+    # Code patterns strongly indicate tabular data (e.g., earnings codes, deduction codes)
+    if code_ratio > 0.15:
+        is_tabular = True
+        confidence = max(confidence, 0.85)
+        reasons.append(f"code_patterns ({code_ratio:.0%})")
+    
+    # UKG patterns - lower threshold since these are strong indicators
+    if has_ukg and ukg_matches >= 2:
         is_tabular = True
         confidence = max(confidence, 0.8)
-        reasons.append("ukg_patterns_detected")
+        reasons.append(f"ukg_patterns ({ukg_matches} matches)")
+    elif has_ukg and (spacing_ratio > 0.15 or numeric_ratio > 0.2 or code_ratio > 0.1):
+        is_tabular = True
+        confidence = max(confidence, 0.75)
+        reasons.append("ukg_patterns_with_structure")
+    
+    # Config document patterns
+    if has_config and config_matches >= 3:
+        is_tabular = True
+        confidence = max(confidence, 0.75)
+        reasons.append(f"config_document ({config_matches} matches)")
+    
+    # Repeated headers (multi-page table)
+    if has_repeated_headers and (numeric_ratio > 0.15 or code_ratio > 0.1):
+        is_tabular = True
+        confidence = max(confidence, 0.7)
+        reasons.append("repeated_headers")
     
     # Large documents with moderate signals should lean tabular
     if len(text_sample) > 100000 and (spacing_ratio > 0.25 or numeric_ratio > 0.25):
         is_tabular = True
         confidence = max(confidence, 0.7)
         reasons.append(f"large_doc_with_patterns")
+    
+    # Medium docs with good signals
+    if len(text_sample) > 10000 and (numeric_ratio > 0.3 or code_ratio > 0.2):
+        is_tabular = True
+        confidence = max(confidence, 0.7)
+        reasons.append(f"medium_doc_numeric ({numeric_ratio:.0%})")
     
     result = {
         "is_tabular": is_tabular,
@@ -271,11 +318,17 @@ def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
             "tab_ratio": tab_ratio,
             "spacing_ratio": spacing_ratio,
             "numeric_ratio": numeric_ratio,
-            "has_ukg_patterns": has_ukg
+            "code_ratio": code_ratio,
+            "has_ukg_patterns": has_ukg,
+            "ukg_matches": ukg_matches,
+            "has_config_patterns": has_config,
+            "config_matches": config_matches
         }
     }
     
     logger.warning(f"[RULES] Detection result: is_tabular={is_tabular}, reasons={reasons}")
+    if not is_tabular:
+        logger.warning(f"[RULES] Metrics: numeric={numeric_ratio:.0%}, code={code_ratio:.0%}, spacing={spacing_ratio:.0%}, ukg={ukg_matches}, config={config_matches}")
     return result
 
 
