@@ -205,6 +205,7 @@ function FilesTab({ colors }) {
   const [deepCleanLoading, setDeepCleanLoading] = useState(false);
   const [deepCleanResult, setDeepCleanResult] = useState(null);
   const [showDeepCleanModal, setShowDeepCleanModal] = useState(false);
+  const [forceClean, setForceClean] = useState(false);
 
   const toggleFileExpand = (key) => { const s = new Set(expandedFiles); if (s.has(key)) s.delete(key); else s.add(key); setExpandedFiles(s); };
   const loadTableProfile = async (tableName) => {
@@ -263,14 +264,15 @@ function FilesTab({ colors }) {
     setDeepCleanLoading(true);
     setDeepCleanResult(null);
     try {
-      const res = await api.post('/deep-clean?confirm=true');
+      const url = forceClean ? '/deep-clean?confirm=true&force=true' : '/deep-clean?confirm=true';
+      const res = await api.post(url);
       setDeepCleanResult(res.data);
       // Reload data after cleanup
       await loadData();
     } catch (err) {
       setDeepCleanResult({ 
         success: false, 
-        error: err.response?.data?.detail || err.message 
+        error: err.response?.data?.detail || err.response?.data?.error || err.message 
       });
     } finally {
       setDeepCleanLoading(false);
@@ -376,6 +378,35 @@ function FilesTab({ colors }) {
               </ul>
             </div>
 
+            {/* Force Clean Option */}
+            <label style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '0.75rem',
+              padding: '0.75rem 1rem',
+              background: forceClean ? colors.redLight : colors.inputBg,
+              border: `1px solid ${forceClean ? colors.red + '40' : colors.divider}`,
+              borderRadius: 8,
+              marginBottom: '1rem',
+              cursor: 'pointer',
+            }}>
+              <input
+                type="checkbox"
+                checked={forceClean}
+                onChange={(e) => setForceClean(e.target.checked)}
+                style={{ marginTop: 2 }}
+              />
+              <div>
+                <div style={{ fontSize: '0.85rem', fontWeight: 500, color: forceClean ? colors.red : colors.text }}>
+                  Force clean (full wipe)
+                </div>
+                <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginTop: 2 }}>
+                  Use this if Registry is empty and you want to clear all backend data. 
+                  Normally, an empty Registry is treated as a connection error to prevent accidental data loss.
+                </div>
+              </div>
+            </label>
+
             {deepCleanResult && (
               <div style={{
                 background: deepCleanResult.success ? colors.greenLight : colors.redLight,
@@ -426,6 +457,7 @@ function FilesTab({ colors }) {
                 onClick={() => {
                   setShowDeepCleanModal(false);
                   setDeepCleanResult(null);
+                  setForceClean(false);
                 }}
                 style={{
                   padding: '0.6rem 1.25rem',
