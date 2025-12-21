@@ -4398,8 +4398,11 @@ SQL:"""
         """
         Gather INTENT - what customer's DOCUMENTS say.
         
-        Uses truth_type='intent' filter to only get customer documentation,
-        excluding reference/standards materials.
+        Searches for customer documentation including:
+        - intent: SOWs, requirements, meeting notes
+        - configuration: Code lists, mappings (when stored as documents)
+        
+        Excludes reference/standards materials (those are global best practices).
         """
         if not self.rag_handler:
             return []
@@ -4411,17 +4414,46 @@ SQL:"""
             if not collection_name:
                 return []
             
-            # NEW: Use truth_type filter for precise intent retrieval
-            # This replaces the old logic of manually filtering out global docs
-            results = self.rag_handler.search(
-                collection_name=collection_name,
-                query=question,
-                n_results=10,
-                truth_type='intent',  # Only get customer documentation
-                project_id=self.project if self.project else None
-            )
+            # Search customer documents - both intent AND configuration types
+            # Configuration docs (like "Earnings Codes.pdf") are customer-specific too
+            customer_truth_types = ['intent', 'configuration']
             
-            for result in results:
+            all_results = []
+            for truth_type in customer_truth_types:
+                try:
+                    results = self.rag_handler.search(
+                        collection_name=collection_name,
+                        query=question,
+                        n_results=5,  # Get fewer per type to avoid overwhelming
+                        truth_type=truth_type,
+                        project_id=self.project if self.project else None
+                    )
+                    all_results.extend(results)
+                except Exception as e:
+                    logger.warning(f"[GATHER_INTENT] Search for {truth_type} failed: {e}")
+            
+            # Also try without truth_type filter as fallback (catches any miscategorized docs)
+            if not all_results:
+                try:
+                    results = self.rag_handler.search(
+                        collection_name=collection_name,
+                        query=question,
+                        n_results=10,
+                        project_id=self.project if self.project else None
+                        # No truth_type filter - get any project docs
+                    )
+                    # Filter out reference/global docs manually
+                    for r in results:
+                        metadata = r.get('metadata', {})
+                        if metadata.get('truth_type') != 'reference' and not metadata.get('is_global'):
+                            all_results.append(r)
+                except Exception as e:
+                    logger.warning(f"[GATHER_INTENT] Fallback search failed: {e}")
+            
+            # Sort by relevance (distance) and take top results
+            all_results.sort(key=lambda x: x.get('distance', 1.0))
+            
+            for result in all_results[:10]:  # Limit to top 10
                 metadata = result.get('metadata', {})
                 distance = result.get('distance', 1.0)
                 doc = result.get('document', '')
