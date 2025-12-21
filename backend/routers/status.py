@@ -98,9 +98,13 @@ async def get_structured_data_status(project: Optional[str] = None):
             for entry in registry_entries:
                 storage = entry.get('storage_type', '')
                 if storage in ('duckdb', 'both'):
-                    valid_files.add(entry.get('filename', '').lower())
+                    fn = entry.get('filename', '').lower()
+                    valid_files.add(fn)
+                    # Also add normalized version (no extension, spaces→underscores)
+                    normalized = fn.rsplit('.', 1)[0].replace(' ', '_')
+                    valid_files.add(normalized)
             
-            logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
+            logger.info(f"[STATUS/STRUCTURED] Registry has {len(registry_entries)} DuckDB files, {len(valid_files)} valid patterns")
             
             # If registry is empty, return empty - no fallback to stale metadata
             if not valid_files:
