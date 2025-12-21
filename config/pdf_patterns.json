@@ -1,0 +1,40 @@
+{
+  "_comment": "PDF parsing patterns - loaded by smart_pdf_analyzer.py",
+  "_location": "Deploy to /app/config/pdf_patterns.json or config/pdf_patterns.json",
+  
+  "skip_patterns": [
+    "Page ",
+    "Select: All", 
+    "Last Page",
+    "Code Tax Category",
+    "Description Rule"
+  ],
+  
+  "code_patterns": [
+    {
+      "name": "numeric_code",
+      "description": "5-digit codes like 20001, 20002",
+      "regex": "^(\\d{5})\\s+([A-Z]{3,6})\\s+(.+)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    },
+    {
+      "name": "alpha_code",
+      "description": "Alpha codes like REG, OT, VAC",
+      "regex": "^([A-Z][A-Z0-9]{1,5})\\s+([A-Z]{3,6})\\s+(.+)$",
+      "groups": {"Code": 1, "Tax Category": 2, "rest": 3}
+    }
+  ],
+  
+  "calculation_rules": [
+    "Pay rate * hours * rate factor",
+    "Flat amount",
+    "Expression",
+    "Hours * flat amount",
+    "Coefficient OT"
+  ],
+  
+  "flags": {
+    "reg_pay_markers": ["ü", "✓"],
+    "accumulator_markers": [" Z ", " Z$"]
+  }
+}
