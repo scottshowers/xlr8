@@ -101,6 +101,164 @@ router = APIRouter()
 
 
 # =============================================================================
+# IDEMPOTENT UPLOAD HELPER - Clean existing data before re-upload
+# =============================================================================
+
+def _cleanup_existing_file(filename: str, project: str = None, project_id: str = None):
+    """
+    Remove any existing data for this filename before re-uploading.
+    This makes uploads idempotent - same file uploaded twice = replacement, not duplication.
+    
+    Cleans:
+    - ChromaDB chunks
+    - DuckDB tables
+    - Registry entry
+    
+    Returns dict with cleanup summary.
+    """
+    result = {
+        'chromadb_chunks_deleted': 0,
+        'duckdb_tables_deleted': 0,
+        'registry_deleted': False
+    }
+    
+    filename_lower = filename.lower()
+    
+    # =========================================================================
+    # STEP 1: Clean ChromaDB chunks
+    # =========================================================================
+    try:
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Try multiple metadata fields for matching
+        for field in ["filename", "source", "name"]:
+            try:
+                results = collection.get(where={field: filename})
+                if results and results['ids']:
+                    collection.delete(ids=results['ids'])
+                    result['chromadb_chunks_deleted'] += len(results['ids'])
+                    logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (field: {field})")
+                    break
+            except Exception as ce:
+                pass
+        
+        # Also try case-insensitive match if nothing found
+        if result['chromadb_chunks_deleted'] == 0:
+            try:
+                all_docs = collection.get(include=["metadatas"], limit=10000)
+                ids_to_delete = []
+                for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                    doc_filename = metadata.get("source", metadata.get("filename", ""))
+                    if doc_filename and doc_filename.lower() == filename_lower:
+                        ids_to_delete.append(all_docs["ids"][i])
+                
+                if ids_to_delete:
+                    collection.delete(ids=ids_to_delete)
+                    result['chromadb_chunks_deleted'] = len(ids_to_delete)
+                    logger.info(f"[CLEANUP] Deleted {len(ids_to_delete)} ChromaDB chunks (case-insensitive)")
+            except Exception as ce2:
+                pass
+                
+    except Exception as chroma_e:
+        logger.warning(f"[CLEANUP] ChromaDB cleanup error: {chroma_e}")
+    
+    # =========================================================================
+    # STEP 2: Clean DuckDB tables
+    # =========================================================================
+    if STRUCTURED_HANDLER_AVAILABLE and project:
+        try:
+            handler = get_structured_handler()
+            conn = handler.conn
+            project_lower = project.lower()
+            
+            # Find tables from _schema_metadata
+            try:
+                tables_result = conn.execute("""
+                    SELECT table_name FROM _schema_metadata 
+                    WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+                """, [project_lower, filename_lower]).fetchall()
+                
+                for (table_name,) in tables_result:
+                    try:
+                        conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                        result['duckdb_tables_deleted'] += 1
+                        logger.info(f"[CLEANUP] Dropped DuckDB table: {table_name}")
+                    except:
+                        pass
+                
+                # Clean metadata
+                conn.execute("""
+                    DELETE FROM _schema_metadata 
+                    WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+                """, [project_lower, filename_lower])
+                
+            except Exception as meta_e:
+                pass
+            
+            # Also check _pdf_tables
+            try:
+                table_check = conn.execute("""
+                    SELECT COUNT(*) FROM information_schema.tables 
+                    WHERE table_name = '_pdf_tables'
+                """).fetchone()
+                
+                if table_check and table_check[0] > 0:
+                    pdf_result = conn.execute("""
+                        SELECT table_name FROM _pdf_tables 
+                        WHERE LOWER(source_file) = ?
+                    """, [filename_lower]).fetchall()
+                    
+                    for (table_name,) in pdf_result:
+                        try:
+                            conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                            result['duckdb_tables_deleted'] += 1
+                        except:
+                            pass
+                    
+                    conn.execute("""
+                        DELETE FROM _pdf_tables WHERE LOWER(source_file) = ?
+                    """, [filename_lower])
+                    
+            except:
+                pass
+            
+            # Clean support tables
+            for support_table in ['file_metadata', '_column_profiles']:
+                try:
+                    conn.execute(f"""
+                        DELETE FROM {support_table} 
+                        WHERE LOWER(filename) = ? OR LOWER(file_name) = ?
+                    """, [filename_lower, filename_lower])
+                except:
+                    pass
+            
+            try:
+                conn.execute("CHECKPOINT")
+            except:
+                pass
+                
+        except Exception as duck_e:
+            logger.warning(f"[CLEANUP] DuckDB cleanup error: {duck_e}")
+    
+    # =========================================================================
+    # STEP 3: Unregister from Registry
+    # =========================================================================
+    try:
+        result['registry_deleted'] = DocumentRegistryModel.unregister(filename, project_id)
+        if result['registry_deleted']:
+            logger.info(f"[CLEANUP] Unregistered {filename} from registry")
+    except Exception as reg_e:
+        logger.warning(f"[CLEANUP] Registry cleanup error: {reg_e}")
+    
+    total_cleaned = result['chromadb_chunks_deleted'] + result['duckdb_tables_deleted']
+    if total_cleaned > 0 or result['registry_deleted']:
+        logger.info(f"[CLEANUP] Cleaned existing data for {filename}: {result}")
+    
+    return result
+
+
+# =============================================================================
 # DEBUG ENDPOINT - Check what's available
 # =============================================================================
 @router.get("/upload/debug")
@@ -642,6 +800,14 @@ def process_file_background(
             timing['parse_start'] = time.time()
             
             try:
+                # ===========================================================
+                # IDEMPOTENT: Clean existing data for this filename first
+                # This prevents duplicate tables if same file uploaded twice
+                # ===========================================================
+                cleanup_result = _cleanup_existing_file(filename, project, project_id)
+                if cleanup_result['duckdb_tables_deleted'] > 0:
+                    logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['duckdb_tables_deleted']} tables")
+                
                 handler = get_structured_handler()
                 
                 # ===========================================================
@@ -1237,6 +1403,14 @@ def process_file_background(
         # Step 3: Initialize RAG and process
         ProcessingJobModel.update_progress(job_id, 20, "Initializing document processor...")
         
+        # ===========================================================
+        # IDEMPOTENT: Clean existing data for this filename first
+        # This prevents duplicate chunks if same file uploaded twice
+        # ===========================================================
+        cleanup_result = _cleanup_existing_file(filename, project, project_id)
+        if cleanup_result['chromadb_chunks_deleted'] > 0:
+            logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['chromadb_chunks_deleted']} chunks")
+        
         def update_progress(current: int, total: int, message: str):
             """Callback for RAG handler progress updates"""
             # Map RAG progress (0-100) to our range (20-90)
@@ -1248,7 +1422,7 @@ def process_file_background(
         ProcessingJobModel.update_progress(job_id, 25, "Chunking document...")
         
         timing['embedding_start'] = time.time()
-        success = rag.add_document(
+        chunks_added = rag.add_document(
             collection_name="documents",
             text=text,
             metadata=metadata,
@@ -1257,7 +1431,7 @@ def process_file_background(
         timing['embedding_end'] = time.time()
         timing['storage_end'] = time.time()
         
-        if not success:
+        if not chunks_added:
             ProcessingJobModel.fail(job_id, "Failed to add document to vector store")
             return
         
@@ -1292,7 +1466,7 @@ def process_file_background(
                 storage_type=DocumentRegistryModel.STORAGE_CHROMADB,
                 project_id=project_id if not is_global else None,
                 is_global=is_global,
-                chunk_count=len(text) // 500,  # Approximate
+                chunk_count=chunks_added,  # Actual count from RAG
                 parse_status='success',
                 processing_time_ms=times['processing_time_ms'],
                 classification_time_ms=times['classification_time_ms'],
