@@ -314,8 +314,13 @@ class RAGHandler:
         text: str, 
         metadata: Dict[str, Any],
         progress_callback: Optional[callable] = None
-    ) -> bool:
-        """Add a document to a ChromaDB collection with optional progress reporting."""
+    ) -> int:
+        """
+        Add a document to a ChromaDB collection with optional progress reporting.
+        
+        Returns:
+            int: Number of chunks successfully added (0 if failed)
+        """
         try:
             collection = self.client.get_or_create_collection(
                 name=collection_name,
@@ -439,11 +444,11 @@ class RAGHandler:
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] All chunks tagged with truth_type: {truth_type}")
             
-            return chunks_added > 0
+            return chunks_added
             
         except Exception as e:
             logger.error(f"Error adding document to collection: {str(e)}")
-            return False
+            return 0
 
     def search(
         self, 
