@@ -914,7 +914,9 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         return {
             "success": True,
             "table_name": table_name,
+            "tables_created": [table_name],  # For upload.py compatibility
             "row_count": row_count,
+            "total_rows": row_count,  # For upload.py compatibility
             "columns": list(df.columns)
         }
         
