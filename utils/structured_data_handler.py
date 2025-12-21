@@ -2821,6 +2821,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             ]
             
             # Store metadata
+            logger.warning(f"[STORE_DF] Inserting _schema_metadata for {table_name}")
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
                 (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
@@ -2836,6 +2837,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 json.dumps([]),  # encrypted_columns
                 version
             ])
+            
+            # Commit to ensure visibility
+            self.conn.commit()
+            logger.warning(f"[STORE_DF] Committed _schema_metadata for {table_name}")
             
             logger.warning(f"[STORE_DF] Stored {len(df)} rows to {table_name} from {source_type}")
             
