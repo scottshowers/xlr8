@@ -882,6 +882,9 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
     
     This ensures consistency with how Excel/CSV files are stored and
     makes the data immediately visible to all status/query endpoints.
+    
+    Note: With the sys.modules singleton pattern, import path doesn't matter -
+    we always get the same handler instance.
     """
     if not PANDAS_AVAILABLE:
         return {"success": False, "error": "pandas not available"}
@@ -895,35 +898,32 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         if df.empty:
             return {"success": False, "error": "DataFrame is empty"}
         
-        # Use the shared handler for consistent connection
+        # Get the shared handler - uses sys.modules singleton so import path doesn't matter
         try:
+            from backend.utils.structured_data_handler import get_structured_handler
+        except ImportError:
             from utils.structured_data_handler import get_structured_handler
-            handler = get_structured_handler()
-            
-            result = handler.store_dataframe(
-                df=df,
-                project=project,
-                file_name=filename,
-                sheet_name='PDF',
-                source_type='pdf'
-            )
-            
-            if result.get('success'):
-                logger.warning(f"[DUCKDB] Stored {result['row_count']} rows to table '{result['table_name']}'")
-            else:
-                logger.warning(f"[DUCKDB] Storage failed: {result.get('error')}")
-            
-            return result
-            
-        except ImportError as ie:
-            logger.error(f"[DUCKDB] Handler not available: {ie}")
-            return {"success": False, "error": f"Handler not available: {ie}"}
-        except Exception as he:
-            logger.error(f"[DUCKDB] Handler error: {he}")
-            import traceback
-            logger.error(traceback.format_exc())
-            return {"success": False, "error": str(he)}
         
+        handler = get_structured_handler()
+        
+        result = handler.store_dataframe(
+            df=df,
+            project=project,
+            file_name=filename,
+            sheet_name='PDF',
+            source_type='pdf'
+        )
+        
+        if result.get('success'):
+            logger.warning(f"[DUCKDB] Stored {result['row_count']} rows to table '{result['table_name']}'")
+        else:
+            logger.warning(f"[DUCKDB] Storage failed: {result.get('error')}")
+        
+        return result
+        
+    except ImportError as ie:
+        logger.error(f"[DUCKDB] Handler not available: {ie}")
+        return {"success": False, "error": f"Handler not available: {ie}"}
     except Exception as e:
         logger.error(f"[DUCKDB] Storage failed: {e}")
         import traceback
