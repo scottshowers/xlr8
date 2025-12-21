@@ -2851,6 +2851,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 ).fetchone()[0]
                 logger.warning(f"[STORE_DF] VERIFY: _schema_metadata has {verify_count} rows for {table_name}")
                 
+                # Check is_current value
+                verify_current = self.conn.execute(
+                    "SELECT is_current FROM _schema_metadata WHERE table_name = ?", 
+                    [table_name]
+                ).fetchone()
+                logger.warning(f"[STORE_DF] VERIFY: is_current = {verify_current}")
+                
+                # Also check with is_current = TRUE filter (what status.py uses)
+                verify_filtered = self.conn.execute(
+                    "SELECT COUNT(*) FROM _schema_metadata WHERE table_name = ? AND is_current = TRUE", 
+                    [table_name]
+                ).fetchone()[0]
+                logger.warning(f"[STORE_DF] VERIFY: with is_current=TRUE filter: {verify_filtered} rows")
+                
                 # Also check total rows
                 total_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
                 logger.warning(f"[STORE_DF] VERIFY: _schema_metadata total rows: {total_count}")
@@ -3790,9 +3804,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         """
         with self._db_lock:
             try:
+                # Log INSERT operations for debugging
+                if 'INSERT' in sql.upper() and '_schema_metadata' in sql:
+                    logger.warning(f"[SAFE_EXECUTE] Running INSERT into _schema_metadata")
+                
                 if params:
-                    return self.conn.execute(sql, params)
-                return self.conn.execute(sql)
+                    result = self.conn.execute(sql, params)
+                else:
+                    result = self.conn.execute(sql)
+                
+                # Verify INSERT worked
+                if 'INSERT' in sql.upper() and '_schema_metadata' in sql:
+                    logger.warning(f"[SAFE_EXECUTE] INSERT completed, result type: {type(result)}")
+                
+                return result
             except Exception as e:
                 logger.error(f"[SAFE_EXECUTE] Error: {e}")
                 raise
@@ -3806,6 +3831,14 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 # Log the query for debugging
                 if '_schema_metadata' in sql:
                     logger.warning(f"[SAFE_FETCHALL] Querying _schema_metadata, conn_id={id(self.conn)}")
+                    # Try a direct count first to diagnose
+                    try:
+                        direct_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                        logger.warning(f"[SAFE_FETCHALL] DIAG: Direct count shows {direct_count} total rows")
+                        current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
+                        logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
+                    except Exception as de:
+                        logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
                 
                 if params:
                     result = self.conn.execute(sql, params).fetchall()
@@ -3837,15 +3870,11 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     def safe_commit(self):
         """
         Thread-safe commit wrapper.
-        
-        Also runs CHECKPOINT to ensure data is flushed from WAL to main database file,
-        making it visible to other connections (e.g., in other worker processes).
         """
         with self._db_lock:
             try:
                 self.conn.commit()
-                # Force WAL checkpoint so other connections see the data
-                self.conn.execute("CHECKPOINT")
+                logger.debug("[SAFE_COMMIT] Committed successfully")
             except Exception as e:
                 logger.error(f"[SAFE_COMMIT] Error: {e}")
                 raise
