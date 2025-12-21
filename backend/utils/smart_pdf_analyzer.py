@@ -887,7 +887,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         
         row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
         
-        # Store metadata
+        # Store metadata in _pdf_tables
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS _pdf_tables (
@@ -905,7 +905,36 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
                 VALUES (?, ?, ?, ?, ?, ?)
             """, [table_name, filename, project, project_id, row_count, json.dumps(list(df.columns))])
         except Exception as e:
-            logger.warning(f"[DUCKDB] Could not store metadata: {e}")
+            logger.warning(f"[DUCKDB] Could not store _pdf_tables metadata: {e}")
+        
+        # Also store in _schema_metadata for status endpoint compatibility
+        try:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS _schema_metadata (
+                    table_name VARCHAR,
+                    project VARCHAR,
+                    file_name VARCHAR,
+                    sheet_name VARCHAR,
+                    columns JSON,
+                    row_count INTEGER,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    is_current BOOLEAN DEFAULT TRUE,
+                    PRIMARY KEY (table_name, project)
+                )
+            """)
+            # Mark any existing entry as not current
+            conn.execute("""
+                UPDATE _schema_metadata SET is_current = FALSE 
+                WHERE table_name = ? AND project = ?
+            """, [table_name, project])
+            # Insert new entry
+            conn.execute("""
+                INSERT INTO _schema_metadata (table_name, project, file_name, sheet_name, columns, row_count, is_current)
+                VALUES (?, ?, ?, ?, ?, ?, TRUE)
+            """, [table_name, project, filename, 'PDF', json.dumps(list(df.columns)), row_count])
+            logger.info(f"[DUCKDB] Added _schema_metadata entry for {table_name}")
+        except Exception as e:
+            logger.warning(f"[DUCKDB] Could not store _schema_metadata: {e}")
         
         conn.close()
         
