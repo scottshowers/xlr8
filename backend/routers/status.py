@@ -134,13 +134,20 @@ async def get_structured_data_status(project: Optional[str] = None):
         # =================================================================
         tables = []
         try:
-            logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
+            logger.warning("[STATUS/STRUCTURED] Querying _schema_metadata...")
             metadata_result = handler.safe_fetchall("""
                 SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
                 FROM _schema_metadata 
                 WHERE is_current = TRUE
             """)
-            logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
+            logger.warning(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
+            
+            # Debug: log what we found
+            for row in metadata_result:
+                logger.warning(f"[STATUS/STRUCTURED] Found: table={row[0]}, project={row[1]}, file={row[2]}")
+            
+            # Debug: log valid_files
+            logger.warning(f"[STATUS/STRUCTURED] valid_files patterns: {valid_files}")
             
             for row in metadata_result:
                 table_name, proj, filename, sheet, columns_json, row_count, created_at = row
