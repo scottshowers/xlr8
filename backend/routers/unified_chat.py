@@ -1706,11 +1706,26 @@ async def unified_chat(request: UnifiedChatRequest):
     citation_builder = CitationBuilder()
     
     try:
+        # Get project_id (UUID) from project name for RAG filtering
+        project_id = None
+        if project and SUPABASE_AVAILABLE:
+            try:
+                supabase = get_supabase()
+                result = supabase.table('projects').select('id').eq('name', project).limit(1).execute()
+                if result.data:
+                    project_id = result.data[0].get('id')
+                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}")
+            except Exception as e:
+                logger.warning(f"[UNIFIED] Could not resolve project_id: {e}")
+        
         # Get or create intelligence engine
         if session['engine']:
             engine = session['engine']
+            # Ensure project_id is set on existing engines
+            if project_id and not getattr(engine, 'project_id', None):
+                engine.project_id = project_id
         elif INTELLIGENCE_AVAILABLE:
-            engine = IntelligenceEngine(project or 'default')
+            engine = IntelligenceEngine(project or 'default', project_id=project_id)
             session['engine'] = engine
         else:
             return {
