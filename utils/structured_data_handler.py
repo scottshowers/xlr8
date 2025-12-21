@@ -3784,9 +3784,19 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 raise
     
     def safe_fetchall(self, sql: str, params: list = None) -> list:
-        """Thread-safe SQL query that returns all rows."""
+        """
+        Thread-safe SQL query that returns all rows.
+        
+        Forces a fresh transaction view to ensure we see the latest committed data.
+        """
         with self._db_lock:
             try:
+                # End any existing transaction to get fresh snapshot
+                try:
+                    self.conn.execute("ROLLBACK")
+                except:
+                    pass  # Ignore if no transaction active
+                
                 if params:
                     return self.conn.execute(sql, params).fetchall()
                 return self.conn.execute(sql).fetchall()
@@ -3795,9 +3805,19 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 raise
     
     def safe_fetchone(self, sql: str, params: list = None):
-        """Thread-safe SQL query that returns one row."""
+        """
+        Thread-safe SQL query that returns one row.
+        
+        Forces a fresh transaction view to ensure we see the latest committed data.
+        """
         with self._db_lock:
             try:
+                # End any existing transaction to get fresh snapshot
+                try:
+                    self.conn.execute("ROLLBACK")
+                except:
+                    pass  # Ignore if no transaction active
+                
                 if params:
                     return self.conn.execute(sql, params).fetchone()
                 return self.conn.execute(sql).fetchone()
