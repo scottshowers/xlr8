@@ -733,6 +733,9 @@ def process_file_background(
         file_ext = filename.split('.')[-1].lower()
         logger.warning(f"[BACKGROUND] Detected file extension: '{file_ext}'")
         
+        # Track if DuckDB storage succeeded (for PDFs that go to both DuckDB + ChromaDB)
+        duckdb_success = False
+        
         # =================================================================
         # TIMING TRACKING - Track processing performance
         # =================================================================
@@ -1462,6 +1465,14 @@ def process_file_background(
         # Register in document registry with classification
         try:
             times = calc_timing_ms()
+            
+            # Determine storage type - use "both" if DuckDB also succeeded
+            if duckdb_success:
+                storage_type = DocumentRegistryModel.STORAGE_BOTH
+                logger.info(f"[BACKGROUND] Using storage_type=both (DuckDB + ChromaDB)")
+            else:
+                storage_type = DocumentRegistryModel.STORAGE_CHROMADB
+            
             DocumentRegistryModel.register(
                 filename=filename,
                 file_type=file_ext,
@@ -1469,7 +1480,7 @@ def process_file_background(
                 classification_method=classification_method,
                 classification_confidence=classification_confidence,
                 content_domain=domain_list,
-                storage_type=DocumentRegistryModel.STORAGE_CHROMADB,
+                storage_type=storage_type,
                 project_id=project_id if not is_global else None,
                 is_global=is_global,
                 chunk_count=chunks_added,  # Actual count from RAG
@@ -1486,7 +1497,7 @@ def process_file_background(
                     'char_count': len(text)
                 }
             )
-            logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> CHROMADB ({times['processing_time_ms']}ms)")
+            logger.warning(f"[BACKGROUND] Registered: {filename} as {truth_type} -> {storage_type} ({times['processing_time_ms']}ms)")
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
         
