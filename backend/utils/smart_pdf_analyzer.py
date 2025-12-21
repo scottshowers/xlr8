@@ -328,6 +328,87 @@ def detect_tabular_by_rules(text_sample: str) -> Dict[str, Any]:
     return result
 
 
+def infer_columns_from_text(text_sample: str) -> List[str]:
+    """
+    Infer column names from tabular text when LLM is unavailable.
+    
+    Looks for:
+    - Common header patterns (Code, Description, Amount, etc.)
+    - Repeated header lines across pages
+    - UKG-specific column names
+    """
+    lines = [l.strip() for l in text_sample.split('\n') if l.strip()]
+    
+    if len(lines) < 3:
+        return []
+    
+    # UKG Earnings/Deductions specific columns
+    ukg_earnings_cols = ['Code', 'Description', 'Tax Category', 'Calculation Rule', 
+                         'Rate Factor', 'Reg Pay', 'Special 1', 'Special 2', 'Special 3',
+                         'Accumulators', 'Retro Accruals', 'Deferred Pay', 'Shift Calc',
+                         'Loc Alloc', 'General Ledger', 'Expense Account']
+    
+    ukg_deduction_cols = ['Code', 'Description', 'Category', 'Calculation', 
+                          'Rate', 'Limit', 'Start Date', 'End Date', 'GL Account']
+    
+    ukg_employee_cols = ['Employee ID', 'Name', 'Department', 'Location', 
+                         'Job Title', 'Pay Group', 'Status', 'Hire Date']
+    
+    # Generic payroll columns
+    generic_cols = ['Code', 'Description', 'Type', 'Category', 'Amount', 
+                    'Rate', 'Hours', 'Units', 'Total', 'YTD']
+    
+    text_lower = text_sample.lower()
+    
+    # Check which column set matches best
+    if 'tax category' in text_lower and 'calculation' in text_lower:
+        # Earnings codes document
+        logger.warning("[RULES] Detected UKG earnings code structure")
+        return ukg_earnings_cols
+    
+    if 'deduction' in text_lower and ('category' in text_lower or 'limit' in text_lower):
+        # Deductions document
+        logger.warning("[RULES] Detected UKG deduction code structure")
+        return ukg_deduction_cols
+    
+    if 'employee' in text_lower and ('department' in text_lower or 'location' in text_lower):
+        # Employee list
+        logger.warning("[RULES] Detected employee list structure")
+        return ukg_employee_cols
+    
+    # Try to extract columns from first few lines
+    # Look for lines that have multiple capitalized words (potential headers)
+    for line in lines[:10]:
+        words = line.split()
+        # Header lines typically have multiple capitalized words
+        cap_words = [w for w in words if w and w[0].isupper() and len(w) > 1]
+        
+        if len(cap_words) >= 4:
+            # This might be a header line
+            # Clean up and return as columns
+            cols = []
+            current_col = []
+            
+            for word in words:
+                if word and word[0].isupper():
+                    if current_col:
+                        cols.append(' '.join(current_col))
+                    current_col = [word]
+                else:
+                    current_col.append(word)
+            
+            if current_col:
+                cols.append(' '.join(current_col))
+            
+            if len(cols) >= 4:
+                logger.warning(f"[RULES] Extracted columns from header line: {cols[:5]}...")
+                return cols
+    
+    # Fallback to generic columns if we detected tabular but couldn't identify specific type
+    logger.warning("[RULES] Using generic column set")
+    return generic_cols
+
+
 # =============================================================================
 # LLM-BASED ANALYSIS
 # =============================================================================
@@ -375,7 +456,16 @@ JSON RESPONSE:"""
     
     if not response:
         logger.warning("[LLM] No response from LLM, using rule-based detection...")
-        return detect_tabular_by_rules(text_sample)
+        rule_result = detect_tabular_by_rules(text_sample)
+        
+        # If rules detect tabular, try to infer columns from text
+        if rule_result.get('is_tabular'):
+            inferred_columns = infer_columns_from_text(text_sample)
+            if inferred_columns:
+                rule_result['columns'] = inferred_columns
+                logger.warning(f"[RULES] Inferred {len(inferred_columns)} columns: {inferred_columns[:5]}...")
+        
+        return rule_result
     
     # Parse JSON from response
     try:
