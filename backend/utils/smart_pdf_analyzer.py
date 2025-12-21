@@ -632,11 +632,167 @@ def parse_tabular_pdf_with_pdfplumber(file_path: str, columns: List[str]) -> Lis
                     continue
         
         logger.warning(f"[PDFPLUMBER] Extracted {len(all_rows)} rows from PDF")
-        
+    
     except Exception as e:
         logger.error(f"[PDFPLUMBER] Table extraction failed: {e}")
     
+    # If pdfplumber didn't find tables, try text-based parsing
+    if len(all_rows) == 0:
+        logger.warning("[PDFPLUMBER] No table structures found, trying text-based parsing...")
+        all_rows = parse_tabular_text_by_patterns(file_path, columns)
+    
     return all_rows
+
+
+def parse_tabular_text_by_patterns(file_path: str, columns: List[str]) -> List[Dict[str, str]]:
+    """
+    Parse tabular PDF using text patterns when pdfplumber table extraction fails.
+    
+    Patterns are loaded from /app/config/pdf_patterns.json if available,
+    otherwise uses sensible defaults.
+    """
+    # Load patterns from config or use defaults
+    patterns = load_pdf_parsing_patterns()
+    
+    all_rows = []
+    
+    try:
+        with pdfplumber.open(file_path) as pdf:
+            for page_num, page in enumerate(pdf.pages):
+                try:
+                    text = page.extract_text() or ""
+                    lines = text.split('\n')
+                    
+                    for line in lines:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        
+                        # Skip headers, footers, page markers
+                        if any(skip in line for skip in patterns.get('skip_patterns', [])):
+                            continue
+                        
+                        # Try each code pattern
+                        row = None
+                        for pattern_def in patterns.get('code_patterns', []):
+                            match = re.match(pattern_def['regex'], line)
+                            if match:
+                                row = parse_line_with_pattern(match, line, pattern_def, patterns, columns)
+                                break
+                        
+                        if row:
+                            all_rows.append(row)
+                
+                except Exception as page_e:
+                    logger.warning(f"[TEXT-PARSE] Page {page_num+1} error: {page_e}")
+                    continue
+        
+        logger.warning(f"[TEXT-PARSE] Extracted {len(all_rows)} rows via text patterns")
+        
+    except Exception as e:
+        logger.error(f"[TEXT-PARSE] Text parsing failed: {e}")
+    
+    return all_rows
+
+
+def load_pdf_parsing_patterns() -> Dict[str, Any]:
+    """
+    Load PDF parsing patterns from config file or return defaults.
+    
+    Config file: /app/config/pdf_patterns.json
+    """
+    config_paths = [
+        '/app/config/pdf_patterns.json',
+        'config/pdf_patterns.json',
+        os.path.join(os.path.dirname(__file__), 'pdf_patterns.json')
+    ]
+    
+    for path in config_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    patterns = json.load(f)
+                    logger.info(f"[TEXT-PARSE] Loaded patterns from {path}")
+                    return patterns
+            except Exception as e:
+                logger.warning(f"[TEXT-PARSE] Failed to load {path}: {e}")
+    
+    # Default patterns
+    return {
+        'skip_patterns': [
+            'Page ', 'Select: All', 'Last Page',
+            'Code Tax Category', 'Description Rule'
+        ],
+        'code_patterns': [
+            {
+                'name': 'numeric_code',
+                'regex': r'^(\d{5})\s+([A-Z]{3,6})\s+(.+)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            },
+            {
+                'name': 'alpha_code', 
+                'regex': r'^([A-Z][A-Z0-9]{1,5})\s+([A-Z]{3,6})\s+(.+)$',
+                'groups': {'Code': 1, 'Tax Category': 2, 'rest': 3}
+            }
+        ],
+        'calculation_rules': [
+            'Pay rate * hours * rate factor',
+            'Flat amount',
+            'Expression',
+            'Hours * flat amount',
+            'Coefficient OT'
+        ],
+        'flags': {
+            'reg_pay_markers': ['ü', '✓'],
+            'accumulator_markers': [' Z ', ' Z$']
+        }
+    }
+
+
+def parse_line_with_pattern(match, line: str, pattern_def: Dict, patterns: Dict, columns: List[str]) -> Dict[str, str]:
+    """
+    Parse a matched line using pattern definition.
+    """
+    groups = pattern_def.get('groups', {})
+    row = {}
+    
+    # Extract named groups
+    for field, group_num in groups.items():
+        if field != 'rest' and group_num <= len(match.groups()):
+            row[field] = match.group(group_num)
+    
+    # Get the "rest" portion for further parsing
+    rest_group = groups.get('rest')
+    rest = match.group(rest_group) if rest_group and rest_group <= len(match.groups()) else ''
+    
+    # Extract calculation rule
+    for calc in patterns.get('calculation_rules', []):
+        if calc.lower() in rest.lower():
+            row['Calculation Rule'] = calc
+            rest = rest.replace(calc, '').strip()
+            break
+    
+    # Extract rate factor
+    rate_match = re.search(r'\b(\d+\.?\d*)\b', rest)
+    if rate_match:
+        row['Rate Factor'] = rate_match.group(1)
+    
+    # Check flags
+    flags = patterns.get('flags', {})
+    if any(m in line for m in flags.get('reg_pay_markers', [])):
+        row['Reg Pay'] = 'Yes'
+    
+    for marker in flags.get('accumulator_markers', []):
+        if marker.rstrip('$') in line or (marker.endswith('$') and line.endswith(marker[:-1])):
+            row['Accumulators'] = 'Z'
+            break
+    
+    # Fill remaining columns
+    for col in columns:
+        if col not in row:
+            row[col] = ''
+    
+    return row
 
 
 # =============================================================================
