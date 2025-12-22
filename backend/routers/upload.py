@@ -60,6 +60,19 @@ from utils.database.models import (
     DocumentRegistryModel, auto_classify_file, LineageModel
 )
 
+# Import unified registration service
+try:
+    from utils.registration_service import RegistrationService, RegistrationSource
+    REGISTRATION_SERVICE_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.registration_service import RegistrationService, RegistrationSource
+        REGISTRATION_SERVICE_AVAILABLE = True
+    except ImportError:
+        REGISTRATION_SERVICE_AVAILABLE = False
+        logger_temp = logging.getLogger(__name__)
+        logger_temp.warning("RegistrationService not available - using legacy registration")
+
 # Import structured data handler for Excel/CSV
 try:
     from utils.structured_data_handler import get_structured_handler
@@ -927,55 +940,65 @@ def process_file_background(
                     except Exception as e:
                         logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
                 
-                # Register in document registry with classification
+                # Register in document registry with classification (UNIFIED)
                 try:
                     times = calc_timing_ms()
-                    DocumentRegistryModel.register(
-                        filename=filename,
-                        file_type=file_ext,
-                        truth_type=truth_type,
-                        classification_method=classification_method,
-                        classification_confidence=classification_confidence,
-                        content_domain=domain_list,
-                        storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                        project_id=project_id if not is_global else None,
-                        is_global=is_global,
-                        duckdb_tables=result.get('tables_created', []),
-                        row_count=total_rows,
-                        sheet_count=tables_created,
-                        parse_status='success',
-                        processing_time_ms=times['processing_time_ms'],
-                        classification_time_ms=times['classification_time_ms'],
-                        parse_time_ms=times['parse_time_ms'],
-                        storage_time_ms=times['storage_time_ms'],
-                        file_hash=file_hash,
-                        file_size_bytes=file_size,
-                        uploaded_by_id=uploaded_by_id,
-                        uploaded_by_email=uploaded_by_email,
-                        metadata={
-                            'project_name': project,
-                            'functional_area': functional_area,
-                            'file_size': file_size,
-                            'intelligence': intelligence_summary
-                        }
-                    )
-                    logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> DUCKDB ({times['processing_time_ms']}ms)")
-                    
-                    # Track lineage: file → table(s)
-                    tables_created_list = result.get('tables_created', [])
-                    for table_name in tables_created_list:
-                        LineageModel.track(
-                            source_type=LineageModel.NODE_FILE,
-                            source_id=filename,
-                            target_type=LineageModel.NODE_TABLE,
-                            target_id=table_name,
-                            relationship=LineageModel.REL_PARSED,
-                            project_id=project_id,
+                    if REGISTRATION_SERVICE_AVAILABLE:
+                        reg_result = RegistrationService.register_structured(
+                            filename=filename,
+                            project=project,
+                            project_id=project_id if not is_global else None,
+                            tables_created=result.get('tables_created', []),
+                            row_count=total_rows,
+                            sheet_count=tables_created,
+                            file_content=None,  # Already processed
+                            file_size=file_size,
+                            file_type=file_ext,
+                            uploaded_by_id=uploaded_by_id,
+                            uploaded_by_email=uploaded_by_email,
                             job_id=job_id,
-                            created_by_id=uploaded_by_id,
-                            metadata={'rows': total_rows, 'truth_type': truth_type}
+                            source=RegistrationSource.UPLOAD,
+                            classification_confidence=classification_confidence,
+                            content_domain=domain_list,
+                            processing_time_ms=times['processing_time_ms'],
+                            parse_time_ms=times['parse_time_ms'],
+                            storage_time_ms=times['storage_time_ms'],
+                            metadata={
+                                'project_name': project,
+                                'functional_area': functional_area,
+                                'file_size': file_size,
+                                'intelligence': intelligence_summary,
+                                'classification_method': classification_method,
+                                'truth_type': truth_type
+                            }
                         )
-                    logger.info(f"[BACKGROUND] Tracked lineage: {filename} -> {len(tables_created_list)} table(s)")
+                        if reg_result.success:
+                            logger.info(f"[BACKGROUND] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
+                        else:
+                            logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
+                    else:
+                        # Legacy fallback
+                        DocumentRegistryModel.register(
+                            filename=filename,
+                            file_type=file_ext,
+                            truth_type=truth_type,
+                            classification_method=classification_method,
+                            classification_confidence=classification_confidence,
+                            content_domain=domain_list,
+                            storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                            project_id=project_id if not is_global else None,
+                            is_global=is_global,
+                            duckdb_tables=result.get('tables_created', []),
+                            row_count=total_rows,
+                            sheet_count=tables_created,
+                            parse_status='success',
+                            processing_time_ms=times['processing_time_ms'],
+                            file_hash=file_hash,
+                            file_size_bytes=file_size,
+                            uploaded_by_id=uploaded_by_id,
+                            uploaded_by_email=uploaded_by_email
+                        )
+                        logger.info(f"[BACKGROUND] Registered (legacy): {filename}")
                     
                 except Exception as e:
                     logger.warning(f"[BACKGROUND] Could not register document: {e}")
@@ -1075,7 +1098,7 @@ def process_file_background(
                     except Exception as int_e:
                         logger.warning(f"[BACKGROUND] PDF intelligence analysis failed: {int_e}")
                     
-                    # Register in document registry with classification
+                    # Register in document registry with classification (UNIFIED)
                     try:
                         duckdb_result = pdf_result.get('duckdb_result', {})
                         logger.warning(f"[BACKGROUND] duckdb_result keys: {duckdb_result.keys() if duckdb_result else 'None'}")
@@ -1087,56 +1110,64 @@ def process_file_background(
                         timing['storage_end'] = time.time()
                         times = calc_timing_ms()
                         
-                        DocumentRegistryModel.register(
-                            filename=filename,
-                            file_type='pdf',
-                            truth_type=truth_type,
-                            classification_method=classification_method,
-                            classification_confidence=classification_confidence,
-                            content_domain=domain_list,
-                            storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                            project_id=project_id,
-                            is_global=is_global,
-                            duckdb_tables=duckdb_result.get('tables_created', []),
-                            row_count=duckdb_result.get('total_rows', 0),
-                            parse_status='success',
-                            processing_time_ms=times['processing_time_ms'],
-                            classification_time_ms=times['classification_time_ms'],
-                            parse_time_ms=times['parse_time_ms'],
-                            storage_time_ms=times['storage_time_ms'],
-                            file_hash=file_hash,
-                            file_size_bytes=file_size,
-                            uploaded_by_id=uploaded_by_id,
-                            uploaded_by_email=uploaded_by_email,
-                            metadata={
-                                'project_name': project,
-                                'functional_area': functional_area,
-                                'file_size': file_size,
-                                'pdf_analysis': {
-                                    'is_tabular': analysis.get('is_tabular', False),
-                                    'confidence': analysis.get('confidence', 0),
-                                    'table_pages': len(analysis.get('table_pages', []))
-                                },
-                                'intelligence': pdf_result.get('intelligence')
-                            }
-                        )
-                        logger.warning(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB")
-                        
-                        # Track lineage: file → table(s)
-                        pdf_tables = duckdb_result.get('tables_created', [])
-                        for table_name in pdf_tables:
-                            LineageModel.track(
-                                source_type=LineageModel.NODE_FILE,
-                                source_id=filename,
-                                target_type=LineageModel.NODE_TABLE,
-                                target_id=table_name,
-                                relationship=LineageModel.REL_PARSED,
+                        if REGISTRATION_SERVICE_AVAILABLE:
+                            reg_result = RegistrationService.register_structured(
+                                filename=filename,
+                                project=project,
                                 project_id=project_id,
+                                tables_created=duckdb_result.get('tables_created', []),
+                                row_count=duckdb_result.get('total_rows', 0),
+                                file_size=file_size,
+                                file_type='pdf',
+                                uploaded_by_id=uploaded_by_id,
+                                uploaded_by_email=uploaded_by_email,
                                 job_id=job_id,
-                                created_by_id=uploaded_by_id,
-                                metadata={'rows': duckdb_result.get('total_rows', 0), 'source': 'smart_pdf'}
+                                source=RegistrationSource.UPLOAD,
+                                classification_confidence=classification_confidence,
+                                content_domain=domain_list,
+                                processing_time_ms=times['processing_time_ms'],
+                                parse_time_ms=times['parse_time_ms'],
+                                storage_time_ms=times['storage_time_ms'],
+                                metadata={
+                                    'project_name': project,
+                                    'functional_area': functional_area,
+                                    'file_size': file_size,
+                                    'pdf_analysis': {
+                                        'is_tabular': analysis.get('is_tabular', False),
+                                        'confidence': analysis.get('confidence', 0),
+                                        'table_pages': len(analysis.get('table_pages', []))
+                                    },
+                                    'intelligence': pdf_result.get('intelligence'),
+                                    'truth_type': truth_type,
+                                    'source': 'smart_pdf'
+                                }
                             )
-                        logger.warning(f"[BACKGROUND] Tracked lineage: PDF -> {len(pdf_tables)} table(s)")
+                            if reg_result.success:
+                                logger.warning(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB ({reg_result.lineage_edges} lineage edges)")
+                            else:
+                                logger.warning(f"[BACKGROUND] PDF registration warning: {reg_result.error}")
+                        else:
+                            # Legacy fallback
+                            DocumentRegistryModel.register(
+                                filename=filename,
+                                file_type='pdf',
+                                truth_type=truth_type,
+                                classification_method=classification_method,
+                                classification_confidence=classification_confidence,
+                                content_domain=domain_list,
+                                storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                                project_id=project_id,
+                                is_global=is_global,
+                                duckdb_tables=duckdb_result.get('tables_created', []),
+                                row_count=duckdb_result.get('total_rows', 0),
+                                parse_status='success',
+                                processing_time_ms=times['processing_time_ms'],
+                                file_hash=file_hash,
+                                file_size_bytes=file_size,
+                                uploaded_by_id=uploaded_by_id,
+                                uploaded_by_email=uploaded_by_email
+                            )
+                            logger.warning(f"[BACKGROUND] Registered PDF (legacy): {truth_type} -> DUCKDB")
                         
                     except Exception as e:
                         logger.warning(f"[BACKGROUND] Could not register PDF: {e}")
@@ -1297,37 +1328,57 @@ def process_file_background(
                                             timing['storage_end'] = time.time()
                                             times = calc_timing_ms()
                                             
-                                            # Register in document registry with classification
+                                            # Register in document registry with classification (UNIFIED)
                                             try:
-                                                DocumentRegistryModel.register(
-                                                    filename=filename,
-                                                    file_type=file_ext,
-                                                    truth_type=truth_type,
-                                                    classification_method=classification_method,
-                                                    classification_confidence=classification_confidence,
-                                                    content_domain=domain_list,
-                                                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                                                    project_id=project_id,
-                                                    is_global=is_global,
-                                                    row_count=result.get('row_count', 0),
-                                                    parse_status='success',
-                                                    processing_time_ms=times['processing_time_ms'],
-                                                    classification_time_ms=times['classification_time_ms'],
-                                                    parse_time_ms=times['parse_time_ms'],
-                                                    storage_time_ms=times['storage_time_ms'],
-                                                    file_hash=file_hash,
-                                                    file_size_bytes=file_size,
-                                                    uploaded_by_id=uploaded_by_id,
-                                                    uploaded_by_email=uploaded_by_email,
-                                                    metadata={
-                                                        'project_name': project,
-                                                        'functional_area': functional_area,
-                                                        'original_type': file_ext,
-                                                        'detected_structure': 'tabular',
-                                                        'delimiter': delimiter,
-                                                        'intelligence': intelligence_summary
-                                                    }
-                                                )
+                                                if REGISTRATION_SERVICE_AVAILABLE:
+                                                    reg_result = RegistrationService.register_structured(
+                                                        filename=filename,
+                                                        project=project,
+                                                        project_id=project_id,
+                                                        tables_created=result.get('tables_created', []),
+                                                        row_count=result.get('row_count', 0),
+                                                        file_size=file_size,
+                                                        file_type=file_ext,
+                                                        uploaded_by_id=uploaded_by_id,
+                                                        uploaded_by_email=uploaded_by_email,
+                                                        job_id=job_id,
+                                                        source=RegistrationSource.UPLOAD,
+                                                        classification_confidence=classification_confidence,
+                                                        content_domain=domain_list,
+                                                        processing_time_ms=times['processing_time_ms'],
+                                                        parse_time_ms=times['parse_time_ms'],
+                                                        storage_time_ms=times['storage_time_ms'],
+                                                        metadata={
+                                                            'project_name': project,
+                                                            'functional_area': functional_area,
+                                                            'original_type': file_ext,
+                                                            'detected_structure': 'tabular',
+                                                            'delimiter': delimiter,
+                                                            'intelligence': intelligence_summary,
+                                                            'truth_type': truth_type
+                                                        }
+                                                    )
+                                                    if not reg_result.success:
+                                                        logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
+                                                else:
+                                                    DocumentRegistryModel.register(
+                                                        filename=filename,
+                                                        file_type=file_ext,
+                                                        truth_type=truth_type,
+                                                        classification_method=classification_method,
+                                                        classification_confidence=classification_confidence,
+                                                        content_domain=domain_list,
+                                                        storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
+                                                        project_id=project_id,
+                                                        is_global=is_global,
+                                                        row_count=result.get('row_count', 0),
+                                                        parse_status='success',
+                                                        processing_time_ms=times['processing_time_ms'],
+                                                        file_hash=file_hash,
+                                                        file_size_bytes=file_size,
+                                                        uploaded_by_id=uploaded_by_id,
+                                                        uploaded_by_email=uploaded_by_email
+                                                    )
                                             except Exception as reg_e:
                                                 logger.warning(f"[BACKGROUND] Could not register: {reg_e}")
                                             
@@ -1537,61 +1588,92 @@ def process_file_background(
             except Exception as e:
                 logger.warning(f"[BACKGROUND] Could not save to documents table: {e}")
         
-        # Register in document registry with classification
+        # Register in document registry with classification (UNIFIED)
         try:
             times = calc_timing_ms()
             
-            # Determine storage type - use "both" if DuckDB also succeeded
-            if duckdb_success:
-                storage_type = DocumentRegistryModel.STORAGE_BOTH
-                logger.info(f"[BACKGROUND] Using storage_type=both (DuckDB + ChromaDB)")
+            if REGISTRATION_SERVICE_AVAILABLE:
+                # Use hybrid registration if DuckDB also succeeded
+                if duckdb_success:
+                    reg_result = RegistrationService.register_hybrid(
+                        filename=filename,
+                        project=project,
+                        project_id=project_id if not is_global else None,
+                        tables_created=pdf_result.get('duckdb_result', {}).get('tables_created', []) if 'pdf_result' in dir() else [],
+                        row_count=pdf_result.get('duckdb_result', {}).get('total_rows', 0) if 'pdf_result' in dir() else 0,
+                        chunk_count=chunks_added,
+                        truth_type=truth_type,
+                        file_size=file_size,
+                        file_type=file_ext,
+                        uploaded_by_id=uploaded_by_id,
+                        uploaded_by_email=uploaded_by_email,
+                        job_id=job_id,
+                        source=RegistrationSource.UPLOAD,
+                        metadata={
+                            'project_name': project,
+                            'functional_area': functional_area,
+                            'file_size': file_size,
+                            'char_count': len(text),
+                            'classification_method': classification_method,
+                            'classification_confidence': classification_confidence
+                        }
+                    )
+                else:
+                    reg_result = RegistrationService.register_embedded(
+                        filename=filename,
+                        project=project,
+                        project_id=project_id if not is_global else None,
+                        chunk_count=chunks_added,
+                        truth_type=truth_type,
+                        file_size=file_size,
+                        file_type=file_ext,
+                        uploaded_by_id=uploaded_by_id,
+                        uploaded_by_email=uploaded_by_email,
+                        job_id=job_id,
+                        source=RegistrationSource.UPLOAD,
+                        classification_confidence=classification_confidence,
+                        content_domain=domain_list,
+                        functional_area=functional_area,
+                        processing_time_ms=times['processing_time_ms'],
+                        embedding_time_ms=times['embedding_time_ms'],
+                        storage_time_ms=times['storage_time_ms'],
+                        metadata={
+                            'project_name': project,
+                            'functional_area': functional_area,
+                            'file_size': file_size,
+                            'char_count': len(text),
+                            'classification_method': classification_method
+                        }
+                    )
+                
+                if reg_result.success:
+                    logger.warning(f"[BACKGROUND] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
+                else:
+                    logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
             else:
-                storage_type = DocumentRegistryModel.STORAGE_CHROMADB
-            
-            DocumentRegistryModel.register(
-                filename=filename,
-                file_type=file_ext,
-                truth_type=truth_type,
-                classification_method=classification_method,
-                classification_confidence=classification_confidence,
-                content_domain=domain_list,
-                storage_type=storage_type,
-                project_id=project_id if not is_global else None,
-                is_global=is_global,
-                chunk_count=chunks_added,  # Actual count from RAG
-                parse_status='success',
-                processing_time_ms=times['processing_time_ms'],
-                classification_time_ms=times['classification_time_ms'],
-                parse_time_ms=times['parse_time_ms'],
-                embedding_time_ms=times['embedding_time_ms'],
-                storage_time_ms=times['storage_time_ms'],
-                file_hash=file_hash,
-                file_size_bytes=file_size,
-                uploaded_by_id=uploaded_by_id,
-                uploaded_by_email=uploaded_by_email,
-                metadata={
-                    'project_name': project,
-                    'functional_area': functional_area,
-                    'file_size': file_size,
-                    'char_count': len(text)
-                }
-            )
-            logger.warning(f"[BACKGROUND] Registered: {filename} as {truth_type} -> {storage_type} ({times['processing_time_ms']}ms)")
-            
-            # Track lineage: file → chunks (ChromaDB)
-            if chunks_added > 0:
-                LineageModel.track(
-                    source_type=LineageModel.NODE_FILE,
-                    source_id=filename,
-                    target_type=LineageModel.NODE_CHUNK,
-                    target_id=f"{filename}:chunks",  # Aggregate ID for all chunks from this file
-                    relationship=LineageModel.REL_EMBEDDED,
-                    project_id=project_id,
-                    job_id=job_id,
-                    created_by_id=uploaded_by_id,
-                    metadata={'chunk_count': chunks_added, 'truth_type': truth_type, 'storage_type': storage_type}
+                # Legacy fallback
+                storage_type = DocumentRegistryModel.STORAGE_BOTH if duckdb_success else DocumentRegistryModel.STORAGE_CHROMADB
+                DocumentRegistryModel.register(
+                    filename=filename,
+                    file_type=file_ext,
+                    truth_type=truth_type,
+                    classification_method=classification_method,
+                    classification_confidence=classification_confidence,
+                    content_domain=domain_list,
+                    storage_type=storage_type,
+                    project_id=project_id if not is_global else None,
+                    is_global=is_global,
+                    chunk_count=chunks_added,
+                    parse_status='success',
+                    processing_time_ms=times['processing_time_ms'],
+                    embedding_time_ms=times['embedding_time_ms'],
+                    storage_time_ms=times['storage_time_ms'],
+                    file_hash=file_hash,
+                    file_size_bytes=file_size,
+                    uploaded_by_id=uploaded_by_id,
+                    uploaded_by_email=uploaded_by_email
                 )
-                logger.warning(f"[BACKGROUND] Tracked lineage: {filename} -> {chunks_added} chunks")
+                logger.warning(f"[BACKGROUND] Registered (legacy): {filename} as {truth_type}")
             
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
@@ -1751,6 +1833,30 @@ async def upload_file(
                 registry.add_document(doc)
                 
                 logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+                
+                # Register in unified registration service
+                if REGISTRATION_SERVICE_AVAILABLE:
+                    try:
+                        reg_result = RegistrationService.register_standards(
+                            filename=filename,
+                            domain=domain or 'general',
+                            rules_extracted=len(doc.rules),
+                            document_id=doc.document_id,
+                            title=doc.title,
+                            page_count=doc.page_count,
+                            file_content=content,
+                            file_type=ext,
+                            metadata={
+                                'source': 'standards_upload',
+                                'rule_types': list(set(r.rule_type for r in doc.rules[:50]))
+                            }
+                        )
+                        if reg_result.success:
+                            logger.info(f"[STANDARDS] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
+                        else:
+                            logger.warning(f"[STANDARDS] Registration warning: {reg_result.error}")
+                    except Exception as reg_e:
+                        logger.warning(f"[STANDARDS] Could not register: {reg_e}")
                 
                 return {
                     "success": True,
