@@ -278,6 +278,61 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
         # Run analysis
         result = service.analyze(tiers=tiers)
         
+        # Track lineage: table → analysis, analysis → findings
+        try:
+            from utils.database.models import LineageModel, ProjectModel
+            import uuid
+            
+            # Get project_id
+            project_record = ProjectModel.get_by_name(project)
+            project_id = project_record.get('id') if project_record else None
+            
+            # Generate analysis ID
+            analysis_id = str(uuid.uuid4())[:8]
+            
+            # Get tables analyzed
+            tables_analyzed = []
+            if hasattr(service, 'tables') and service.tables:
+                tables_analyzed = [t.get('name') or t.get('table_name') for t in service.tables if isinstance(t, dict)]
+            elif hasattr(service, 'table_names'):
+                tables_analyzed = service.table_names
+            
+            # Track table → analysis edges
+            for table_name in tables_analyzed:
+                LineageModel.track(
+                    source_type=LineageModel.NODE_TABLE,
+                    source_id=table_name,
+                    target_type=LineageModel.NODE_ANALYSIS,
+                    target_id=f"analysis_{analysis_id}",
+                    relationship=LineageModel.REL_ANALYZED,
+                    project_id=project_id,
+                    metadata={'tiers': [t.value for t in tiers], 'project': project}
+                )
+            
+            # Track analysis → findings edges
+            findings_count = 0
+            if hasattr(service, 'findings') and service.findings:
+                findings_count = len(service.findings)
+                for finding in service.findings[:50]:  # Limit to prevent too many edges
+                    finding_id = getattr(finding, 'id', None) or str(uuid.uuid4())[:8]
+                    LineageModel.track(
+                        source_type=LineageModel.NODE_ANALYSIS,
+                        source_id=f"analysis_{analysis_id}",
+                        target_type=LineageModel.NODE_FINDING,
+                        target_id=finding_id,
+                        relationship=LineageModel.REL_GENERATED,
+                        project_id=project_id,
+                        metadata={
+                            'severity': getattr(finding, 'severity', {}).value if hasattr(getattr(finding, 'severity', None), 'value') else 'unknown',
+                            'category': getattr(finding, 'category', 'unknown')
+                        }
+                    )
+            
+            logger.info(f"[INTELLIGENCE_API] Tracked lineage: {len(tables_analyzed)} tables -> analysis -> {findings_count} findings")
+            
+        except Exception as lineage_error:
+            logger.warning(f"[INTELLIGENCE_API] Lineage tracking failed (non-fatal): {lineage_error}")
+        
         return {
             'project': project,
             'success': 'error' not in result,
