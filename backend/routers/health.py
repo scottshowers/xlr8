@@ -202,8 +202,8 @@ def check_supabase_health() -> Dict[str, Any]:
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
-        supabase = get_supabase_client()
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
         
         if not supabase:
             result["status"] = "critical"
@@ -343,8 +343,8 @@ def check_jobs_health() -> Dict[str, Any]:
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
-        supabase = get_supabase_client()
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
         
         if not supabase:
             result["status"] = "degraded"
@@ -491,8 +491,8 @@ def check_data_integrity() -> Dict[str, Any]:
         # Get registry entries
         registry_entries = {}
         try:
-            from utils.database.models import get_supabase_client
-            supabase = get_supabase_client()
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
             
             if supabase:
                 registry = supabase.table('document_registry').select('*').execute()
@@ -824,8 +824,8 @@ async def get_projects_health():
         
         # 3. Supabase registry - entries per project
         try:
-            from utils.database.models import get_supabase_client
-            supabase = get_supabase_client()
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
             
             if supabase:
                 # Get projects table for project_id mapping
@@ -974,8 +974,8 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
         
         # 3. Registry entries
         try:
-            from utils.database.models import get_supabase_client
-            supabase = get_supabase_client()
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
             
             if supabase:
                 # Get projects for name lookup
@@ -1170,10 +1170,10 @@ async def get_stale_files(days: int = Query(30, description="Files not accessed 
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
+        from utils.database.supabase_client import get_supabase
         from datetime import timedelta
         
-        supabase = get_supabase_client()
+        supabase = get_supabase()
         if not supabase:
             result["error"] = "Supabase not available"
             return result
@@ -1238,9 +1238,9 @@ async def get_uploader_stats():
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
+        from utils.database.supabase_client import get_supabase
         
-        supabase = get_supabase_client()
+        supabase = get_supabase()
         if not supabase:
             result["error"] = "Supabase not available"
             return result
@@ -1316,9 +1316,9 @@ async def find_duplicate_files():
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
+        from utils.database.supabase_client import get_supabase
         
-        supabase = get_supabase_client()
+        supabase = get_supabase()
         if not supabase:
             result["error"] = "Supabase not available"
             return result
@@ -1398,9 +1398,9 @@ async def get_lineage_summary():
     start = time.time()
     
     try:
-        from utils.database.models import get_supabase_client
+        from utils.database.supabase_client import get_supabase
         
-        supabase = get_supabase_client()
+        supabase = get_supabase()
         if not supabase:
             result["error"] = "Supabase not available"
             return result
@@ -1459,12 +1459,13 @@ async def get_node_lineage(node_type: str, node_id: str, project: str = Query(No
     start = time.time()
     
     try:
-        from utils.database.models import LineageModel, get_supabase_client
+        from utils.database.models import LineageModel
+        from utils.database.supabase_client import get_supabase
         
         # Get project_id if project name provided
         project_id = None
         if project:
-            supabase = get_supabase_client()
+            supabase = get_supabase()
             if supabase:
                 proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
                 if proj_resp.data:
@@ -1501,9 +1502,10 @@ async def get_project_lineage(project_name: str):
     start = time.time()
     
     try:
-        from utils.database.models import LineageModel, get_supabase_client
+        from utils.database.models import LineageModel
+        from utils.database.supabase_client import get_supabase
         
-        supabase = get_supabase_client()
+        supabase = get_supabase()
         if not supabase:
             result["error"] = "Supabase not available"
             return result
@@ -1561,12 +1563,13 @@ async def trace_to_source(target_type: str, target_id: str, project: str = Query
     start = time.time()
     
     try:
-        from utils.database.models import LineageModel, get_supabase_client
+        from utils.database.models import LineageModel
+        from utils.database.supabase_client import get_supabase
         
         # Get project_id if project name provided
         project_id = None
         if project:
-            supabase = get_supabase_client()
+            supabase = get_supabase()
             if supabase:
                 proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
                 if proj_resp.data:
