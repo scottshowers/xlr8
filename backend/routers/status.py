@@ -786,9 +786,15 @@ async def delete_all_jobs():
 @router.get("/status/documents")
 async def get_documents(project: Optional[str] = None, limit: int = 1000):
     """
-    Get all documents.
+    Get all documents that have chunks in ChromaDB.
     
     Uses document_registry as source of truth.
+    
+    NOTE: Only returns files with:
+    - storage_type containing 'chromadb' (chromadb or both)
+    - chunk_count > 0
+    
+    Files with 0 chunks should NOT appear in Documents section.
     """
     import time
     start_time = time.time()
@@ -826,6 +832,21 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
             logger.info(f"[STATUS/DOCUMENTS] Registry returned {len(registry_entries)} entries")
             
             for entry in registry_entries:
+                storage_type = entry.get("storage_type", "")
+                chunk_count = entry.get("chunk_count", 0) or 0
+                
+                # =============================================================
+                # FILTER: Only show files that have chunks in ChromaDB
+                # Files with storage_type='duckdb' only belong in Structured Data
+                # Files with 0 chunks shouldn't appear in Documents section
+                # =============================================================
+                has_chromadb = storage_type in ('chromadb', 'both')
+                has_chunks = chunk_count > 0
+                
+                if not has_chromadb or not has_chunks:
+                    # Skip - this file doesn't belong in Documents section
+                    continue
+                
                 doc_entry = {
                     "id": entry.get("id"),
                     "filename": entry.get("filename", "unknown"),
@@ -835,8 +856,8 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
                     "project_id": entry.get("project_id"),
                     "functional_area": entry.get("metadata", {}).get("functional_area", ""),
                     "upload_date": entry.get("created_at", ""),
-                    "chunks": entry.get("chunk_count", 0),
-                    "storage_type": entry.get("storage_type", ""),
+                    "chunks": chunk_count,
+                    "storage_type": storage_type,
                     "usage_type": entry.get("usage_type", ""),
                     "is_global": entry.get("is_global", False),
                 }
