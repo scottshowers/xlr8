@@ -2691,14 +2691,250 @@ async def check_data_integrity(project: Optional[str] = None):
         return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0, "insights_count": 0}
 
 
+
 # =============================================================================
-# COMPREHENSIVE HEALTH ENDPOINT - Task 2 GET HEALTHY Sprint
+# COMPREHENSIVE HEALTH MONITORING - Task 2 GET HEALTHY Sprint
+# =============================================================================
+# 
+# Endpoints:
+#   GET  /status/health          - Full check with scores, saves snapshot
+#   GET  /status/health/quick    - Fast connectivity check only (<500ms)
+#   GET  /status/health/history  - Query historical snapshots for charts
+#   POST /status/health/snapshot - Force save snapshot (for scheduled jobs)
+#
+# Database table required (run in Supabase):
+#   CREATE TABLE health_snapshots (
+#     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+#     timestamp TIMESTAMPTZ DEFAULT NOW(),
+#     overall_status TEXT NOT NULL,
+#     health_score INT NOT NULL,
+#     checks JSONB NOT NULL,
+#     issues JSONB DEFAULT '[]',
+#     check_time_ms INT,
+#     triggered_by TEXT DEFAULT 'manual'
+#   );
+#   CREATE INDEX idx_health_timestamp ON health_snapshots(timestamp DESC);
 # =============================================================================
 
-@router.get("/status/health")
-async def comprehensive_health_check(project_id: Optional[str] = None):
+
+def _calculate_check_score(check_result: dict) -> int:
+    """Calculate a 0-100 score for a single health check."""
+    status = check_result.get('status', 'error')
+    
+    if status == 'ok':
+        return 100
+    elif status == 'warning':
+        return 75
+    elif status == 'degraded':
+        return 50
+    elif status in ('timeout', 'unavailable'):
+        return 25
+    else:  # error
+        return 0
+
+
+def _save_health_snapshot(
+    overall_status: str,
+    health_score: int,
+    checks: dict,
+    issues: list,
+    check_time_ms: int,
+    triggered_by: str = 'manual'
+) -> bool:
+    """Save health snapshot to database for historical tracking."""
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if not supabase:
+            logger.warning("[HEALTH] Cannot save snapshot - Supabase unavailable")
+            return False
+        
+        result = supabase.table('health_snapshots').insert({
+            'overall_status': overall_status,
+            'health_score': health_score,
+            'checks': checks,
+            'issues': issues,
+            'check_time_ms': check_time_ms,
+            'triggered_by': triggered_by
+        }).execute()
+        
+        return bool(result.data)
+    except Exception as e:
+        logger.warning(f"[HEALTH] Failed to save snapshot: {e}")
+        return False
+
+
+@router.get("/status/health/quick")
+async def quick_health_check():
     """
-    Comprehensive system health check.
+    Fast connectivity check - Supabase, DuckDB, ChromaDB only.
+    
+    Use this for frequent polling (every 30s-1min).
+    Target: <500ms response time.
+    """
+    import time
+    start_time = time.time()
+    
+    checks = {}
+    overall_score = 0
+    check_count = 0
+    
+    # CHECK 1: SUPABASE
+    try:
+        supabase_start = time.time()
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            supabase.table('document_registry').select('id').limit(1).execute()
+            latency = int((time.time() - supabase_start) * 1000)
+            checks["supabase"] = {"status": "ok", "score": 100, "latency_ms": latency}
+            overall_score += 100
+        else:
+            checks["supabase"] = {"status": "error", "score": 0}
+    except Exception as e:
+        checks["supabase"] = {"status": "error", "score": 0, "error": str(e)[:100]}
+    check_count += 1
+    
+    # CHECK 2: DUCKDB
+    try:
+        duckdb_start = time.time()
+        if STRUCTURED_AVAILABLE:
+            handler = get_structured_handler()
+            handler.safe_fetchone("SELECT 1")
+            latency = int((time.time() - duckdb_start) * 1000)
+            checks["duckdb"] = {"status": "ok", "score": 100, "latency_ms": latency}
+            overall_score += 100
+        else:
+            checks["duckdb"] = {"status": "unavailable", "score": 25}
+            overall_score += 25
+    except Exception as e:
+        checks["duckdb"] = {"status": "error", "score": 0, "error": str(e)[:100]}
+    check_count += 1
+    
+    # CHECK 3: CHROMADB
+    try:
+        chroma_start = time.time()
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        collection.count()
+        latency = int((time.time() - chroma_start) * 1000)
+        checks["chromadb"] = {"status": "ok", "score": 100, "latency_ms": latency}
+        overall_score += 100
+    except Exception as e:
+        checks["chromadb"] = {"status": "error", "score": 0, "error": str(e)[:100]}
+    check_count += 1
+    
+    # Calculate overall
+    health_score = int(overall_score / check_count) if check_count > 0 else 0
+    
+    if health_score >= 90:
+        overall_status = "healthy"
+    elif health_score >= 50:
+        overall_status = "degraded"
+    else:
+        overall_status = "unhealthy"
+    
+    return {
+        "status": overall_status,
+        "health_score": health_score,
+        "timestamp": datetime.utcnow().isoformat(),
+        "check_time_ms": int((time.time() - start_time) * 1000),
+        "checks": checks
+    }
+
+
+@router.get("/status/health/history")
+async def get_health_history(
+    hours: int = 24,
+    limit: int = 100
+):
+    """
+    Get historical health snapshots for charting/trending.
+    
+    Args:
+        hours: How many hours back to query (default 24)
+        limit: Max records to return (default 100)
+    
+    Returns:
+        List of snapshots ordered by timestamp DESC
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if not supabase:
+            return {"error": "Supabase unavailable", "snapshots": []}
+        
+        from datetime import timedelta
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        
+        result = supabase.table('health_snapshots')\
+            .select('timestamp, overall_status, health_score, check_time_ms, issues')\
+            .gt('timestamp', cutoff)\
+            .order('timestamp', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        snapshots = result.data if result.data else []
+        
+        # Calculate summary stats
+        if snapshots:
+            scores = [s['health_score'] for s in snapshots]
+            avg_score = int(sum(scores) / len(scores))
+            min_score = min(scores)
+            max_score = max(scores)
+            
+            status_counts = {}
+            for s in snapshots:
+                st = s['overall_status']
+                status_counts[st] = status_counts.get(st, 0) + 1
+        else:
+            avg_score = min_score = max_score = 0
+            status_counts = {}
+        
+        return {
+            "period_hours": hours,
+            "snapshot_count": len(snapshots),
+            "summary": {
+                "avg_score": avg_score,
+                "min_score": min_score,
+                "max_score": max_score,
+                "status_distribution": status_counts
+            },
+            "snapshots": snapshots
+        }
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] History query failed: {e}")
+        return {"error": str(e), "snapshots": []}
+
+
+@router.post("/status/health/snapshot")
+async def force_health_snapshot(triggered_by: str = "manual"):
+    """
+    Force a health check and save snapshot.
+    
+    Use this for scheduled jobs (cron) to capture regular snapshots.
+    """
+    result = await comprehensive_health_check(save_snapshot=True, triggered_by=triggered_by)
+    return {
+        "saved": result.get("snapshot_saved", False),
+        "status": result.get("status"),
+        "health_score": result.get("health_score"),
+        "timestamp": result.get("timestamp")
+    }
+
+
+@router.get("/status/health")
+async def comprehensive_health_check(
+    project_id: Optional[str] = None,
+    save_snapshot: bool = True,
+    triggered_by: str = "api"
+):
+    """
+    Comprehensive system health check with numeric scores.
     
     Checks ALL backend systems and their consistency:
     - Supabase: Connection, document_registry accessible
@@ -2711,7 +2947,8 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
     
     Returns:
         - status: "healthy" | "degraded" | "unhealthy"
-        - Individual check results
+        - health_score: 0-100 overall score
+        - Individual check results with scores
         - Issues found
         - Recommendations
     """
@@ -2731,24 +2968,23 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         supabase = get_supabase()
         
         if supabase:
-            # Test query
             result = supabase.table('document_registry').select('id').limit(1).execute()
             supabase_latency = int((time.time() - supabase_start) * 1000)
             
-            # Count entries
             count_result = supabase.table('document_registry').select('id', count='exact').execute()
             registry_count = count_result.count if hasattr(count_result, 'count') else len(count_result.data)
             
             checks["supabase"] = {
                 "status": "ok",
+                "score": 100,
                 "latency_ms": supabase_latency,
                 "registry_entries": registry_count
             }
         else:
-            checks["supabase"] = {"status": "error", "error": "Client not available"}
+            checks["supabase"] = {"status": "error", "score": 0, "error": "Client not available"}
             issues.append("Supabase client not available")
     except Exception as e:
-        checks["supabase"] = {"status": "error", "error": str(e)}
+        checks["supabase"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"Supabase connection failed: {e}")
     
     # =========================================================================
@@ -2759,7 +2995,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         if STRUCTURED_AVAILABLE:
             handler = get_structured_handler()
             
-            # Test connection and get stats
             table_count = handler.safe_fetchone("""
                 SELECT COUNT(DISTINCT table_name) FROM _schema_metadata 
                 WHERE is_current = TRUE
@@ -2779,16 +3014,17 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             
             checks["duckdb"] = {
                 "status": "ok",
+                "score": 100,
                 "latency_ms": duckdb_latency,
                 "tables": table_count[0] if table_count else 0,
                 "total_rows": row_count[0] if row_count else 0,
                 "files": file_count[0] if file_count else 0
             }
         else:
-            checks["duckdb"] = {"status": "unavailable", "error": "Structured handler not available"}
+            checks["duckdb"] = {"status": "unavailable", "score": 25, "error": "Structured handler not available"}
             issues.append("DuckDB structured handler not available")
     except Exception as e:
-        checks["duckdb"] = {"status": "error", "error": str(e)}
+        checks["duckdb"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"DuckDB check failed: {e}")
     
     # =========================================================================
@@ -2799,10 +3035,8 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         rag = RAGHandler()
         collection = rag.client.get_or_create_collection(name="documents")
         
-        # Get collection stats
         chroma_count = collection.count()
         
-        # Get unique files
         if chroma_count > 0:
             chroma_results = collection.get(include=["metadatas"], limit=5000)
             unique_files = set()
@@ -2818,25 +3052,24 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         
         checks["chromadb"] = {
             "status": "ok",
+            "score": 100,
             "latency_ms": chroma_latency,
             "total_chunks": chroma_count,
             "unique_files": file_count
         }
     except Exception as e:
-        checks["chromadb"] = {"status": "error", "error": str(e)}
+        checks["chromadb"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"ChromaDB check failed: {e}")
     
     # =========================================================================
     # CHECK 4: REGISTRY CONSISTENCY
     # =========================================================================
     try:
-        consistency_issues = []
+        consistency_score = 100
         
-        # Get all registry entries
         registry_entries = DocumentRegistryModel.get_all(limit=5000)
         registry_files = {e['filename']: e for e in registry_entries}
         
-        # Get actual files in DuckDB
         duckdb_files = set()
         if STRUCTURED_AVAILABLE:
             try:
@@ -2849,7 +3082,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             except:
                 pass
         
-        # Get actual files in ChromaDB
         chroma_files = set()
         try:
             rag = RAGHandler()
@@ -2865,7 +3097,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         
         all_actual_files = duckdb_files | chroma_files
         
-        # Find orphans: in registry but not in any backend
         orphaned_registry = []
         for filename, entry in registry_files.items():
             storage_type = entry.get('storage_type', '')
@@ -2878,7 +3109,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
                 if filename not in duckdb_files and filename not in chroma_files:
                     orphaned_registry.append({"file": filename, "issue": "in registry as both but not in either backend"})
         
-        # Find unregistered: in backend but not in registry
         unregistered_files = []
         for filename in all_actual_files:
             if filename not in registry_files:
@@ -2889,7 +3119,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
                     location.append("chromadb")
                 unregistered_files.append({"file": filename, "found_in": location})
         
-        # Storage type mismatches
         mismatched_storage = []
         for filename, entry in registry_files.items():
             storage_type = entry.get('storage_type', '')
@@ -2909,20 +3138,29 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
                 if actual:
                     mismatched_storage.append({"file": filename, "registry": "both", "actual": actual})
         
-        consistency_status = "ok"
-        if orphaned_registry or unregistered_files or mismatched_storage:
-            consistency_status = "warning"
+        # Calculate consistency score
+        total_issues = len(orphaned_registry) + len(unregistered_files) + len(mismatched_storage)
+        total_files = max(len(registry_files), len(all_actual_files), 1)
+        
+        if total_issues == 0:
+            consistency_score = 100
+            consistency_status = "ok"
+        else:
+            consistency_score = max(0, 100 - int((total_issues / total_files) * 100))
+            consistency_status = "warning" if consistency_score >= 50 else "error"
+            
             if orphaned_registry:
-                issues.append(f"{len(orphaned_registry)} orphaned registry entries (file not in backend)")
+                issues.append(f"{len(orphaned_registry)} orphaned registry entries")
                 recommendations.append("Run /api/status/registry/sync to clean orphans")
             if unregistered_files:
-                issues.append(f"{len(unregistered_files)} unregistered files (in backend but not registry)")
+                issues.append(f"{len(unregistered_files)} unregistered files")
                 recommendations.append("Run /api/status/registry/sync to register missing files")
             if mismatched_storage:
                 issues.append(f"{len(mismatched_storage)} storage type mismatches")
         
         checks["registry_consistency"] = {
             "status": consistency_status,
+            "score": consistency_score,
             "registry_entries": len(registry_files),
             "duckdb_files": len(duckdb_files),
             "chromadb_files": len(chroma_files),
@@ -2930,13 +3168,13 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             "unregistered_files": len(unregistered_files),
             "storage_mismatches": len(mismatched_storage),
             "details": {
-                "orphaned": orphaned_registry[:5],  # Limit to 5 examples
+                "orphaned": orphaned_registry[:5],
                 "unregistered": unregistered_files[:5],
                 "mismatched": mismatched_storage[:5]
             }
         }
     except Exception as e:
-        checks["registry_consistency"] = {"status": "error", "error": str(e)}
+        checks["registry_consistency"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"Registry consistency check failed: {e}")
     
     # =========================================================================
@@ -2947,7 +3185,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         supabase = get_supabase()
         
         if supabase:
-            # Get lineage edge counts by relationship type
             lineage_result = supabase.table('lineage_edges').select('relationship, source_id').execute()
             lineage_data = lineage_result.data if lineage_result.data else []
             
@@ -2960,7 +3197,6 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
                 by_relationship[rel] = by_relationship.get(rel, 0) + 1
                 files_with_lineage.add(edge.get('source_id'))
             
-            # Get registry entries to compare
             registry_entries = DocumentRegistryModel.get_all(limit=5000)
             registry_filenames = {e.get('filename') for e in registry_entries if e.get('filename')}
             
@@ -2968,24 +3204,31 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             
             lineage_coverage = f"{len(files_with_lineage)}/{len(registry_filenames)}"
             
-            lineage_status = "ok"
+            # Calculate lineage score
+            if len(registry_filenames) > 0:
+                lineage_score = int((len(files_with_lineage) / len(registry_filenames)) * 100)
+            else:
+                lineage_score = 100
+            
+            lineage_status = "ok" if lineage_score >= 80 else ("warning" if lineage_score >= 50 else "error")
+            
             if files_without_lineage:
-                lineage_status = "warning"
                 issues.append(f"{len(files_without_lineage)} files without lineage tracking")
             
             checks["lineage"] = {
                 "status": lineage_status,
+                "score": lineage_score,
                 "total_edges": total_edges,
                 "by_relationship": by_relationship,
                 "files_with_lineage": len(files_with_lineage),
                 "files_without_lineage": len(files_without_lineage),
                 "coverage": lineage_coverage,
-                "missing_files": files_without_lineage[:10]  # First 10
+                "missing_files": files_without_lineage[:10]
             }
         else:
-            checks["lineage"] = {"status": "unavailable", "error": "Supabase not available"}
+            checks["lineage"] = {"status": "unavailable", "score": 25, "error": "Supabase not available"}
     except Exception as e:
-        checks["lineage"] = {"status": "error", "error": str(e)}
+        checks["lineage"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"Lineage check failed: {e}")
     
     # =========================================================================
@@ -2996,40 +3239,44 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
         supabase = get_supabase()
         
         if supabase:
-            # Get stuck jobs (processing for > 10 minutes)
             from datetime import timedelta
             ten_mins_ago = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
             
-            # Use source_file instead of filename (correct column name)
             stuck_result = supabase.table('processing_jobs').select('id, source_file, status, created_at').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
             stuck_jobs = stuck_result.data if stuck_result.data else []
             
-            # Get failed jobs in last 24 hours
             one_day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
             failed_result = supabase.table('processing_jobs').select('id, source_file, error').eq('status', 'failed').gt('created_at', one_day_ago).execute()
             failed_jobs = failed_result.data if failed_result.data else []
             
-            # Get pending jobs
             pending_result = supabase.table('processing_jobs').select('id').eq('status', 'pending').execute()
             pending_count = len(pending_result.data) if pending_result.data else 0
             
-            jobs_status = "ok"
+            # Calculate jobs score
             if stuck_jobs:
+                jobs_score = 50
                 jobs_status = "warning"
                 issues.append(f"{len(stuck_jobs)} jobs stuck in processing")
                 recommendations.append("Check stuck jobs and manually fail them if needed")
+            elif failed_jobs and len(failed_jobs) > 5:
+                jobs_score = 75
+                jobs_status = "warning"
+            else:
+                jobs_score = 100
+                jobs_status = "ok"
             
             checks["jobs"] = {
                 "status": jobs_status,
+                "score": jobs_score,
                 "stuck_count": len(stuck_jobs),
                 "failed_24h": len(failed_jobs),
                 "pending": pending_count,
                 "stuck_jobs": [{"id": j['id'], "source_file": j.get('source_file'), "created_at": j['created_at']} for j in stuck_jobs[:5]]
             }
         else:
-            checks["jobs"] = {"status": "unavailable", "error": "Supabase not available"}
+            checks["jobs"] = {"status": "unavailable", "score": 25, "error": "Supabase not available"}
     except Exception as e:
-        checks["jobs"] = {"status": "error", "error": str(e)}
+        checks["jobs"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"Jobs check failed: {e}")
     
     # =========================================================================
@@ -3050,59 +3297,93 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             models_data = response.json()
             available_models = [m['name'] for m in models_data.get('models', [])]
             
-            # Check for required models
             required_models = ['mistral:7b', 'deepseek-r1:7b']
             missing_models = [m for m in required_models if m not in available_models]
             
-            ollama_status = "ok" if not missing_models else "warning"
-            if missing_models:
+            if not missing_models:
+                ollama_score = 100
+                ollama_status = "ok"
+            else:
+                ollama_score = 50
+                ollama_status = "warning"
                 issues.append(f"Missing LLM models: {missing_models}")
             
             checks["ollama"] = {
                 "status": ollama_status,
+                "score": ollama_score,
                 "latency_ms": ollama_latency,
                 "endpoint": ollama_endpoint,
                 "available_models": available_models,
                 "missing_models": missing_models
             }
         else:
-            checks["ollama"] = {"status": "error", "error": f"HTTP {response.status_code}"}
+            checks["ollama"] = {"status": "error", "score": 0, "error": f"HTTP {response.status_code}"}
             issues.append(f"Ollama returned HTTP {response.status_code}")
     except requests.exceptions.Timeout:
-        checks["ollama"] = {"status": "timeout", "error": "Connection timed out"}
+        checks["ollama"] = {"status": "timeout", "score": 25, "error": "Connection timed out"}
         issues.append("Ollama connection timed out")
     except requests.exceptions.ConnectionError:
-        checks["ollama"] = {"status": "unreachable", "error": "Connection refused"}
+        checks["ollama"] = {"status": "unreachable", "score": 0, "error": "Connection refused"}
         issues.append("Ollama server unreachable")
     except Exception as e:
-        checks["ollama"] = {"status": "error", "error": str(e)}
+        checks["ollama"] = {"status": "error", "score": 0, "error": str(e)}
         issues.append(f"Ollama check failed: {e}")
     
     # =========================================================================
-    # CALCULATE OVERALL STATUS
+    # CALCULATE OVERALL SCORE AND STATUS
     # =========================================================================
-    check_statuses = [c.get('status', 'error') for c in checks.values()]
     
-    error_count = sum(1 for s in check_statuses if s == 'error')
-    warning_count = sum(1 for s in check_statuses if s == 'warning')
+    # Weighted scoring (critical systems weighted higher)
+    weights = {
+        "supabase": 1.5,      # Critical - metadata store
+        "duckdb": 1.5,        # Critical - structured data
+        "chromadb": 1.0,      # Important - vector search
+        "registry_consistency": 1.0,  # Important - data integrity
+        "lineage": 0.5,       # Nice to have
+        "jobs": 0.75,         # Important - processing health
+        "ollama": 0.5         # Nice to have - fallback exists
+    }
     
-    if error_count >= 2:
-        overall_status = "unhealthy"
-    elif error_count >= 1 or warning_count >= 3:
-        overall_status = "degraded"
-    elif warning_count >= 1:
+    total_weight = 0
+    weighted_score = 0
+    
+    for check_name, check_result in checks.items():
+        weight = weights.get(check_name, 1.0)
+        score = check_result.get('score', 0)
+        weighted_score += score * weight
+        total_weight += weight
+    
+    health_score = int(weighted_score / total_weight) if total_weight > 0 else 0
+    
+    if health_score >= 90:
+        overall_status = "healthy"
+    elif health_score >= 70:
         overall_status = "degraded"
     else:
-        overall_status = "healthy"
+        overall_status = "unhealthy"
     
     total_time = int((time.time() - start_time) * 1000)
     
+    # Save snapshot if requested
+    snapshot_saved = False
+    if save_snapshot:
+        snapshot_saved = _save_health_snapshot(
+            overall_status=overall_status,
+            health_score=health_score,
+            checks=checks,
+            issues=issues,
+            check_time_ms=total_time,
+            triggered_by=triggered_by
+        )
+    
     return {
         "status": overall_status,
+        "health_score": health_score,
         "timestamp": datetime.utcnow().isoformat(),
         "check_time_ms": total_time,
         "checks": checks,
         "issues": issues,
         "issue_count": len(issues),
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "snapshot_saved": snapshot_saved
     }
