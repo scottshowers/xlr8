@@ -2061,7 +2061,7 @@ async def upload_standards(
     domain: str = Form(default="general"),
     title: Optional[str] = Form(default=None)
 ):
-    """Upload standards document for rule extraction."""
+    """Upload standards document for rule extraction AND semantic search."""
     try:
         if not file.filename:
             raise HTTPException(status_code=400, detail="No filename provided")
@@ -2085,13 +2085,21 @@ async def upload_standards(
         with open(file_path, 'wb') as f:
             f.write(content)
         
+        chunks_added = 0
+        
         try:
+            # Extract text for both rule extraction AND chunking
             if ext == 'pdf':
                 doc = standards_process_pdf(file_path, domain)
+                # Get raw text for chunking
+                raw_text = getattr(doc, 'raw_text', '') or ''
+                if not raw_text:
+                    # Re-extract text if not available
+                    raw_text = extract_text(file_path)
             else:
                 with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    text = f.read()
-                doc = standards_process_text(text, filename, domain)
+                    raw_text = f.read()
+                doc = standards_process_text(raw_text, filename, domain)
             
             if title:
                 doc.title = title
@@ -2100,6 +2108,29 @@ async def upload_standards(
             registry.add_document(doc)
             
             logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+            
+            # ALSO chunk and embed for semantic search
+            if raw_text and len(raw_text.strip()) > 100:
+                try:
+                    rag = RAGHandler()
+                    metadata = {
+                        'source': filename,
+                        'filename': filename,
+                        'project': '__STANDARDS__',
+                        'truth_type': 'reference',
+                        'domain': domain,
+                        'is_global': True,
+                        'document_id': doc.document_id,
+                        'rules_extracted': len(doc.rules)
+                    }
+                    chunks_added = rag.add_document(
+                        collection_name="documents",
+                        text=raw_text,
+                        metadata=metadata
+                    )
+                    logger.info(f"[STANDARDS] Added {chunks_added} chunks to ChromaDB for semantic search")
+                except Exception as chunk_e:
+                    logger.warning(f"[STANDARDS] ChromaDB chunking failed (rules still saved): {chunk_e}")
             
             # Register in document_registry for unified tracking
             if REGISTRATION_SERVICE_AVAILABLE:
@@ -2114,7 +2145,8 @@ async def upload_standards(
                         title=doc.title,
                         page_count=doc.page_count,
                         metadata={
-                            'upload_source': 'standards_upload'
+                            'upload_source': 'standards_upload',
+                            'chunks_added': chunks_added
                         }
                     )
                     if reg_result.success:
@@ -2131,6 +2163,7 @@ async def upload_standards(
                 "title": doc.title,
                 "domain": doc.domain,
                 "rules_extracted": len(doc.rules),
+                "chunks_added": chunks_added,
                 "page_count": doc.page_count,
                 "rules": [r.to_dict() for r in doc.rules[:10]]
             }
