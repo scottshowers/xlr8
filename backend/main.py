@@ -141,6 +141,14 @@ except ImportError as e:
     DEEP_CLEAN_AVAILABLE = False
     logging.warning(f"Deep clean router import failed: {e}")
 
+# Import health router (comprehensive system diagnostics)
+try:
+    from backend.routers import health
+    HEALTH_AVAILABLE = True
+except ImportError as e:
+    HEALTH_AVAILABLE = False
+    logging.warning(f"Health router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -344,68 +352,18 @@ if BI_ROUTER_AVAILABLE:
 else:
     logger.warning("BI router not available")
 
-
-
-
-@app.get("/api/health")
-async def health():
-    """Health check endpoint."""
-    try:
-        from utils.rag_handler import RAGHandler
-        rag = RAGHandler()
-        
-        # Check various subsystems
-        features = {
-            "rag": True,
-            "chat": True,
-            "upload": True,
-            "status": True,
-            "register_extractor": REGISTER_EXTRACTOR_AVAILABLE,
-            "playbooks": PLAYBOOKS_AVAILABLE,
-            "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
-            "advisor": ADVISOR_AVAILABLE,
-            "progress": PROGRESS_AVAILABLE,
-            "security": SECURITY_AVAILABLE,
-            "auth": AUTH_AVAILABLE,
-            "data_model": DATA_MODEL_AVAILABLE,
-            "admin": ADMIN_AVAILABLE,
-            "api_connections": API_CONNECTIONS_AVAILABLE,
-            "intelligence": INTELLIGENCE_AVAILABLE,
-            "unified_chat": UNIFIED_CHAT_AVAILABLE,
-            "bi": BI_ROUTER_AVAILABLE,
-            "cleanup": CLEANUP_AVAILABLE,
-            "deep_clean": DEEP_CLEAN_AVAILABLE,
-            "standards": True,
-        }
-        
-        return {
-            "status": "healthy",
-            "features": features,
-            "collections": {
-                "hcmpact_docs": rag.collection.count() if hasattr(rag, 'collection') else 0,
-            }
-        }
-    except Exception as e:
-        return {
-            "status": "degraded",
-            "error": str(e),
-            "features": {
-                "register_extractor": REGISTER_EXTRACTOR_AVAILABLE,
-                "playbooks": PLAYBOOKS_AVAILABLE,
-                "playbook_builder": PLAYBOOK_BUILDER_AVAILABLE,
-                "advisor": ADVISOR_AVAILABLE,
-                "progress": PROGRESS_AVAILABLE,
-                "security": SECURITY_AVAILABLE,
-                "admin": ADMIN_AVAILABLE,
-                "api_connections": API_CONNECTIONS_AVAILABLE,
-                "intelligence": INTELLIGENCE_AVAILABLE,
-                "unified_chat": UNIFIED_CHAT_AVAILABLE,
-                "bi": BI_ROUTER_AVAILABLE,
-                "cleanup": CLEANUP_AVAILABLE,
-                "deep_clean": DEEP_CLEAN_AVAILABLE,
-                "standards": True,
-            }
-        }
+# Register health router if available (comprehensive system diagnostics)
+if HEALTH_AVAILABLE:
+    app.include_router(health.router, prefix="/api", tags=["health"])
+    logger.info("Health router registered at /api/health")
+else:
+    logger.warning("Health router not available - using fallback")
+    
+    # Fallback minimal health endpoint if router not available
+    @app.get("/api/health")
+    async def health_fallback():
+        """Minimal health check fallback."""
+        return {"status": "healthy", "note": "Full health router not loaded"}
 
 
 @app.get("/api/debug/imports")
