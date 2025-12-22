@@ -7,6 +7,7 @@ Updated: December 14, 2025 - Added playbook_builder router (P3.6 P3)
 Updated: December 15, 2025 - Added advisor router (Work Advisor)
 Updated: December 17, 2025 - Added cleanup router (data deletion endpoints)
 Updated: December 17, 2025 - Replaced vacuum with register_extractor (local LLM + DuckDB)
+Updated: December 22, 2025 - Added Smart Router (unified upload endpoint)
 """
 
 from fastapi import FastAPI
@@ -20,7 +21,22 @@ import logging
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from backend.routers import chat, upload, status, projects, jobs
+from backend.routers import chat, status, projects, jobs
+
+# Import Smart Router (unified upload endpoint - replaces separate upload paths)
+try:
+    from backend.routers import smart_router
+    SMART_ROUTER_AVAILABLE = True
+except ImportError as e:
+    SMART_ROUTER_AVAILABLE = False
+    logging.warning(f"Smart router import failed: {e}")
+    # Fallback to legacy upload router
+    try:
+        from backend.routers import upload
+        LEGACY_UPLOAD_AVAILABLE = True
+    except ImportError:
+        LEGACY_UPLOAD_AVAILABLE = False
+        logging.error("Neither smart_router nor upload router available!")
 
 # Import playbooks router
 try:
@@ -46,7 +62,7 @@ except ImportError as e:
     ADVISOR_AVAILABLE = False
     logging.warning(f"Advisor router import failed: {e}")
 
-# Import register_extractor router (formerly vacuum - includes backward compat routes)
+# Import register_extractor router (for job status endpoints - upload now handled by smart_router)
 try:
     from backend.routers import register_extractor
     REGISTER_EXTRACTOR_AVAILABLE = True
@@ -149,12 +165,12 @@ except ImportError as e:
     HEALTH_AVAILABLE = False
     logging.warning(f"Health router import failed: {e}")
 
-# Standards endpoints are now in upload.py (no separate router needed)
+# Standards endpoints are now in smart_router.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="XLR8", version="2.0")
+app = FastAPI(title="XLR8", version="2.1")
 
 # CORS Configuration - Allow all origins for now
 app.add_middleware(
@@ -186,12 +202,91 @@ async def startup_event():
             logger.warning("Playbook loader not available - using code-defined playbooks only")
 
 
-# Register core routers
+# =============================================================================
+# CORE ROUTERS
+# =============================================================================
+
 app.include_router(chat.router, prefix="/api")
-app.include_router(upload.router, prefix="/api")
 app.include_router(status.router, prefix="/api")
 app.include_router(projects.router, prefix="/api/projects")
 app.include_router(jobs.router, prefix="/api")
+
+# =============================================================================
+# SMART ROUTER - Unified Upload Endpoint (replaces separate upload paths)
+# =============================================================================
+
+if SMART_ROUTER_AVAILABLE:
+    app.include_router(smart_router.router, prefix="/api", tags=["upload"])
+    logger.info("Smart Router registered at /api/upload (unified upload endpoint)")
+    logger.info("  → Routes: /upload, /standards/upload, /register/upload")
+    logger.info("  → Auto-detects: register, standards, structured, semantic")
+else:
+    # Fallback to legacy upload router if smart_router not available
+    if LEGACY_UPLOAD_AVAILABLE:
+        app.include_router(upload.router, prefix="/api")
+        logger.warning("Using legacy upload router (smart_router not available)")
+    else:
+        logger.error("No upload router available!")
+
+# Register register_extractor for job status endpoints (upload handled by smart_router)
+if REGISTER_EXTRACTOR_AVAILABLE:
+    # Only register the job status and extract endpoints, not the upload endpoints
+    # (those are now handled by smart_router with backward compat aliases)
+    from fastapi import APIRouter
+    register_jobs_router = APIRouter()
+    
+    # Re-export just the job/status endpoints
+    @register_jobs_router.get("/register/job/{job_id}")
+    async def get_register_job_status(job_id: str):
+        """Get status of register extraction job."""
+        return await register_extractor.get_job_status(job_id)
+    
+    @register_jobs_router.get("/register/extracts")
+    async def get_register_extracts(project_id: str = None, limit: int = 50):
+        """Get extraction history."""
+        return await register_extractor.get_extracts_list(project_id, limit)
+    
+    @register_jobs_router.get("/register/extract/{extract_id}")
+    async def get_register_extract(extract_id: str):
+        """Get full extraction details."""
+        return await register_extractor.get_extract(extract_id)
+    
+    @register_jobs_router.delete("/register/extract/{extract_id}")
+    async def delete_register_extract(extract_id: str):
+        """Delete an extraction."""
+        return await register_extractor.delete_extract(extract_id)
+    
+    @register_jobs_router.get("/register/status")
+    async def get_register_status():
+        """Get register extractor status."""
+        return await register_extractor.status()
+    
+    @register_jobs_router.get("/register/health")
+    async def get_register_health():
+        """Get register extractor health."""
+        return await register_extractor.health()
+    
+    # Backward compatibility for /vacuum endpoints
+    @register_jobs_router.get("/vacuum/status")
+    async def vacuum_status_compat():
+        return await register_extractor.status()
+    
+    @register_jobs_router.get("/vacuum/job/{job_id}")
+    async def vacuum_job_compat(job_id: str):
+        return await register_extractor.get_job_status(job_id)
+    
+    @register_jobs_router.get("/vacuum/extracts")
+    async def vacuum_extracts_compat(project_id: str = None, limit: int = 50):
+        return await register_extractor.get_extracts_list(project_id, limit)
+    
+    app.include_router(register_jobs_router, prefix="/api", tags=["register"])
+    logger.info("Register extractor job endpoints registered at /api/register")
+else:
+    logger.warning("Register extractor not available")
+
+# =============================================================================
+# OPTIONAL ROUTERS
+# =============================================================================
 
 # Register cleanup router if available (data deletion endpoints)
 if CLEANUP_AVAILABLE:
@@ -207,16 +302,9 @@ if DEEP_CLEAN_AVAILABLE:
 else:
     logger.warning("Deep clean router not available")
 
-# Register register_extractor router if available (pay register extraction + DuckDB storage)
-if REGISTER_EXTRACTOR_AVAILABLE:
-    app.include_router(register_extractor.router, prefix="/api", tags=["register-extractor"])
-    logger.info("Register extractor router registered (includes /vacuum backward compat)")
-else:
-    logger.warning("Register extractor router not available")
-
 # Register playbooks router if available
 if PLAYBOOKS_AVAILABLE:
-    app.include_router(playbooks.router, prefix="/api")
+    app.include_router(playbooks.router, prefix="/api", tags=["playbooks"])
     logger.info("Playbooks router registered at /api/playbooks")
 else:
     logger.warning("Playbooks router not available")
@@ -366,10 +454,17 @@ else:
         return {"status": "healthy", "note": "Full health router not loaded"}
 
 
+# =============================================================================
+# DEBUG ENDPOINTS
+# =============================================================================
+
 @app.get("/api/debug/imports")
 async def debug_imports():
     """Debug endpoint to check import status."""
     results = {}
+    
+    # Check smart router
+    results['smart_router'] = 'OK' if SMART_ROUTER_AVAILABLE else 'NOT AVAILABLE'
     
     # Check structured data handler
     try:
@@ -408,6 +503,24 @@ async def debug_imports():
     
     return results
 
+
+@app.get("/api/debug/routes")
+async def debug_routes():
+    """List all registered routes."""
+    routes = []
+    for route in app.routes:
+        if hasattr(route, 'path') and hasattr(route, 'methods'):
+            routes.append({
+                'path': route.path,
+                'methods': list(route.methods) if route.methods else [],
+                'name': route.name
+            })
+    return {"total": len(routes), "routes": sorted(routes, key=lambda x: x['path'])}
+
+
+# =============================================================================
+# STATIC FILES (Production)
+# =============================================================================
 
 # Serve static files in production
 static_path = Path("/app/static")
