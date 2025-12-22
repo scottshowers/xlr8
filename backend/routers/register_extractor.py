@@ -16,7 +16,7 @@ Deploy to: backend/routers/register_extractor.py
 Requirements: pip install pymupdf anthropic boto3
 
 Author: XLR8 Team
-Version: 1.1.0 - Added DocumentRegistryModel integration + thread-safe DuckDB
+Version: 1.2.0 - PARALLEL LLM processing for 10x speed improvement on large PDFs
 """
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
@@ -34,6 +34,8 @@ import time
 import pandas as pd
 import requests
 from requests.auth import HTTPBasicAuth
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Tuple
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -843,11 +845,16 @@ class RegisterExtractor:
     
     def _parse_with_llm(self, pages_text: List[str], vendor_type: str, job_id: str = None) -> tuple:
         """
-        Parse employees using Groq (page-by-page) + code merge.
+        Parse employees using PARALLEL Groq calls + code merge.
         
         Strategy:
-        1. Extract each page individually via Groq (fast, accurate)
-        2. Merge employees by employee_id in code (deterministic)
+        1. Process all pages in parallel (10 concurrent)
+        2. Each page is its own API call (no batching)
+        3. Merge employees by employee_id/name in code (deterministic)
+        
+        Performance:
+        - Sequential: 1800 pages × 6s = 3 hours
+        - Parallel(10): 1800 pages / 10 × 6s = 18 minutes
         
         Returns: (employees, llm_used, cost_usd)
         """
@@ -861,32 +868,31 @@ class RegisterExtractor:
                 return employees, "claude", 0.05
             return [], "none", 0.0
         
-        logger.info(f"[REGISTER] Groq page-by-page extraction ({len(pages_text)} pages)...")
+        # Configuration
+        MAX_WORKERS = 10  # Groq paid tier handles this easily
+        OVERLAP_CHARS = 600  # Context from previous page for page-spanning records
+        
+        total_pages = len(pages_text)
+        logger.warning(f"[REGISTER] ⚡ PARALLEL extraction: {total_pages} pages with {MAX_WORKERS} workers")
         
         prompt_template = self._get_vendor_prompt(vendor_type)
-        all_employees = []
+        start_time = time.time()
         
-        # Overlap settings for page-spanning records
-        OVERLAP_CHARS = 600  # Include last 600 chars from previous page
-        
-        for page_idx, page_text in enumerate(pages_text):
+        def process_single_page(page_idx: int) -> Tuple[int, List[Dict], Optional[str]]:
+            """
+            Process a single page. Returns (page_idx, employees, error).
+            This runs in a thread pool.
+            """
             page_num = page_idx + 1
-            
-            if job_id:
-                progress = 80 + int((page_idx / len(pages_text)) * 15)
-                update_job(job_id, message=f'Extracting page {page_num}/{len(pages_text)}...', progress=progress)
+            page_text = pages_text[page_idx]
             
             # Build context with overlap from previous page
             if page_idx > 0 and len(pages_text[page_idx - 1]) > 0:
                 prev_page = pages_text[page_idx - 1]
                 overlap_text = prev_page[-OVERLAP_CHARS:] if len(prev_page) > OVERLAP_CHARS else prev_page
                 context_text = f"[END OF PREVIOUS PAGE - for context only, may contain partial employee data:]\n{overlap_text}\n\n[CURRENT PAGE {page_num} - extract employees from here:]\n{page_text}"
-                has_overlap = True
             else:
                 context_text = page_text
-                has_overlap = False
-            
-            logger.warning(f"[REGISTER] Processing page {page_num}/{len(pages_text)} ({len(page_text)} chars, overlap={has_overlap})...")
             
             page_prompt = f"""{prompt_template}
 
@@ -900,12 +906,11 @@ INSTRUCTIONS:
 
 Return ONLY a valid JSON array. No markdown, no explanation."""
 
-            try:
-                # Retry logic - paid tier has high limits but keep as safety net
-                max_retries = 3
-                retry_delay = 5  # seconds - quick retry on paid tier
-                
-                for attempt in range(max_retries):
+            # Retry logic with exponential backoff + jitter
+            max_retries = 3
+            
+            for attempt in range(max_retries):
+                try:
                     response = requests.post(
                         "https://api.groq.com/openai/v1/chat/completions",
                         headers={
@@ -918,58 +923,87 @@ Return ONLY a valid JSON array. No markdown, no explanation."""
                             "temperature": 0.1,
                             "max_tokens": 8192
                         },
-                        timeout=60
+                        timeout=90  # Slightly longer timeout for safety
                     )
                     
                     if response.status_code == 200:
                         result = response.json()
                         content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        logger.warning(f"[REGISTER] Page {page_num} raw response length: {len(content)}")
-                        
                         page_employees = self._parse_json_response(content)
-                        
-                        if page_employees:
-                            logger.warning(f"[REGISTER] Page {page_num}: {len(page_employees)} employees extracted")
-                            for emp in page_employees:
-                                logger.warning(f"[REGISTER]   - {emp.get('name', 'NO NAME')} (ID: {emp.get('employee_id', 'NO ID')})")
-                            all_employees.extend(page_employees)
-                        else:
-                            logger.warning(f"[REGISTER] Page {page_num}: NO employees parsed from response")
-                            logger.warning(f"[REGISTER] Page {page_num} response preview: {content[:500]}...")
-                        
-                        # Paid tier - minimal delay just to be safe
-                        if page_idx < len(pages_text) - 1:  # Don't delay after last page
-                            time.sleep(1)  # 1 second courtesy delay
-                        break  # Success, exit retry loop
-                        
-                    elif response.status_code == 429:
-                        # Rate limited - wait and retry
-                        wait_time = retry_delay * (attempt + 1)  # Exponential backoff
-                        logger.warning(f"[REGISTER] Page {page_num} rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})...")
-                        
-                        if job_id:
-                            update_job(job_id, message=f'Rate limited, waiting {wait_time}s... (page {page_num})')
-                        
-                        time.sleep(wait_time)
-                        
-                        if attempt == max_retries - 1:
-                            logger.warning(f"[REGISTER] Page {page_num} failed after {max_retries} retries due to rate limiting")
-                    else:
-                        logger.warning(f"[REGISTER] Page {page_num} Groq error: {response.status_code} - {response.text[:200]}")
-                        break  # Non-rate-limit error, don't retry
+                        return (page_idx, page_employees, None)
                     
-            except Exception as e:
-                logger.warning(f"[REGISTER] Page {page_num} error: {e}")
+                    elif response.status_code == 429:
+                        # Rate limited - exponential backoff with jitter
+                        import random
+                        wait_time = (2 ** attempt) + random.uniform(0, 1)
+                        logger.warning(f"[REGISTER] Page {page_num} rate limited, waiting {wait_time:.1f}s (attempt {attempt + 1})")
+                        time.sleep(wait_time)
+                        continue
+                    
+                    else:
+                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
+                        logger.warning(f"[REGISTER] Page {page_num} error: {error_msg}")
+                        return (page_idx, [], error_msg)
+                        
+                except requests.exceptions.Timeout:
+                    logger.warning(f"[REGISTER] Page {page_num} timeout (attempt {attempt + 1})")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    return (page_idx, [], "Timeout after retries")
+                    
+                except Exception as e:
+                    logger.warning(f"[REGISTER] Page {page_num} exception: {e}")
+                    return (page_idx, [], str(e))
+            
+            return (page_idx, [], "Max retries exceeded")
         
-        # Merge employees by employee_id
+        # Process all pages in parallel
+        all_employees = []
+        completed = 0
+        failed_pages = []
+        
+        if job_id:
+            update_job(job_id, message=f'Extracting {total_pages} pages in parallel...', progress=80)
+        
+        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+            # Submit all pages
+            futures = {executor.submit(process_single_page, idx): idx for idx in range(total_pages)}
+            
+            # Collect results as they complete
+            for future in as_completed(futures):
+                page_idx, page_employees, error = future.result()
+                completed += 1
+                
+                if page_employees:
+                    all_employees.extend(page_employees)
+                    logger.warning(f"[REGISTER] Page {page_idx + 1}: {len(page_employees)} employees")
+                elif error:
+                    failed_pages.append((page_idx + 1, error))
+                    logger.warning(f"[REGISTER] Page {page_idx + 1} FAILED: {error}")
+                
+                # Progress update every 10 pages or at completion
+                if job_id and (completed % 10 == 0 or completed == total_pages):
+                    progress = 80 + int((completed / total_pages) * 15)
+                    update_job(job_id, message=f'Extracted {completed}/{total_pages} pages...', progress=progress)
+        
+        elapsed = time.time() - start_time
+        rate = total_pages / elapsed if elapsed > 0 else 0
+        
+        logger.warning(f"[REGISTER] ⚡ Parallel extraction complete: {total_pages} pages in {elapsed:.1f}s ({rate:.1f} pages/sec)")
+        
+        if failed_pages:
+            logger.warning(f"[REGISTER] {len(failed_pages)} pages failed: {failed_pages[:5]}...")
+        
+        # Merge employees by employee_id/name (unchanged logic)
         if all_employees:
             merged = self._merge_employees(all_employees)
-            logger.info(f"[REGISTER] Groq extraction complete: {len(all_employees)} raw -> {len(merged)} merged")
-            return merged, "groq_llama70b", 0.001
+            logger.info(f"[REGISTER] Merge complete: {len(all_employees)} raw -> {len(merged)} unique employees")
+            return merged, "groq_llama70b_parallel", 0.001
         
-        # Fallback to Claude
+        # Fallback to Claude if parallel extraction yielded nothing
         if self.claude_api_key:
-            logger.info("[REGISTER] Groq returned no employees, falling back to Claude...")
+            logger.info("[REGISTER] Parallel extraction returned no employees, falling back to Claude...")
             employees = self._parse_with_claude_direct(pages_text, vendor_type, job_id)
             return employees, "claude", 0.05
         
