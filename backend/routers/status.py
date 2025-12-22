@@ -3242,14 +3242,15 @@ async def comprehensive_health_check(
             from datetime import timedelta
             ten_mins_ago = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
             
-            stuck_result = supabase.table('processing_jobs').select('id, source_file, status, created_at').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
+            # Query uses actual columns: id, status, created_at, input_data (JSONB has filename)
+            stuck_result = supabase.table('processing_jobs').select('id, job_type, status, created_at, input_data').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
             stuck_jobs = stuck_result.data if stuck_result.data else []
             
             one_day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-            failed_result = supabase.table('processing_jobs').select('id, source_file, error').eq('status', 'failed').gt('created_at', one_day_ago).execute()
+            failed_result = supabase.table('processing_jobs').select('id, job_type, error_message, input_data').eq('status', 'failed').gt('created_at', one_day_ago).execute()
             failed_jobs = failed_result.data if failed_result.data else []
             
-            pending_result = supabase.table('processing_jobs').select('id').eq('status', 'pending').execute()
+            pending_result = supabase.table('processing_jobs').select('id').eq('status', 'queued').execute()
             pending_count = len(pending_result.data) if pending_result.data else 0
             
             # Calculate jobs score
@@ -3265,13 +3266,24 @@ async def comprehensive_health_check(
                 jobs_score = 100
                 jobs_status = "ok"
             
+            # Extract filename from input_data JSONB if present
+            stuck_details = []
+            for j in stuck_jobs[:5]:
+                input_data = j.get('input_data') or {}
+                stuck_details.append({
+                    "id": j['id'],
+                    "job_type": j.get('job_type'),
+                    "filename": input_data.get('filename') or input_data.get('source_file'),
+                    "created_at": j['created_at']
+                })
+            
             checks["jobs"] = {
                 "status": jobs_status,
                 "score": jobs_score,
                 "stuck_count": len(stuck_jobs),
                 "failed_24h": len(failed_jobs),
                 "pending": pending_count,
-                "stuck_jobs": [{"id": j['id'], "source_file": j.get('source_file'), "created_at": j['created_at']} for j in stuck_jobs[:5]]
+                "stuck_jobs": stuck_details
             }
         else:
             checks["jobs"] = {"status": "unavailable", "score": 25, "error": "Supabase not available"}
@@ -3283,42 +3295,63 @@ async def comprehensive_health_check(
     # CHECK 7: LOCAL LLM (OLLAMA)
     # =========================================================================
     try:
+        import os
         import requests
         from requests.auth import HTTPBasicAuth
         
-        ollama_endpoint = "http://178.156.190.64:11435"
-        ollama_auth = HTTPBasicAuth("xlr8", "Argyle76226#")
+        # Read from environment variables (same as rest of codebase)
+        ollama_endpoint = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+        ollama_user = os.getenv("LLM_USERNAME", "")
+        ollama_pass = os.getenv("LLM_PASSWORD", "")
         
-        ollama_start = time.time()
-        response = requests.get(f"{ollama_endpoint}/api/tags", auth=ollama_auth, timeout=5)
-        ollama_latency = int((time.time() - ollama_start) * 1000)
-        
-        if response.status_code == 200:
-            models_data = response.json()
-            available_models = [m['name'] for m in models_data.get('models', [])]
-            
-            required_models = ['mistral:7b', 'deepseek-r1:7b']
-            missing_models = [m for m in required_models if m not in available_models]
-            
-            if not missing_models:
-                ollama_score = 100
-                ollama_status = "ok"
-            else:
-                ollama_score = 50
-                ollama_status = "warning"
-                issues.append(f"Missing LLM models: {missing_models}")
-            
-            checks["ollama"] = {
-                "status": ollama_status,
-                "score": ollama_score,
-                "latency_ms": ollama_latency,
-                "endpoint": ollama_endpoint,
-                "available_models": available_models,
-                "missing_models": missing_models
-            }
+        if not ollama_endpoint:
+            checks["ollama"] = {"status": "not_configured", "score": 50, "error": "LLM_ENDPOINT not set"}
+            issues.append("Ollama LLM_ENDPOINT not configured")
         else:
-            checks["ollama"] = {"status": "error", "score": 0, "error": f"HTTP {response.status_code}"}
-            issues.append(f"Ollama returned HTTP {response.status_code}")
+            ollama_start = time.time()
+            
+            # Build auth if credentials provided
+            auth = HTTPBasicAuth(ollama_user, ollama_pass) if ollama_user and ollama_pass else None
+            
+            response = requests.get(f"{ollama_endpoint}/api/tags", auth=auth, timeout=10)
+            ollama_latency = int((time.time() - ollama_start) * 1000)
+            
+            if response.status_code == 200:
+                models_data = response.json()
+                available_models = [m['name'] for m in models_data.get('models', [])]
+                
+                # Check for models actually used by XLR8
+                required_models = ['mistral:7b', 'deepseek-coder:6.7b']
+                missing_models = [m for m in required_models if m not in available_models]
+                
+                # Also check for embedding model
+                has_embeddings = 'nomic-embed-text:latest' in available_models
+                
+                if not missing_models:
+                    ollama_score = 100
+                    ollama_status = "ok"
+                elif len(missing_models) == 1:
+                    ollama_score = 75
+                    ollama_status = "warning"
+                    issues.append(f"Missing LLM model: {missing_models}")
+                else:
+                    ollama_score = 50
+                    ollama_status = "warning"
+                    issues.append(f"Missing LLM models: {missing_models}")
+                
+                checks["ollama"] = {
+                    "status": ollama_status,
+                    "score": ollama_score,
+                    "latency_ms": ollama_latency,
+                    "endpoint": ollama_endpoint,
+                    "available_models": available_models,
+                    "required_models": required_models,
+                    "missing_models": missing_models,
+                    "has_embeddings": has_embeddings
+                }
+            else:
+                checks["ollama"] = {"status": "error", "score": 0, "error": f"HTTP {response.status_code}"}
+                issues.append(f"Ollama returned HTTP {response.status_code}")
     except requests.exceptions.Timeout:
         checks["ollama"] = {"status": "timeout", "score": 25, "error": "Connection timed out"}
         issues.append("Ollama connection timed out")
