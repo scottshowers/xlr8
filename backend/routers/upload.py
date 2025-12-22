@@ -1415,10 +1415,30 @@ def process_file_background(
         # ===========================================================
         # IDEMPOTENT: Clean existing data for this filename first
         # This prevents duplicate chunks if same file uploaded twice
+        # BUT: Skip if Smart PDF route already stored to DuckDB!
         # ===========================================================
-        cleanup_result = _cleanup_existing_file(filename, project, project_id)
-        if cleanup_result['chromadb_chunks_deleted'] > 0:
-            logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['chromadb_chunks_deleted']} chunks")
+        if duckdb_success:
+            # Smart PDF already stored to DuckDB - only clean ChromaDB chunks, not DuckDB
+            logger.info(f"[BACKGROUND] Skipping full cleanup - Smart PDF already stored to DuckDB")
+            try:
+                rag_cleanup = RAGHandler()
+                collection = rag_cleanup.client.get_or_create_collection(name="documents")
+                for field in ["filename", "source", "name"]:
+                    try:
+                        results = collection.get(where={field: filename})
+                        if results and results['ids']:
+                            collection.delete(ids=results['ids'])
+                            logger.info(f"[BACKGROUND] Cleaned {len(results['ids'])} existing ChromaDB chunks")
+                            break
+                    except:
+                        pass
+            except Exception as chroma_e:
+                logger.warning(f"[BACKGROUND] ChromaDB cleanup error: {chroma_e}")
+        else:
+            # Normal cleanup - clean both DuckDB and ChromaDB
+            cleanup_result = _cleanup_existing_file(filename, project, project_id)
+            if cleanup_result['chromadb_chunks_deleted'] > 0:
+                logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['chromadb_chunks_deleted']} chunks")
         
         def update_progress(current: int, total: int, message: str):
             """Callback for RAG handler progress updates"""
