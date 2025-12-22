@@ -1583,6 +1583,359 @@ class EntityConfigModel:
 
 
 # =============================================================================
+# LINEAGE MODEL - Data Lineage Tracking
+# =============================================================================
+
+class LineageModel:
+    """
+    Track data lineage across the platform.
+    
+    Node Types:
+        - file: Uploaded file (filename as ID)
+        - table: DuckDB table (table_name as ID)
+        - chunk: ChromaDB chunk (chunk_id as ID)
+        - analysis: Intelligence analysis run (analysis_id as ID)
+        - finding: Generated finding (finding_id as ID)
+        - task: Created task (task_id as ID)
+        - response: Chat/query response (response_id as ID)
+    
+    Relationship Types:
+        - parsed: file → table
+        - embedded: file → chunks
+        - analyzed: table → analysis
+        - input: [file|chunk] → analysis (semantic input)
+        - generated: analysis → finding
+        - created: finding → task
+        - cited: [table|chunk] → response
+        - suppressed: finding → suppression_rule
+    """
+    
+    # Node types
+    NODE_FILE = 'file'
+    NODE_TABLE = 'table'
+    NODE_CHUNK = 'chunk'
+    NODE_ANALYSIS = 'analysis'
+    NODE_FINDING = 'finding'
+    NODE_TASK = 'task'
+    NODE_RESPONSE = 'response'
+    NODE_SUPPRESSION = 'suppression'
+    
+    # Relationship types
+    REL_PARSED = 'parsed'           # file → table
+    REL_EMBEDDED = 'embedded'       # file → chunks
+    REL_ANALYZED = 'analyzed'       # table → analysis
+    REL_INPUT = 'input'             # [file|chunk] → analysis
+    REL_GENERATED = 'generated'     # analysis → finding
+    REL_CREATED = 'created'         # finding → task
+    REL_CITED = 'cited'             # [table|chunk] → response
+    REL_SUPPRESSED = 'suppressed'   # finding → suppression
+    REL_DERIVED = 'derived'         # generic derivation
+    
+    @staticmethod
+    def track(
+        source_type: str,
+        source_id: str,
+        target_type: str,
+        target_id: str,
+        relationship: str,
+        project_id: str = None,
+        job_id: str = None,
+        created_by_id: str = None,
+        metadata: dict = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Record a lineage edge.
+        
+        Args:
+            source_type: Type of source node (file, table, chunk, etc.)
+            source_id: Identifier of source node
+            target_type: Type of target node
+            target_id: Identifier of target node
+            relationship: Type of relationship (parsed, embedded, etc.)
+            project_id: Project UUID (optional)
+            job_id: Processing job UUID (optional)
+            created_by_id: User UUID who triggered this (optional)
+            metadata: Additional context (optional)
+        
+        Returns:
+            Created edge record or None on error
+        """
+        supabase = get_supabase()
+        if not supabase:
+            logger.warning("[LINEAGE] No Supabase connection")
+            return None
+        
+        try:
+            data = {
+                'source_type': source_type,
+                'source_id': str(source_id),
+                'target_type': target_type,
+                'target_id': str(target_id),
+                'relationship': relationship,
+                'project_id': project_id,
+                'job_id': job_id,
+                'created_by_id': created_by_id,
+                'metadata': metadata or {}
+            }
+            
+            # Remove None values
+            data = {k: v for k, v in data.items() if v is not None}
+            
+            response = supabase.table('lineage_edges').upsert(
+                data,
+                on_conflict='source_type,source_id,target_type,target_id,relationship,project_id'
+            ).execute()
+            
+            if response.data:
+                logger.debug(f"[LINEAGE] Tracked: {source_type}:{source_id} --{relationship}--> {target_type}:{target_id}")
+                return response.data[0]
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error tracking edge: {e}")
+            return None
+    
+    @staticmethod
+    def track_batch(edges: List[Dict[str, Any]]) -> int:
+        """
+        Record multiple lineage edges at once.
+        
+        Args:
+            edges: List of edge dicts with source_type, source_id, target_type, target_id, relationship, etc.
+        
+        Returns:
+            Number of edges created
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            # Clean up edges
+            clean_edges = []
+            for edge in edges:
+                clean_edge = {
+                    'source_type': edge['source_type'],
+                    'source_id': str(edge['source_id']),
+                    'target_type': edge['target_type'],
+                    'target_id': str(edge['target_id']),
+                    'relationship': edge['relationship'],
+                    'project_id': edge.get('project_id'),
+                    'job_id': edge.get('job_id'),
+                    'created_by_id': edge.get('created_by_id'),
+                    'metadata': edge.get('metadata', {})
+                }
+                clean_edge = {k: v for k, v in clean_edge.items() if v is not None}
+                clean_edges.append(clean_edge)
+            
+            response = supabase.table('lineage_edges').upsert(
+                clean_edges,
+                on_conflict='source_type,source_id,target_type,target_id,relationship,project_id'
+            ).execute()
+            
+            return len(response.data) if response.data else 0
+            
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error batch tracking: {e}")
+            return 0
+    
+    @staticmethod
+    def get_descendants(
+        source_type: str,
+        source_id: str,
+        project_id: str = None,
+        max_depth: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get all descendants of a node (what was derived from it)."""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            # Try using the RPC function
+            try:
+                response = supabase.rpc('get_lineage_descendants', {
+                    'p_source_type': source_type,
+                    'p_source_id': str(source_id),
+                    'p_project_id': project_id,
+                    'p_max_depth': max_depth
+                }).execute()
+                return response.data if response.data else []
+            except Exception:
+                pass
+            
+            # Fallback: simple direct query (no recursion)
+            query = supabase.table('lineage_edges').select('*').eq('source_type', source_type).eq('source_id', str(source_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return response.data if response.data else []
+            
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error getting descendants: {e}")
+            return []
+    
+    @staticmethod
+    def get_ancestors(
+        target_type: str,
+        target_id: str,
+        project_id: str = None,
+        max_depth: int = 10
+    ) -> List[Dict[str, Any]]:
+        """Get all ancestors of a node (what it came from)."""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            # Try using the RPC function
+            try:
+                response = supabase.rpc('get_lineage_ancestors', {
+                    'p_target_type': target_type,
+                    'p_target_id': str(target_id),
+                    'p_project_id': project_id,
+                    'p_max_depth': max_depth
+                }).execute()
+                return response.data if response.data else []
+            except Exception:
+                pass
+            
+            # Fallback: simple direct query (no recursion)
+            query = supabase.table('lineage_edges').select('*').eq('target_type', target_type).eq('target_id', str(target_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return response.data if response.data else []
+            
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error getting ancestors: {e}")
+            return []
+    
+    @staticmethod
+    def get_direct_sources(target_type: str, target_id: str, project_id: str = None) -> List[Dict[str, Any]]:
+        """Get immediate sources of a node (one level up)."""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            query = supabase.table('lineage_edges').select('*').eq('target_type', target_type).eq('target_id', str(target_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error getting direct sources: {e}")
+            return []
+    
+    @staticmethod
+    def get_direct_targets(source_type: str, source_id: str, project_id: str = None) -> List[Dict[str, Any]]:
+        """Get immediate targets of a node (one level down)."""
+        supabase = get_supabase()
+        if not supabase:
+            return []
+        
+        try:
+            query = supabase.table('lineage_edges').select('*').eq('source_type', source_type).eq('source_id', str(source_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return response.data if response.data else []
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error getting direct targets: {e}")
+            return []
+    
+    @staticmethod
+    def get_full_lineage(node_type: str, node_id: str, project_id: str = None) -> Dict[str, Any]:
+        """Get complete lineage for a node (both ancestors and descendants)."""
+        return {
+            'node': {'type': node_type, 'id': node_id},
+            'ancestors': LineageModel.get_ancestors(node_type, node_id, project_id),
+            'descendants': LineageModel.get_descendants(node_type, node_id, project_id)
+        }
+    
+    @staticmethod
+    def get_root_files(target_type: str, target_id: str, project_id: str = None) -> List[str]:
+        """Trace back to find the original file(s) that a node came from."""
+        ancestors = LineageModel.get_ancestors(target_type, target_id, project_id)
+        
+        files = set()
+        for edge in ancestors:
+            if edge.get('source_type') == 'file':
+                files.add(edge.get('source_id'))
+        
+        return list(files)
+    
+    @staticmethod
+    def delete_for_source(source_type: str, source_id: str, project_id: str = None) -> int:
+        """Delete all lineage edges originating from a source."""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            query = supabase.table('lineage_edges').delete().eq('source_type', source_type).eq('source_id', str(source_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return len(response.data) if response.data else 0
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error deleting edges: {e}")
+            return 0
+    
+    @staticmethod
+    def delete_for_target(target_type: str, target_id: str, project_id: str = None) -> int:
+        """Delete all lineage edges pointing to a target."""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        
+        try:
+            query = supabase.table('lineage_edges').delete().eq('target_type', target_type).eq('target_id', str(target_id))
+            if project_id:
+                query = query.eq('project_id', project_id)
+            response = query.execute()
+            return len(response.data) if response.data else 0
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error deleting edges: {e}")
+            return 0
+    
+    @staticmethod
+    def get_project_summary(project_id: str) -> Dict[str, Any]:
+        """Get lineage statistics for a project."""
+        supabase = get_supabase()
+        if not supabase:
+            return {}
+        
+        try:
+            response = supabase.table('lineage_edges').select('source_type, target_type, relationship').eq('project_id', project_id).execute()
+            
+            edges = response.data or []
+            
+            summary = {
+                'total_edges': len(edges),
+                'by_relationship': {},
+                'by_source_type': {},
+                'by_target_type': {}
+            }
+            
+            for edge in edges:
+                rel = edge.get('relationship', 'unknown')
+                src = edge.get('source_type', 'unknown')
+                tgt = edge.get('target_type', 'unknown')
+                
+                summary['by_relationship'][rel] = summary['by_relationship'].get(rel, 0) + 1
+                summary['by_source_type'][src] = summary['by_source_type'].get(src, 0) + 1
+                summary['by_target_type'][tgt] = summary['by_target_type'].get(tgt, 0) + 1
+            
+            return summary
+            
+        except Exception as e:
+            logger.warning(f"[LINEAGE] Error getting project summary: {e}")
+            return {}
+
+
+# =============================================================================
 # CONVENIENCE FUNCTIONS
 # =============================================================================
 
@@ -1610,3 +1963,12 @@ def complete_job(job_id: str, result_data: dict = None) -> bool:
 
 def fail_job(job_id: str, error: str) -> bool:
     return ProcessingJobModel.fail(job_id, error)
+
+def track_lineage(source_type: str, source_id: str, target_type: str, target_id: str, 
+                  relationship: str, **kwargs) -> Optional[Dict]:
+    """Convenience wrapper for LineageModel.track()"""
+    return LineageModel.track(source_type, source_id, target_type, target_id, relationship, **kwargs)
+
+def get_lineage(node_type: str, node_id: str, project_id: str = None) -> Dict:
+    """Convenience wrapper for LineageModel.get_full_lineage()"""
+    return LineageModel.get_full_lineage(node_type, node_id, project_id)
