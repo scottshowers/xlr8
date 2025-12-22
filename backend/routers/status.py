@@ -509,7 +509,7 @@ async def delete_structured_file(project: str, filename: str):
         # =================================================================
         try:
             conn.commit()
-            logger.info("[DELETE] Committed delete operations")
+            logger.warning("[DELETE] Committed delete operations")
         except Exception as commit_e:
             logger.warning(f"[DELETE] Commit failed: {commit_e}")
         
