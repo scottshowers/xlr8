@@ -1375,3 +1375,221 @@ async def find_duplicate_files():
     
     result["check_time_ms"] = int((time.time() - start) * 1000)
     return result
+
+
+# =============================================================================
+# LINEAGE ENDPOINTS
+# =============================================================================
+
+@router.get("/health/lineage")
+async def get_lineage_summary():
+    """
+    Get overall lineage statistics.
+    
+    Shows edge counts by type across all projects.
+    """
+    result = {
+        "total_edges": 0,
+        "by_relationship": {},
+        "by_project": {},
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import get_supabase_client
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            result["error"] = "Supabase not available"
+            return result
+        
+        # Get all edges
+        response = supabase.table('lineage_edges').select('source_type, target_type, relationship, project_id').execute()
+        
+        edges = response.data or []
+        result["total_edges"] = len(edges)
+        
+        # Get project names
+        projects_resp = supabase.table('projects').select('id, name').execute()
+        project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
+        
+        for edge in edges:
+            rel = edge.get('relationship', 'unknown')
+            result["by_relationship"][rel] = result["by_relationship"].get(rel, 0) + 1
+            
+            pid = edge.get('project_id')
+            if pid:
+                proj_name = project_id_map.get(pid, pid)
+                if proj_name not in result["by_project"]:
+                    result["by_project"][proj_name] = {"total": 0, "by_relationship": {}}
+                result["by_project"][proj_name]["total"] += 1
+                result["by_project"][proj_name]["by_relationship"][rel] = \
+                    result["by_project"][proj_name]["by_relationship"].get(rel, 0) + 1
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Lineage summary failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/lineage/{node_type}/{node_id}")
+async def get_node_lineage(node_type: str, node_id: str, project: str = Query(None)):
+    """
+    Get full lineage for a specific node.
+    
+    Returns ancestors (what it came from) and descendants (what was derived from it).
+    
+    Args:
+        node_type: Type of node (file, table, chunk, analysis, finding, etc.)
+        node_id: Identifier of the node
+        project: Optional project name filter
+    """
+    result = {
+        "node": {"type": node_type, "id": node_id},
+        "ancestors": [],
+        "descendants": [],
+        "root_files": [],
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import LineageModel, get_supabase_client
+        
+        # Get project_id if project name provided
+        project_id = None
+        if project:
+            supabase = get_supabase_client()
+            if supabase:
+                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
+                if proj_resp.data:
+                    project_id = proj_resp.data[0]['id']
+        
+        # Get ancestors and descendants
+        result["ancestors"] = LineageModel.get_ancestors(node_type, node_id, project_id)
+        result["descendants"] = LineageModel.get_descendants(node_type, node_id, project_id)
+        result["root_files"] = LineageModel.get_root_files(node_type, node_id, project_id)
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Node lineage failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/lineage/project/{project_name}")
+async def get_project_lineage(project_name: str):
+    """
+    Get lineage statistics for a specific project.
+    
+    Shows edge breakdown and helps identify lineage gaps.
+    """
+    result = {
+        "project": project_name,
+        "summary": {},
+        "files_with_lineage": [],
+        "files_without_lineage": [],
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import LineageModel, get_supabase_client
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            result["error"] = "Supabase not available"
+            return result
+        
+        # Get project ID
+        proj_resp = supabase.table('projects').select('id').eq('name', project_name).execute()
+        if not proj_resp.data:
+            result["error"] = f"Project '{project_name}' not found"
+            return result
+        
+        project_id = proj_resp.data[0]['id']
+        
+        # Get lineage summary
+        result["summary"] = LineageModel.get_project_summary(project_id)
+        
+        # Get all files in project from registry
+        registry = supabase.table('document_registry').select('filename').eq('project_id', project_id).execute()
+        all_files = set(f['filename'] for f in (registry.data or []))
+        
+        # Get files that have lineage edges
+        edges = supabase.table('lineage_edges').select('source_id').eq('project_id', project_id).eq('source_type', 'file').execute()
+        files_with_edges = set(e['source_id'] for e in (edges.data or []))
+        
+        result["files_with_lineage"] = list(files_with_edges)
+        result["files_without_lineage"] = list(all_files - files_with_edges)
+        result["lineage_coverage"] = f"{len(files_with_edges)}/{len(all_files)}" if all_files else "0/0"
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Project lineage failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/lineage/trace/{target_type}/{target_id}")
+async def trace_to_source(target_type: str, target_id: str, project: str = Query(None)):
+    """
+    Trace a target back to its original source file(s).
+    
+    Answers the question: "Where did this come from?"
+    
+    Useful for:
+    - Finding the source document for a finding
+    - Tracing a table back to its upload
+    - Audit trails
+    """
+    result = {
+        "target": {"type": target_type, "id": target_id},
+        "source_files": [],
+        "trace_path": [],
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import LineageModel, get_supabase_client
+        
+        # Get project_id if project name provided
+        project_id = None
+        if project:
+            supabase = get_supabase_client()
+            if supabase:
+                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
+                if proj_resp.data:
+                    project_id = proj_resp.data[0]['id']
+        
+        # Get ancestors
+        ancestors = LineageModel.get_ancestors(target_type, target_id, project_id)
+        
+        # Build trace path
+        for ancestor in ancestors:
+            result["trace_path"].append({
+                "source": f"{ancestor.get('source_type')}:{ancestor.get('source_id')}",
+                "target": f"{ancestor.get('target_type')}:{ancestor.get('target_id')}",
+                "relationship": ancestor.get('relationship'),
+                "depth": ancestor.get('depth', 1)
+            })
+        
+        # Get root files
+        result["source_files"] = LineageModel.get_root_files(target_type, target_id, project_id)
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Trace to source failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
