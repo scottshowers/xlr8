@@ -3200,13 +3200,15 @@ async def comprehensive_health_check(
             registry_entries = DocumentRegistryModel.get_all(limit=5000)
             registry_filenames = {e.get('filename') for e in registry_entries if e.get('filename')}
             
+            # Only count files that are BOTH in lineage AND in registry
+            files_with_lineage_in_registry = files_with_lineage & registry_filenames
             files_without_lineage = [f for f in registry_filenames if f not in files_with_lineage]
             
-            lineage_coverage = f"{len(files_with_lineage)}/{len(registry_filenames)}"
+            lineage_coverage = f"{len(files_with_lineage_in_registry)}/{len(registry_filenames)}"
             
-            # Calculate lineage score
+            # Calculate lineage score (capped at 100)
             if len(registry_filenames) > 0:
-                lineage_score = int((len(files_with_lineage) / len(registry_filenames)) * 100)
+                lineage_score = min(100, int((len(files_with_lineage_in_registry) / len(registry_filenames)) * 100))
             else:
                 lineage_score = 100
             
@@ -3220,7 +3222,7 @@ async def comprehensive_health_check(
                 "score": lineage_score,
                 "total_edges": total_edges,
                 "by_relationship": by_relationship,
-                "files_with_lineage": len(files_with_lineage),
+                "files_with_lineage": len(files_with_lineage_in_registry),
                 "files_without_lineage": len(files_without_lineage),
                 "coverage": lineage_coverage,
                 "missing_files": files_without_lineage[:10]
@@ -3386,7 +3388,7 @@ async def comprehensive_health_check(
         weighted_score += score * weight
         total_weight += weight
     
-    health_score = int(weighted_score / total_weight) if total_weight > 0 else 0
+    health_score = min(100, int(weighted_score / total_weight)) if total_weight > 0 else 0
     
     if health_score >= 90:
         overall_status = "healthy"
