@@ -1098,19 +1098,27 @@ def process_file_background(
                     except Exception as int_e:
                         logger.warning(f"[BACKGROUND] PDF intelligence analysis failed: {int_e}")
                     
-                    # Register in document registry with classification (UNIFIED)
-                    try:
-                        duckdb_result = pdf_result.get('duckdb_result', {})
-                        logger.warning(f"[BACKGROUND] duckdb_result keys: {duckdb_result.keys() if duckdb_result else 'None'}")
-                        logger.warning(f"[BACKGROUND] tables_created: {duckdb_result.get('tables_created', [])}")
-                        logger.warning(f"[BACKGROUND] total_rows: {duckdb_result.get('total_rows', 0)}")
-                        
-                        analysis = pdf_result.get('analysis', {})
-                        timing['parse_end'] = time.time()
-                        timing['storage_end'] = time.time()
-                        times = calc_timing_ms()
-                        
-                        if REGISTRATION_SERVICE_AVAILABLE:
+                    # DON'T register here - wait until we know if ChromaDB will be used too
+                    # Store the duckdb_result info for later registration
+                    duckdb_result = pdf_result.get('duckdb_result', {})
+                    logger.warning(f"[BACKGROUND] duckdb_result keys: {duckdb_result.keys() if duckdb_result else 'None'}")
+                    logger.warning(f"[BACKGROUND] tables_created: {duckdb_result.get('tables_created', [])}")
+                    logger.warning(f"[BACKGROUND] total_rows: {duckdb_result.get('total_rows', 0)}")
+                
+                # Get text content for ChromaDB (either from analysis or re-extract)
+                chromadb_result = pdf_result.get('chromadb_result', {})
+                text = chromadb_result.get('text_content', '')
+                
+                if not text:
+                    # Fallback: extract text normally
+                    text = extract_text(file_path)
+                
+                # If we got DuckDB storage but no text, we can complete here
+                if duckdb_success and (not text or len(text.strip()) < 100):
+                    # Register as DuckDB-only (structured)
+                    if REGISTRATION_SERVICE_AVAILABLE:
+                        try:
+                            duckdb_result = pdf_result.get('duckdb_result', {})
                             reg_result = RegistrationService.register_structured(
                                 filename=filename,
                                 project=project,
@@ -1125,65 +1133,18 @@ def process_file_background(
                                 source=RegistrationSource.UPLOAD,
                                 classification_confidence=classification_confidence,
                                 content_domain=domain_list,
-                                processing_time_ms=times['processing_time_ms'],
-                                parse_time_ms=times['parse_time_ms'],
-                                storage_time_ms=times['storage_time_ms'],
                                 metadata={
                                     'project_name': project,
                                     'functional_area': functional_area,
-                                    'file_size': file_size,
-                                    'pdf_analysis': {
-                                        'is_tabular': analysis.get('is_tabular', False),
-                                        'confidence': analysis.get('confidence', 0),
-                                        'table_pages': len(analysis.get('table_pages', []))
-                                    },
-                                    'intelligence': pdf_result.get('intelligence'),
-                                    'truth_type': truth_type,
-                                    'source': 'smart_pdf'
+                                    'source': 'smart_pdf',
+                                    'exit_reason': 'no_text',
+                                    'truth_type': truth_type
                                 }
                             )
-                            if reg_result.success:
-                                logger.warning(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB ({reg_result.lineage_edges} lineage edges)")
-                            else:
-                                logger.warning(f"[BACKGROUND] PDF registration warning: {reg_result.error}")
-                        else:
-                            # Legacy fallback
-                            DocumentRegistryModel.register(
-                                filename=filename,
-                                file_type='pdf',
-                                truth_type=truth_type,
-                                classification_method=classification_method,
-                                classification_confidence=classification_confidence,
-                                content_domain=domain_list,
-                                storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                                project_id=project_id,
-                                is_global=is_global,
-                                duckdb_tables=duckdb_result.get('tables_created', []),
-                                row_count=duckdb_result.get('total_rows', 0),
-                                parse_status='success',
-                                processing_time_ms=times['processing_time_ms'],
-                                file_hash=file_hash,
-                                file_size_bytes=file_size,
-                                uploaded_by_id=uploaded_by_id,
-                                uploaded_by_email=uploaded_by_email
-                            )
-                            logger.warning(f"[BACKGROUND] Registered PDF (legacy): {truth_type} -> DUCKDB")
-                        
-                    except Exception as e:
-                        logger.warning(f"[BACKGROUND] Could not register PDF: {e}")
-                        import traceback
-                        logger.warning(traceback.format_exc())
-                
-                # Get text content for ChromaDB (either from analysis or re-extract)
-                chromadb_result = pdf_result.get('chromadb_result', {})
-                text = chromadb_result.get('text_content', '')
-                
-                if not text:
-                    # Fallback: extract text normally
-                    text = extract_text(file_path)
-                
-                # If we got DuckDB storage but no text, we can complete here
-                if duckdb_success and (not text or len(text.strip()) < 100):
+                            logger.warning(f"[BACKGROUND] Registered PDF (DuckDB only): {reg_result.lineage_edges} lineage edges")
+                        except Exception as e:
+                            logger.warning(f"[BACKGROUND] Registration failed: {e}")
+                    
                     ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
                     if file_path and os.path.exists(file_path):
                         try:
@@ -1206,6 +1167,36 @@ def process_file_background(
                 skip_chromadb = 'chromadb' not in pdf_result.get('storage_used', [])
                 
                 if skip_chromadb and duckdb_success:
+                    # Register as DuckDB-only (structured) - large tabular
+                    if REGISTRATION_SERVICE_AVAILABLE:
+                        try:
+                            duckdb_result = pdf_result.get('duckdb_result', {})
+                            reg_result = RegistrationService.register_structured(
+                                filename=filename,
+                                project=project,
+                                project_id=project_id,
+                                tables_created=duckdb_result.get('tables_created', []),
+                                row_count=duckdb_result.get('total_rows', 0),
+                                file_size=file_size,
+                                file_type='pdf',
+                                uploaded_by_id=uploaded_by_id,
+                                uploaded_by_email=uploaded_by_email,
+                                job_id=job_id,
+                                source=RegistrationSource.UPLOAD,
+                                classification_confidence=classification_confidence,
+                                content_domain=domain_list,
+                                metadata={
+                                    'project_name': project,
+                                    'functional_area': functional_area,
+                                    'source': 'smart_pdf',
+                                    'exit_reason': 'large_tabular_skip_chromadb',
+                                    'truth_type': truth_type
+                                }
+                            )
+                            logger.warning(f"[BACKGROUND] Registered PDF (DuckDB only, large tabular): {reg_result.lineage_edges} lineage edges")
+                        except Exception as e:
+                            logger.warning(f"[BACKGROUND] Registration failed: {e}")
+                    
                     # Large tabular PDF - DuckDB only, skip ChromaDB
                     ProcessingJobModel.update_progress(job_id, 90, "Cleaning up (skipping semantic search for large table)...")
                     if file_path and os.path.exists(file_path):
