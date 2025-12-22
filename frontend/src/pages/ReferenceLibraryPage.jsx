@@ -4,6 +4,7 @@
  * Clean professional design with:
  * - Light/dark mode support via ThemeContext
  * - Consistent styling with Command Center
+ * - Delete functionality for reference documents
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -126,14 +127,61 @@ function SelectProjectPrompt({ colors }) {
 function DocumentsTab({ colors, darkMode }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [actionStatus, setActionStatus] = useState(null);
 
   useEffect(() => { loadDocuments(); }, []);
 
   const loadDocuments = async () => {
     setLoading(true);
-    try { const res = await api.get('/standards/documents'); setDocuments(res.data.documents || []); }
-    catch { setDocuments([]); }
-    finally { setLoading(false); }
+    setActionStatus(null);
+    try {
+      // Try the new references endpoint first, fallback to standards/documents
+      try {
+        const res = await api.get('/status/references');
+        setDocuments(res.data.files || []);
+      } catch {
+        const res = await api.get('/standards/documents');
+        setDocuments(res.data.documents || []);
+      }
+    } catch {
+      setDocuments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async (filename) => {
+    if (!window.confirm(`Delete "${filename}"?\n\nThis will remove it from the registry, vector store, and rule registry.`)) {
+      return;
+    }
+    
+    setDeleting(filename);
+    setActionStatus(null);
+    try {
+      await api.delete(`/status/references/${encodeURIComponent(filename)}?confirm=true`);
+      setActionStatus({ type: 'success', message: `Deleted "${filename}"` });
+      await loadDocuments();
+    } catch (err) {
+      setActionStatus({ type: 'error', message: err.response?.data?.detail || err.message || 'Delete failed' });
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    setShowClearAllModal(false);
+    setLoading(true);
+    setActionStatus(null);
+    try {
+      const res = await api.delete('/status/references?confirm=true');
+      setActionStatus({ type: 'success', message: `Cleared ${res.data.files_processed || 'all'} reference documents` });
+      await loadDocuments();
+    } catch (err) {
+      setActionStatus({ type: 'error', message: err.response?.data?.detail || err.message || 'Clear failed' });
+      setLoading(false);
+    }
   };
 
   if (loading) {
@@ -148,15 +196,61 @@ function DocumentsTab({ colors, darkMode }) {
 
   return (
     <div>
+      {/* Header with actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
         <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <BookOpen size={18} style={{ color: colors.primary }} />
           Reference Documents ({documents.length})
         </h3>
-        <button onClick={loadDocuments} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${colors.divider}`, borderRadius: 6, color: colors.textMuted, fontSize: '0.8rem', cursor: 'pointer' }}>
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {documents.length > 0 && (
+            <button 
+              onClick={() => setShowClearAllModal(true)} 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+                background: colors.redLight, border: `1px solid ${colors.red}40`, borderRadius: 6, 
+                color: colors.red, fontSize: '0.8rem', cursor: 'pointer', fontWeight: 500 
+              }}
+            >
+              <Trash2 size={14} /> Clear All
+            </button>
+          )}
+          <button 
+            onClick={loadDocuments} 
+            style={{ 
+              display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+              background: 'transparent', border: `1px solid ${colors.divider}`, borderRadius: 6, 
+              color: colors.textMuted, fontSize: '0.8rem', cursor: 'pointer' 
+            }}
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
       </div>
+
+      {/* Status message */}
+      {actionStatus && (
+        <div style={{ 
+          marginBottom: '1rem', padding: '0.75rem 1rem', 
+          background: actionStatus.type === 'success' ? colors.greenLight : colors.redLight, 
+          border: `1px solid ${actionStatus.type === 'success' ? colors.green : colors.red}40`, 
+          borderRadius: 8, display: 'flex', alignItems: 'center', gap: '0.5rem' 
+        }}>
+          {actionStatus.type === 'success' ? 
+            <CheckCircle size={16} style={{ color: colors.green }} /> : 
+            <XCircle size={16} style={{ color: colors.red }} />
+          }
+          <span style={{ color: actionStatus.type === 'success' ? colors.green : colors.red, fontSize: '0.85rem' }}>
+            {actionStatus.message}
+          </span>
+          <button 
+            onClick={() => setActionStatus(null)} 
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}
+          >
+            <XCircle size={14} style={{ color: colors.textMuted }} />
+          </button>
+        </div>
+      )}
 
       {documents.length === 0 ? (
         <div style={{ padding: '3rem', textAlign: 'center', color: colors.textMuted }}>
@@ -167,21 +261,134 @@ function DocumentsTab({ colors, darkMode }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {documents.map((doc, i) => (
-            <div key={doc.id || i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 8 }}>
-              <FileText size={18} style={{ color: colors.blue }} />
+            <div 
+              key={doc.id || doc.filename || i} 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', 
+                background: colors.inputBg, border: `1px solid ${colors.divider}`, borderRadius: 8 
+              }}
+            >
+              <FileText size={18} style={{ color: colors.blue, flexShrink: 0 }} />
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.9rem', fontWeight: 500, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
-                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{doc.rules_count || 0} rules extracted • {doc.domain || 'General'}</div>
+                <div style={{ fontSize: '0.9rem', fontWeight: 500, color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {doc.filename}
+                </div>
+                <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>
+                  {doc.rules_count || doc.chunk_count || 0} {doc.rules_count ? 'rules' : 'chunks'} • {doc.domain || doc.truth_type || 'reference'}
+                  {doc.file_size_bytes && ` • ${formatFileSize(doc.file_size_bytes)}`}
+                </div>
               </div>
-              <span style={{ padding: '0.2rem 0.5rem', background: colors.greenLight, color: colors.green, borderRadius: 4, fontSize: '0.7rem', fontWeight: 600 }}>
-                {doc.status || 'Active'}
+              <span style={{ 
+                padding: '0.2rem 0.5rem', 
+                background: colors.greenLight, 
+                color: colors.green, 
+                borderRadius: 4, 
+                fontSize: '0.7rem', 
+                fontWeight: 600,
+                flexShrink: 0 
+              }}>
+                {doc.status || doc.parse_status || 'Active'}
               </span>
+              <button
+                onClick={() => handleDelete(doc.filename)}
+                disabled={deleting === doc.filename}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  width: 32, height: 32, borderRadius: 6,
+                  background: deleting === doc.filename ? colors.inputBg : colors.redLight,
+                  border: `1px solid ${colors.red}30`,
+                  color: deleting === doc.filename ? colors.textMuted : colors.red,
+                  cursor: deleting === doc.filename ? 'wait' : 'pointer',
+                  opacity: deleting === doc.filename ? 0.5 : 1,
+                  flexShrink: 0
+                }}
+                title="Delete document"
+              >
+                {deleting === doc.filename ? 
+                  <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : 
+                  <Trash2 size={14} />
+                }
+              </button>
             </div>
           ))}
         </div>
       )}
+
+      {/* Clear All Confirmation Modal */}
+      {showClearAllModal && (
+        <div style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 
+        }}>
+          <div style={{ 
+            background: colors.card, borderRadius: 12, padding: '1.5rem', 
+            maxWidth: 420, margin: '1rem', boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+            border: `1px solid ${colors.cardBorder}`
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ 
+                width: 40, height: 40, borderRadius: 10, background: colors.redLight, 
+                display: 'flex', alignItems: 'center', justifyContent: 'center' 
+              }}>
+                <AlertTriangle size={20} style={{ color: colors.red }} />
+              </div>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: colors.text }}>
+                Clear All References?
+              </h3>
+            </div>
+            
+            <p style={{ color: colors.textMuted, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
+              This will permanently delete all <strong>{documents.length}</strong> reference document(s) from:
+            </p>
+            
+            <ul style={{ margin: '0 0 1rem 0', paddingLeft: '1.25rem', color: colors.textMuted, fontSize: '0.85rem' }}>
+              <li>Document Registry</li>
+              <li>Vector Store (ChromaDB)</li>
+              <li>Lineage Tracking</li>
+              <li>Rule Registry</li>
+            </ul>
+            
+            <p style={{ color: colors.red, fontWeight: 500, fontSize: '0.85rem', margin: '0 0 1.25rem 0' }}>
+              This action cannot be undone.
+            </p>
+            
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => setShowClearAllModal(false)}
+                style={{ 
+                  padding: '0.6rem 1rem', background: colors.inputBg, 
+                  border: `1px solid ${colors.divider}`, borderRadius: 8, 
+                  color: colors.text, fontWeight: 500, cursor: 'pointer', fontSize: '0.9rem' 
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleClearAll}
+                style={{ 
+                  padding: '0.6rem 1rem', background: colors.red, 
+                  border: 'none', borderRadius: 8, 
+                  color: 'white', fontWeight: 600, cursor: 'pointer', fontSize: '0.9rem' 
+                }}
+              >
+                Yes, Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+// Helper function
+function formatFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function UploadTab({ colors, darkMode }) {
