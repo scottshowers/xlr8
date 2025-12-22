@@ -13,16 +13,21 @@ NO HARDCODING. The LLM reads the document and extracts:
 
 PERSISTENCE: Rules stored in Supabase (survive Railway redeploys)
 
+LLM STRATEGY:
+- PRIMARY: Groq (Llama 3.3 70B) - fast, free, capable
+- FALLBACK: Claude - only if Groq fails
+
 Deploy to: backend/utils/standards_processor.py
 
 Author: XLR8 Team
-Version: 1.1.0 - P4 Standards Layer + Supabase Persistence
+Version: 1.2.0 - Groq first, Claude fallback only (NO MONEY GRAB)
 """
 
 import os
 import re
 import json
 import logging
+import requests
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -171,54 +176,146 @@ def _get_supabase():
 
 
 # =============================================================================
-# LLM INTEGRATION - Uses LLMOrchestrator like intelligence_engine
+# LLM INTEGRATION - GROQ FIRST, CLAUDE FALLBACK ONLY
 # =============================================================================
 
-_orchestrator = None
+def _call_groq(prompt: str, system_prompt: str = None) -> tuple:
+    """
+    Call Groq API (Llama 3.3 70B) for rule extraction.
+    
+    Returns: (response_text, success)
+    """
+    groq_api_key = os.getenv("GROQ_API_KEY", "")
+    
+    if not groq_api_key:
+        logger.warning("[STANDARDS] No GROQ_API_KEY - cannot use Groq")
+        return "", False
+    
+    try:
+        messages = []
+        if system_prompt:
+            messages.append({"role": "system", "content": system_prompt})
+        messages.append({"role": "user", "content": prompt})
+        
+        response = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {groq_api_key}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "model": "llama-3.3-70b-versatile",
+                "messages": messages,
+                "temperature": 0.1,
+                "max_tokens": 8192
+            },
+            timeout=90
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
+            logger.info(f"[STANDARDS] Groq response: {len(content)} chars")
+            return content, True
+        elif response.status_code == 429:
+            logger.warning("[STANDARDS] Groq rate limited")
+            return "", False
+        else:
+            logger.warning(f"[STANDARDS] Groq error: {response.status_code} - {response.text[:200]}")
+            return "", False
+            
+    except requests.exceptions.Timeout:
+        logger.warning("[STANDARDS] Groq timeout")
+        return "", False
+    except Exception as e:
+        logger.error(f"[STANDARDS] Groq call failed: {e}")
+        return "", False
 
-def _get_orchestrator():
-    """Get or create LLMOrchestrator instance."""
-    global _orchestrator
-    if _orchestrator is None:
-        try:
+
+def _call_claude_fallback(prompt: str, system_prompt: str = None) -> tuple:
+    """
+    Call Claude API as FALLBACK ONLY when Groq fails.
+    
+    Returns: (response_text, success)
+    """
+    claude_api_key = os.getenv("ANTHROPIC_API_KEY", "")
+    
+    if not claude_api_key:
+        logger.warning("[STANDARDS] No ANTHROPIC_API_KEY - cannot use Claude fallback")
+        return "", False
+    
+    try:
+        headers = {
+            "x-api-key": claude_api_key,
+            "Content-Type": "application/json",
+            "anthropic-version": "2023-06-01"
+        }
+        
+        data = {
+            "model": "claude-3-haiku-20240307",  # Use cheapest model for fallback
+            "max_tokens": 4096,
+            "messages": [{"role": "user", "content": prompt}]
+        }
+        
+        if system_prompt:
+            data["system"] = system_prompt
+        
+        response = requests.post(
+            "https://api.anthropic.com/v1/messages",
+            headers=headers,
+            json=data,
+            timeout=90
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            content = result.get("content", [{}])[0].get("text", "")
+            
+            # Track cost (for visibility)
             try:
-                from utils.llm_orchestrator import LLMOrchestrator
-            except ImportError:
-                from backend.utils.llm_orchestrator import LLMOrchestrator
-            _orchestrator = LLMOrchestrator()
-            logger.info("[STANDARDS] LLMOrchestrator initialized")
-        except Exception as e:
-            logger.error(f"[STANDARDS] Could not load LLMOrchestrator: {e}")
-            return None
-    return _orchestrator
+                from utils.cost_tracker import track_cost
+                input_tokens = result.get("usage", {}).get("input_tokens", 0)
+                output_tokens = result.get("usage", {}).get("output_tokens", 0)
+                track_cost("claude_haiku", "standards_extraction_fallback", input_tokens, output_tokens)
+            except:
+                pass
+            
+            logger.warning(f"[STANDARDS] Claude FALLBACK used: {len(content)} chars")
+            return content, True
+        else:
+            logger.error(f"[STANDARDS] Claude error: {response.status_code}")
+            return "", False
+            
+    except Exception as e:
+        logger.error(f"[STANDARDS] Claude fallback failed: {e}")
+        return "", False
 
 
 def _call_llm(prompt: str, system_prompt: str = None) -> str:
-    """Call LLM for rule extraction using LLMOrchestrator."""
-    orchestrator = _get_orchestrator()
+    """
+    Call LLM for rule extraction.
     
-    if not orchestrator:
-        logger.error("[STANDARDS] No LLM available for rule extraction")
-        return ""
+    STRATEGY:
+    1. Groq (Llama 3.3 70B) - PRIMARY, fast, free
+    2. Claude (Haiku) - FALLBACK ONLY if Groq fails
     
-    try:
-        # Try Claude directly since this is text extraction (not SQL)
-        result, success = orchestrator._call_claude(
-            prompt=prompt,
-            system_prompt=system_prompt or "You are a compliance analyst extracting rules from documents.",
-            operation="standards_extraction"
-        )
-        
-        if success:
-            logger.info(f"[STANDARDS] LLM response: {len(result)} chars")
-            return result
-        else:
-            logger.error(f"[STANDARDS] LLM call failed: {result}")
-            return ""
+    This is NOT a money grab. Groq handles this fine.
+    """
     
-    except Exception as e:
-        logger.error(f"[STANDARDS] LLM call failed: {e}")
-        return ""
+    # Try Groq first (PRIMARY)
+    result, success = _call_groq(prompt, system_prompt)
+    if success and result:
+        logger.info("[STANDARDS] Using Groq (Llama 3.3 70B)")
+        return result
+    
+    # Fallback to Claude ONLY if Groq failed
+    logger.warning("[STANDARDS] Groq failed, falling back to Claude...")
+    result, success = _call_claude_fallback(prompt, system_prompt)
+    if success and result:
+        return result
+    
+    logger.error("[STANDARDS] All LLM calls failed")
+    return ""
 
 
 # =============================================================================
