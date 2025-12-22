@@ -96,6 +96,11 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Track module loads for debugging multi-worker issues
+import uuid
+_MODULE_LOAD_ID = str(uuid.uuid4())[:8]
+logger.warning(f"[MODULE] structured_data_handler loaded, module_id={_MODULE_LOAD_ID}, pid={os.getpid()}")
+
 # DuckDB storage location
 DUCKDB_PATH = "/data/structured_data.duckdb"
 ENCRYPTION_KEY_PATH = "/data/.encryption_key_v2"  # New path for AES-256 key
@@ -2772,9 +2777,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             try:
                 with self._db_lock:
                     self.conn.rollback()
-                    logger.warning("[STORE_DF] Cleared any pending transaction")
+                    logger.warning("[STORE_DF] Cleared any pending transaction via rollback")
             except Exception as rb_e:
-                logger.debug(f"[STORE_DF] Rollback note (OK if no transaction): {rb_e}")
+                logger.warning(f"[STORE_DF] Rollback note (OK if no transaction): {rb_e}")
             
             if df is None or df.empty:
                 results['error'] = 'DataFrame is empty'
@@ -2800,21 +2805,25 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             # Clean up any existing data for this file
             try:
+                logger.warning(f"[STORE_DF] CLEANUP: Looking for existing data for {project}/{file_name}")
                 existing = self.safe_fetchall("""
                     SELECT table_name FROM _schema_metadata 
                     WHERE project = ? AND file_name = ?
                 """, [project, file_name])
                 
+                logger.warning(f"[STORE_DF] CLEANUP: Found {len(existing)} existing tables")
+                
                 for (old_table,) in existing:
                     try:
                         self.safe_execute(f'DROP TABLE IF EXISTS "{old_table}"')
-                        logger.info(f"[STORE_DF] Dropped existing table: {old_table}")
+                        logger.warning(f"[STORE_DF] CLEANUP: Dropped existing table: {old_table}")
                     except:
                         pass
                 
                 self.safe_execute("""
                     DELETE FROM _schema_metadata WHERE project = ? AND file_name = ?
                 """, [project, file_name])
+                logger.warning(f"[STORE_DF] CLEANUP: Deleted metadata for {project}/{file_name}")
             except Exception as cleanup_e:
                 logger.warning(f"[STORE_DF] Cleanup warning: {cleanup_e}")
             
@@ -2865,14 +2874,39 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             # Force DuckDB to persist by closing and reopening connection
             with self._db_lock:
-                logger.warning("[STORE_DF] Forcing connection reconnect to persist data")
+                import os
+                pre_size = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+                logger.warning(f"[STORE_DF] PRE-RECONNECT: db_path={self.db_path}, file_size={pre_size} bytes")
+                
+                # Check row count before close
+                pre_close_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                logger.warning(f"[STORE_DF] PRE-CLOSE: _schema_metadata has {pre_close_count} rows")
+                
+                # List tables before close
+                pre_tables = [t[0] for t in self.conn.execute("SHOW TABLES").fetchall()]
+                logger.warning(f"[STORE_DF] PRE-CLOSE tables: {pre_tables[:10]}")
+                
                 old_conn = self.conn
                 try:
                     old_conn.close()
-                except:
-                    pass
+                    logger.warning("[STORE_DF] Closed old connection")
+                except Exception as close_e:
+                    logger.warning(f"[STORE_DF] Close error: {close_e}")
+                
+                # Check file size after close
+                post_close_size = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+                logger.warning(f"[STORE_DF] POST-CLOSE: file_size={post_close_size} bytes")
+                    
                 self.conn = duckdb.connect(self.db_path)
-                logger.warning("[STORE_DF] Reconnected to DuckDB")
+                logger.warning(f"[STORE_DF] Opened new connection, conn_id={id(self.conn)}")
+                
+                # Check row count after reconnect
+                post_reconnect_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                logger.warning(f"[STORE_DF] POST-RECONNECT: _schema_metadata has {post_reconnect_count} rows")
+                
+                # List tables after reconnect
+                post_tables = [t[0] for t in self.conn.execute("SHOW TABLES").fetchall()]
+                logger.warning(f"[STORE_DF] POST-RECONNECT tables: {post_tables[:10]}")
             
             # Final verification using safe_fetchall (same path as status.py)
             try:
@@ -3847,7 +3881,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 
                 # Log the query for debugging
                 if '_schema_metadata' in sql:
-                    logger.warning(f"[SAFE_FETCHALL] Querying _schema_metadata (after commit)")
+                    # Check if database file actually exists and its size
+                    import os
+                    db_exists = os.path.exists(self.db_path)
+                    db_size = os.path.getsize(self.db_path) if db_exists else 0
+                    logger.warning(f"[SAFE_FETCHALL] DB FILE: path={self.db_path}, exists={db_exists}, size={db_size}b, module={_MODULE_LOAD_ID}, pid={os.getpid()}")
+                    logger.warning(f"[SAFE_FETCHALL] handler_id={id(self)}, conn_id={id(self.conn)}")
+                    
                     # Try a direct count first to diagnose
                     try:
                         direct_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
@@ -3855,14 +3895,18 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
                         logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
                         
-                        # Check if table actually exists
-                        tables = self.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name = '_schema_metadata'").fetchall()
-                        logger.warning(f"[SAFE_FETCHALL] DIAG: _schema_metadata table exists: {len(tables) > 0}")
+                        # List ALL tables to see what exists
+                        all_tables = self.conn.execute("SHOW TABLES").fetchall()
+                        table_names = [t[0] for t in all_tables]
+                        logger.warning(f"[SAFE_FETCHALL] DIAG: All tables ({len(table_names)}): {table_names[:10]}")
                         
-                        # List all rows in schema_metadata
-                        if direct_count == 0:
-                            all_tables = self.conn.execute("SHOW TABLES").fetchall()
-                            logger.warning(f"[SAFE_FETCHALL] DIAG: All tables: {[t[0] for t in all_tables[:5]]}")
+                        # Check for our data table specifically
+                        if 'tea1000_team_earnings_codes_pdf' in table_names:
+                            data_count = self.conn.execute("SELECT COUNT(*) FROM tea1000_team_earnings_codes_pdf").fetchone()[0]
+                            logger.warning(f"[SAFE_FETCHALL] DIAG: Data table has {data_count} rows")
+                        else:
+                            logger.warning("[SAFE_FETCHALL] DIAG: Data table tea1000_team_earnings_codes_pdf NOT FOUND!")
+                            
                     except Exception as de:
                         logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
                 
@@ -4466,14 +4510,22 @@ def get_structured_handler() -> StructuredDataHandler:
         handler = StructuredDataHandler()
         sys.modules[_SINGLETON_KEY] = handler
         logging.getLogger(__name__).warning(
-            f"[HANDLER] Created singleton (id={id(handler)}, conn_id={id(handler.conn)}, db={handler.db_path})"
+            f"[HANDLER] Created singleton (id={id(handler)}, conn_id={id(handler.conn)}, db={handler.db_path}, module={_MODULE_LOAD_ID}, pid={os.getpid()})"
         )
     else:
         handler = sys.modules[_SINGLETON_KEY]
+        # Log every access to help debug
         logging.getLogger(__name__).debug(
             f"[HANDLER] Reusing singleton (id={id(handler)}, conn_id={id(handler.conn)})"
         )
-    return sys.modules[_SINGLETON_KEY]
+    
+    # Verify it's actually a handler instance
+    if not isinstance(handler, StructuredDataHandler):
+        logging.getLogger(__name__).error(f"[HANDLER] SINGLETON IS WRONG TYPE: {type(handler)}")
+        handler = StructuredDataHandler()
+        sys.modules[_SINGLETON_KEY] = handler
+        
+    return handler
 
 
 def reset_structured_handler():
