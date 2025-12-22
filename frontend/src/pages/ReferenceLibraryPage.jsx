@@ -462,10 +462,35 @@ function RulesTab({ colors, darkMode }) {
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState({});
+  const [clearing, setClearing] = useState(false);
+  const [status, setStatus] = useState(null);
+
+  const loadRules = () => {
+    setLoading(true);
+    api.get('/standards/rules').then(res => setRules(res.data.rules || [])).catch(() => setRules([])).finally(() => setLoading(false));
+  };
 
   useEffect(() => {
-    api.get('/standards/rules').then(res => setRules(res.data.rules || [])).catch(() => setRules([])).finally(() => setLoading(false));
+    loadRules();
   }, []);
+
+  const handleClearRules = async () => {
+    if (!window.confirm(`Clear all ${rules.length} rules?\n\nThis will delete from:\n- standards_documents table\n- standards_rules table\n- In-memory registry`)) {
+      return;
+    }
+    
+    setClearing(true);
+    setStatus(null);
+    try {
+      const res = await api.delete('/status/references?confirm=true');
+      setStatus({ type: 'success', message: `Cleared ${res.data.deleted?.standards_rules || 0} rules` });
+      loadRules();
+    } catch (err) {
+      setStatus({ type: 'error', message: err.response?.data?.detail || err.message || 'Clear failed' });
+    } finally {
+      setClearing(false);
+    }
+  };
 
   const toggleExpand = (id) => setExpanded(prev => ({ ...prev, [id]: !prev[id] }));
 
@@ -487,10 +512,64 @@ function RulesTab({ colors, darkMode }) {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0', fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <ListChecks size={18} style={{ color: colors.primary }} />
-        Extracted Rules ({rules.length})
-      </h3>
+      {/* Header with actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <ListChecks size={18} style={{ color: colors.primary }} />
+          Extracted Rules ({rules.length})
+        </h3>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {rules.length > 0 && (
+            <button 
+              onClick={handleClearRules}
+              disabled={clearing}
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+                background: colors.redLight, border: `1px solid ${colors.red}40`, borderRadius: 6, 
+                color: colors.red, fontSize: '0.8rem', cursor: clearing ? 'wait' : 'pointer', 
+                fontWeight: 500, opacity: clearing ? 0.5 : 1
+              }}
+            >
+              {clearing ? <RefreshCw size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={14} />}
+              {clearing ? 'Clearing...' : 'Clear All Rules'}
+            </button>
+          )}
+          <button 
+            onClick={loadRules}
+            style={{ 
+              display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+              background: 'transparent', border: `1px solid ${colors.divider}`, borderRadius: 6, 
+              color: colors.textMuted, fontSize: '0.8rem', cursor: 'pointer' 
+            }}
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Status message */}
+      {status && (
+        <div style={{ 
+          marginBottom: '1rem', padding: '0.75rem 1rem', 
+          background: status.type === 'success' ? colors.greenLight : colors.redLight, 
+          border: `1px solid ${status.type === 'success' ? colors.green : colors.red}40`, 
+          borderRadius: 8, display: 'flex', alignItems: 'center', gap: '0.5rem' 
+        }}>
+          {status.type === 'success' ? 
+            <CheckCircle size={16} style={{ color: colors.green }} /> : 
+            <XCircle size={16} style={{ color: colors.red }} />
+          }
+          <span style={{ color: status.type === 'success' ? colors.green : colors.red, fontSize: '0.85rem' }}>
+            {status.message}
+          </span>
+          <button 
+            onClick={() => setStatus(null)} 
+            style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '0.25rem' }}
+          >
+            <XCircle size={14} style={{ color: colors.textMuted }} />
+          </button>
+        </div>
+      )}
 
       {rules.length === 0 ? (
         <div style={{ padding: '2rem', textAlign: 'center', color: colors.textMuted }}>
@@ -518,6 +597,7 @@ function RulesTab({ colors, darkMode }) {
           ))}
         </div>
       )}
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
