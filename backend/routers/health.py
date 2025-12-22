@@ -1016,6 +1016,15 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
                         file_data[key]["registry_chunk_count"] = entry.get('chunk_count')
                         file_data[key]["truth_type"] = entry.get('truth_type')
                         file_data[key]["uploaded_at"] = entry.get('created_at')
+                        # New enhanced metadata fields
+                        file_data[key]["file_hash"] = entry.get('file_hash')
+                        file_data[key]["file_size_bytes"] = entry.get('file_size_bytes')
+                        file_data[key]["uploaded_by_email"] = entry.get('uploaded_by_email')
+                        file_data[key]["uploaded_by_id"] = entry.get('uploaded_by_id')
+                        file_data[key]["last_accessed_at"] = entry.get('last_accessed_at')
+                        file_data[key]["access_count"] = entry.get('access_count', 0)
+                        file_data[key]["data_quality_score"] = entry.get('data_quality_score')
+                        file_data[key]["quality_issues"] = entry.get('quality_issues')
         except Exception as e:
             logger.warning(f"[HEALTH] Registry file scan failed: {e}")
         
@@ -1137,6 +1146,231 @@ async def get_project_detail(project_name: str):
         
     except Exception as e:
         logger.error(f"[HEALTH] Project detail failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/stale-files")
+async def get_stale_files(days: int = Query(30, description="Files not accessed in this many days")):
+    """
+    Find files that haven't been accessed recently.
+    
+    Helps identify data that may be obsolete or orphaned.
+    """
+    result = {
+        "threshold_days": days,
+        "stale_files": [],
+        "never_accessed": [],
+        "total_stale": 0,
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import get_supabase_client
+        from datetime import timedelta
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            result["error"] = "Supabase not available"
+            return result
+        
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        
+        # Get all files from registry
+        registry = supabase.table('document_registry').select(
+            'filename, project_id, last_accessed_at, access_count, created_at, file_size_bytes, storage_type'
+        ).execute()
+        
+        # Get project names
+        projects_resp = supabase.table('projects').select('id, name').execute()
+        project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
+        
+        for entry in registry.data or []:
+            last_accessed = entry.get('last_accessed_at')
+            
+            file_info = {
+                "filename": entry.get('filename'),
+                "project": project_id_map.get(entry.get('project_id'), 'unknown'),
+                "created_at": entry.get('created_at'),
+                "last_accessed_at": last_accessed,
+                "access_count": entry.get('access_count', 0),
+                "file_size_bytes": entry.get('file_size_bytes'),
+                "storage_type": entry.get('storage_type')
+            }
+            
+            if last_accessed is None:
+                result["never_accessed"].append(file_info)
+            elif last_accessed < cutoff:
+                result["stale_files"].append(file_info)
+        
+        result["total_stale"] = len(result["stale_files"]) + len(result["never_accessed"])
+        
+        # Sort by oldest first
+        result["stale_files"] = sorted(result["stale_files"], key=lambda x: x.get("last_accessed_at") or "")
+        result["never_accessed"] = sorted(result["never_accessed"], key=lambda x: x.get("created_at") or "")
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Stale files check failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/uploaders")
+async def get_uploader_stats():
+    """
+    Get upload statistics by user.
+    
+    Shows who uploaded what and when.
+    """
+    result = {
+        "uploaders": [],
+        "total_uploaders": 0,
+        "anonymous_uploads": 0,
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import get_supabase_client
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            result["error"] = "Supabase not available"
+            return result
+        
+        # Get all files grouped by uploader
+        registry = supabase.table('document_registry').select(
+            'uploaded_by_id, uploaded_by_email, filename, file_size_bytes, created_at, parse_status'
+        ).execute()
+        
+        uploader_stats = {}
+        
+        for entry in registry.data or []:
+            uploader_id = entry.get('uploaded_by_id')
+            uploader_email = entry.get('uploaded_by_email') or 'anonymous'
+            
+            if not uploader_id:
+                result["anonymous_uploads"] += 1
+                continue
+            
+            if uploader_email not in uploader_stats:
+                uploader_stats[uploader_email] = {
+                    "email": uploader_email,
+                    "user_id": uploader_id,
+                    "file_count": 0,
+                    "total_size_bytes": 0,
+                    "successful_uploads": 0,
+                    "failed_uploads": 0,
+                    "first_upload": None,
+                    "last_upload": None
+                }
+            
+            stats = uploader_stats[uploader_email]
+            stats["file_count"] += 1
+            stats["total_size_bytes"] += entry.get('file_size_bytes') or 0
+            
+            if entry.get('parse_status') == 'success':
+                stats["successful_uploads"] += 1
+            else:
+                stats["failed_uploads"] += 1
+            
+            created = entry.get('created_at')
+            if created:
+                if stats["first_upload"] is None or created < stats["first_upload"]:
+                    stats["first_upload"] = created
+                if stats["last_upload"] is None or created > stats["last_upload"]:
+                    stats["last_upload"] = created
+        
+        result["uploaders"] = sorted(uploader_stats.values(), key=lambda x: -x["file_count"])
+        result["total_uploaders"] = len(uploader_stats)
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Uploader stats failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/duplicates")
+async def find_duplicate_files():
+    """
+    Find duplicate files based on file hash.
+    
+    Identifies files that have been uploaded multiple times.
+    """
+    result = {
+        "duplicate_groups": [],
+        "total_duplicates": 0,
+        "wasted_bytes": 0,
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import get_supabase_client
+        
+        supabase = get_supabase_client()
+        if not supabase:
+            result["error"] = "Supabase not available"
+            return result
+        
+        # Get all files with hashes
+        registry = supabase.table('document_registry').select(
+            'filename, file_hash, file_size_bytes, project_id, created_at, uploaded_by_email'
+        ).not_.is_('file_hash', 'null').execute()
+        
+        # Get project names
+        projects_resp = supabase.table('projects').select('id, name').execute()
+        project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
+        
+        # Group by hash
+        hash_groups = {}
+        for entry in registry.data or []:
+            file_hash = entry.get('file_hash')
+            if file_hash:
+                if file_hash not in hash_groups:
+                    hash_groups[file_hash] = []
+                hash_groups[file_hash].append({
+                    "filename": entry.get('filename'),
+                    "project": project_id_map.get(entry.get('project_id'), 'unknown'),
+                    "file_size_bytes": entry.get('file_size_bytes'),
+                    "created_at": entry.get('created_at'),
+                    "uploaded_by": entry.get('uploaded_by_email')
+                })
+        
+        # Find duplicates (more than one file with same hash)
+        for file_hash, files in hash_groups.items():
+            if len(files) > 1:
+                # Sort by created_at to identify original vs duplicates
+                files_sorted = sorted(files, key=lambda x: x.get("created_at") or "")
+                
+                result["duplicate_groups"].append({
+                    "file_hash": file_hash[:16] + "...",  # Truncate for display
+                    "count": len(files),
+                    "original": files_sorted[0],
+                    "duplicates": files_sorted[1:]
+                })
+                
+                result["total_duplicates"] += len(files) - 1
+                
+                # Calculate wasted space (size of duplicates)
+                for dup in files_sorted[1:]:
+                    result["wasted_bytes"] += dup.get("file_size_bytes") or 0
+        
+        # Sort by most duplicates first
+        result["duplicate_groups"] = sorted(result["duplicate_groups"], key=lambda x: -x["count"])
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Duplicate check failed: {e}")
         result["error"] = str(e)
     
     result["check_time_ms"] = int((time.time() - start) * 1000)
