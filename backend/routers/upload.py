@@ -2075,7 +2075,8 @@ async def upload_standards(
         logger.info(f"[STANDARDS] Upload: {filename}, domain={domain}")
         
         content = await file.read()
-        logger.info(f"[STANDARDS] Size: {len(content)} bytes")
+        file_size = len(content)
+        logger.info(f"[STANDARDS] Size: {file_size} bytes")
         
         if not STANDARDS_AVAILABLE:
             raise HTTPException(status_code=503, detail="Standards processor not available")
@@ -2099,6 +2100,30 @@ async def upload_standards(
             registry.add_document(doc)
             
             logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
+            
+            # Register in document_registry for unified tracking
+            if REGISTRATION_SERVICE_AVAILABLE:
+                try:
+                    reg_result = RegistrationService.register_standards(
+                        filename=filename,
+                        document_id=doc.document_id,
+                        domain=domain,
+                        rules_count=len(doc.rules),
+                        file_size=file_size,
+                        file_type=ext,
+                        source=RegistrationSource.UPLOAD,
+                        metadata={
+                            'title': doc.title,
+                            'page_count': doc.page_count,
+                            'upload_source': 'standards_upload'
+                        }
+                    )
+                    if reg_result.success:
+                        logger.info(f"[STANDARDS] Registered in document_registry: {filename}")
+                    else:
+                        logger.warning(f"[STANDARDS] Registration warning: {reg_result.error}")
+                except Exception as reg_e:
+                    logger.warning(f"[STANDARDS] Could not register: {reg_e}")
             
             return {
                 "success": True,
