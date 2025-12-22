@@ -79,6 +79,18 @@ except ImportError:
         REGISTRY_AVAILABLE = False
         logger.warning("[REGISTER] DocumentRegistryModel not available - no registry tracking")
 
+# Unified Registration Service
+try:
+    from utils.registration_service import RegistrationService, RegistrationSource
+    REGISTRATION_SERVICE_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.registration_service import RegistrationService, RegistrationSource
+        REGISTRATION_SERVICE_AVAILABLE = True
+    except ImportError:
+        REGISTRATION_SERVICE_AVAILABLE = False
+        logger.warning("[REGISTER] RegistrationService not available - using legacy registration")
+
 # Shared PDF utilities (PIIRedactor, JSON parsing)
 # Falls back to local implementation if not available
 try:
@@ -520,16 +532,45 @@ def store_to_duckdb(
             logger.warning(f"Could not store metadata: {meta_err}")
         
         # =================================================================
-        # REGISTER IN DOCUMENT REGISTRY - Classification & Tracking
+        # REGISTER IN DOCUMENT REGISTRY - Classification & Tracking (UNIFIED)
         # =================================================================
-        if REGISTRY_AVAILABLE:
+        if REGISTRATION_SERVICE_AVAILABLE:
+            try:
+                reg_result = RegistrationService.register_structured(
+                    filename=source_file,
+                    project=project_name,
+                    project_id=project_id,
+                    tables_created=[table_name],
+                    row_count=len(df),
+                    column_count=len(df.columns),
+                    file_type='pdf',
+                    job_id=job_id,
+                    source=RegistrationSource.REGISTER_EXTRACTOR,
+                    classification_confidence=0.95,  # High confidence - we know it's payroll
+                    content_domain=['payroll'],
+                    metadata={
+                        'project_name': project_name,
+                        'vendor_type': vendor_type,
+                        'extraction_method': 'register_extractor',
+                        'employee_count': len(employees),
+                        'columns': list(df.columns)
+                    }
+                )
+                if reg_result.success:
+                    logger.info(f"[REGISTER] Registered: {source_file} ({reg_result.lineage_edges} lineage edges)")
+                else:
+                    logger.warning(f"[REGISTER] Registration warning: {reg_result.error}")
+            except Exception as reg_err:
+                logger.warning(f"[REGISTER] Could not register document: {reg_err}")
+        elif REGISTRY_AVAILABLE:
+            # Legacy fallback
             try:
                 DocumentRegistryModel.register(
                     filename=source_file,
                     file_type='pdf',
-                    truth_type=DocumentRegistryModel.TRUTH_REALITY,  # Payroll data = customer reality
+                    truth_type=DocumentRegistryModel.TRUTH_REALITY,
                     classification_method=DocumentRegistryModel.CLASS_AUTO_DETECTED,
-                    classification_confidence=0.95,  # High confidence - we know it's payroll
+                    classification_confidence=0.95,
                     content_domain=['payroll'],
                     storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
                     project_id=project_id,
@@ -545,7 +586,7 @@ def store_to_duckdb(
                         'columns': list(df.columns)
                     }
                 )
-                logger.info(f"[REGISTER] Registered in document registry: {source_file} as reality/payroll")
+                logger.info(f"[REGISTER] Registered (legacy): {source_file}")
             except Exception as reg_err:
                 logger.warning(f"[REGISTER] Could not register document: {reg_err}")
         
