@@ -3422,3 +3422,243 @@ async def comprehensive_health_check(
         "recommendations": recommendations,
         "snapshot_saved": snapshot_saved
     }
+
+
+# =============================================================================
+# DELETE VERIFICATION ENDPOINT - Task 3 GET HEALTHY Sprint
+# =============================================================================
+
+@router.get("/status/verify-deleted")
+async def verify_file_deleted(filename: str, project: Optional[str] = None):
+    """
+    Verify a file has been completely deleted from all storage locations.
+    
+    Checks:
+    - Document Registry (Supabase)
+    - DuckDB tables (_schema_metadata, _pdf_tables, actual tables)
+    - ChromaDB chunks
+    - Lineage edges
+    - Documents table (Supabase)
+    
+    Returns:
+        - completely_deleted: True if no remnants found anywhere
+        - remnants: Details of any remaining data
+    """
+    import time
+    start_time = time.time()
+    
+    filename_lower = filename.lower()
+    project_lower = project.lower() if project else None
+    
+    remnants = {
+        "registry": False,
+        "duckdb_tables": [],
+        "duckdb_metadata": False,
+        "duckdb_pdf_tables": False,
+        "chromadb_chunks": 0,
+        "lineage_edges": 0,
+        "documents_table": False
+    }
+    
+    issues = []
+    
+    # =========================================================================
+    # CHECK 1: Document Registry
+    # =========================================================================
+    try:
+        # Check if file still exists in registry
+        entries = DocumentRegistryModel.get_all(limit=5000)
+        for entry in entries:
+            if entry.get('filename', '').lower() == filename_lower:
+                remnants["registry"] = True
+                issues.append(f"Found in document_registry (id: {entry.get('id')})")
+                break
+    except Exception as e:
+        issues.append(f"Registry check error: {e}")
+    
+    # =========================================================================
+    # CHECK 2: DuckDB - _schema_metadata
+    # =========================================================================
+    if STRUCTURED_AVAILABLE:
+        try:
+            handler = get_structured_handler()
+            
+            # Check _schema_metadata
+            if project_lower:
+                meta_result = handler.safe_fetchall("""
+                    SELECT table_name, project, file_name FROM _schema_metadata 
+                    WHERE LOWER(file_name) = ? AND LOWER(project) = ?
+                """, [filename_lower, project_lower])
+            else:
+                meta_result = handler.safe_fetchall("""
+                    SELECT table_name, project, file_name FROM _schema_metadata 
+                    WHERE LOWER(file_name) = ?
+                """, [filename_lower])
+            
+            if meta_result:
+                remnants["duckdb_metadata"] = True
+                issues.append(f"Found {len(meta_result)} entries in _schema_metadata")
+                
+        except Exception as e:
+            if "does not exist" not in str(e).lower():
+                issues.append(f"_schema_metadata check error: {e}")
+    
+    # =========================================================================
+    # CHECK 3: DuckDB - _pdf_tables
+    # =========================================================================
+    if STRUCTURED_AVAILABLE:
+        try:
+            handler = get_structured_handler()
+            
+            # Check if _pdf_tables exists
+            table_check = handler.safe_fetchone("""
+                SELECT COUNT(*) FROM information_schema.tables 
+                WHERE table_name = '_pdf_tables'
+            """)
+            
+            if table_check and table_check[0] > 0:
+                pdf_result = handler.safe_fetchall("""
+                    SELECT table_name, source_file FROM _pdf_tables 
+                    WHERE LOWER(source_file) = ? OR LOWER(source_file) LIKE ?
+                """, [filename_lower, f"%{filename_lower}%"])
+                
+                if pdf_result:
+                    remnants["duckdb_pdf_tables"] = True
+                    issues.append(f"Found {len(pdf_result)} entries in _pdf_tables")
+                    
+        except Exception as e:
+            if "does not exist" not in str(e).lower():
+                issues.append(f"_pdf_tables check error: {e}")
+    
+    # =========================================================================
+    # CHECK 4: DuckDB - Actual Tables (by naming pattern)
+    # =========================================================================
+    if STRUCTURED_AVAILABLE:
+        try:
+            handler = get_structured_handler()
+            
+            # Generate expected table name patterns
+            safe_file = filename.rsplit('.', 1)[0].lower().replace(' ', '_').replace('-', '_')
+            
+            all_tables = handler.safe_fetchall("SHOW TABLES")
+            matching_tables = []
+            
+            for (tbl,) in all_tables:
+                tbl_lower = tbl.lower()
+                # Match tables containing the filename pattern
+                if safe_file in tbl_lower:
+                    matching_tables.append(tbl)
+            
+            if matching_tables:
+                remnants["duckdb_tables"] = matching_tables
+                issues.append(f"Found {len(matching_tables)} DuckDB tables matching pattern")
+                
+        except Exception as e:
+            issues.append(f"DuckDB tables check error: {e}")
+    
+    # =========================================================================
+    # CHECK 5: ChromaDB Chunks
+    # =========================================================================
+    try:
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        chunk_count = 0
+        
+        # Try exact match first
+        for field in ["filename", "source", "name"]:
+            try:
+                results = collection.get(where={field: filename})
+                if results and results['ids']:
+                    chunk_count += len(results['ids'])
+            except:
+                pass
+        
+        # Case-insensitive fallback
+        if chunk_count == 0:
+            try:
+                all_docs = collection.get(include=["metadatas"], limit=10000)
+                for metadata in all_docs.get("metadatas", []):
+                    doc_filename = metadata.get("source") or metadata.get("filename") or ""
+                    if doc_filename.lower() == filename_lower:
+                        chunk_count += 1
+            except:
+                pass
+        
+        if chunk_count > 0:
+            remnants["chromadb_chunks"] = chunk_count
+            issues.append(f"Found {chunk_count} ChromaDB chunks")
+            
+    except Exception as e:
+        issues.append(f"ChromaDB check error: {e}")
+    
+    # =========================================================================
+    # CHECK 6: Lineage Edges
+    # =========================================================================
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            # Check for lineage edges where this file is the source
+            result = supabase.table('lineage_edges').select('id').eq('source_id', filename).execute()
+            edge_count = len(result.data) if result.data else 0
+            
+            # Also check case-insensitive
+            if edge_count == 0:
+                all_edges = supabase.table('lineage_edges').select('id, source_id').execute()
+                for edge in (all_edges.data or []):
+                    if edge.get('source_id', '').lower() == filename_lower:
+                        edge_count += 1
+            
+            if edge_count > 0:
+                remnants["lineage_edges"] = edge_count
+                issues.append(f"Found {edge_count} lineage edges")
+                
+    except Exception as e:
+        issues.append(f"Lineage check error: {e}")
+    
+    # =========================================================================
+    # CHECK 7: Documents Table
+    # =========================================================================
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            result = supabase.table('documents').select('id').eq('name', filename).execute()
+            if result.data:
+                remnants["documents_table"] = True
+                issues.append(f"Found in documents table")
+                
+    except Exception as e:
+        if "does not exist" not in str(e).lower():
+            issues.append(f"Documents table check error: {e}")
+    
+    # =========================================================================
+    # DETERMINE IF COMPLETELY DELETED
+    # =========================================================================
+    has_remnants = (
+        remnants["registry"] or
+        remnants["duckdb_tables"] or
+        remnants["duckdb_metadata"] or
+        remnants["duckdb_pdf_tables"] or
+        remnants["chromadb_chunks"] > 0 or
+        remnants["lineage_edges"] > 0 or
+        remnants["documents_table"]
+    )
+    
+    completely_deleted = not has_remnants
+    
+    check_time = int((time.time() - start_time) * 1000)
+    
+    return {
+        "filename": filename,
+        "project": project,
+        "completely_deleted": completely_deleted,
+        "remnants": remnants,
+        "issues": issues if issues else [],
+        "issue_count": len([i for i in issues if "error" not in i.lower()]),
+        "check_time_ms": check_time,
+        "recommendation": None if completely_deleted else "Run delete again or manually clean remnants"
+    }
