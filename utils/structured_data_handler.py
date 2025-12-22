@@ -2868,6 +2868,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 # Also check total rows
                 total_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
                 logger.warning(f"[STORE_DF] VERIFY: _schema_metadata total rows: {total_count}")
+                
+                # CRITICAL: Verify with a SEPARATE connection to check disk persistence
+                try:
+                    import duckdb
+                    verify_conn = duckdb.connect(self.db_path, read_only=True)
+                    disk_count = verify_conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                    logger.warning(f"[STORE_DF] VERIFY-DISK: Separate connection sees {disk_count} rows")
+                    verify_conn.close()
+                except Exception as disk_e:
+                    logger.warning(f"[STORE_DF] VERIFY-DISK: Failed: {disk_e}")
+                    
             except Exception as ve:
                 logger.warning(f"[STORE_DF] VERIFY failed: {ve}")
             
@@ -3837,6 +3848,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         logger.warning(f"[SAFE_FETCHALL] DIAG: Direct count shows {direct_count} total rows")
                         current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
                         logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
+                        
+                        # Check if data exists on disk via separate connection
+                        try:
+                            import duckdb
+                            verify_conn = duckdb.connect(self.db_path, read_only=True)
+                            disk_count = verify_conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                            logger.warning(f"[SAFE_FETCHALL] DIAG-DISK: Separate connection sees {disk_count} rows")
+                            verify_conn.close()
+                        except Exception as disk_e:
+                            logger.warning(f"[SAFE_FETCHALL] DIAG-DISK failed: {disk_e}")
+                            
                     except Exception as de:
                         logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
                 
@@ -3874,7 +3896,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         with self._db_lock:
             try:
                 self.conn.commit()
-                logger.debug("[SAFE_COMMIT] Committed successfully")
+                logger.warning("[SAFE_COMMIT] Committed successfully")
+                
+                # Force DuckDB to flush by running a checkpoint
+                try:
+                    self.conn.execute("CHECKPOINT")
+                    logger.warning("[SAFE_COMMIT] Checkpoint complete")
+                except Exception as cp_e:
+                    logger.debug(f"[SAFE_COMMIT] Checkpoint note: {cp_e}")
+                    
             except Exception as e:
                 logger.error(f"[SAFE_COMMIT] Error: {e}")
                 raise
