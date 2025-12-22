@@ -57,7 +57,7 @@ sys.path.insert(0, '/data')
 from utils.rag_handler import RAGHandler
 from utils.database.models import (
     ProcessingJobModel, DocumentModel, ProjectModel, 
-    DocumentRegistryModel, auto_classify_file
+    DocumentRegistryModel, auto_classify_file, LineageModel
 )
 
 # Import structured data handler for Excel/CSV
@@ -960,6 +960,23 @@ def process_file_background(
                         }
                     )
                     logger.info(f"[BACKGROUND] Registered: {filename} as {truth_type} -> DUCKDB ({times['processing_time_ms']}ms)")
+                    
+                    # Track lineage: file → table(s)
+                    tables_created_list = result.get('tables_created', [])
+                    for table_name in tables_created_list:
+                        LineageModel.track(
+                            source_type=LineageModel.NODE_FILE,
+                            source_id=filename,
+                            target_type=LineageModel.NODE_TABLE,
+                            target_id=table_name,
+                            relationship=LineageModel.REL_PARSED,
+                            project_id=project_id,
+                            job_id=job_id,
+                            created_by_id=uploaded_by_id,
+                            metadata={'rows': total_rows, 'truth_type': truth_type}
+                        )
+                    logger.info(f"[BACKGROUND] Tracked lineage: {filename} -> {len(tables_created_list)} table(s)")
+                    
                 except Exception as e:
                     logger.warning(f"[BACKGROUND] Could not register document: {e}")
                 
@@ -1104,6 +1121,23 @@ def process_file_background(
                             }
                         )
                         logger.warning(f"[BACKGROUND] Registered PDF: {truth_type} -> DUCKDB")
+                        
+                        # Track lineage: file → table(s)
+                        pdf_tables = duckdb_result.get('tables_created', [])
+                        for table_name in pdf_tables:
+                            LineageModel.track(
+                                source_type=LineageModel.NODE_FILE,
+                                source_id=filename,
+                                target_type=LineageModel.NODE_TABLE,
+                                target_id=table_name,
+                                relationship=LineageModel.REL_PARSED,
+                                project_id=project_id,
+                                job_id=job_id,
+                                created_by_id=uploaded_by_id,
+                                metadata={'rows': duckdb_result.get('total_rows', 0), 'source': 'smart_pdf'}
+                            )
+                        logger.warning(f"[BACKGROUND] Tracked lineage: PDF -> {len(pdf_tables)} table(s)")
+                        
                     except Exception as e:
                         logger.warning(f"[BACKGROUND] Could not register PDF: {e}")
                         import traceback
@@ -1543,6 +1577,22 @@ def process_file_background(
                 }
             )
             logger.warning(f"[BACKGROUND] Registered: {filename} as {truth_type} -> {storage_type} ({times['processing_time_ms']}ms)")
+            
+            # Track lineage: file → chunks (ChromaDB)
+            if chunks_added > 0:
+                LineageModel.track(
+                    source_type=LineageModel.NODE_FILE,
+                    source_id=filename,
+                    target_type=LineageModel.NODE_CHUNK,
+                    target_id=f"{filename}:chunks",  # Aggregate ID for all chunks from this file
+                    relationship=LineageModel.REL_EMBEDDED,
+                    project_id=project_id,
+                    job_id=job_id,
+                    created_by_id=uploaded_by_id,
+                    metadata={'chunk_count': chunks_added, 'truth_type': truth_type, 'storage_type': storage_type}
+                )
+                logger.warning(f"[BACKGROUND] Tracked lineage: {filename} -> {chunks_added} chunks")
+            
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
         
