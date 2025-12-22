@@ -2108,13 +2108,12 @@ async def upload_standards(
                         filename=filename,
                         document_id=doc.document_id,
                         domain=domain,
-                        rules_count=len(doc.rules),
+                        rules_extracted=len(doc.rules),
                         file_size=file_size,
                         file_type=ext,
-                        source=RegistrationSource.UPLOAD,
+                        title=doc.title,
+                        page_count=doc.page_count,
                         metadata={
-                            'title': doc.title,
-                            'page_count': doc.page_count,
                             'upload_source': 'standards_upload'
                         }
                     )
