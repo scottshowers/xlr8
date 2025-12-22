@@ -19,6 +19,8 @@ const COLORS = {
   white: '#f6f5fa',
   text: '#2a3441',
   textLight: '#5f6c7b',
+  red: '#dc3545',
+  redLight: '#f8d7da',
 };
 
 // =============================================================================
@@ -237,41 +239,236 @@ function RulesTab() {
 }
 
 // =============================================================================
-// DOCUMENTS TAB
+// DOCUMENTS TAB - WITH DELETE FUNCTIONALITY
 // =============================================================================
 
-function DocumentsTab() {
+function DocumentsTab({ onDeleteSuccess }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [deleting, setDeleting] = useState(null);
+  const [showClearAllModal, setShowClearAllModal] = useState(false);
+  const [actionStatus, setActionStatus] = useState(null);
+
+  const loadDocuments = async () => {
+    setLoading(true);
+    setActionStatus(null);
+    try {
+      // Try the new references endpoint first
+      try {
+        const res = await api.get('/status/references');
+        setDocuments(res.data.files || []);
+      } catch {
+        // Fallback to standards/documents
+        const res = await api.get('/standards/documents');
+        setDocuments(res.data.documents || []);
+      }
+    } catch {
+      setDocuments([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    api.get('/standards/documents')
-      .then(res => setDocuments(res.data.documents || []))
-      .catch(() => setDocuments([]))
-      .finally(() => setLoading(false));
+    loadDocuments();
   }, []);
+
+  const handleDelete = async (filename) => {
+    if (!window.confirm(`Delete "${filename}"?\n\nThis will remove it from the registry, vector store, and rule registry.`)) {
+      return;
+    }
+    
+    setDeleting(filename);
+    setActionStatus(null);
+    try {
+      await api.delete(`/status/references/${encodeURIComponent(filename)}?confirm=true`);
+      setActionStatus({ type: 'success', message: `Deleted "${filename}"` });
+      await loadDocuments();
+      if (onDeleteSuccess) onDeleteSuccess();
+    } catch (err) {
+      setActionStatus({ type: 'error', message: err.response?.data?.detail || err.message || 'Delete failed' });
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleClearAll = async () => {
+    setShowClearAllModal(false);
+    setLoading(true);
+    setActionStatus(null);
+    try {
+      const res = await api.delete('/status/references?confirm=true');
+      setActionStatus({ type: 'success', message: `Cleared ${res.data.files_processed || 'all'} reference documents` });
+      await loadDocuments();
+      if (onDeleteSuccess) onDeleteSuccess();
+    } catch (err) {
+      setActionStatus({ type: 'error', message: err.response?.data?.detail || err.message || 'Clear failed' });
+      setLoading(false);
+    }
+  };
 
   if (loading) return <div style={{ padding: '2rem', textAlign: 'center', color: '#5f6c7b' }}>Loading...</div>;
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0' }}>📚 Documents ({documents.length})</h3>
+      {/* Header with actions */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h3 style={{ margin: 0 }}>📚 Documents ({documents.length})</h3>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {documents.length > 0 && (
+            <button 
+              onClick={() => setShowClearAllModal(true)} 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+                background: COLORS.redLight, border: `1px solid ${COLORS.red}40`, borderRadius: '6px', 
+                color: COLORS.red, fontSize: '0.8rem', cursor: 'pointer', fontWeight: '500' 
+              }}
+            >
+              🗑️ Clear All
+            </button>
+          )}
+          <button 
+            onClick={loadDocuments} 
+            style={{ 
+              display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.4rem 0.75rem', 
+              background: 'transparent', border: '1px solid #e1e8ed', borderRadius: '6px', 
+              color: COLORS.textLight, fontSize: '0.8rem', cursor: 'pointer' 
+            }}
+          >
+            🔄 Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Status message */}
+      {actionStatus && (
+        <div style={{ 
+          marginBottom: '1rem', padding: '0.75rem 1rem', 
+          background: actionStatus.type === 'success' ? '#d4edda' : '#f8d7da', 
+          border: `1px solid ${actionStatus.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`, 
+          borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' 
+        }}>
+          <span style={{ color: actionStatus.type === 'success' ? '#155724' : '#721c24', fontSize: '0.9rem' }}>
+            {actionStatus.type === 'success' ? '✅' : '❌'} {actionStatus.message}
+          </span>
+          <button 
+            onClick={() => setActionStatus(null)} 
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1rem', opacity: 0.6 }}
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {documents.length === 0 ? (
-        <p style={{ color: '#5f6c7b' }}>No documents yet.</p>
+        <p style={{ color: '#5f6c7b' }}>No documents yet. Upload a standards document to get started.</p>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
           {documents.map((doc, i) => (
-            <div key={doc.document_id || i} style={{ padding: '1rem', background: '#f8f9fa', borderRadius: '8px', border: '1px solid #e1e8ed' }}>
-              <h4 style={{ margin: '0 0 0.5rem 0' }}>{doc.title || doc.filename}</h4>
-              <p style={{ margin: '0', color: '#5f6c7b', fontSize: '0.9rem' }}>
-                Domain: {doc.domain} | Rules: {doc.rule_count || 0}
-              </p>
+            <div 
+              key={doc.document_id || doc.id || doc.filename || i} 
+              style={{ 
+                padding: '1rem', background: '#f8f9fa', borderRadius: '8px', 
+                border: '1px solid #e1e8ed', display: 'flex', alignItems: 'center', gap: '1rem' 
+              }}
+            >
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h4 style={{ margin: '0 0 0.25rem 0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {doc.title || doc.filename}
+                </h4>
+                <p style={{ margin: '0', color: '#5f6c7b', fontSize: '0.85rem' }}>
+                  {doc.domain || doc.truth_type || 'reference'} 
+                  {doc.rule_count ? ` • ${doc.rule_count} rules` : ''}
+                  {doc.chunk_count ? ` • ${doc.chunk_count} chunks` : ''}
+                  {doc.file_size_bytes ? ` • ${formatFileSize(doc.file_size_bytes)}` : ''}
+                </p>
+              </div>
+              <button
+                onClick={() => handleDelete(doc.filename)}
+                disabled={deleting === doc.filename}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  padding: '0.5rem 0.75rem', borderRadius: '6px',
+                  background: deleting === doc.filename ? '#f8f9fa' : COLORS.redLight,
+                  border: `1px solid ${COLORS.red}30`,
+                  color: deleting === doc.filename ? COLORS.textLight : COLORS.red,
+                  cursor: deleting === doc.filename ? 'wait' : 'pointer',
+                  opacity: deleting === doc.filename ? 0.5 : 1,
+                  fontSize: '0.8rem', fontWeight: '500',
+                }}
+                title="Delete document"
+              >
+                {deleting === doc.filename ? '⏳' : '🗑️'} Delete
+              </button>
             </div>
           ))}
         </div>
       )}
+
+      {/* Clear All Confirmation Modal */}
+      {showClearAllModal && (
+        <div style={{ 
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', 
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 
+        }}>
+          <div style={{ 
+            background: 'white', borderRadius: '12px', padding: '1.5rem', 
+            maxWidth: '420px', margin: '1rem', boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+          }}>
+            <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              ⚠️ Clear All Documents?
+            </h3>
+            
+            <p style={{ color: COLORS.textLight, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
+              This will permanently delete all <strong>{documents.length}</strong> reference document(s) from:
+            </p>
+            
+            <ul style={{ margin: '0 0 1rem 0', paddingLeft: '1.25rem', color: COLORS.textLight, fontSize: '0.85rem' }}>
+              <li>Document Registry</li>
+              <li>Vector Store (ChromaDB)</li>
+              <li>Lineage Tracking</li>
+              <li>Rule Registry</li>
+            </ul>
+            
+            <p style={{ color: COLORS.red, fontWeight: '500', fontSize: '0.85rem', margin: '0 0 1.25rem 0' }}>
+              This action cannot be undone.
+            </p>
+            
+            <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'flex-end' }}>
+              <button 
+                onClick={() => setShowClearAllModal(false)}
+                style={{ 
+                  padding: '0.6rem 1rem', background: '#f8f9fa', 
+                  border: '1px solid #e1e8ed', borderRadius: '8px', 
+                  color: COLORS.text, fontWeight: '500', cursor: 'pointer', fontSize: '0.9rem' 
+                }}
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={handleClearAll}
+                style={{ 
+                  padding: '0.6rem 1rem', background: COLORS.red, 
+                  border: 'none', borderRadius: '8px', 
+                  color: 'white', fontWeight: '600', cursor: 'pointer', fontSize: '0.9rem' 
+                }}
+              >
+                Yes, Clear All
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
+}
+
+// Helper function
+function formatFileSize(bytes) {
+  if (!bytes) return '';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 // =============================================================================
@@ -432,6 +629,9 @@ export default function StandardsPage() {
     { id: 'compliance', label: 'Compliance', icon: '🔍' },
   ];
 
+  // Refresh docs and rules tabs
+  const handleRefresh = () => setKey(k => k + 1);
+
   // Show loading state
   if (loading) {
     return (
@@ -489,8 +689,8 @@ export default function StandardsPage() {
 
         {/* Tab content */}
         <div style={{ padding: '1.5rem' }}>
-          {activeTab === 'upload' && <UploadTab onUploadSuccess={() => setKey(k => k + 1)} />}
-          {activeTab === 'documents' && <DocumentsTab key={key} />}
+          {activeTab === 'upload' && <UploadTab onUploadSuccess={handleRefresh} />}
+          {activeTab === 'documents' && <DocumentsTab key={key} onDeleteSuccess={handleRefresh} />}
           {activeTab === 'rules' && <RulesTab key={key} />}
           {activeTab === 'compliance' && (
             hasActiveProject ? (
@@ -507,4 +707,4 @@ export default function StandardsPage() {
       </div>
     </div>
   );
-                    }
+}
