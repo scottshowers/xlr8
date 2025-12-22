@@ -98,13 +98,9 @@ async def get_structured_data_status(project: Optional[str] = None):
             for entry in registry_entries:
                 storage = entry.get('storage_type', '')
                 if storage in ('duckdb', 'both'):
-                    fn = entry.get('filename', '').lower()
-                    valid_files.add(fn)
-                    # Also add normalized version (no extension, spaces→underscores)
-                    normalized = fn.rsplit('.', 1)[0].replace(' ', '_')
-                    valid_files.add(normalized)
+                    valid_files.add(entry.get('filename', '').lower())
             
-            logger.info(f"[STATUS/STRUCTURED] Registry has {len(registry_entries)} DuckDB files, {len(valid_files)} valid patterns")
+            logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
             
             # If registry is empty, return empty - no fallback to stale metadata
             if not valid_files:
@@ -134,20 +130,13 @@ async def get_structured_data_status(project: Optional[str] = None):
         # =================================================================
         tables = []
         try:
-            logger.warning("[STATUS/STRUCTURED] Querying _schema_metadata...")
+            logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
             metadata_result = handler.safe_fetchall("""
                 SELECT table_name, project, file_name, sheet_name, columns, row_count, created_at
                 FROM _schema_metadata 
                 WHERE is_current = TRUE
             """)
-            logger.warning(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
-            
-            # Debug: log what we found
-            for row in metadata_result:
-                logger.warning(f"[STATUS/STRUCTURED] Found: table={row[0]}, project={row[1]}, file={row[2]}")
-            
-            # Debug: log valid_files
-            logger.warning(f"[STATUS/STRUCTURED] valid_files patterns: {valid_files}")
+            logger.info(f"[STATUS/STRUCTURED] _schema_metadata returned {len(metadata_result)} rows")
             
             for row in metadata_result:
                 table_name, proj, filename, sheet, columns_json, row_count, created_at = row
@@ -516,8 +505,14 @@ async def delete_structured_file(project: str, filename: str):
                 logger.warning(f"[DELETE] Fallback pattern match failed: {fb_e}")
         
         # =================================================================
-        # STEP 5: Checkpoint to persist changes
+        # STEP 5: COMMIT and Checkpoint to persist changes
         # =================================================================
+        try:
+            conn.commit()
+            logger.info("[DELETE] Committed delete operations")
+        except Exception as commit_e:
+            logger.warning(f"[DELETE] Commit failed: {commit_e}")
+        
         try:
             conn.execute("CHECKPOINT")
             logger.info("[DELETE] Checkpoint complete")
@@ -525,48 +520,7 @@ async def delete_structured_file(project: str, filename: str):
             logger.debug(f"[DELETE] Checkpoint failed (may not be needed): {cp_e}")
         
         # =================================================================
-        # STEP 6: Clean ChromaDB chunks (for files stored in BOTH places)
-        # =================================================================
-        chromadb_cleaned = 0
-        try:
-            rag = RAGHandler()
-            collection = rag.client.get_or_create_collection(name="documents")
-            
-            # Find and delete chunks for this filename
-            for field in ["filename", "source", "name"]:
-                try:
-                    # Try exact match
-                    results = collection.get(where={field: filename})
-                    if results and results['ids']:
-                        collection.delete(ids=results['ids'])
-                        chromadb_cleaned += len(results['ids'])
-                        logger.info(f"[DELETE] Deleted {len(results['ids'])} ChromaDB chunks (field: {field})")
-                        break
-                except Exception as ce:
-                    pass
-            
-            # Also try case-insensitive by getting all and filtering
-            if chromadb_cleaned == 0:
-                try:
-                    all_docs = collection.get(include=["metadatas"], limit=10000)
-                    ids_to_delete = []
-                    for i, metadata in enumerate(all_docs.get("metadatas", [])):
-                        doc_filename = metadata.get("source", metadata.get("filename", ""))
-                        if doc_filename and doc_filename.lower() == filename.lower():
-                            ids_to_delete.append(all_docs["ids"][i])
-                    
-                    if ids_to_delete:
-                        collection.delete(ids=ids_to_delete)
-                        chromadb_cleaned = len(ids_to_delete)
-                        logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (case-insensitive)")
-                except Exception as ce2:
-                    logger.warning(f"[DELETE] ChromaDB case-insensitive cleanup failed: {ce2}")
-                    
-        except Exception as chroma_e:
-            logger.warning(f"[DELETE] ChromaDB cleanup failed: {chroma_e}")
-        
-        # =================================================================
-        # STEP 7: Unregister from document registry (SOURCE OF TRUTH)
+        # STEP 6: Unregister from document registry (SOURCE OF TRUTH)
         # =================================================================
         registry_cleaned = False
         try:
@@ -591,7 +545,6 @@ async def delete_structured_file(project: str, filename: str):
             "deleted_tables": deleted_tables,
             "count": len(deleted_tables),
             "metadata_cleaned": metadata_cleaned,
-            "chromadb_cleaned": chromadb_cleaned,
             "registry_cleaned": registry_cleaned
         }
         
@@ -2231,304 +2184,3 @@ async def check_data_integrity(project: Optional[str] = None):
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
         return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0, "insights_count": 0}
-
-
-# =============================================================================
-# REGISTRY HEALTH - Source of Truth Verification
-# =============================================================================
-
-@router.get("/status/registry/health")
-async def get_registry_health(project_id: Optional[str] = None):
-    """
-    Check health of DocumentRegistry vs actual backend storage.
-    
-    Returns sync status between Registry (source of truth) and:
-    - DuckDB (structured data)
-    - ChromaDB (vector data)
-    
-    Use this to detect orphan data or missing registrations.
-    """
-    from datetime import datetime as dt
-    
-    result = {
-        "timestamp": dt.utcnow().isoformat(),
-        "project_filter": project_id,
-        "registry": {
-            "total_files": 0,
-            "by_truth_type": {},
-            "by_storage_type": {}
-        },
-        "duckdb": {
-            "tables_in_metadata": 0,
-            "unique_files": 0,
-            "orphan_tables": 0,
-            "orphan_files": []
-        },
-        "chromadb": {
-            "total_chunks": 0,
-            "unique_files": 0,
-            "orphan_chunks": 0,
-            "orphan_files": []
-        },
-        "sync_status": "unknown",
-        "issues": []
-    }
-    
-    # =========================================================================
-    # STEP 1: Get Registry State (Source of Truth)
-    # =========================================================================
-    registry_files = set()
-    registry_files_lower = set()
-    
-    try:
-        from utils.database.models import ProjectModel
-        
-        # Get project UUID if name provided
-        if project_id and len(project_id) < 32:
-            proj = ProjectModel.get_by_name(project_id)
-            if proj:
-                project_id = proj.get('id')
-        
-        if project_id:
-            entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
-        else:
-            entries = DocumentRegistryModel.get_all()
-        
-        result["registry"]["total_files"] = len(entries)
-        
-        for entry in entries:
-            filename = entry.get('filename', '')
-            truth_type = entry.get('truth_type', 'unknown')
-            storage_type = entry.get('storage_type', 'unknown')
-            
-            if filename:
-                registry_files.add(filename)
-                registry_files_lower.add(filename.lower())
-            
-            # Count by type
-            result["registry"]["by_truth_type"][truth_type] = \
-                result["registry"]["by_truth_type"].get(truth_type, 0) + 1
-            result["registry"]["by_storage_type"][storage_type] = \
-                result["registry"]["by_storage_type"].get(storage_type, 0) + 1
-                
-    except Exception as e:
-        result["issues"].append(f"Registry query failed: {str(e)}")
-        logger.error(f"[REGISTRY_HEALTH] Registry query failed: {e}")
-    
-    # =========================================================================
-    # STEP 2: Check DuckDB State
-    # =========================================================================
-    duckdb_files = set()
-    
-    try:
-        if STRUCTURED_AVAILABLE:
-            handler = get_structured_handler()
-            
-            # Get files from _schema_metadata
-            try:
-                meta_result = handler.safe_fetchall("""
-                    SELECT DISTINCT file_name FROM _schema_metadata 
-                    WHERE file_name IS NOT NULL
-                """)
-                
-                for (filename,) in meta_result:
-                    if filename:
-                        duckdb_files.add(filename)
-                        
-                count_result = handler.safe_fetchone("SELECT COUNT(*) FROM _schema_metadata")
-                result["duckdb"]["tables_in_metadata"] = count_result[0] if count_result else 0
-            except Exception as e:
-                result["issues"].append(f"_schema_metadata query failed: {str(e)}")
-            
-            # Get files from _pdf_tables
-            try:
-                table_check = handler.safe_fetchone("""
-                    SELECT COUNT(*) FROM information_schema.tables 
-                    WHERE table_name = '_pdf_tables'
-                """)
-                
-                if table_check and table_check[0] > 0:
-                    pdf_result = handler.safe_fetchall("""
-                        SELECT DISTINCT source_file FROM _pdf_tables 
-                        WHERE source_file IS NOT NULL
-                    """)
-                    for (filename,) in pdf_result:
-                        if filename:
-                            duckdb_files.add(filename)
-            except:
-                pass
-            
-            result["duckdb"]["unique_files"] = len(duckdb_files)
-            
-            # Find orphans (in DuckDB but not in Registry)
-            orphan_files = []
-            for filename in duckdb_files:
-                if filename.lower() not in registry_files_lower:
-                    orphan_files.append(filename)
-            
-            result["duckdb"]["orphan_tables"] = len(orphan_files)
-            result["duckdb"]["orphan_files"] = orphan_files[:10]  # First 10
-            
-    except Exception as e:
-        result["issues"].append(f"DuckDB check failed: {str(e)}")
-        logger.error(f"[REGISTRY_HEALTH] DuckDB check failed: {e}")
-    
-    # =========================================================================
-    # STEP 3: Check ChromaDB State
-    # =========================================================================
-    chromadb_files = set()
-    
-    try:
-        rag = RAGHandler()
-        
-        try:
-            collection = rag.client.get_or_create_collection(name="documents")
-            all_docs = collection.get(include=["metadatas"], limit=10000)
-            
-            result["chromadb"]["total_chunks"] = len(all_docs.get("ids", []))
-            
-            for metadata in all_docs.get("metadatas", []):
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename:
-                    chromadb_files.add(filename)
-            
-            result["chromadb"]["unique_files"] = len(chromadb_files)
-            
-            # Find orphans
-            orphan_files = []
-            orphan_chunk_count = 0
-            for i, metadata in enumerate(all_docs.get("metadatas", [])):
-                filename = metadata.get("source", metadata.get("filename", ""))
-                if filename and filename.lower() not in registry_files_lower:
-                    orphan_chunk_count += 1
-                    if filename not in orphan_files:
-                        orphan_files.append(filename)
-            
-            result["chromadb"]["orphan_chunks"] = orphan_chunk_count
-            result["chromadb"]["orphan_files"] = orphan_files[:10]
-            
-        except Exception as e:
-            result["issues"].append(f"ChromaDB collection query failed: {str(e)}")
-            
-    except Exception as e:
-        result["issues"].append(f"ChromaDB check failed: {str(e)}")
-        logger.error(f"[REGISTRY_HEALTH] ChromaDB check failed: {e}")
-    
-    # =========================================================================
-    # STEP 4: Determine Overall Sync Status
-    # =========================================================================
-    total_orphans = result["duckdb"]["orphan_tables"] + result["chromadb"]["orphan_chunks"]
-    
-    if result["issues"]:
-        result["sync_status"] = "error"
-    elif total_orphans == 0:
-        result["sync_status"] = "healthy"
-    elif total_orphans < 10:
-        result["sync_status"] = "warning"
-        result["issues"].append(f"Found {total_orphans} orphaned items - run /api/deep-clean to fix")
-    else:
-        result["sync_status"] = "unhealthy"
-        result["issues"].append(f"Found {total_orphans} orphaned items - run /api/deep-clean?confirm=true to fix")
-    
-    return result
-
-
-@router.post("/status/registry/sync")
-async def sync_registry():
-    """
-    One-time sync: Register any files that exist in backends but not in Registry.
-    
-    Use this ONCE after deploying Registry system to backfill existing files.
-    After this, all new uploads should go through proper registration.
-    """
-    from datetime import datetime as dt
-    
-    result = {
-        "timestamp": dt.utcnow().isoformat(),
-        "registered": [],
-        "errors": []
-    }
-    
-    try:
-        # Get existing registry files
-        existing = DocumentRegistryModel.get_all()
-        existing_files = set(e.get('filename', '').lower() for e in existing if e.get('filename'))
-        
-        # Check DuckDB for unregistered files
-        if STRUCTURED_AVAILABLE:
-            handler = get_structured_handler()
-            
-            try:
-                meta_result = handler.safe_fetchall("""
-                    SELECT DISTINCT file_name, project FROM _schema_metadata 
-                    WHERE file_name IS NOT NULL
-                """)
-                
-                for filename, project in meta_result:
-                    if filename and filename.lower() not in existing_files:
-                        try:
-                            # Get project_id
-                            project_id = None
-                            if project:
-                                from utils.database.models import ProjectModel
-                                proj = ProjectModel.get_by_name(project)
-                                if proj:
-                                    project_id = proj.get('id')
-                            
-                            # Register with reality truth_type (it's in DuckDB)
-                            DocumentRegistryModel.register(
-                                filename=filename,
-                                truth_type='reality',
-                                storage_type='duckdb',
-                                project_id=project_id,
-                                classification_method='auto_detected',
-                                classification_confidence=0.5
-                            )
-                            result["registered"].append({"file": filename, "source": "duckdb", "project": project})
-                            existing_files.add(filename.lower())
-                            
-                        except Exception as e:
-                            result["errors"].append(f"Failed to register {filename}: {str(e)}")
-                            
-            except Exception as e:
-                result["errors"].append(f"DuckDB sync failed: {str(e)}")
-        
-        # Check ChromaDB for unregistered files
-        try:
-            rag = RAGHandler()
-            collection = rag.client.get_or_create_collection(name="documents")
-            all_docs = collection.get(include=["metadatas"], limit=10000)
-            
-            seen_files = set()
-            for metadata in all_docs.get("metadatas", []):
-                filename = metadata.get("source", metadata.get("filename", ""))
-                chroma_project_id = metadata.get("project_id", metadata.get("project", ""))
-                truth_type = metadata.get("truth_type", "intent")
-                
-                if filename and filename.lower() not in existing_files and filename not in seen_files:
-                    seen_files.add(filename)
-                    try:
-                        DocumentRegistryModel.register(
-                            filename=filename,
-                            truth_type=truth_type or 'intent',
-                            storage_type='chromadb',
-                            project_id=chroma_project_id if chroma_project_id and len(str(chroma_project_id)) > 30 else None,
-                            classification_method='auto_detected',
-                            classification_confidence=0.5
-                        )
-                        result["registered"].append({"file": filename, "source": "chromadb", "project": chroma_project_id})
-                        existing_files.add(filename.lower())
-                        
-                    except Exception as e:
-                        result["errors"].append(f"Failed to register {filename}: {str(e)}")
-                        
-        except Exception as e:
-            result["errors"].append(f"ChromaDB sync failed: {str(e)}")
-    
-    except Exception as e:
-        result["errors"].append(f"Sync failed: {str(e)}")
-    
-    result["total_registered"] = len(result["registered"])
-    result["total_errors"] = len(result["errors"])
-    
-    return result
