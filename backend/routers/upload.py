@@ -28,7 +28,7 @@ ROUTING LOGIC (Universal Classification Architecture):
 Author: XLR8 Team
 """
 
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks, Request, Depends
 from typing import Optional
 from datetime import datetime
 import sys
@@ -36,6 +36,7 @@ import os
 import json
 import threading
 import traceback
+import hashlib
 import PyPDF2
 import docx
 import pandas as pd
@@ -709,7 +710,10 @@ def process_file_background(
     functional_area: Optional[str],
     file_size: int,
     truth_type: Optional[str] = None,
-    content_domain: Optional[str] = None
+    content_domain: Optional[str] = None,
+    file_hash: Optional[str] = None,
+    uploaded_by_id: Optional[str] = None,
+    uploaded_by_email: Optional[str] = None
 ):
     """
     Background processing function - runs in separate thread
@@ -725,6 +729,11 @@ def process_file_background(
        - INTENT/REFERENCE → ChromaDB (semantic search)
     3. Run intelligence analysis (Phase 3)
     4. Update job status throughout
+    
+    Metadata tracked:
+    - file_hash: SHA-256 hash for integrity/dedup
+    - uploaded_by_id: User UUID who uploaded
+    - uploaded_by_email: User email for quick lookup
     """
     try:
         logger.warning(f"[BACKGROUND] === STARTING JOB {job_id} ===")
@@ -939,6 +948,10 @@ def process_file_background(
                         classification_time_ms=times['classification_time_ms'],
                         parse_time_ms=times['parse_time_ms'],
                         storage_time_ms=times['storage_time_ms'],
+                        file_hash=file_hash,
+                        file_size_bytes=file_size,
+                        uploaded_by_id=uploaded_by_id,
+                        uploaded_by_email=uploaded_by_email,
                         metadata={
                             'project_name': project,
                             'functional_area': functional_area,
@@ -1074,6 +1087,10 @@ def process_file_background(
                             classification_time_ms=times['classification_time_ms'],
                             parse_time_ms=times['parse_time_ms'],
                             storage_time_ms=times['storage_time_ms'],
+                            file_hash=file_hash,
+                            file_size_bytes=file_size,
+                            uploaded_by_id=uploaded_by_id,
+                            uploaded_by_email=uploaded_by_email,
                             metadata={
                                 'project_name': project,
                                 'functional_area': functional_area,
@@ -1264,6 +1281,10 @@ def process_file_background(
                                                     classification_time_ms=times['classification_time_ms'],
                                                     parse_time_ms=times['parse_time_ms'],
                                                     storage_time_ms=times['storage_time_ms'],
+                                                    file_hash=file_hash,
+                                                    file_size_bytes=file_size,
+                                                    uploaded_by_id=uploaded_by_id,
+                                                    uploaded_by_email=uploaded_by_email,
                                                     metadata={
                                                         'project_name': project,
                                                         'functional_area': functional_area,
@@ -1510,6 +1531,10 @@ def process_file_background(
                 parse_time_ms=times['parse_time_ms'],
                 embedding_time_ms=times['embedding_time_ms'],
                 storage_time_ms=times['storage_time_ms'],
+                file_hash=file_hash,
+                file_size_bytes=file_size,
+                uploaded_by_id=uploaded_by_id,
+                uploaded_by_email=uploaded_by_email,
                 metadata={
                     'project_name': project,
                     'functional_area': functional_area,
@@ -1560,6 +1585,7 @@ def process_file_background(
 
 @router.post("/upload")
 async def upload_file(
+    request: Request,
     file: UploadFile = File(...),
     project: str = Form(...),
     functional_area: Optional[str] = Form(None),
@@ -1578,6 +1604,40 @@ async def upload_file(
     If standards_mode=true, extracts compliance rules instead of normal processing.
     Returns immediately with job_id for status polling (or rules for standards mode)
     """
+    
+    # =================================================================
+    # EXTRACT USER INFO FROM REQUEST
+    # =================================================================
+    uploaded_by_id = None
+    uploaded_by_email = None
+    
+    try:
+        # Try to get user from Authorization header (Supabase JWT)
+        auth_header = request.headers.get('Authorization', '')
+        if auth_header.startswith('Bearer '):
+            token = auth_header[7:]
+            try:
+                # Decode JWT to get user info (without verification for now)
+                import base64
+                # JWT has 3 parts: header.payload.signature
+                payload = token.split('.')[1]
+                # Add padding if needed
+                payload += '=' * (4 - len(payload) % 4)
+                decoded = json.loads(base64.urlsafe_b64decode(payload))
+                uploaded_by_id = decoded.get('sub')  # User UUID
+                uploaded_by_email = decoded.get('email')
+                logger.info(f"[UPLOAD] User from JWT: {uploaded_by_email} ({uploaded_by_id})")
+            except Exception as jwt_e:
+                logger.warning(f"[UPLOAD] Could not decode JWT: {jwt_e}")
+        
+        # Fallback: check for user info in headers (set by frontend)
+        if not uploaded_by_id:
+            uploaded_by_id = request.headers.get('X-User-Id')
+            uploaded_by_email = request.headers.get('X-User-Email')
+            if uploaded_by_id:
+                logger.info(f"[UPLOAD] User from headers: {uploaded_by_email} ({uploaded_by_id})")
+    except Exception as user_e:
+        logger.warning(f"[UPLOAD] Could not extract user info: {user_e}")
     
     # STANDARDS MODE - Extract rules from compliance documents
     if standards_mode == "true" or project.lower() == "__standards__":
@@ -1719,6 +1779,10 @@ async def upload_file(
         content = await file.read()
         file_size = len(content)
         
+        # Calculate file hash for integrity and deduplication
+        file_hash = hashlib.sha256(content).hexdigest()
+        logger.info(f"[UPLOAD] File hash: {file_hash[:16]}...")
+        
         # Write to temp file
         with open(file_path, 'wb') as f:
             f.write(content)
@@ -1729,7 +1793,14 @@ async def upload_file(
         job_result = ProcessingJobModel.create(
             job_type='upload',
             project_id=project_id,
-            input_data={'filename': file.filename, 'functional_area': functional_area, 'project_name': project}
+            input_data={
+                'filename': file.filename, 
+                'functional_area': functional_area, 
+                'project_name': project,
+                'file_hash': file_hash,
+                'uploaded_by_id': uploaded_by_id,
+                'uploaded_by_email': uploaded_by_email
+            }
         )
         
         if not job_result:
@@ -1737,13 +1808,13 @@ async def upload_file(
         
         job_id = job_result['id']
         
-        logger.info(f"[UPLOAD] Created job {job_id} for project_id={project_id}, truth_type={truth_type}")
+        logger.info(f"[UPLOAD] Created job {job_id} for project_id={project_id}, truth_type={truth_type}, user={uploaded_by_email}")
         
         # Queue for background processing (sequential!)
         queue_info = job_queue.enqueue(
             job_id,
             process_file_background,
-            (job_id, file_path, file.filename, project, project_id, functional_area, file_size, truth_type, content_domain)
+            (job_id, file_path, file.filename, project, project_id, functional_area, file_size, truth_type, content_domain, file_hash, uploaded_by_id, uploaded_by_email)
         )
         
         return {
