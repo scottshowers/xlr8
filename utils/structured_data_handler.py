@@ -2767,6 +2767,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         }
         
         try:
+            # CRITICAL: Clear any pending uncommitted transaction
+            # This ensures we're not affected by uncommitted deletes/changes from other operations
+            try:
+                with self._db_lock:
+                    self.conn.rollback()
+                    logger.warning("[STORE_DF] Cleared any pending transaction")
+            except Exception as rb_e:
+                logger.debug(f"[STORE_DF] Rollback note (OK if no transaction): {rb_e}")
+            
             if df is None or df.empty:
                 results['error'] = 'DataFrame is empty'
                 return results
@@ -2821,66 +2830,45 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 for col in df.columns
             ]
             
-            # Store metadata
+            # Store metadata - DuckDB is in autocommit mode, so INSERT commits immediately
             logger.warning(f"[STORE_DF] Inserting _schema_metadata for {table_name}, conn_id={id(self.conn)}")
-            self.safe_execute("""
-                INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-            """, [
-                project,
-                file_name,
-                sheet_name,
-                table_name,
-                json.dumps(columns_info),
-                len(df),
-                json.dumps([]),  # likely_keys - could detect later
-                json.dumps([]),  # encrypted_columns
-                version
-            ])
             
-            # Commit to ensure visibility (thread-safe)
-            self.safe_commit()
-            logger.warning(f"[STORE_DF] Committed _schema_metadata for {table_name}")
+            with self._db_lock:
+                self.conn.execute("""
+                    INSERT INTO _schema_metadata 
+                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                """, [
+                    project,
+                    file_name,
+                    sheet_name,
+                    table_name,
+                    json.dumps(columns_info),
+                    len(df),
+                    json.dumps([]),  # likely_keys
+                    json.dumps([]),  # encrypted_columns
+                    version
+                ])
+                logger.warning("[STORE_DF] INSERT executed")
+                
+                # Immediate verification BEFORE leaving the lock
+                immed_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                logger.warning(f"[STORE_DF] IMMEDIATE CHECK: {immed_count} rows in _schema_metadata")
+                
+                # Force checkpoint to persist
+                self.conn.execute("CHECKPOINT")
+                logger.warning("[STORE_DF] CHECKPOINT complete")
+                
+                # Verify after checkpoint
+                post_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
+                logger.warning(f"[STORE_DF] POST-CHECKPOINT: {post_count} rows in _schema_metadata")
             
-            # DIAGNOSTIC: Verify the data was actually written
+            # Final verification using safe_fetchall (same path as status.py)
             try:
-                verify_count = self.conn.execute(
-                    "SELECT COUNT(*) FROM _schema_metadata WHERE table_name = ?", 
-                    [table_name]
-                ).fetchone()[0]
-                logger.warning(f"[STORE_DF] VERIFY: _schema_metadata has {verify_count} rows for {table_name}")
-                
-                # Check is_current value
-                verify_current = self.conn.execute(
-                    "SELECT is_current FROM _schema_metadata WHERE table_name = ?", 
-                    [table_name]
-                ).fetchone()
-                logger.warning(f"[STORE_DF] VERIFY: is_current = {verify_current}")
-                
-                # Also check with is_current = TRUE filter (what status.py uses)
-                verify_filtered = self.conn.execute(
-                    "SELECT COUNT(*) FROM _schema_metadata WHERE table_name = ? AND is_current = TRUE", 
-                    [table_name]
-                ).fetchone()[0]
-                logger.warning(f"[STORE_DF] VERIFY: with is_current=TRUE filter: {verify_filtered} rows")
-                
-                # Also check total rows
-                total_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
-                logger.warning(f"[STORE_DF] VERIFY: _schema_metadata total rows: {total_count}")
-                
-                # CRITICAL: Verify with a SEPARATE connection to check disk persistence
-                try:
-                    import duckdb
-                    verify_conn = duckdb.connect(self.db_path, read_only=True)
-                    disk_count = verify_conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
-                    logger.warning(f"[STORE_DF] VERIFY-DISK: Separate connection sees {disk_count} rows")
-                    verify_conn.close()
-                except Exception as disk_e:
-                    logger.warning(f"[STORE_DF] VERIFY-DISK: Failed: {disk_e}")
-                    
-            except Exception as ve:
-                logger.warning(f"[STORE_DF] VERIFY failed: {ve}")
+                test_result = self.safe_fetchall("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE")
+                logger.warning(f"[STORE_DF] FINAL CHECK via safe_fetchall: {test_result[0][0] if test_result else 'None'} rows with is_current=TRUE")
+            except Exception as sf_e:
+                logger.warning(f"[STORE_DF] FINAL CHECK failed: {sf_e}")
             
             logger.warning(f"[STORE_DF] Stored {len(df)} rows to {table_name} from {source_type}")
             
@@ -3848,17 +3836,6 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         logger.warning(f"[SAFE_FETCHALL] DIAG: Direct count shows {direct_count} total rows")
                         current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
                         logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
-                        
-                        # Check if data exists on disk via separate connection
-                        try:
-                            import duckdb
-                            verify_conn = duckdb.connect(self.db_path, read_only=True)
-                            disk_count = verify_conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
-                            logger.warning(f"[SAFE_FETCHALL] DIAG-DISK: Separate connection sees {disk_count} rows")
-                            verify_conn.close()
-                        except Exception as disk_e:
-                            logger.warning(f"[SAFE_FETCHALL] DIAG-DISK failed: {disk_e}")
-                            
                     except Exception as de:
                         logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
                 
