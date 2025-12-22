@@ -520,7 +520,45 @@ async def delete_structured_file(project: str, filename: str):
             logger.debug(f"[DELETE] Checkpoint failed (may not be needed): {cp_e}")
         
         # =================================================================
-        # STEP 6: Unregister from document registry (SOURCE OF TRUTH)
+        # STEP 6: Clean ChromaDB chunks (for PDFs that might have both)
+        # =================================================================
+        chromadb_cleaned = 0
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            for field in ["filename", "source", "name"]:
+                try:
+                    results = collection.get(where={field: filename})
+                    if results and results['ids']:
+                        collection.delete(ids=results['ids'])
+                        chromadb_cleaned = len(results['ids'])
+                        logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (field: {field})")
+                        break
+                except:
+                    pass
+            
+            # Also try case-insensitive if nothing found
+            if chromadb_cleaned == 0:
+                try:
+                    all_docs = collection.get(include=["metadatas"], limit=10000)
+                    ids_to_delete = []
+                    for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                        doc_filename = metadata.get("source", metadata.get("filename", ""))
+                        if doc_filename and doc_filename.lower() == filename_lower:
+                            ids_to_delete.append(all_docs["ids"][i])
+                    
+                    if ids_to_delete:
+                        collection.delete(ids=ids_to_delete)
+                        chromadb_cleaned = len(ids_to_delete)
+                        logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (case-insensitive)")
+                except:
+                    pass
+        except Exception as chroma_e:
+            logger.warning(f"[DELETE] ChromaDB cleanup failed: {chroma_e}")
+        
+        # =================================================================
+        # STEP 7: Unregister from document registry (SOURCE OF TRUTH)
         # =================================================================
         registry_cleaned = False
         try:
@@ -541,15 +579,53 @@ async def delete_structured_file(project: str, filename: str):
         except Exception as reg_e:
             logger.warning(f"[DELETE] Registry unregister failed: {reg_e}")
         
+        # =================================================================
+        # STEP 8: Clean lineage edges
+        # =================================================================
+        lineage_cleaned = 0
+        try:
+            from utils.database.models import LineageModel
+            lineage_cleaned = LineageModel.delete_for_source('file', filename, project_id if 'project_id' in dir() else None)
+            if lineage_cleaned:
+                logger.info(f"[DELETE] Deleted {lineage_cleaned} lineage edges")
+        except Exception as lin_e:
+            logger.warning(f"[DELETE] Lineage cleanup failed: {lin_e}")
+        
+        # =================================================================
+        # STEP 9: Clean documents table (Supabase)
+        # =================================================================
+        documents_cleaned = False
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                result = supabase.table('documents').delete().eq('name', filename).execute()
+                documents_cleaned = len(result.data) > 0 if result.data else False
+                if documents_cleaned:
+                    logger.info(f"[DELETE] Cleaned documents table entry")
+        except Exception as doc_e:
+            logger.warning(f"[DELETE] Documents table cleanup failed: {doc_e}")
+        
+        # Build detailed response
         result = {
-            "deleted_tables": deleted_tables,
-            "count": len(deleted_tables),
-            "metadata_cleaned": metadata_cleaned,
-            "registry_cleaned": registry_cleaned
+            "success": True,
+            "filename": filename,
+            "project": project,
+            "cleaned": {
+                "duckdb_tables": deleted_tables,
+                "duckdb_tables_count": len(deleted_tables),
+                "schema_metadata_rows": metadata_cleaned["_schema_metadata"],
+                "pdf_tables_rows": metadata_cleaned["_pdf_tables"],
+                "chromadb_chunks": chromadb_cleaned,
+                "registry": registry_cleaned,
+                "lineage_edges": lineage_cleaned,
+                "documents_table": documents_cleaned
+            },
+            "summary": f"Cleaned {len(deleted_tables)} tables, {chromadb_cleaned} chunks, {lineage_cleaned} lineage edges"
         }
         
-        logger.warning(f"[DELETE] Result: {result}")
-        return {"success": True, "message": f"Deleted {filename}", "details": result}
+        logger.warning(f"[DELETE] Complete: {result}")
+        return result
         
     except Exception as e:
         logger.error(f"Failed to delete structured file: {e}")
@@ -888,8 +964,19 @@ async def get_documents(project: Optional[str] = None, limit: int = 1000):
 
 @router.delete("/status/documents/{doc_id}")
 async def delete_document(doc_id: str, filename: str = None, project: str = None):
-    """Delete a document and its chunks from ChromaDB"""
+    """
+    Delete a document and its chunks from ChromaDB.
+    
+    Returns detailed breakdown of what was cleaned.
+    """
     try:
+        cleaned = {
+            "chromadb_chunks": 0,
+            "documents_table": False,
+            "registry": False,
+            "lineage_edges": 0
+        }
+        
         # Check if doc_id is a UUID or a filename
         is_uuid = len(doc_id) == 36 and '-' in doc_id
         
@@ -902,6 +989,8 @@ async def delete_document(doc_id: str, filename: str = None, project: str = None
         if doc:
             actual_filename = doc.get("name", actual_filename)
         
+        project_id = doc.get("project_id") if doc else None
+        
         # Delete from ChromaDB
         if actual_filename:
             try:
@@ -913,45 +1002,66 @@ async def delete_document(doc_id: str, filename: str = None, project: str = None
                     results = collection.get(where={field: actual_filename})
                     if results and results['ids']:
                         collection.delete(ids=results['ids'])
+                        cleaned["chromadb_chunks"] = len(results['ids'])
                         logger.info(f"Deleted {len(results['ids'])} chunks from ChromaDB (field: {field})")
                         break
+                
+                # Case-insensitive fallback
+                if cleaned["chromadb_chunks"] == 0:
+                    all_docs = collection.get(include=["metadatas"], limit=10000)
+                    ids_to_delete = []
+                    filename_lower = actual_filename.lower()
+                    for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                        doc_filename = metadata.get("source", metadata.get("filename", ""))
+                        if doc_filename and doc_filename.lower() == filename_lower:
+                            ids_to_delete.append(all_docs["ids"][i])
+                    if ids_to_delete:
+                        collection.delete(ids=ids_to_delete)
+                        cleaned["chromadb_chunks"] = len(ids_to_delete)
+                        
             except Exception as ce:
                 logger.warning(f"ChromaDB deletion issue: {ce}")
         
-        # Delete from Supabase if we have a doc record
+        # Delete from Supabase documents table
         if doc:
             DocumentModel.delete(doc.get("id"))
+            cleaned["documents_table"] = True
             logger.info(f"Deleted document {doc.get('id')} from Supabase")
         elif not is_uuid and actual_filename:
-            # Try to find and delete by filename
             try:
                 from utils.database.supabase_client import get_supabase
                 supabase = get_supabase()
                 if supabase:
-                    supabase.table('documents').delete().eq('name', actual_filename).execute()
+                    result = supabase.table('documents').delete().eq('name', actual_filename).execute()
+                    cleaned["documents_table"] = len(result.data) > 0 if result.data else False
                     logger.info(f"Deleted document by filename: {actual_filename}")
             except Exception as db_e:
                 logger.warning(f"Could not delete from Supabase by filename: {db_e}")
         
-        # =================================================================
-        # Unregister from document registry (SOURCE OF TRUTH)
-        # =================================================================
-        registry_cleaned = False
+        # Unregister from document registry
         try:
-            # Get project_id from doc or param
-            project_id = doc.get("project_id") if doc else None
-            
             if actual_filename:
-                registry_cleaned = DocumentRegistryModel.unregister(actual_filename, project_id)
-                if registry_cleaned:
+                cleaned["registry"] = DocumentRegistryModel.unregister(actual_filename, project_id)
+                if cleaned["registry"]:
                     logger.info(f"Unregistered {actual_filename} from document registry")
-                elif not project_id:
-                    # File might be global or project_id not found
-                    logger.info(f"Registry entry not found for {actual_filename} (may not exist)")
         except Exception as reg_e:
             logger.warning(f"Registry unregister failed: {reg_e}")
         
-        return {"success": True, "message": f"Document deleted", "registry_cleaned": registry_cleaned}
+        # Clean lineage edges
+        try:
+            from utils.database.models import LineageModel
+            cleaned["lineage_edges"] = LineageModel.delete_for_source('file', actual_filename, project_id)
+            if cleaned["lineage_edges"]:
+                logger.info(f"Deleted {cleaned['lineage_edges']} lineage edges")
+        except Exception as lin_e:
+            logger.warning(f"Lineage cleanup failed: {lin_e}")
+        
+        return {
+            "success": True,
+            "filename": actual_filename,
+            "cleaned": cleaned,
+            "summary": f"Cleaned {cleaned['chromadb_chunks']} chunks, {cleaned['lineage_edges']} lineage edges"
+        }
             
     except Exception as e:
         logger.error(f"Failed to delete document: {e}")
@@ -2833,46 +2943,47 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
     # CHECK 5: LINEAGE
     # =========================================================================
     try:
-        from utils.database.models import LineageModel
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
         
-        # Get lineage stats
-        lineage_stats = LineageModel.get_stats(project_id=project_id)
-        
-        # Get files with/without lineage
-        registry_entries = DocumentRegistryModel.get_all(limit=5000)
-        files_with_lineage = set()
-        
-        try:
-            from utils.database.supabase_client import get_supabase
-            supabase = get_supabase()
-            if supabase:
-                lineage_result = supabase.table('lineage_edges').select('source_id').eq('source_type', 'file').execute()
-                files_with_lineage = {r['source_id'] for r in lineage_result.data}
-        except:
-            pass
-        
-        files_without_lineage = []
-        for entry in registry_entries:
-            filename = entry.get('filename')
-            if filename and filename not in files_with_lineage:
-                files_without_lineage.append(filename)
-        
-        lineage_coverage = f"{len(files_with_lineage)}/{len(registry_entries)}"
-        
-        lineage_status = "ok"
-        if files_without_lineage:
-            lineage_status = "warning"
-            issues.append(f"{len(files_without_lineage)} files without lineage tracking")
-        
-        checks["lineage"] = {
-            "status": lineage_status,
-            "total_edges": lineage_stats.get('total_edges', 0),
-            "by_relationship": lineage_stats.get('by_relationship', {}),
-            "files_with_lineage": len(files_with_lineage),
-            "files_without_lineage": len(files_without_lineage),
-            "coverage": lineage_coverage,
-            "missing_files": files_without_lineage[:10]  # First 10
-        }
+        if supabase:
+            # Get lineage edge counts by relationship type
+            lineage_result = supabase.table('lineage_edges').select('relationship, source_id').execute()
+            lineage_data = lineage_result.data if lineage_result.data else []
+            
+            total_edges = len(lineage_data)
+            by_relationship = {}
+            files_with_lineage = set()
+            
+            for edge in lineage_data:
+                rel = edge.get('relationship', 'unknown')
+                by_relationship[rel] = by_relationship.get(rel, 0) + 1
+                files_with_lineage.add(edge.get('source_id'))
+            
+            # Get registry entries to compare
+            registry_entries = DocumentRegistryModel.get_all(limit=5000)
+            registry_filenames = {e.get('filename') for e in registry_entries if e.get('filename')}
+            
+            files_without_lineage = [f for f in registry_filenames if f not in files_with_lineage]
+            
+            lineage_coverage = f"{len(files_with_lineage)}/{len(registry_filenames)}"
+            
+            lineage_status = "ok"
+            if files_without_lineage:
+                lineage_status = "warning"
+                issues.append(f"{len(files_without_lineage)} files without lineage tracking")
+            
+            checks["lineage"] = {
+                "status": lineage_status,
+                "total_edges": total_edges,
+                "by_relationship": by_relationship,
+                "files_with_lineage": len(files_with_lineage),
+                "files_without_lineage": len(files_without_lineage),
+                "coverage": lineage_coverage,
+                "missing_files": files_without_lineage[:10]  # First 10
+            }
+        else:
+            checks["lineage"] = {"status": "unavailable", "error": "Supabase not available"}
     except Exception as e:
         checks["lineage"] = {"status": "error", "error": str(e)}
         issues.append(f"Lineage check failed: {e}")
@@ -2889,12 +3000,13 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
             from datetime import timedelta
             ten_mins_ago = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
             
-            stuck_result = supabase.table('processing_jobs').select('id, filename, status, created_at').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
+            # Use source_file instead of filename (correct column name)
+            stuck_result = supabase.table('processing_jobs').select('id, source_file, status, created_at').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
             stuck_jobs = stuck_result.data if stuck_result.data else []
             
             # Get failed jobs in last 24 hours
             one_day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
-            failed_result = supabase.table('processing_jobs').select('id, filename, error').eq('status', 'failed').gt('created_at', one_day_ago).execute()
+            failed_result = supabase.table('processing_jobs').select('id, source_file, error').eq('status', 'failed').gt('created_at', one_day_ago).execute()
             failed_jobs = failed_result.data if failed_result.data else []
             
             # Get pending jobs
@@ -2912,7 +3024,7 @@ async def comprehensive_health_check(project_id: Optional[str] = None):
                 "stuck_count": len(stuck_jobs),
                 "failed_24h": len(failed_jobs),
                 "pending": pending_count,
-                "stuck_jobs": [{"id": j['id'], "filename": j['filename'], "created_at": j['created_at']} for j in stuck_jobs[:5]]
+                "stuck_jobs": [{"id": j['id'], "source_file": j.get('source_file'), "created_at": j['created_at']} for j in stuck_jobs[:5]]
             }
         else:
             checks["jobs"] = {"status": "unavailable", "error": "Supabase not available"}
