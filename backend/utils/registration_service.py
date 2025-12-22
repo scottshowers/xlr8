@@ -365,9 +365,23 @@ class RegistrationService:
         Called by:
         - upload.py for unstructured documents
         - Any semantic document ingestion
+        
+        NOTE: If chunk_count is 0 or None, this method returns early without
+        creating a registry entry. No point tracking a ChromaDB entry with no chunks.
         """
         start = time.time()
         result = RegistrationResult(success=False, filename=filename)
+        
+        # =================================================================
+        # GUARD: Skip registration if no chunks were actually stored
+        # This prevents phantom 0-chunk ChromaDB entries
+        # =================================================================
+        if not chunk_count or chunk_count <= 0:
+            logger.info(f"[REGISTRATION] Skipping embedded registration for {filename} - no chunks (count={chunk_count})")
+            result.success = True
+            result.warnings.append("Skipped - no chunks to register")
+            result.timing_ms = int((time.time() - start) * 1000)
+            return result
         
         try:
             DocumentRegistryModel, LineageModel, _ = RegistrationService._get_models()
@@ -599,6 +613,11 @@ class RegistrationService:
         Called by:
         - Smart PDF analyzer (tables + text from same PDF)
         - Any file that goes to both DuckDB AND ChromaDB
+        
+        NOTE: Dynamically determines storage_type based on actual data:
+        - If tables AND chunks → 'both'
+        - If only tables (chunk_count=0) → 'duckdb'
+        - If only chunks (no tables) → 'chromadb'
         """
         start = time.time()
         result = RegistrationResult(success=False, filename=filename)
@@ -627,14 +646,31 @@ class RegistrationService:
                 ext = filename.split('.')[-1].lower() if '.' in filename else 'unknown'
                 file_type = ext
             
-            # Register with BOTH storage type
+            # =================================================================
+            # SMART STORAGE TYPE - based on what actually has data
+            # =================================================================
+            has_tables = tables_created and len(tables_created) > 0
+            has_chunks = chunk_count and chunk_count > 0
+            
+            if has_tables and has_chunks:
+                storage_type = 'both'
+            elif has_tables:
+                storage_type = 'duckdb'
+            elif has_chunks:
+                storage_type = 'chromadb'
+            else:
+                # Nothing stored? Log warning but continue
+                logger.warning(f"[REGISTRATION] Hybrid called with no tables and no chunks for {filename}")
+                storage_type = 'duckdb'  # Default to duckdb
+            
+            # Register with correct storage type
             registry_result = DocumentRegistryModel.register(
                 filename=filename,
                 file_type=file_type,
                 truth_type=truth_type,
                 classification_method='auto_detected',  # Must be: user_selected, auto_detected, filename_inferred
                 classification_confidence=0.9,
-                storage_type='both',
+                storage_type=storage_type,  # Dynamic: 'both', 'duckdb', or 'chromadb'
                 project_id=project_id,
                 is_global=False,
                 duckdb_tables=tables_created or [],
@@ -656,7 +692,7 @@ class RegistrationService:
             
             if registry_result:
                 result.registry_id = registry_result.get('id')
-                logger.info(f"[REGISTRATION] Registered hybrid: {filename} ({row_count} rows, {chunk_count} chunks)")
+                logger.info(f"[REGISTRATION] Registered hybrid: {filename} (storage={storage_type}, {row_count} rows, {chunk_count} chunks)")
             
             # Track lineage for BOTH paths
             if LineageModel:
