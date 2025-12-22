@@ -2341,6 +2341,73 @@ async def unified_chat(request: UnifiedChatRequest):
         session['last_question'] = message
         session['interaction_count'] = session.get('interaction_count', 0) + 1
         
+        # Track lineage: sources → response
+        try:
+            from utils.database.models import LineageModel, ProjectModel
+            import uuid
+            
+            # Only track if we have actual sources cited
+            sources_tracked = 0
+            response_id = session.get('session_id', str(uuid.uuid4())[:8]) + f"_{session.get('interaction_count', 0)}"
+            
+            # Get project_id
+            project_record = ProjectModel.get_by_name(project)
+            project_id = project_record.get('id') if project_record else None
+            
+            # Track Reality sources (DuckDB tables)
+            if answer and answer.from_reality:
+                for truth in answer.from_reality:
+                    source_table = truth.source_name if hasattr(truth, 'source_name') else None
+                    if source_table:
+                        LineageModel.track(
+                            source_type=LineageModel.NODE_TABLE,
+                            source_id=source_table,
+                            target_type=LineageModel.NODE_RESPONSE,
+                            target_id=response_id,
+                            relationship=LineageModel.REL_CITED,
+                            project_id=project_id,
+                            metadata={'query': message[:100], 'confidence': response.get('confidence', 0)}
+                        )
+                        sources_tracked += 1
+            
+            # Track Intent sources (ChromaDB chunks)
+            if answer and answer.from_intent:
+                for truth in answer.from_intent:
+                    source_doc = truth.source_name if hasattr(truth, 'source_name') else None
+                    if source_doc:
+                        LineageModel.track(
+                            source_type=LineageModel.NODE_CHUNK,
+                            source_id=f"{source_doc}:chunks",
+                            target_type=LineageModel.NODE_RESPONSE,
+                            target_id=response_id,
+                            relationship=LineageModel.REL_CITED,
+                            project_id=project_id,
+                            metadata={'query': message[:100], 'truth_type': 'intent'}
+                        )
+                        sources_tracked += 1
+            
+            # Track Best Practice sources
+            if answer and answer.from_best_practice:
+                for truth in answer.from_best_practice:
+                    source_doc = truth.source_name if hasattr(truth, 'source_name') else None
+                    if source_doc:
+                        LineageModel.track(
+                            source_type=LineageModel.NODE_CHUNK,
+                            source_id=f"{source_doc}:chunks",
+                            target_type=LineageModel.NODE_RESPONSE,
+                            target_id=response_id,
+                            relationship=LineageModel.REL_CITED,
+                            project_id=project_id,
+                            metadata={'query': message[:100], 'truth_type': 'best_practice'}
+                        )
+                        sources_tracked += 1
+            
+            if sources_tracked > 0:
+                logger.debug(f"[UNIFIED] Tracked lineage: {sources_tracked} sources -> response_{response_id}")
+                
+        except Exception as lineage_error:
+            logger.debug(f"[UNIFIED] Lineage tracking skipped: {lineage_error}")
+        
         # Cleanup old sessions
         cleanup_old_sessions()
         
