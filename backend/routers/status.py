@@ -1051,7 +1051,9 @@ async def delete_reference(filename: str, confirm: bool = False):
     - Document registry (Supabase)
     - ChromaDB (vector store)
     - Lineage edges
-    - Rule registry (if applicable)
+    - Standards documents table (Supabase)
+    - Standards rules table (Supabase)
+    - Rule registry (in-memory)
     
     Requires confirm=true query parameter.
     """
@@ -1066,7 +1068,9 @@ async def delete_reference(filename: str, confirm: bool = False):
             'registry': False,
             'chromadb': 0,
             'lineage': 0,
-            'rules': False
+            'standards_docs': 0,
+            'standards_rules': 0,
+            'memory': False
         }
         
         # 1. Delete from document_registry
@@ -1110,14 +1114,58 @@ async def delete_reference(filename: str, confirm: bool = False):
         except Exception as e:
             logger.warning(f"Lineage delete failed: {e}")
         
-        # 4. Clear from rule registry
+        # 4. Delete from standards_documents table (get document_id first)
+        document_ids = []
+        try:
+            # Find document_id by filename
+            doc_result = supabase.table('standards_documents') \
+                .select('document_id') \
+                .eq('filename', filename) \
+                .execute()
+            document_ids = [d['document_id'] for d in (doc_result.data or [])]
+            
+            if document_ids:
+                # Delete the documents
+                result = supabase.table('standards_documents') \
+                    .delete() \
+                    .eq('filename', filename) \
+                    .execute()
+                deleted['standards_docs'] = len(result.data or [])
+                logger.info(f"Deleted {deleted['standards_docs']} from standards_documents")
+        except Exception as e:
+            logger.warning(f"Standards documents delete failed: {e}")
+        
+        # 5. Delete from standards_rules table
+        try:
+            for doc_id in document_ids:
+                result = supabase.table('standards_rules') \
+                    .delete() \
+                    .eq('document_id', doc_id) \
+                    .execute()
+                deleted['standards_rules'] += len(result.data or [])
+            if deleted['standards_rules'] > 0:
+                logger.info(f"Deleted {deleted['standards_rules']} from standards_rules")
+        except Exception as e:
+            logger.warning(f"Standards rules delete failed: {e}")
+        
+        # 6. Clear from in-memory rule registry
         try:
             from utils.standards_processor import get_rule_registry
             registry = get_rule_registry()
-            if hasattr(registry, 'documents'):
-                before = len(registry.documents)
-                registry.documents = [d for d in registry.documents if getattr(d, 'filename', '') != filename]
-                deleted['rules'] = len(registry.documents) < before
+            
+            # Remove from documents dict
+            if hasattr(registry, 'documents') and isinstance(registry.documents, dict):
+                docs_to_remove = [k for k, v in registry.documents.items() if getattr(v, 'filename', '') == filename]
+                for doc_id in docs_to_remove:
+                    del registry.documents[doc_id]
+                    deleted['memory'] = True
+            
+            # Remove rules associated with this document
+            if hasattr(registry, 'rules') and isinstance(registry.rules, dict):
+                rules_to_remove = [k for k, v in registry.rules.items() if getattr(v, 'source_document', '') == filename]
+                for rule_id in rules_to_remove:
+                    del registry.rules[rule_id]
+                    
         except ImportError:
             pass
         except Exception as e:
@@ -1147,7 +1195,9 @@ async def clear_all_references(confirm: bool = False):
     - Document registry (all reference/global entries)
     - ChromaDB (all chunks for those files)
     - Lineage edges
-    - Rule registry
+    - Standards documents table (Supabase)
+    - Standards rules table (Supabase)
+    - Rule registry (in-memory)
     """
     if not confirm:
         raise HTTPException(400, "Must set confirm=true to clear all references")
@@ -1160,7 +1210,10 @@ async def clear_all_references(confirm: bool = False):
             'registry': 0,
             'chromadb': 0,
             'lineage': 0,
-            'rules': 0
+            'standards_docs': 0,
+            'standards_rules': 0,
+            'memory_docs': 0,
+            'memory_rules': 0
         }
         
         # 1. Get all reference files first
@@ -1212,13 +1265,43 @@ async def clear_all_references(confirm: bool = False):
         except Exception as e:
             logger.warning(f"Lineage clear failed: {e}")
         
-        # 5. Clear rule registry
+        # 5. Clear ALL standards_rules from Supabase
+        try:
+            result = supabase.table('standards_rules') \
+                .delete() \
+                .neq('rule_id', '00000000-0000-0000-0000-000000000000') \
+                .execute()
+            deleted['standards_rules'] = len(result.data or [])
+            logger.info(f"Cleared {deleted['standards_rules']} from standards_rules table")
+        except Exception as e:
+            logger.warning(f"Standards rules clear failed: {e}")
+        
+        # 6. Clear ALL standards_documents from Supabase
+        try:
+            result = supabase.table('standards_documents') \
+                .delete() \
+                .neq('document_id', '00000000-0000-0000-0000-000000000000') \
+                .execute()
+            deleted['standards_docs'] = len(result.data or [])
+            logger.info(f"Cleared {deleted['standards_docs']} from standards_documents table")
+        except Exception as e:
+            logger.warning(f"Standards documents clear failed: {e}")
+        
+        # 7. Clear in-memory rule registry
         try:
             from utils.standards_processor import get_rule_registry
             registry = get_rule_registry()
-            if hasattr(registry, 'documents'):
-                deleted['rules'] = len(registry.documents)
-                registry.documents = []
+            
+            # Clear documents dict
+            if hasattr(registry, 'documents') and isinstance(registry.documents, dict):
+                deleted['memory_docs'] = len(registry.documents)
+                registry.documents.clear()
+            
+            # Clear rules dict
+            if hasattr(registry, 'rules') and isinstance(registry.rules, dict):
+                deleted['memory_rules'] = len(registry.rules)
+                registry.rules.clear()
+                
         except ImportError:
             pass
         except Exception as e:
