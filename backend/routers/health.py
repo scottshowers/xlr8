@@ -1380,6 +1380,7 @@ async def find_duplicate_files():
 # =============================================================================
 # LINEAGE ENDPOINTS
 # =============================================================================
+# NOTE: Route order matters! Specific routes must come before generic {node_type}/{node_id}
 
 @router.get("/health/lineage")
 async def get_lineage_summary():
@@ -1430,54 +1431,6 @@ async def get_lineage_summary():
         
     except Exception as e:
         logger.error(f"[HEALTH] Lineage summary failed: {e}")
-        result["error"] = str(e)
-    
-    result["check_time_ms"] = int((time.time() - start) * 1000)
-    return result
-
-
-@router.get("/health/lineage/{node_type}/{node_id}")
-async def get_node_lineage(node_type: str, node_id: str, project: str = Query(None)):
-    """
-    Get full lineage for a specific node.
-    
-    Returns ancestors (what it came from) and descendants (what was derived from it).
-    
-    Args:
-        node_type: Type of node (file, table, chunk, analysis, finding, etc.)
-        node_id: Identifier of the node
-        project: Optional project name filter
-    """
-    result = {
-        "node": {"type": node_type, "id": node_id},
-        "ancestors": [],
-        "descendants": [],
-        "root_files": [],
-        "check_time_ms": 0
-    }
-    
-    start = time.time()
-    
-    try:
-        from utils.database.models import LineageModel
-        from utils.database.supabase_client import get_supabase
-        
-        # Get project_id if project name provided
-        project_id = None
-        if project:
-            supabase = get_supabase()
-            if supabase:
-                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
-                if proj_resp.data:
-                    project_id = proj_resp.data[0]['id']
-        
-        # Get ancestors and descendants
-        result["ancestors"] = LineageModel.get_ancestors(node_type, node_id, project_id)
-        result["descendants"] = LineageModel.get_descendants(node_type, node_id, project_id)
-        result["root_files"] = LineageModel.get_root_files(node_type, node_id, project_id)
-        
-    except Exception as e:
-        logger.error(f"[HEALTH] Node lineage failed: {e}")
         result["error"] = str(e)
     
     result["check_time_ms"] = int((time.time() - start) * 1000)
@@ -1541,7 +1494,7 @@ async def get_project_lineage(project_name: str):
     return result
 
 
-@router.get("/health/lineage/trace/{target_type}/{target_id}")
+@router.get("/health/lineage/trace/{target_type}/{target_id:path}")
 async def trace_to_source(target_type: str, target_id: str, project: str = Query(None)):
     """
     Trace a target back to its original source file(s).
@@ -1592,6 +1545,54 @@ async def trace_to_source(target_type: str, target_id: str, project: str = Query
         
     except Exception as e:
         logger.error(f"[HEALTH] Trace to source failed: {e}")
+        result["error"] = str(e)
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+@router.get("/health/lineage/{node_type}/{node_id:path}")
+async def get_node_lineage(node_type: str, node_id: str, project: str = Query(None)):
+    """
+    Get full lineage for a specific node.
+    
+    Returns ancestors (what it came from) and descendants (what was derived from it).
+    
+    Args:
+        node_type: Type of node (file, table, chunk, analysis, finding, etc.)
+        node_id: Identifier of the node
+        project: Optional project name filter
+    """
+    result = {
+        "node": {"type": node_type, "id": node_id},
+        "ancestors": [],
+        "descendants": [],
+        "root_files": [],
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    try:
+        from utils.database.models import LineageModel
+        from utils.database.supabase_client import get_supabase
+        
+        # Get project_id if project name provided
+        project_id = None
+        if project:
+            supabase = get_supabase()
+            if supabase:
+                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
+                if proj_resp.data:
+                    project_id = proj_resp.data[0]['id']
+        
+        # Get ancestors and descendants
+        result["ancestors"] = LineageModel.get_ancestors(node_type, node_id, project_id)
+        result["descendants"] = LineageModel.get_descendants(node_type, node_id, project_id)
+        result["root_files"] = LineageModel.get_root_files(node_type, node_id, project_id)
+        
+    except Exception as e:
+        logger.error(f"[HEALTH] Node lineage failed: {e}")
         result["error"] = str(e)
     
     result["check_time_ms"] = int((time.time() - start) * 1000)
