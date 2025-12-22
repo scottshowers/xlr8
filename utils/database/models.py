@@ -362,7 +362,16 @@ class DocumentRegistryModel:
         parse_time_ms: int = None,
         embedding_time_ms: int = None,
         storage_time_ms: int = None,
-        metadata: dict = None
+        metadata: dict = None,
+        # NEW: Enhanced metadata fields for health tracking
+        file_hash: str = None,
+        file_size_bytes: int = None,
+        uploaded_by_id: str = None,
+        uploaded_by_email: str = None,
+        error_message: str = None,
+        error_details: dict = None,
+        data_quality_score: int = None,
+        quality_issues: List[dict] = None
     ) -> Optional[Dict[str, Any]]:
         """Register a document in the registry."""
         supabase = get_supabase()
@@ -435,7 +444,18 @@ class DocumentRegistryModel:
                 'parse_time_ms': parse_time_ms,
                 'embedding_time_ms': embedding_time_ms,
                 'storage_time_ms': storage_time_ms,
-                'metadata': metadata or {}
+                'metadata': metadata or {},
+                # NEW: Enhanced metadata fields
+                'file_hash': file_hash,
+                'file_size_bytes': file_size_bytes,
+                'uploaded_by_id': uploaded_by_id,
+                'uploaded_by_email': uploaded_by_email,
+                'error_message': error_message,
+                'error_details': error_details,
+                'data_quality_score': data_quality_score,
+                'quality_issues': quality_issues,
+                # Initialize access tracking
+                'access_count': 0
             }
             
             data = {k: v for k, v in data.items() if v is not None}
@@ -688,6 +708,86 @@ class DocumentRegistryModel:
         return DocumentRegistryModel.update(filename, project_id, truth_type=truth_type,
                                             storage_type=new_storage, classification_method=classification_method,
                                             classification_confidence=classification_confidence)
+    
+    @staticmethod
+    def track_access(filename: str, project_id: str = None) -> bool:
+        """
+        Track when a document is accessed (queried, cited, etc.)
+        
+        Increments access_count and updates last_accessed_at.
+        Called by chat, BI Builder, playbooks when they use a document.
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        
+        try:
+            # Try to use the RPC function if available
+            try:
+                supabase.rpc('track_document_access', {'doc_filename': filename}).execute()
+                return True
+            except Exception:
+                pass
+            
+            # Fallback: manual update
+            query = supabase.table('document_registry').select('access_count').eq('filename', filename)
+            if project_id:
+                query = query.eq('project_id', project_id)
+            
+            result = query.execute()
+            current_count = result.data[0].get('access_count', 0) if result.data else 0
+            
+            update_query = supabase.table('document_registry').update({
+                'access_count': current_count + 1,
+                'last_accessed_at': datetime.utcnow().isoformat()
+            }).eq('filename', filename)
+            
+            if project_id:
+                update_query = update_query.eq('project_id', project_id)
+            
+            update_query.execute()
+            return True
+            
+        except Exception as e:
+            logger.warning(f"[REGISTRY] Error tracking access for {filename}: {e}")
+            return False
+    
+    @staticmethod
+    def update_quality(filename: str, quality_score: int, issues: List[dict] = None, 
+                       project_id: str = None) -> bool:
+        """
+        Update data quality score and issues for a document.
+        
+        Args:
+            filename: Document filename
+            quality_score: 0-100 score
+            issues: List of issue dicts with 'type', 'severity', 'description'
+            project_id: Optional project filter
+        
+        Called by intelligence analysis when profiling data quality.
+        """
+        return DocumentRegistryModel.update(
+            filename, 
+            project_id,
+            data_quality_score=quality_score,
+            quality_issues=issues or []
+        )
+    
+    @staticmethod
+    def record_error(filename: str, error_message: str, error_details: dict = None,
+                     project_id: str = None) -> bool:
+        """
+        Record an error that occurred during processing.
+        
+        Called when file processing fails partially or completely.
+        """
+        return DocumentRegistryModel.update(
+            filename,
+            project_id,
+            parse_status='failed',
+            error_message=error_message,
+            error_details=error_details or {}
+        )
     
     # ==========================================================================
     # LEARNING METRICS
