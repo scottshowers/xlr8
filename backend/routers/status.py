@@ -988,6 +988,297 @@ async def reset_all_documents():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# =============================================================================
+# REFERENCE / STANDARDS MANAGEMENT
+# =============================================================================
+
+@router.get("/status/references")
+async def list_references():
+    """
+    List all reference/standards files (global documents).
+    
+    These are documents with truth_type='reference' or is_global=true.
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if not supabase:
+            raise HTTPException(500, "Supabase not available")
+        
+        # Get from document_registry - reference or global
+        result = supabase.table('document_registry') \
+            .select('*') \
+            .or_('truth_type.eq.reference,is_global.eq.true') \
+            .order('created_at', desc=True) \
+            .execute()
+        
+        files = result.data or []
+        
+        # Also get rules from standards processor
+        rules_info = {'available': False, 'documents': 0, 'total_rules': 0}
+        try:
+            from utils.standards_processor import get_rule_registry
+            registry = get_rule_registry()
+            if hasattr(registry, 'documents'):
+                rules_info['available'] = True
+                rules_info['documents'] = len(registry.documents)
+                rules_info['total_rules'] = sum(len(getattr(d, 'rules', [])) for d in registry.documents)
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Could not get rules info: {e}")
+        
+        return {
+            'count': len(files),
+            'files': files,
+            'rules': rules_info
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error listing references: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/references/{filename:path}")
+async def delete_reference(filename: str, confirm: bool = False):
+    """
+    Delete a specific reference/standards file.
+    
+    Removes from:
+    - Document registry (Supabase)
+    - ChromaDB (vector store)
+    - Lineage edges
+    - Rule registry (if applicable)
+    
+    Requires confirm=true query parameter.
+    """
+    if not confirm:
+        raise HTTPException(400, "Must set confirm=true to delete")
+    
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        deleted = {
+            'registry': False,
+            'chromadb': 0,
+            'lineage': 0,
+            'rules': False
+        }
+        
+        # 1. Delete from document_registry
+        try:
+            result = supabase.table('document_registry') \
+                .delete() \
+                .eq('filename', filename) \
+                .or_('truth_type.eq.reference,is_global.eq.true') \
+                .execute()
+            deleted['registry'] = len(result.data or []) > 0
+        except Exception as e:
+            logger.warning(f"Registry delete failed: {e}")
+        
+        # 2. Delete from ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            # Find chunks for this file
+            all_docs = collection.get(include=["metadatas"])
+            ids_to_delete = []
+            for i, meta in enumerate(all_docs.get('metadatas', [])):
+                if meta and (meta.get('source') == filename or meta.get('filename') == filename):
+                    ids_to_delete.append(all_docs['ids'][i])
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                deleted['chromadb'] = len(ids_to_delete)
+                logger.info(f"Deleted {len(ids_to_delete)} chunks from ChromaDB")
+        except Exception as e:
+            logger.warning(f"ChromaDB delete failed: {e}")
+        
+        # 3. Delete lineage edges
+        try:
+            result = supabase.table('lineage_edges') \
+                .delete() \
+                .eq('source_id', filename) \
+                .eq('source_type', 'file') \
+                .execute()
+            deleted['lineage'] = len(result.data or [])
+        except Exception as e:
+            logger.warning(f"Lineage delete failed: {e}")
+        
+        # 4. Clear from rule registry
+        try:
+            from utils.standards_processor import get_rule_registry
+            registry = get_rule_registry()
+            if hasattr(registry, 'documents'):
+                before = len(registry.documents)
+                registry.documents = [d for d in registry.documents if getattr(d, 'filename', '') != filename]
+                deleted['rules'] = len(registry.documents) < before
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Rule registry delete failed: {e}")
+        
+        return {
+            'success': True,
+            'filename': filename,
+            'deleted': deleted
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting reference: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/references")
+async def clear_all_references(confirm: bool = False):
+    """
+    Clear ALL reference/standards files.
+    
+    WARNING: This is destructive. Requires confirm=true.
+    
+    Removes from:
+    - Document registry (all reference/global entries)
+    - ChromaDB (all chunks for those files)
+    - Lineage edges
+    - Rule registry
+    """
+    if not confirm:
+        raise HTTPException(400, "Must set confirm=true to clear all references")
+    
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        deleted = {
+            'registry': 0,
+            'chromadb': 0,
+            'lineage': 0,
+            'rules': 0
+        }
+        
+        # 1. Get all reference files first
+        refs = supabase.table('document_registry') \
+            .select('filename') \
+            .or_('truth_type.eq.reference,is_global.eq.true') \
+            .execute()
+        
+        filenames = [r['filename'] for r in (refs.data or [])]
+        
+        # 2. Delete from registry
+        try:
+            result = supabase.table('document_registry') \
+                .delete() \
+                .or_('truth_type.eq.reference,is_global.eq.true') \
+                .execute()
+            deleted['registry'] = len(result.data or [])
+        except Exception as e:
+            logger.warning(f"Registry clear failed: {e}")
+        
+        # 3. Delete from ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            all_docs = collection.get(include=["metadatas"])
+            ids_to_delete = []
+            for i, meta in enumerate(all_docs.get('metadatas', [])):
+                if meta:
+                    source = meta.get('source') or meta.get('filename')
+                    if source in filenames:
+                        ids_to_delete.append(all_docs['ids'][i])
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                deleted['chromadb'] = len(ids_to_delete)
+        except Exception as e:
+            logger.warning(f"ChromaDB clear failed: {e}")
+        
+        # 4. Delete lineage for these files
+        try:
+            for filename in filenames:
+                result = supabase.table('lineage_edges') \
+                    .delete() \
+                    .eq('source_id', filename) \
+                    .eq('source_type', 'file') \
+                    .execute()
+                deleted['lineage'] += len(result.data or [])
+        except Exception as e:
+            logger.warning(f"Lineage clear failed: {e}")
+        
+        # 5. Clear rule registry
+        try:
+            from utils.standards_processor import get_rule_registry
+            registry = get_rule_registry()
+            if hasattr(registry, 'documents'):
+                deleted['rules'] = len(registry.documents)
+                registry.documents = []
+        except ImportError:
+            pass
+        except Exception as e:
+            logger.warning(f"Rule registry clear failed: {e}")
+        
+        return {
+            'success': True,
+            'files_processed': len(filenames),
+            'deleted': deleted
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error clearing references: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.get("/status/rules")
+async def list_rules():
+    """
+    List all rules in the standards rule registry.
+    """
+    try:
+        from utils.standards_processor import get_rule_registry
+        registry = get_rule_registry()
+        
+        documents = []
+        total_rules = 0
+        
+        if hasattr(registry, 'documents'):
+            for doc in registry.documents:
+                doc_info = {
+                    'document_id': getattr(doc, 'document_id', 'unknown'),
+                    'filename': getattr(doc, 'filename', 'unknown'),
+                    'title': getattr(doc, 'title', ''),
+                    'domain': getattr(doc, 'domain', 'general'),
+                    'rules_count': len(getattr(doc, 'rules', []))
+                }
+                documents.append(doc_info)
+                total_rules += doc_info['rules_count']
+        
+        return {
+            'documents': len(documents),
+            'total_rules': total_rules,
+            'registry': documents
+        }
+        
+    except ImportError:
+        return {
+            'documents': 0,
+            'total_rules': 0,
+            'registry': [],
+            'note': 'Standards processor not available'
+        }
+    except Exception as e:
+        logger.error(f"Error listing rules: {e}")
+        raise HTTPException(500, str(e))
+
+
 @router.get("/status/registry")
 async def get_registry_status():
     """
