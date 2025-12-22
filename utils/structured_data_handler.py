@@ -2863,6 +2863,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 post_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
                 logger.warning(f"[STORE_DF] POST-CHECKPOINT: {post_count} rows in _schema_metadata")
             
+            # Force DuckDB to persist by closing and reopening connection
+            with self._db_lock:
+                logger.warning("[STORE_DF] Forcing connection reconnect to persist data")
+                old_conn = self.conn
+                try:
+                    old_conn.close()
+                except:
+                    pass
+                self.conn = duckdb.connect(self.db_path)
+                logger.warning("[STORE_DF] Reconnected to DuckDB")
+            
             # Final verification using safe_fetchall (same path as status.py)
             try:
                 test_result = self.safe_fetchall("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE")
@@ -3824,18 +3835,34 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     def safe_fetchall(self, sql: str, params: list = None) -> list:
         """
         Thread-safe SQL query that returns all rows.
+        Commits any pending transaction first to ensure we see latest data.
         """
         with self._db_lock:
             try:
+                # Commit any pending changes to ensure we see them
+                try:
+                    self.conn.commit()
+                except:
+                    pass  # OK if nothing to commit
+                
                 # Log the query for debugging
                 if '_schema_metadata' in sql:
-                    logger.warning(f"[SAFE_FETCHALL] Querying _schema_metadata, conn_id={id(self.conn)}")
+                    logger.warning(f"[SAFE_FETCHALL] Querying _schema_metadata (after commit)")
                     # Try a direct count first to diagnose
                     try:
                         direct_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
                         logger.warning(f"[SAFE_FETCHALL] DIAG: Direct count shows {direct_count} total rows")
                         current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
                         logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
+                        
+                        # Check if table actually exists
+                        tables = self.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name = '_schema_metadata'").fetchall()
+                        logger.warning(f"[SAFE_FETCHALL] DIAG: _schema_metadata table exists: {len(tables) > 0}")
+                        
+                        # List all rows in schema_metadata
+                        if direct_count == 0:
+                            all_tables = self.conn.execute("SHOW TABLES").fetchall()
+                            logger.warning(f"[SAFE_FETCHALL] DIAG: All tables: {[t[0] for t in all_tables[:5]]}")
                     except Exception as de:
                         logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
                 
