@@ -2579,3 +2579,418 @@ async def check_data_integrity(project: Optional[str] = None):
     except Exception as e:
         logger.error(f"Data integrity check failed: {e}")
         return {"error": str(e), "tables": [], "total_rows": 0, "health_score": 0, "issues_count": 0, "insights_count": 0}
+
+
+# =============================================================================
+# COMPREHENSIVE HEALTH ENDPOINT - Task 2 GET HEALTHY Sprint
+# =============================================================================
+
+@router.get("/status/health")
+async def comprehensive_health_check(project_id: Optional[str] = None):
+    """
+    Comprehensive system health check.
+    
+    Checks ALL backend systems and their consistency:
+    - Supabase: Connection, document_registry accessible
+    - DuckDB: Connection, tables, row counts
+    - ChromaDB: Connection, collections, chunk counts
+    - Registry Consistency: Registry matches actual backend data
+    - Lineage: Edges exist, coverage
+    - Processing Jobs: Stuck or failed jobs
+    - Local LLM (Ollama): Reachable, models available
+    
+    Returns:
+        - status: "healthy" | "degraded" | "unhealthy"
+        - Individual check results
+        - Issues found
+        - Recommendations
+    """
+    import time
+    start_time = time.time()
+    
+    checks = {}
+    issues = []
+    recommendations = []
+    
+    # =========================================================================
+    # CHECK 1: SUPABASE
+    # =========================================================================
+    try:
+        supabase_start = time.time()
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            # Test query
+            result = supabase.table('document_registry').select('id').limit(1).execute()
+            supabase_latency = int((time.time() - supabase_start) * 1000)
+            
+            # Count entries
+            count_result = supabase.table('document_registry').select('id', count='exact').execute()
+            registry_count = count_result.count if hasattr(count_result, 'count') else len(count_result.data)
+            
+            checks["supabase"] = {
+                "status": "ok",
+                "latency_ms": supabase_latency,
+                "registry_entries": registry_count
+            }
+        else:
+            checks["supabase"] = {"status": "error", "error": "Client not available"}
+            issues.append("Supabase client not available")
+    except Exception as e:
+        checks["supabase"] = {"status": "error", "error": str(e)}
+        issues.append(f"Supabase connection failed: {e}")
+    
+    # =========================================================================
+    # CHECK 2: DUCKDB
+    # =========================================================================
+    try:
+        duckdb_start = time.time()
+        if STRUCTURED_AVAILABLE:
+            handler = get_structured_handler()
+            
+            # Test connection and get stats
+            table_count = handler.safe_fetchone("""
+                SELECT COUNT(DISTINCT table_name) FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """)
+            
+            row_count = handler.safe_fetchone("""
+                SELECT COALESCE(SUM(row_count), 0) FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """)
+            
+            file_count = handler.safe_fetchone("""
+                SELECT COUNT(DISTINCT file_name) FROM _schema_metadata 
+                WHERE is_current = TRUE
+            """)
+            
+            duckdb_latency = int((time.time() - duckdb_start) * 1000)
+            
+            checks["duckdb"] = {
+                "status": "ok",
+                "latency_ms": duckdb_latency,
+                "tables": table_count[0] if table_count else 0,
+                "total_rows": row_count[0] if row_count else 0,
+                "files": file_count[0] if file_count else 0
+            }
+        else:
+            checks["duckdb"] = {"status": "unavailable", "error": "Structured handler not available"}
+            issues.append("DuckDB structured handler not available")
+    except Exception as e:
+        checks["duckdb"] = {"status": "error", "error": str(e)}
+        issues.append(f"DuckDB check failed: {e}")
+    
+    # =========================================================================
+    # CHECK 3: CHROMADB
+    # =========================================================================
+    try:
+        chroma_start = time.time()
+        rag = RAGHandler()
+        collection = rag.client.get_or_create_collection(name="documents")
+        
+        # Get collection stats
+        chroma_count = collection.count()
+        
+        # Get unique files
+        if chroma_count > 0:
+            chroma_results = collection.get(include=["metadatas"], limit=5000)
+            unique_files = set()
+            for metadata in chroma_results.get("metadatas", []):
+                filename = metadata.get("source") or metadata.get("filename")
+                if filename:
+                    unique_files.add(filename)
+            file_count = len(unique_files)
+        else:
+            file_count = 0
+        
+        chroma_latency = int((time.time() - chroma_start) * 1000)
+        
+        checks["chromadb"] = {
+            "status": "ok",
+            "latency_ms": chroma_latency,
+            "total_chunks": chroma_count,
+            "unique_files": file_count
+        }
+    except Exception as e:
+        checks["chromadb"] = {"status": "error", "error": str(e)}
+        issues.append(f"ChromaDB check failed: {e}")
+    
+    # =========================================================================
+    # CHECK 4: REGISTRY CONSISTENCY
+    # =========================================================================
+    try:
+        consistency_issues = []
+        
+        # Get all registry entries
+        registry_entries = DocumentRegistryModel.get_all(limit=5000)
+        registry_files = {e['filename']: e for e in registry_entries}
+        
+        # Get actual files in DuckDB
+        duckdb_files = set()
+        if STRUCTURED_AVAILABLE:
+            try:
+                handler = get_structured_handler()
+                duckdb_result = handler.safe_fetchall("""
+                    SELECT DISTINCT file_name FROM _schema_metadata 
+                    WHERE is_current = TRUE AND file_name IS NOT NULL
+                """)
+                duckdb_files = {r[0] for r in duckdb_result if r[0]}
+            except:
+                pass
+        
+        # Get actual files in ChromaDB
+        chroma_files = set()
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            if collection.count() > 0:
+                chroma_results = collection.get(include=["metadatas"], limit=5000)
+                for metadata in chroma_results.get("metadatas", []):
+                    filename = metadata.get("source") or metadata.get("filename")
+                    if filename:
+                        chroma_files.add(filename)
+        except:
+            pass
+        
+        all_actual_files = duckdb_files | chroma_files
+        
+        # Find orphans: in registry but not in any backend
+        orphaned_registry = []
+        for filename, entry in registry_files.items():
+            storage_type = entry.get('storage_type', '')
+            
+            if storage_type == 'duckdb' and filename not in duckdb_files:
+                orphaned_registry.append({"file": filename, "issue": "in registry as duckdb but not in DuckDB"})
+            elif storage_type == 'chromadb' and filename not in chroma_files:
+                orphaned_registry.append({"file": filename, "issue": "in registry as chromadb but not in ChromaDB"})
+            elif storage_type == 'both':
+                if filename not in duckdb_files and filename not in chroma_files:
+                    orphaned_registry.append({"file": filename, "issue": "in registry as both but not in either backend"})
+        
+        # Find unregistered: in backend but not in registry
+        unregistered_files = []
+        for filename in all_actual_files:
+            if filename not in registry_files:
+                location = []
+                if filename in duckdb_files:
+                    location.append("duckdb")
+                if filename in chroma_files:
+                    location.append("chromadb")
+                unregistered_files.append({"file": filename, "found_in": location})
+        
+        # Storage type mismatches
+        mismatched_storage = []
+        for filename, entry in registry_files.items():
+            storage_type = entry.get('storage_type', '')
+            in_duckdb = filename in duckdb_files
+            in_chroma = filename in chroma_files
+            
+            if storage_type == 'duckdb' and in_chroma and not in_duckdb:
+                mismatched_storage.append({"file": filename, "registry": "duckdb", "actual": "chromadb"})
+            elif storage_type == 'chromadb' and in_duckdb and not in_chroma:
+                mismatched_storage.append({"file": filename, "registry": "chromadb", "actual": "duckdb"})
+            elif storage_type == 'both' and not (in_duckdb and in_chroma):
+                actual = []
+                if in_duckdb:
+                    actual.append("duckdb")
+                if in_chroma:
+                    actual.append("chromadb")
+                if actual:
+                    mismatched_storage.append({"file": filename, "registry": "both", "actual": actual})
+        
+        consistency_status = "ok"
+        if orphaned_registry or unregistered_files or mismatched_storage:
+            consistency_status = "warning"
+            if orphaned_registry:
+                issues.append(f"{len(orphaned_registry)} orphaned registry entries (file not in backend)")
+                recommendations.append("Run /api/status/registry/sync to clean orphans")
+            if unregistered_files:
+                issues.append(f"{len(unregistered_files)} unregistered files (in backend but not registry)")
+                recommendations.append("Run /api/status/registry/sync to register missing files")
+            if mismatched_storage:
+                issues.append(f"{len(mismatched_storage)} storage type mismatches")
+        
+        checks["registry_consistency"] = {
+            "status": consistency_status,
+            "registry_entries": len(registry_files),
+            "duckdb_files": len(duckdb_files),
+            "chromadb_files": len(chroma_files),
+            "orphaned_registry": len(orphaned_registry),
+            "unregistered_files": len(unregistered_files),
+            "storage_mismatches": len(mismatched_storage),
+            "details": {
+                "orphaned": orphaned_registry[:5],  # Limit to 5 examples
+                "unregistered": unregistered_files[:5],
+                "mismatched": mismatched_storage[:5]
+            }
+        }
+    except Exception as e:
+        checks["registry_consistency"] = {"status": "error", "error": str(e)}
+        issues.append(f"Registry consistency check failed: {e}")
+    
+    # =========================================================================
+    # CHECK 5: LINEAGE
+    # =========================================================================
+    try:
+        from utils.database.models import LineageModel
+        
+        # Get lineage stats
+        lineage_stats = LineageModel.get_stats(project_id=project_id)
+        
+        # Get files with/without lineage
+        registry_entries = DocumentRegistryModel.get_all(limit=5000)
+        files_with_lineage = set()
+        
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                lineage_result = supabase.table('lineage_edges').select('source_id').eq('source_type', 'file').execute()
+                files_with_lineage = {r['source_id'] for r in lineage_result.data}
+        except:
+            pass
+        
+        files_without_lineage = []
+        for entry in registry_entries:
+            filename = entry.get('filename')
+            if filename and filename not in files_with_lineage:
+                files_without_lineage.append(filename)
+        
+        lineage_coverage = f"{len(files_with_lineage)}/{len(registry_entries)}"
+        
+        lineage_status = "ok"
+        if files_without_lineage:
+            lineage_status = "warning"
+            issues.append(f"{len(files_without_lineage)} files without lineage tracking")
+        
+        checks["lineage"] = {
+            "status": lineage_status,
+            "total_edges": lineage_stats.get('total_edges', 0),
+            "by_relationship": lineage_stats.get('by_relationship', {}),
+            "files_with_lineage": len(files_with_lineage),
+            "files_without_lineage": len(files_without_lineage),
+            "coverage": lineage_coverage,
+            "missing_files": files_without_lineage[:10]  # First 10
+        }
+    except Exception as e:
+        checks["lineage"] = {"status": "error", "error": str(e)}
+        issues.append(f"Lineage check failed: {e}")
+    
+    # =========================================================================
+    # CHECK 6: PROCESSING JOBS
+    # =========================================================================
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            # Get stuck jobs (processing for > 10 minutes)
+            from datetime import timedelta
+            ten_mins_ago = (datetime.utcnow() - timedelta(minutes=10)).isoformat()
+            
+            stuck_result = supabase.table('processing_jobs').select('id, filename, status, created_at').eq('status', 'processing').lt('created_at', ten_mins_ago).execute()
+            stuck_jobs = stuck_result.data if stuck_result.data else []
+            
+            # Get failed jobs in last 24 hours
+            one_day_ago = (datetime.utcnow() - timedelta(hours=24)).isoformat()
+            failed_result = supabase.table('processing_jobs').select('id, filename, error').eq('status', 'failed').gt('created_at', one_day_ago).execute()
+            failed_jobs = failed_result.data if failed_result.data else []
+            
+            # Get pending jobs
+            pending_result = supabase.table('processing_jobs').select('id').eq('status', 'pending').execute()
+            pending_count = len(pending_result.data) if pending_result.data else 0
+            
+            jobs_status = "ok"
+            if stuck_jobs:
+                jobs_status = "warning"
+                issues.append(f"{len(stuck_jobs)} jobs stuck in processing")
+                recommendations.append("Check stuck jobs and manually fail them if needed")
+            
+            checks["jobs"] = {
+                "status": jobs_status,
+                "stuck_count": len(stuck_jobs),
+                "failed_24h": len(failed_jobs),
+                "pending": pending_count,
+                "stuck_jobs": [{"id": j['id'], "filename": j['filename'], "created_at": j['created_at']} for j in stuck_jobs[:5]]
+            }
+        else:
+            checks["jobs"] = {"status": "unavailable", "error": "Supabase not available"}
+    except Exception as e:
+        checks["jobs"] = {"status": "error", "error": str(e)}
+        issues.append(f"Jobs check failed: {e}")
+    
+    # =========================================================================
+    # CHECK 7: LOCAL LLM (OLLAMA)
+    # =========================================================================
+    try:
+        import requests
+        from requests.auth import HTTPBasicAuth
+        
+        ollama_endpoint = "http://178.156.190.64:11435"
+        ollama_auth = HTTPBasicAuth("xlr8", "Argyle76226#")
+        
+        ollama_start = time.time()
+        response = requests.get(f"{ollama_endpoint}/api/tags", auth=ollama_auth, timeout=5)
+        ollama_latency = int((time.time() - ollama_start) * 1000)
+        
+        if response.status_code == 200:
+            models_data = response.json()
+            available_models = [m['name'] for m in models_data.get('models', [])]
+            
+            # Check for required models
+            required_models = ['mistral:7b', 'deepseek-r1:7b']
+            missing_models = [m for m in required_models if m not in available_models]
+            
+            ollama_status = "ok" if not missing_models else "warning"
+            if missing_models:
+                issues.append(f"Missing LLM models: {missing_models}")
+            
+            checks["ollama"] = {
+                "status": ollama_status,
+                "latency_ms": ollama_latency,
+                "endpoint": ollama_endpoint,
+                "available_models": available_models,
+                "missing_models": missing_models
+            }
+        else:
+            checks["ollama"] = {"status": "error", "error": f"HTTP {response.status_code}"}
+            issues.append(f"Ollama returned HTTP {response.status_code}")
+    except requests.exceptions.Timeout:
+        checks["ollama"] = {"status": "timeout", "error": "Connection timed out"}
+        issues.append("Ollama connection timed out")
+    except requests.exceptions.ConnectionError:
+        checks["ollama"] = {"status": "unreachable", "error": "Connection refused"}
+        issues.append("Ollama server unreachable")
+    except Exception as e:
+        checks["ollama"] = {"status": "error", "error": str(e)}
+        issues.append(f"Ollama check failed: {e}")
+    
+    # =========================================================================
+    # CALCULATE OVERALL STATUS
+    # =========================================================================
+    check_statuses = [c.get('status', 'error') for c in checks.values()]
+    
+    error_count = sum(1 for s in check_statuses if s == 'error')
+    warning_count = sum(1 for s in check_statuses if s == 'warning')
+    
+    if error_count >= 2:
+        overall_status = "unhealthy"
+    elif error_count >= 1 or warning_count >= 3:
+        overall_status = "degraded"
+    elif warning_count >= 1:
+        overall_status = "degraded"
+    else:
+        overall_status = "healthy"
+    
+    total_time = int((time.time() - start_time) * 1000)
+    
+    return {
+        "status": overall_status,
+        "timestamp": datetime.utcnow().isoformat(),
+        "check_time_ms": total_time,
+        "checks": checks,
+        "issues": issues,
+        "issue_count": len(issues),
+        "recommendations": recommendations
+    }
