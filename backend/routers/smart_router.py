@@ -891,3 +891,33 @@ async def register_upload_alias(
         vendor_type=vendor_type,
         async_mode=async_mode
     )
+
+
+@router.post("/vacuum/upload")
+async def vacuum_upload_alias(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...),
+    max_pages: int = Form(0),
+    project_id: Optional[str] = Form(None),
+    use_textract: bool = Form(False),
+    async_mode: bool = Form(True),
+    vendor_type: str = Form("unknown")
+):
+    """
+    DEPRECATED: Use /upload with processing_type=register instead.
+    Kept for backward compatibility with old 'vacuum' naming.
+    """
+    logger.warning(f"[SMART-ROUTER] /vacuum/upload called - routing through smart router")
+    
+    return await smart_upload(
+        request=request,
+        background_tasks=background_tasks,
+        file=file,
+        project=project_id or "unknown",
+        processing_type="register",
+        max_pages=max_pages,
+        use_textract=use_textract,
+        vendor_type=vendor_type,
+        async_mode=async_mode
+    )
