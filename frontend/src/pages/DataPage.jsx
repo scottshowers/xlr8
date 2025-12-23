@@ -216,7 +216,7 @@ function FilesTab({ colors }) {
     finally { setLoadingProfiles(prev => { const n = new Set(prev); n.delete(tableName); return n; }); }
   };
 
-  useEffect(() => { loadData(); const i = setInterval(loadData, 10000); return () => clearInterval(i); }, [activeProject?.id]);
+  useEffect(() => { loadData(); const i = setInterval(loadData, 30000); return () => clearInterval(i); }, [activeProject?.id]);
 
   const loadData = async () => {
     try {
