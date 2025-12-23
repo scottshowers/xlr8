@@ -1,40 +1,19 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.13
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.14
 ============================================================
 
 Deploy to: utils/structured_data_handler.py
 
-v5.13 CHANGES (Fix chunked processing + skip detection for large sheets):
-- Sheets with None dimensions can now be chunked (streams without knowing total)
-- Large sheets that fail chunking use simple pandas (NO detection overhead)
-- Detection (horizontal/vertical split) ONLY runs for small sheets
-- Fix: Deductions (68k rows) won't run 68k row detection anymore
-
-v5.12 CHANGES (Hybrid dimension check - per-sheet fallback):
-- Uses openpyxl dimensions for sheets that have them
-- Falls back to pandas ONLY for sheets with None dimensions
-- No longer throws away good dimensions when one sheet is bad
-- Example: 4 sheets instant from openpyxl, 1 sheet checked with pandas
-
-v5.11 CHANGES (Debug logging + unreliable dimension handling):
-- All dimension/chunking logs now WARNING level (visible in production)
-- Detects unreliable openpyxl dimensions (None/0) and falls back to pandas
-- Explicit LARGE/small indicators in logs
-
-v5.10 CHANGES (Fast Excel Opening - CRITICAL PERFORMANCE FIX):
-- Uses openpyxl read_only mode to get sheet dimensions from metadata (INSTANT)
-- Avoids pd.ExcelFile() which parses entire file structure (was taking 6+ min)
-- Large sheets detected instantly, routed directly to chunked processing
-- Small sheets lazy-load pandas only when needed
-- Expected: 6 min startup → ~5 seconds for dimension check
-
-v5.9 CHANGES (Chunked Excel Processing - MAJOR PERFORMANCE):
-- NEW: _process_sheet_chunked() - streams large sheets using openpyxl read_only mode
-- NEW: _insert_batch() - batch INSERT for efficiency
-- Sheets >5000 rows now use streaming instead of loading entire sheet into memory
-- 10,000 row batches with progress callbacks
-- Expected: 10 min → 2-3 min for large XLSX files
-- Memory usage stays flat regardless of file size
+v5.14 CHANGES (Simple Fast Processing - MAJOR REWRITE):
+- REMOVED: All chunked/streaming processing (was SLOWER than pandas!)
+- SIMPLIFIED: Direct pd.read_excel(file, sheet_name=X) for each sheet
+  - Pandas C-level code is FAST
+  - Only reads one sheet at a time (not entire file)
+- openpyxl ONLY used for: getting sheet names (instant metadata read)
+- Small sheets (<1000 rows): Run detection for multi-table layouts
+- Large sheets (>=1000 rows): Skip detection, direct read → DuckDB
+- NEW: _store_single_table() helper centralizes all storage logic
+- Expected: 15+ min → 2-3 min for large XLSX files
 
 v5.6 CHANGES (Performance Optimization):
 - REMOVED: Verbose diagnostics from safe_fetchall() that ran 6 queries per call
@@ -836,188 +815,121 @@ class StructuredDataHandler:
         return best_row
     
     # =========================================================================
-    # CHUNKED PROCESSING - For large sheets (>5000 rows)
-    # Uses openpyxl read_only mode to stream rows without loading entire sheet
+    # STORE SINGLE TABLE - Helper to store one dataframe to DuckDB
     # =========================================================================
     
-    CHUNK_BATCH_SIZE = 10000  # Rows per batch for chunked processing
-    LARGE_SHEET_THRESHOLD = 5000  # Sheets larger than this use chunked processing
-    
-    def _process_sheet_chunked(
+    def _store_single_table(
         self,
-        file_path: str,
-        sheet_name: str,
+        df: pd.DataFrame,
         project: str,
         file_name: str,
-        table_name: str,
-        progress_callback: Optional[Callable[[int, str], None]] = None
-    ) -> Dict[str, Any]:
+        sheet_name: str,
+        version: int,
+        encrypt_pii: bool,
+        all_encrypted_cols: list,
+        results: dict
+    ) -> bool:
         """
-        Process a large sheet using streaming/chunked approach.
+        Store a single dataframe as a DuckDB table.
         
-        Uses openpyxl read_only mode to avoid loading entire sheet into memory.
-        Creates table from first batch, then INSERTs subsequent batches.
-        
-        Returns: {'rows': int, 'columns': list}
+        Handles: column sanitization, deduplication, type coercion, encryption, metadata.
+        Returns True on success, False on failure.
         """
-        if not OPENPYXL_AVAILABLE:
-            logger.warning(f"[CHUNKED] openpyxl not available, falling back to pandas")
-            return None
-        
-        logger.info(f"[CHUNKED] Starting chunked processing for '{sheet_name}'")
-        
         try:
-            # Open workbook in read-only mode (memory efficient)
-            wb = load_workbook(file_path, read_only=True, data_only=True)
-            ws = wb[sheet_name]
+            # Drop completely empty rows/columns
+            df = df.dropna(how='all').dropna(axis=1, how='all')
             
-            # Get dimensions (may be None for some sheets)
-            max_row = ws.max_row
-            max_col = ws.max_column
-            
-            # If dimensions are unknown, we can still stream - just won't know total upfront
-            if max_row is None or max_row == 0:
-                logger.warning(f"[CHUNKED] Sheet '{sheet_name}' has unknown row count - will count while streaming")
-                max_row = None  # Flag for unknown
-            else:
-                logger.warning(f"[CHUNKED] Sheet dimensions: {max_row} rows x {max_col} cols")
-            
-            # Read first 50 rows to detect header
-            header_sample = []
-            for row_num, row in enumerate(ws.iter_rows(max_row=50, values_only=True), 1):
-                header_sample.append(row)
-            
-            if not header_sample:
-                logger.warning(f"[CHUNKED] Sheet '{sheet_name}' appears empty")
-                wb.close()
-                return None
-            
-            # Convert to DataFrame for header detection
-            sample_df = pd.DataFrame(header_sample)
-            header_row_idx = self._find_header_row(sample_df, max_rows=15)
-            
-            # Extract header row
-            raw_columns = list(header_sample[header_row_idx]) if header_row_idx < len(header_sample) else list(header_sample[0])
+            if df.empty:
+                logger.warning(f"[STORE] Sheet '{sheet_name}' is empty after cleanup, skipping")
+                return False
             
             # Sanitize column names
-            columns = []
+            df.columns = [self._sanitize_name(str(c) if c else f"col_{i}") for i, c in enumerate(df.columns)]
+            
+            # Handle duplicate column names
             seen = {}
-            for i, col in enumerate(raw_columns):
-                col_name = self._sanitize_name(str(col) if col else f"col_{i}")
-                if not col_name or col_name.lower() in ['nan', 'none', '']:
-                    col_name = f"col_{i}"
-                
-                # Handle duplicates
-                if col_name in seen:
-                    seen[col_name] += 1
-                    col_name = f"{col_name}_{seen[col_name]}"
+            new_cols = []
+            for col in df.columns:
+                if col in seen:
+                    seen[col] += 1
+                    new_cols.append(f"{col}_{seen[col]}")
                 else:
-                    seen[col_name] = 0
-                columns.append(col_name)
+                    seen[col] = 0
+                    new_cols.append(col)
+            df.columns = new_cols
             
-            logger.warning(f"[CHUNKED] Detected {len(columns)} columns, header at row {header_row_idx}")
+            # Force all columns to string
+            for col in df.columns:
+                df[col] = df[col].fillna('').astype(str)
+                df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
             
-            # Create table schema (all VARCHAR)
-            col_defs = ', '.join([f'"{c}" VARCHAR' for c in columns])
-            create_sql = f'DROP TABLE IF EXISTS "{table_name}"; CREATE TABLE "{table_name}" ({col_defs})'
+            # Remove junk columns
+            df, removed_junk = self._remove_junk_columns(df)
+            if removed_junk:
+                if 'junk_columns_removed' not in results:
+                    results['junk_columns_removed'] = []
+                results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name} for j in removed_junk])
             
-            with self._db_lock:
-                self.conn.execute(create_sql)
-                self.conn.commit()
+            # Encrypt PII if requested
+            encrypted_cols = []
+            if encrypt_pii and self.encryptor.fernet:
+                df, encrypted_cols = self.encryptor.encrypt_dataframe(df)
+                all_encrypted_cols.extend(encrypted_cols)
             
-            logger.warning(f"[CHUNKED] Created table {table_name}")
+            # Generate table name
+            table_name = self._generate_table_name(project, file_name, sheet_name)
             
-            # Now stream all rows in batches
-            wb.close()  # Close and reopen to reset iterator
-            wb = load_workbook(file_path, read_only=True, data_only=True)
-            ws = wb[sheet_name]
+            # Create table (thread-safe)
+            self.safe_create_table_from_df(table_name, df)
             
-            batch = []
-            total_rows = 0
-            batch_num = 0
-            data_start_row = header_row_idx + 2  # Skip to data (1-indexed + header)
+            # Detect key columns
+            likely_keys = self._detect_key_columns(df)
             
-            for row_num, row in enumerate(ws.iter_rows(values_only=True), 1):
-                # Skip rows before data starts
-                if row_num <= header_row_idx + 1:
-                    continue
-                
-                # Convert row to list of strings
-                row_data = []
-                for val in row[:len(columns)]:  # Only take as many values as columns
-                    if val is None:
-                        row_data.append('')
-                    else:
-                        str_val = str(val)
-                        if str_val.lower() in ['nan', 'none', 'nat']:
-                            row_data.append('')
-                        else:
-                            row_data.append(str_val)
-                
-                # Pad row if needed
-                while len(row_data) < len(columns):
-                    row_data.append('')
-                
-                batch.append(tuple(row_data))
-                
-                # Insert batch when full
-                if len(batch) >= self.CHUNK_BATCH_SIZE:
-                    self._insert_batch(table_name, columns, batch)
-                    total_rows += len(batch)
-                    batch_num += 1
-                    
-                    # Progress callback
-                    if progress_callback:
-                        if max_row:
-                            pct = min(95, int((total_rows / max_row) * 100))
-                        else:
-                            # Unknown total - estimate based on batch count
-                            pct = min(95, 20 + batch_num * 10)
-                        progress_callback(pct, f"Sheet '{sheet_name}': {total_rows:,} rows processed")
-                    
-                    logger.warning(f"[CHUNKED] Batch {batch_num}: inserted {self.CHUNK_BATCH_SIZE} rows (total: {total_rows:,})")
-                    batch = []
+            # Store metadata
+            columns_info = [
+                {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
+                for col in df.columns
+            ]
             
-            # Insert remaining rows
-            if batch:
-                self._insert_batch(table_name, columns, batch)
-                total_rows += len(batch)
-                logger.warning(f"[CHUNKED] Final batch: inserted {len(batch)} rows (total: {total_rows:,})")
+            self.safe_execute("""
+                INSERT INTO _schema_metadata 
+                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+            """, [
+                project,
+                file_name,
+                sheet_name,
+                table_name,
+                json.dumps(columns_info),
+                len(df),
+                json.dumps(likely_keys),
+                json.dumps(encrypted_cols),
+                version
+            ])
             
-            wb.close()
+            # Add to results
+            results['sheets'].append({
+                'sheet_name': sheet_name,
+                'table_name': table_name,
+                'columns': list(df.columns),
+                'row_count': len(df),
+                'likely_keys': likely_keys,
+                'encrypted_columns': encrypted_cols
+            })
+            results['total_rows'] += len(df)
+            results['tables_created'].append(table_name)
             
-            logger.warning(f"[CHUNKED] Complete: {total_rows:,} rows in {batch_num + 1} batches")
-            
-            return {
-                'rows': total_rows,
-                'columns': columns
-            }
+            return True
             
         except Exception as e:
-            logger.error(f"[CHUNKED] Failed: {e}")
+            logger.error(f"[STORE] Failed to store '{sheet_name}': {e}")
             import traceback
             logger.error(traceback.format_exc())
-            return None
+            return False
     
-    def _insert_batch(self, table_name: str, columns: List[str], rows: List[tuple]):
-        """
-        Insert a batch of rows into a table.
-        Uses executemany for efficiency.
-        """
-        if not rows:
-            return
-        
-        placeholders = ', '.join(['?' for _ in columns])
-        col_names = ', '.join([f'"{c}"' for c in columns])
-        insert_sql = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
-        
-        with self._db_lock:
-            try:
-                self.conn.executemany(insert_sql, rows)
-                self.conn.commit()
-            except Exception as e:
-                logger.error(f"[INSERT_BATCH] Failed to insert {len(rows)} rows: {e}")
-                raise
+    # =========================================================================
+    # HORIZONTAL TABLE DETECTION - Side-by-side tables on same sheet
+    # =========================================================================
     
     def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
         """
@@ -2299,533 +2211,113 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 self._archive_previous_version(project, file_name, version - 1)
             
             report_progress(10, "Reading Excel file...")
-            logger.warning(f"[STORE_EXCEL] ===== v5.13 HYBRID DIMENSION CHECK =====")
+            logger.warning(f"[STORE_EXCEL] ===== v5.14 SIMPLE FAST PROCESSING =====")
             
             # =================================================================
-            # PERFORMANCE: Use openpyxl in read_only mode to get sheet info
-            # This reads dimensions from metadata WITHOUT loading any data
-            # For large files (100k+ rows), this is instant vs minutes with pandas
-            # NOTE: Some sheets return None dimensions - we use pandas ONLY for those
+            # STEP 1: Get sheet names using openpyxl (instant - just reads XML index)
             # =================================================================
-            sheet_dimensions = {}
             sheet_names_ordered = []
-            sheets_needing_pandas = []
             
             if OPENPYXL_AVAILABLE:
                 try:
                     wb_readonly = load_workbook(file_path, read_only=True, data_only=True)
                     sheet_names_ordered = wb_readonly.sheetnames
-                    
-                    for sn in sheet_names_ordered:
-                        ws = wb_readonly[sn]
-                        # max_row/max_col from read_only mode are from metadata (instant)
-                        rows = ws.max_row
-                        cols = ws.max_column
-                        
-                        # Check if dimensions are reliable
-                        if rows is None or rows == 0 or cols is None or cols == 0:
-                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' has unreliable dimensions ({rows}x{cols}) - will check with pandas")
-                            sheets_needing_pandas.append(sn)
-                        else:
-                            sheet_dimensions[sn] = {
-                                'rows': rows,
-                                'cols': cols
-                            }
-                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {rows} rows x {cols} cols")
-                    
                     wb_readonly.close()
-                    logger.warning(f"[STORE_EXCEL] Got dimensions for {len(sheet_dimensions)}/{len(sheet_names_ordered)} sheets via openpyxl, {len(sheets_needing_pandas)} need pandas")
-                        
+                    logger.warning(f"[STORE_EXCEL] Found {len(sheet_names_ordered)} sheets: {sheet_names_ordered}")
                 except Exception as op_e:
-                    logger.warning(f"[STORE_EXCEL] openpyxl dimension check failed: {op_e}, falling back to pandas for all")
-                    sheet_dimensions = {}
-                    sheet_names_ordered = []
+                    logger.warning(f"[STORE_EXCEL] openpyxl failed: {op_e}, using pandas for sheet names")
             
-            # Fallback to pandas if openpyxl failed or unavailable
-            if not sheet_dimensions:
+            # Fallback to pandas if openpyxl failed
+            if not sheet_names_ordered:
                 excel_file = pd.ExcelFile(file_path)
                 sheet_names_ordered = excel_file.sheet_names
-                # We'll check dimensions per-sheet with pandas below
+                logger.warning(f"[STORE_EXCEL] Got {len(sheet_names_ordered)} sheets via pandas fallback")
             
             total_sheets = len(sheet_names_ordered)
             all_encrypted_cols = []
             
-            # We may need pandas ExcelFile for small sheets - lazy load it
-            _pandas_excel_file = None
-            def get_pandas_excel():
-                nonlocal _pandas_excel_file
-                if _pandas_excel_file is None:
-                    _pandas_excel_file = pd.ExcelFile(file_path)
-                return _pandas_excel_file
+            # Detection threshold - only run multi-table detection for small sheets
+            DETECTION_THRESHOLD = 1000
             
+            # =================================================================
+            # STEP 2: Process each sheet
+            # =================================================================
             for sheet_idx, sheet_name in enumerate(sheet_names_ordered):
-                # Calculate progress: 10-70% for sheet processing
+                sheet_start_time = datetime.now()
                 sheet_progress = 10 + int((sheet_idx / total_sheets) * 60)
                 report_progress(sheet_progress, f"Processing sheet {sheet_idx + 1}/{total_sheets}: {sheet_name}")
                 
                 try:
-                    # =====================================================
-                    # PERFORMANCE: Check sheet size from pre-loaded dimensions
-                    # openpyxl read_only mode gives us row count from metadata (instant)
-                    # Only fall back to pandas if openpyxl dimensions unavailable
-                    # =====================================================
-                    if sheet_name in sheet_dimensions:
-                        # Fast path: use pre-loaded dimensions
-                        sheet_rows = sheet_dimensions[sheet_name]['rows']
-                        is_large_sheet = sheet_rows > self.LARGE_SHEET_THRESHOLD
-                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {sheet_rows} rows (from openpyxl) -> {'LARGE' if is_large_sheet else 'small'}")
-                    else:
-                        # Slow path: use pandas (only if openpyxl failed)
-                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': checking size with pandas...")
-                        size_check_df = pd.read_excel(get_pandas_excel(), sheet_name=sheet_name, header=None, nrows=self.LARGE_SHEET_THRESHOLD + 1)
-                        is_large_sheet = len(size_check_df) > self.LARGE_SHEET_THRESHOLD
-                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {len(size_check_df)} rows (from pandas) -> {'LARGE' if is_large_sheet else 'small'}")
-                        del size_check_df  # Free memory
+                    # ---------------------------------------------------------
+                    # Read sheet with pandas (C-level speed, single sheet only)
+                    # ---------------------------------------------------------
+                    logger.warning(f"[STORE_EXCEL] Reading sheet '{sheet_name}'...")
                     
-                    if is_large_sheet:
-                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' has >{self.LARGE_SHEET_THRESHOLD} rows - USING CHUNKED PROCESSING")
-                        
-                        # Generate table name
-                        table_name = self._generate_table_name(project, file_name, sheet_name)
-                        
-                        # Process with streaming
-                        def chunked_progress(pct, msg):
-                            # Map chunked progress to overall progress
-                            mapped_pct = sheet_progress + int((pct / 100) * (60 / total_sheets))
-                            report_progress(mapped_pct, msg)
-                        
-                        chunk_result = self._process_sheet_chunked(
-                            file_path, sheet_name, project, file_name, table_name,
-                            progress_callback=chunked_progress
-                        )
-                        
-                        if chunk_result:
-                            # Store metadata
-                            columns_info = [
-                                {'name': col, 'type': 'VARCHAR', 'encrypted': False}
-                                for col in chunk_result['columns']
-                            ]
-                            
-                            self.safe_execute("""
-                                INSERT INTO _schema_metadata 
-                                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                            """, [
-                                project,
-                                file_name,
-                                sheet_name,
-                                table_name,
-                                json.dumps(columns_info),
-                                chunk_result['rows'],
-                                json.dumps([]),  # Likely keys - skip for chunked
-                                json.dumps([]),  # Encrypted cols
-                                version
-                            ])
-                            
-                            results['sheets'].append({
-                                'sheet_name': sheet_name,
-                                'table_name': table_name,
-                                'rows': chunk_result['rows'],
-                                'columns': chunk_result['columns'],
-                                'chunked': True
-                            })
-                            results['total_rows'] += chunk_result['rows']
-                            results['tables_created'].append(table_name)
-                            
-                            logger.warning(f"[STORE_EXCEL] Chunked SUCCESS: {table_name} ({chunk_result['rows']:,} rows)")
-                        else:
-                            logger.warning(f"[STORE_EXCEL] Chunked processing failed for '{sheet_name}', using simple pandas (no detection)")
-                            # Large sheet failed chunking - use simple pandas WITHOUT detection
-                            # Detection is pointless for 68k+ row sheets
-                            try:
-                                df = pd.read_excel(get_pandas_excel(), sheet_name=sheet_name, header=None)
-                                
-                                # Find header row
-                                header_row_idx = self._find_header_row(df, max_rows=15)
-                                df.columns = df.iloc[header_row_idx]
-                                df = df.iloc[header_row_idx + 1:].reset_index(drop=True)
-                                
-                                # Clean column names
-                                df.columns = [self._sanitize_name(str(c) if c else f"col_{i}") for i, c in enumerate(df.columns)]
-                                
-                                # Handle duplicates
-                                seen = {}
-                                new_cols = []
-                                for col in df.columns:
-                                    if col in seen:
-                                        seen[col] += 1
-                                        new_cols.append(f"{col}_{seen[col]}")
-                                    else:
-                                        seen[col] = 0
-                                        new_cols.append(col)
-                                df.columns = new_cols
-                                
-                                # Force all to string
-                                for col in df.columns:
-                                    df[col] = df[col].fillna('').astype(str)
-                                    df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
-                                
-                                # Generate table name and store
-                                table_name = self._generate_table_name(project, file_name, sheet_name)
-                                
-                                with self._db_lock:
-                                    self.conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                                    self.conn.register('temp_df', df)
-                                    self.conn.execute(f'CREATE TABLE "{table_name}" AS SELECT * FROM temp_df')
-                                    self.conn.unregister('temp_df')
-                                    self.conn.commit()
-                                
-                                # Store metadata
-                                columns_info = [{'name': col, 'type': 'VARCHAR', 'encrypted': False} for col in df.columns]
-                                self.safe_execute("""
-                                    INSERT INTO _schema_metadata 
-                                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                                """, [project, file_name, sheet_name, table_name, json.dumps(columns_info), len(df), json.dumps([]), json.dumps([]), version])
-                                
-                                results['sheets'].append({
-                                    'sheet_name': sheet_name,
-                                    'table_name': table_name,
-                                    'rows': len(df),
-                                    'columns': list(df.columns),
-                                    'large_fallback': True
-                                })
-                                results['total_rows'] += len(df)
-                                results['tables_created'].append(table_name)
-                                
-                                logger.warning(f"[STORE_EXCEL] Large fallback SUCCESS: {table_name} ({len(df):,} rows)")
-                                continue  # Next sheet
-                                
-                            except Exception as fallback_e:
-                                logger.error(f"[STORE_EXCEL] Large fallback also failed for '{sheet_name}': {fallback_e}")
-                                continue
-                        
-                        if chunk_result:
-                            continue  # Skip to next sheet
+                    # Quick peek to check size and find header
+                    peek_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=50)
                     
-                    # =====================================================
-                    # SMALL SHEETS ONLY: Check for multi-table layouts
-                    # Large sheets skip detection - they're raw data
-                    # =====================================================
-                    
-                    # =====================================================
-                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
-                    # =====================================================
-                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
-                    
-                    if horizontal_tables:
-                        # Process each horizontal sub-table separately
-                        for sub_table_name, sub_df in horizontal_tables:
-                            try:
-                                # Sanitize column names
-                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
-                                
-                                # Handle duplicate column names
-                                seen = {}
-                                new_cols = []
-                                for col in sub_df.columns:
-                                    if col in seen:
-                                        seen[col] += 1
-                                        new_cols.append(f"{col}_{seen[col]}")
-                                    else:
-                                        seen[col] = 0
-                                        new_cols.append(col)
-                                sub_df.columns = new_cols
-                                
-                                # Force all columns to string
-                                for col in sub_df.columns:
-                                    sub_df[col] = sub_df[col].fillna('').astype(str)
-                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
-                                
-                                # Remove junk columns before storage
-                                sub_df, removed_junk = self._remove_junk_columns(sub_df)
-                                if removed_junk:
-                                    if 'junk_columns_removed' not in results:
-                                        results['junk_columns_removed'] = []
-                                    results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name, 'sub_table': sub_table_name} for j in removed_junk])
-                                
-                                # Generate combined sheet name: "Change Reasons - Benefit Change Reasons"
-                                combined_sheet = f"{sheet_name} - {sub_table_name}"
-                                
-                                # Encrypt PII if needed
-                                encrypted_cols = []
-                                if encrypt_pii and self.encryptor.fernet:
-                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
-                                    all_encrypted_cols.extend(encrypted_cols)
-                                
-                                # Generate table name
-                                table_name = self._generate_table_name(project, file_name, combined_sheet)
-                                
-                                # Create table (thread-safe)
-                                self.safe_create_table_from_df(table_name, sub_df)
-                                
-                                # Store metadata
-                                columns_info = [
-                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
-                                    for col in sub_df.columns
-                                ]
-                                
-                                self.safe_execute("""
-                                    INSERT INTO _schema_metadata 
-                                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                                """, [
-                                    project,
-                                    file_name,
-                                    combined_sheet,
-                                    table_name,
-                                    json.dumps(columns_info),
-                                    len(sub_df),
-                                    json.dumps([]),
-                                    json.dumps(encrypted_cols),
-                                    version
-                                ])
-                                
-                                results['sheets'].append({
-                                    'name': combined_sheet,
-                                    'table_name': table_name,
-                                    'rows': len(sub_df),
-                                    'columns': list(sub_df.columns),
-                                    'encrypted_columns': encrypted_cols
-                                })
-                                results['total_rows'] += len(sub_df)
-                                results['tables_created'].append(table_name)
-                                
-                                logger.info(f"Created horizontal sub-table: {table_name} ({len(sub_df)} rows)")
-                                
-                            except Exception as sub_e:
-                                logger.error(f"Failed to process horizontal sub-table '{sub_table_name}': {sub_e}")
-                        
-                        # Skip normal processing for this sheet - we handled it horizontally
+                    if peek_df.empty:
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' is empty, skipping")
                         continue
                     
-                    # =====================================================
-                    # CHECK FOR VERTICAL TABLES (tables stacked on top of each other)
-                    # =====================================================
-                    vertical_tables = self._split_vertical_tables(file_path, sheet_name)
+                    # Find header row
+                    header_row_idx = self._find_header_row(peek_df, max_rows=15)
                     
-                    if vertical_tables:
-                        # Process each vertical sub-table separately
-                        for sub_table_name, sub_df in vertical_tables:
-                            try:
-                                # Sanitize column names
-                                sub_df.columns = [self._sanitize_name(str(c)) for c in sub_df.columns]
-                                
-                                # Handle duplicate column names
-                                seen = {}
-                                new_cols = []
-                                for col in sub_df.columns:
-                                    if col in seen:
-                                        seen[col] += 1
-                                        new_cols.append(f"{col}_{seen[col]}")
-                                    else:
-                                        seen[col] = 0
-                                        new_cols.append(col)
-                                sub_df.columns = new_cols
-                                
-                                # Force all columns to string
-                                for col in sub_df.columns:
-                                    sub_df[col] = sub_df[col].fillna('').astype(str)
-                                    sub_df[col] = sub_df[col].replace({'nan': '', 'None': '', 'NaT': ''})
-                                
-                                # Remove junk columns before storage
-                                sub_df, removed_junk = self._remove_junk_columns(sub_df)
-                                if removed_junk:
-                                    if 'junk_columns_removed' not in results:
-                                        results['junk_columns_removed'] = []
-                                    results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name, 'sub_table': sub_table_name} for j in removed_junk])
-                                
-                                # Generate combined sheet name: "Organization - Level"
-                                combined_sheet = f"{sheet_name} - {sub_table_name}"
-                                
-                                # Encrypt PII if needed
-                                encrypted_cols = []
-                                if encrypt_pii and self.encryptor.fernet:
-                                    sub_df, encrypted_cols = self.encryptor.encrypt_dataframe(sub_df)
-                                    all_encrypted_cols.extend(encrypted_cols)
-                                
-                                # Generate table name
-                                table_name = self._generate_table_name(project, file_name, combined_sheet)
-                                
-                                # Create table (thread-safe)
-                                self.safe_create_table_from_df(table_name, sub_df)
-                                
-                                # Store metadata
-                                columns_info = [
-                                    {'name': col, 'type': 'VARCHAR', 'encrypted': col in encrypted_cols}
-                                    for col in sub_df.columns
-                                ]
-                                
-                                self.safe_execute("""
-                                    INSERT INTO _schema_metadata 
-                                    (id, project, file_name, sheet_name, table_name, columns, row_count, encrypted_columns)
-                                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
-                                """, [
-                                    project, file_name, combined_sheet, table_name,
-                                    json.dumps(columns_info), len(sub_df), json.dumps(encrypted_cols)
-                                ])
-                                
-                                results['tables_created'].append(table_name)
-                                
-                                logger.info(f"Created vertical sub-table: {table_name} ({len(sub_df)} rows)")
-                                
-                            except Exception as sub_e:
-                                logger.error(f"Failed to process vertical sub-table '{sub_table_name}': {sub_e}")
-                        
-                        # Skip normal processing for this sheet - we handled it vertically
-                        continue
-                    
-                    # =====================================================
-                    # NORMAL SHEET PROCESSING (no horizontal or vertical split)
-                    # =====================================================
-                    df = None
-                    
-                    try:
-                        # Read first 15 rows to detect header
-                        raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=15)
-                        
-                        # Use universal header detection
-                        best_header_row = self._find_header_row(raw_df)
-                        logger.info(f"Sheet '{sheet_name}': Header detected at row {best_header_row}")
-                        
-                    except Exception as e:
-                        logger.warning(f"Header detection failed for '{sheet_name}': {e}, using row 0")
-                        best_header_row = 0
-                    
-                    # Read with detected header row
-                    try:
-                        df = pd.read_excel(
-                            file_path, 
-                            sheet_name=sheet_name, 
-                            header=best_header_row
-                        )
-                        
-                        # POST-READ VALIDATION: Check if columns still look bad
-                        bad_cols = sum(1 for c in df.columns if str(c).lower() in ['nan', 'none', ''] or 
-                                       str(c).replace('.', '').isdigit())
-                        total_cols = len(df.columns)
-                        
-                        # If more than 50% columns are bad, try using first data row as headers
-                        if total_cols > 0 and bad_cols / total_cols > 0.5:
-                            logger.warning(f"Sheet '{sheet_name}': {bad_cols}/{total_cols} bad columns detected, trying first row as headers")
-                            # The first data row might actually be the headers
-                            if len(df) > 0:
-                                new_headers = df.iloc[0].tolist()
-                                # Check if first row looks like headers (mostly strings, not numbers)
-                                string_count = sum(1 for h in new_headers if isinstance(h, str) and len(str(h)) > 1)
-                                if string_count > len(new_headers) * 0.5:
-                                    df.columns = new_headers
-                                    df = df.iloc[1:]  # Remove the header row from data
-                                    logger.info(f"Sheet '{sheet_name}': Recovered headers from first data row")
-                        
-                    except Exception as e:
-                        logger.error(f"Failed to read sheet '{sheet_name}': {e}")
-                        continue
-                    
-                    if df is None or df.empty:
-                        logger.warning(f"Sheet '{sheet_name}' is empty, skipping")
-                        continue
-                    
-                    # Drop completely empty rows/columns
-                    df = df.dropna(how='all').dropna(axis=1, how='all')
+                    # Read full sheet with detected header
+                    df = pd.read_excel(file_path, sheet_name=sheet_name, header=header_row_idx)
                     
                     if df.empty:
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' is empty after header detection, skipping")
                         continue
                     
-                    # Sanitize column names
-                    df.columns = [self._sanitize_name(str(c)) for c in df.columns]
+                    row_count = len(df)
+                    logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {row_count:,} rows x {len(df.columns)} cols")
                     
-                    # Handle duplicate column names
-                    seen = {}
-                    new_cols = []
-                    for col in df.columns:
-                        if col in seen:
-                            seen[col] += 1
-                            new_cols.append(f"{col}_{seen[col]}")
-                        else:
-                            seen[col] = 0
-                            new_cols.append(col)
-                    df.columns = new_cols
+                    # ---------------------------------------------------------
+                    # SMALL SHEETS: Check for multi-table layouts
+                    # ---------------------------------------------------------
+                    if row_count < DETECTION_THRESHOLD:
+                        # Try horizontal split (side-by-side tables)
+                        horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
+                        if horizontal_tables:
+                            for sub_table_name, sub_df in horizontal_tables:
+                                self._store_single_table(
+                                    sub_df, project, file_name, 
+                                    f"{sheet_name} - {sub_table_name}",
+                                    version, encrypt_pii, all_encrypted_cols, results
+                                )
+                            elapsed = (datetime.now() - sheet_start_time).total_seconds()
+                            logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(horizontal_tables)} horizontal tables ({elapsed:.1f}s)")
+                            continue
+                        
+                        # Try vertical split (stacked tables)
+                        vertical_tables = self._split_vertical_tables(file_path, sheet_name)
+                        if vertical_tables:
+                            for sub_table_name, sub_df in vertical_tables:
+                                self._store_single_table(
+                                    sub_df, project, file_name,
+                                    f"{sheet_name} - {sub_table_name}",
+                                    version, encrypt_pii, all_encrypted_cols, results
+                                )
+                            elapsed = (datetime.now() - sheet_start_time).total_seconds()
+                            logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(vertical_tables)} vertical tables ({elapsed:.1f}s)")
+                            continue
                     
-                    # FORCE ALL COLUMNS TO STRING to avoid DuckDB type inference issues
-                    # This prevents errors like "Could not convert 'Amount' to DOUBLE"
-                    for col in df.columns:
-                        # Convert to string, then replace NaN/None with empty string
-                        df[col] = df[col].fillna('').astype(str)
-                        # Replace string 'nan' and 'None' that result from conversion
-                        df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
+                    # ---------------------------------------------------------
+                    # Store as single table (standard path for large sheets)
+                    # ---------------------------------------------------------
+                    self._store_single_table(
+                        df, project, file_name, sheet_name,
+                        version, encrypt_pii, all_encrypted_cols, results
+                    )
                     
-                    # Remove junk columns before storage
-                    df, removed_junk = self._remove_junk_columns(df)
-                    if removed_junk:
-                        if 'junk_columns_removed' not in results:
-                            results['junk_columns_removed'] = []
-                        results['junk_columns_removed'].extend([{**j, 'sheet': sheet_name} for j in removed_junk])
-                    
-                    # ENCRYPT PII COLUMNS
-                    encrypted_cols = []
-                    if encrypt_pii and self.encryptor.fernet:
-                        df, encrypted_cols = self.encryptor.encrypt_dataframe(df)
-                        all_encrypted_cols.extend(encrypted_cols)
-                        if encrypted_cols:
-                            logger.info(f"Encrypted {len(encrypted_cols)} PII columns in '{sheet_name}'")
-                    
-                    # Generate table name
-                    table_name = self._generate_table_name(project, file_name, sheet_name)
-                    
-                    # Create table (thread-safe)
-                    self.safe_create_table_from_df(table_name, df)
-                    
-                    # Detect key columns
-                    likely_keys = self._detect_key_columns(df)
-                    
-                    # Store metadata
-                    columns_info = [
-                        {'name': col, 'type': str(df[col].dtype), 'encrypted': col in encrypted_cols}
-                        for col in df.columns
-                    ]
-                    
-                    # Mark previous metadata as not current
-                    self.safe_execute("""
-                        UPDATE _schema_metadata 
-                        SET is_current = FALSE 
-                        WHERE project = ? AND file_name = ? AND sheet_name = ?
-                    """, [project, file_name, sheet_name])
-                    
-                    self.safe_execute("""
-                        INSERT INTO _schema_metadata 
-                        (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                        VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
-                    """, [
-                        project,
-                        file_name,
-                        sheet_name,
-                        table_name,
-                        json.dumps(columns_info),
-                        len(df),
-                        json.dumps(likely_keys),
-                        json.dumps(encrypted_cols),
-                        version
-                    ])
-                    
-                    sheet_info = {
-                        'sheet_name': sheet_name,
-                        'table_name': table_name,
-                        'columns': list(df.columns),
-                        'row_count': len(df),
-                        'likely_keys': likely_keys,
-                        'encrypted_columns': encrypted_cols,
-                        'sample_data': df.head(3).to_dict('records')
-                    }
-                    
-                    results['sheets'].append(sheet_info)
-                    results['total_rows'] += len(df)
-                    results['tables_created'].append(table_name)
-                    
-                    logger.info(f"Created table '{table_name}' with {len(df)} rows, {len(df.columns)} columns")
+                    elapsed = (datetime.now() - sheet_start_time).total_seconds()
+                    logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {row_count:,} rows stored ({elapsed:.1f}s)")
                     
                 except Exception as e:
-                    logger.error(f"Error processing sheet '{sheet_name}': {e}")
+                    logger.error(f"[STORE_EXCEL] Error processing sheet '{sheet_name}': {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     continue
             
             self.conn.commit()
