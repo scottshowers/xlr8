@@ -2,6 +2,11 @@
 Status Router - Registry-Aware Version
 ======================================
 
+UPDATED December 22, 2025:
+- REMOVED per-table existence checks that were verifying each table exists
+- This was causing N queries per request where N = number of tables (~72)
+- Trust metadata instead - stale entries cleaned up by delete cascade
+
 UPDATED December 20, 2025:
 - Thread-safe DuckDB operations (safe_execute, safe_fetchall, safe_fetchone)
 - Data integrity now classifies INSIGHTS vs ISSUES
@@ -150,12 +155,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping {filename} - not in registry")
                     continue
                 
-                # Verify table actually exists
-                try:
-                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                except:
-                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
-                    continue
+                # Trust metadata - don't verify each table exists (was killing performance)
                 
                 try:
                     columns_data = json.loads(columns_json) if columns_json else []
@@ -212,12 +212,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping PDF {source_file} - not in registry")
                     continue
                 
-                # Verify table actually exists
-                try:
-                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                except:
-                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
-                    continue
+                # Trust metadata - don't verify each table exists (was killing performance)
                 
                 try:
                     columns = json.loads(columns_json) if columns_json else []
