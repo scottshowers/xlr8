@@ -1,8 +1,13 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.5
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.6
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.6 CHANGES (Performance Optimization):
+- REMOVED: Verbose diagnostics from safe_fetchall() that ran 6 queries per call
+- REMOVED: Verbose logging from safe_commit()
+- These diagnostics were killing API responsiveness on polling endpoints
 
 v5.5 CHANGES (Junk Column Removal & Observation Classification):
 - NEW: _remove_junk_columns() - Auto-removes parsing artifacts before storage
@@ -3870,6 +3875,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         """
         Thread-safe SQL query that returns all rows.
         Commits any pending transaction first to ensure we see latest data.
+        
+        v2.1: Removed verbose diagnostics that were killing performance.
         """
         with self._db_lock:
             try:
@@ -3879,45 +3886,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 except:
                     pass  # OK if nothing to commit
                 
-                # Log the query for debugging
-                if '_schema_metadata' in sql:
-                    # Check if database file actually exists and its size
-                    import os
-                    db_exists = os.path.exists(self.db_path)
-                    db_size = os.path.getsize(self.db_path) if db_exists else 0
-                    logger.warning(f"[SAFE_FETCHALL] DB FILE: path={self.db_path}, exists={db_exists}, size={db_size}b, module={_MODULE_LOAD_ID}, pid={os.getpid()}")
-                    logger.warning(f"[SAFE_FETCHALL] handler_id={id(self)}, conn_id={id(self.conn)}")
-                    
-                    # Try a direct count first to diagnose
-                    try:
-                        direct_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata").fetchone()[0]
-                        logger.warning(f"[SAFE_FETCHALL] DIAG: Direct count shows {direct_count} total rows")
-                        current_count = self.conn.execute("SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE").fetchone()[0]
-                        logger.warning(f"[SAFE_FETCHALL] DIAG: With is_current=TRUE: {current_count} rows")
-                        
-                        # List ALL tables to see what exists
-                        all_tables = self.conn.execute("SHOW TABLES").fetchall()
-                        table_names = [t[0] for t in all_tables]
-                        logger.warning(f"[SAFE_FETCHALL] DIAG: All tables ({len(table_names)}): {table_names[:10]}")
-                        
-                        # Check for our data table specifically
-                        if 'tea1000_team_earnings_codes_pdf' in table_names:
-                            data_count = self.conn.execute("SELECT COUNT(*) FROM tea1000_team_earnings_codes_pdf").fetchone()[0]
-                            logger.warning(f"[SAFE_FETCHALL] DIAG: Data table has {data_count} rows")
-                        else:
-                            logger.warning("[SAFE_FETCHALL] DIAG: Data table tea1000_team_earnings_codes_pdf NOT FOUND!")
-                            
-                    except Exception as de:
-                        logger.warning(f"[SAFE_FETCHALL] DIAG failed: {de}")
-                
                 if params:
                     result = self.conn.execute(sql, params).fetchall()
                 else:
                     result = self.conn.execute(sql).fetchall()
-                
-                # Log result count for _schema_metadata queries
-                if '_schema_metadata' in sql:
-                    logger.warning(f"[SAFE_FETCHALL] _schema_metadata returned {len(result)} rows")
                 
                 return result
             except Exception as e:
@@ -3944,12 +3916,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         with self._db_lock:
             try:
                 self.conn.commit()
-                logger.warning("[SAFE_COMMIT] Committed successfully")
                 
                 # Force DuckDB to flush by running a checkpoint
                 try:
                     self.conn.execute("CHECKPOINT")
-                    logger.warning("[SAFE_COMMIT] Checkpoint complete")
                 except Exception as cp_e:
                     logger.debug(f"[SAFE_COMMIT] Checkpoint note: {cp_e}")
                     
