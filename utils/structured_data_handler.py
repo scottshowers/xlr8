@@ -1,21 +1,16 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.8
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.9
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
 
-v5.8 CHANGES (Large Sheet Performance Fix):
-- FIX: Pre-check sheet size BEFORE calling detection functions
-- FIX: Skip BOTH horizontal AND vertical detection for sheets >5000 rows
-- Large sheets now only read ONCE (for size check) instead of 3x
-- Expected: 10 min → ~2-3 min for large XLSX files
-
-v5.7 CHANGES (Large Sheet Performance):
-- PERF: Skip multi-table detection for sheets >5000 rows
-- PERF: Use nrows=5001 to quickly check sheet size before detection
-- Large sheets are almost always single tables - saves 10+ seconds on big files
-- Horizontal detection now reads max 5001 rows instead of full sheet
-- Vertical detection now reads max 5001 rows instead of full sheet
+v5.9 CHANGES (Chunked Excel Processing - MAJOR PERFORMANCE):
+- NEW: _process_sheet_chunked() - streams large sheets using openpyxl read_only mode
+- NEW: _insert_batch() - batch INSERT for efficiency
+- Sheets >5000 rows now use streaming instead of loading entire sheet into memory
+- 10,000 row batches with progress callbacks
+- Expected: 10 min → 2-3 min for large XLSX files
+- Memory usage stays flat regardless of file size
 
 v5.6 CHANGES (Performance Optimization):
 - REMOVED: Verbose diagnostics from safe_fetchall() that ran 6 queries per call
@@ -816,6 +811,180 @@ class StructuredDataHandler:
         
         return best_row
     
+    # =========================================================================
+    # CHUNKED PROCESSING - For large sheets (>5000 rows)
+    # Uses openpyxl read_only mode to stream rows without loading entire sheet
+    # =========================================================================
+    
+    CHUNK_BATCH_SIZE = 10000  # Rows per batch for chunked processing
+    LARGE_SHEET_THRESHOLD = 5000  # Sheets larger than this use chunked processing
+    
+    def _process_sheet_chunked(
+        self,
+        file_path: str,
+        sheet_name: str,
+        project: str,
+        file_name: str,
+        table_name: str,
+        progress_callback: Optional[Callable[[int, str], None]] = None
+    ) -> Dict[str, Any]:
+        """
+        Process a large sheet using streaming/chunked approach.
+        
+        Uses openpyxl read_only mode to avoid loading entire sheet into memory.
+        Creates table from first batch, then INSERTs subsequent batches.
+        
+        Returns: {'rows': int, 'columns': list}
+        """
+        if not OPENPYXL_AVAILABLE:
+            logger.warning(f"[CHUNKED] openpyxl not available, falling back to pandas")
+            return None
+        
+        logger.info(f"[CHUNKED] Starting chunked processing for '{sheet_name}'")
+        
+        try:
+            # Open workbook in read-only mode (memory efficient)
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb[sheet_name]
+            
+            # Get dimensions
+            max_row = ws.max_row or 0
+            max_col = ws.max_column or 0
+            
+            if max_row == 0:
+                wb.close()
+                return None
+            
+            logger.info(f"[CHUNKED] Sheet dimensions: {max_row} rows x {max_col} cols")
+            
+            # Read first 50 rows to detect header
+            header_sample = []
+            for row_num, row in enumerate(ws.iter_rows(max_row=50, values_only=True), 1):
+                header_sample.append(row)
+            
+            # Convert to DataFrame for header detection
+            sample_df = pd.DataFrame(header_sample)
+            header_row_idx = self._find_header_row(sample_df, max_rows=15)
+            
+            # Extract header row
+            raw_columns = list(header_sample[header_row_idx]) if header_row_idx < len(header_sample) else list(header_sample[0])
+            
+            # Sanitize column names
+            columns = []
+            seen = {}
+            for i, col in enumerate(raw_columns):
+                col_name = self._sanitize_name(str(col) if col else f"col_{i}")
+                if not col_name or col_name.lower() in ['nan', 'none', '']:
+                    col_name = f"col_{i}"
+                
+                # Handle duplicates
+                if col_name in seen:
+                    seen[col_name] += 1
+                    col_name = f"{col_name}_{seen[col_name]}"
+                else:
+                    seen[col_name] = 0
+                columns.append(col_name)
+            
+            logger.info(f"[CHUNKED] Detected {len(columns)} columns, header at row {header_row_idx}")
+            
+            # Create table schema (all VARCHAR)
+            col_defs = ', '.join([f'"{c}" VARCHAR' for c in columns])
+            create_sql = f'DROP TABLE IF EXISTS "{table_name}"; CREATE TABLE "{table_name}" ({col_defs})'
+            
+            with self._db_lock:
+                self.conn.execute(create_sql)
+                self.conn.commit()
+            
+            logger.info(f"[CHUNKED] Created table {table_name}")
+            
+            # Now stream all rows in batches
+            wb.close()  # Close and reopen to reset iterator
+            wb = load_workbook(file_path, read_only=True, data_only=True)
+            ws = wb[sheet_name]
+            
+            batch = []
+            total_rows = 0
+            batch_num = 0
+            data_start_row = header_row_idx + 2  # Skip to data (1-indexed + header)
+            
+            for row_num, row in enumerate(ws.iter_rows(values_only=True), 1):
+                # Skip rows before data starts
+                if row_num <= header_row_idx + 1:
+                    continue
+                
+                # Convert row to list of strings
+                row_data = []
+                for val in row[:len(columns)]:  # Only take as many values as columns
+                    if val is None:
+                        row_data.append('')
+                    else:
+                        str_val = str(val)
+                        if str_val.lower() in ['nan', 'none', 'nat']:
+                            row_data.append('')
+                        else:
+                            row_data.append(str_val)
+                
+                # Pad row if needed
+                while len(row_data) < len(columns):
+                    row_data.append('')
+                
+                batch.append(tuple(row_data))
+                
+                # Insert batch when full
+                if len(batch) >= self.CHUNK_BATCH_SIZE:
+                    self._insert_batch(table_name, columns, batch)
+                    total_rows += len(batch)
+                    batch_num += 1
+                    
+                    # Progress callback
+                    if progress_callback:
+                        pct = min(95, int((total_rows / max_row) * 100))
+                        progress_callback(pct, f"Sheet '{sheet_name}': {total_rows:,} rows processed")
+                    
+                    logger.info(f"[CHUNKED] Batch {batch_num}: inserted {len(batch)} rows (total: {total_rows:,})")
+                    batch = []
+            
+            # Insert remaining rows
+            if batch:
+                self._insert_batch(table_name, columns, batch)
+                total_rows += len(batch)
+                logger.info(f"[CHUNKED] Final batch: inserted {len(batch)} rows (total: {total_rows:,})")
+            
+            wb.close()
+            
+            logger.info(f"[CHUNKED] Complete: {total_rows:,} rows in {batch_num + 1} batches")
+            
+            return {
+                'rows': total_rows,
+                'columns': columns
+            }
+            
+        except Exception as e:
+            logger.error(f"[CHUNKED] Failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return None
+    
+    def _insert_batch(self, table_name: str, columns: List[str], rows: List[tuple]):
+        """
+        Insert a batch of rows into a table.
+        Uses executemany for efficiency.
+        """
+        if not rows:
+            return
+        
+        placeholders = ', '.join(['?' for _ in columns])
+        col_names = ', '.join([f'"{c}"' for c in columns])
+        insert_sql = f'INSERT INTO "{table_name}" ({col_names}) VALUES ({placeholders})'
+        
+        with self._db_lock:
+            try:
+                self.conn.executemany(insert_sql, rows)
+                self.conn.commit()
+            except Exception as e:
+                logger.error(f"[INSERT_BATCH] Failed to insert {len(rows)} rows: {e}")
+                raise
+    
     def _split_horizontal_tables(self, file_path: str, sheet_name: str) -> List[Tuple[str, pd.DataFrame]]:
         """
         Detect and split horizontally arranged tables within a single sheet.
@@ -826,15 +995,9 @@ class StructuredDataHandler:
         try:
             logger.warning(f"[HORIZONTAL-DETECT] Checking sheet '{sheet_name}' for side-by-side tables")
             
-            # PERFORMANCE: Read only first 5001 rows to check size
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=5001)
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
-            logger.warning(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)}+ rows, {raw_df.shape[1]} columns")
-            
-            # PERFORMANCE: Skip detection for large sheets - they're almost always single tables
-            if len(raw_df) > 5000:
-                logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}' has >5000 rows - skipping detection (large sheet optimization)")
-                return []
+            logger.warning(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)} rows, {raw_df.shape[1]} columns")
             
             if raw_df.empty or raw_df.shape[1] < 4:
                 logger.warning(f"[HORIZONTAL-DETECT] Sheet too small, skipping")
@@ -930,15 +1093,10 @@ class StructuredDataHandler:
         try:
             logger.warning(f"[VERTICAL-DETECT] Checking sheet '{sheet_name}' for stacked tables")
             
-            # PERFORMANCE: Read only first 5001 rows to check size
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=5001)
+            # Read full sheet first
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
             
-            logger.warning(f"[VERTICAL-DETECT] Sheet has {len(raw_df)}+ rows, {len(raw_df.columns)} columns")
-            
-            # PERFORMANCE: Skip detection for large sheets - they're almost always single tables
-            if len(raw_df) > 5000:
-                logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}' has >5000 rows - skipping detection (large sheet optimization)")
-                return []
+            logger.warning(f"[VERTICAL-DETECT] Sheet has {len(raw_df)} rows, {len(raw_df.columns)} columns")
             
             if len(raw_df) < 3:
                 logger.warning(f"[VERTICAL-DETECT] Sheet too small, skipping")
@@ -2121,23 +2279,80 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 
                 try:
                     # =====================================================
-                    # PERFORMANCE: Quick size check BEFORE detection
-                    # Large sheets (>5000 rows) skip multi-table detection entirely
-                    # This avoids reading the sheet twice (once per detection function)
+                    # PERFORMANCE: Check sheet size first
+                    # Large sheets (>5000 rows) use chunked streaming processing
+                    # This avoids loading entire sheet into memory
                     # =====================================================
-                    size_check_df = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, nrows=5001)
-                    is_large_sheet = len(size_check_df) > 5000
+                    size_check_df = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, nrows=self.LARGE_SHEET_THRESHOLD + 1)
+                    is_large_sheet = len(size_check_df) > self.LARGE_SHEET_THRESHOLD
                     del size_check_df  # Free memory
                     
                     if is_large_sheet:
-                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}' has >5000 rows - skipping multi-table detection")
-                        horizontal_tables = []
-                        vertical_tables = []
-                    else:
-                        # =====================================================
-                        # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
-                        # =====================================================
-                        horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
+                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}' has >{self.LARGE_SHEET_THRESHOLD} rows - using chunked processing")
+                        
+                        # Generate table name
+                        table_name = self._generate_table_name(project, file_name, sheet_name)
+                        
+                        # Process with streaming
+                        def chunked_progress(pct, msg):
+                            # Map chunked progress to overall progress
+                            mapped_pct = sheet_progress + int((pct / 100) * (60 / total_sheets))
+                            report_progress(mapped_pct, msg)
+                        
+                        chunk_result = self._process_sheet_chunked(
+                            file_path, sheet_name, project, file_name, table_name,
+                            progress_callback=chunked_progress
+                        )
+                        
+                        if chunk_result:
+                            # Store metadata
+                            columns_info = [
+                                {'name': col, 'type': 'VARCHAR', 'encrypted': False}
+                                for col in chunk_result['columns']
+                            ]
+                            
+                            self.safe_execute("""
+                                INSERT INTO _schema_metadata 
+                                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
+                                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                            """, [
+                                project,
+                                file_name,
+                                sheet_name,
+                                table_name,
+                                json.dumps(columns_info),
+                                chunk_result['rows'],
+                                json.dumps([]),  # Likely keys - skip for chunked
+                                json.dumps([]),  # Encrypted cols
+                                version
+                            ])
+                            
+                            results['sheets'].append({
+                                'sheet_name': sheet_name,
+                                'table_name': table_name,
+                                'rows': chunk_result['rows'],
+                                'columns': chunk_result['columns'],
+                                'chunked': True
+                            })
+                            results['total_rows'] += chunk_result['rows']
+                            results['tables_created'].append(table_name)
+                            
+                            logger.info(f"[STORE_EXCEL] Chunked: {table_name} ({chunk_result['rows']:,} rows)")
+                        else:
+                            logger.warning(f"[STORE_EXCEL] Chunked processing failed for '{sheet_name}', falling back to pandas")
+                            is_large_sheet = False  # Fall through to pandas processing
+                        
+                        if chunk_result:
+                            continue  # Skip to next sheet
+                    
+                    # =====================================================
+                    # SMALL SHEETS: Check for multi-table layouts
+                    # =====================================================
+                    
+                    # =====================================================
+                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
+                    # =====================================================
+                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
                     
                     if horizontal_tables:
                         # Process each horizontal sub-table separately
@@ -2227,10 +2442,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     
                     # =====================================================
                     # CHECK FOR VERTICAL TABLES (tables stacked on top of each other)
-                    # Only for small sheets - large sheets already set vertical_tables = []
                     # =====================================================
-                    if not is_large_sheet:
-                        vertical_tables = self._split_vertical_tables(file_path, sheet_name)
+                    vertical_tables = self._split_vertical_tables(file_path, sheet_name)
                     
                     if vertical_tables:
                         # Process each vertical sub-table separately
