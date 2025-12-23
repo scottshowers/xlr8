@@ -27,7 +27,7 @@ function SalesButtons() {
   const buttons = [
     { id: 'story', path: '/story', icon: '📖', title: 'The Story' },
     { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
-    { id: 'demo', path: '/intelligence-demo', icon: '✨', title: 'Watch It Think' },
+    { id: 'architecture', path: '/architecture', icon: '🏗️', title: 'Architecture' },
   ];
   
   return (
