@@ -1,8 +1,15 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.6
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.7
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.7 CHANGES (Large Sheet Performance):
+- PERF: Skip multi-table detection for sheets >5000 rows
+- PERF: Use nrows=5001 to quickly check sheet size before detection
+- Large sheets are almost always single tables - saves 10+ seconds on big files
+- Horizontal detection now reads max 5001 rows instead of full sheet
+- Vertical detection now reads max 5001 rows instead of full sheet
 
 v5.6 CHANGES (Performance Optimization):
 - REMOVED: Verbose diagnostics from safe_fetchall() that ran 6 queries per call
@@ -813,9 +820,15 @@ class StructuredDataHandler:
         try:
             logger.warning(f"[HORIZONTAL-DETECT] Checking sheet '{sheet_name}' for side-by-side tables")
             
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            # PERFORMANCE: Read only first 5001 rows to check size
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=5001)
             
-            logger.warning(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)} rows, {raw_df.shape[1]} columns")
+            logger.warning(f"[HORIZONTAL-DETECT] Sheet has {len(raw_df)}+ rows, {raw_df.shape[1]} columns")
+            
+            # PERFORMANCE: Skip detection for large sheets - they're almost always single tables
+            if len(raw_df) > 5000:
+                logger.info(f"[HORIZONTAL-DETECT] Sheet '{sheet_name}' has >5000 rows - skipping detection (large sheet optimization)")
+                return []
             
             if raw_df.empty or raw_df.shape[1] < 4:
                 logger.warning(f"[HORIZONTAL-DETECT] Sheet too small, skipping")
@@ -911,10 +924,15 @@ class StructuredDataHandler:
         try:
             logger.warning(f"[VERTICAL-DETECT] Checking sheet '{sheet_name}' for stacked tables")
             
-            # Read full sheet first
-            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None)
+            # PERFORMANCE: Read only first 5001 rows to check size
+            raw_df = pd.read_excel(file_path, sheet_name=sheet_name, header=None, nrows=5001)
             
-            logger.warning(f"[VERTICAL-DETECT] Sheet has {len(raw_df)} rows, {len(raw_df.columns)} columns")
+            logger.warning(f"[VERTICAL-DETECT] Sheet has {len(raw_df)}+ rows, {len(raw_df.columns)} columns")
+            
+            # PERFORMANCE: Skip detection for large sheets - they're almost always single tables
+            if len(raw_df) > 5000:
+                logger.info(f"[VERTICAL-DETECT] Sheet '{sheet_name}' has >5000 rows - skipping detection (large sheet optimization)")
+                return []
             
             if len(raw_df) < 3:
                 logger.warning(f"[VERTICAL-DETECT] Sheet too small, skipping")
