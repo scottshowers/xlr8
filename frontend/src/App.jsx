@@ -54,6 +54,7 @@ import WelcomePage from './pages/WelcomePage';
 import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
 import IntelligenceDemo from './pages/IntelligenceDemo';
+import ArchitecturePage from './pages/ArchitecturePage';
 
 // CSS
 import './index.css';
@@ -80,6 +81,9 @@ function AppRoutes() {
         
         {/* Intelligence Demo - Watch XLR8 Think */}
         <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
+        
+        {/* Architecture - Level 5 DFD */}
+        <Route path="/architecture" element={<ArchitecturePage />} />
         
         {/* ====== MAIN NAV ====== */}
         
