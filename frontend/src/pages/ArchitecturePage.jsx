@@ -157,7 +157,7 @@ const ArchitecturePage = () => {
           {/* Processor boxes - 4 columns */}
           {[
             {x:100,title:'3.1 REGISTER EXTRACTOR',file:'register_extractor.py',fns:[['extract()','Orchestrator',['• Chunk pages','• Parallel LLM','• Merge results']],['_extract_parallel()','Concurrent',['• ThreadPool(4)','• 68s→9.4s','• Error isolation']],['_call_groq()','Primary LLM',['• llama-3.3-70b','• JSON mode','• Rate limiting']],['_merge_results()','Combine',['• Dedupe by ID','• Validate types','• Return DF']]]},
-            {x:1100,title:'3.2 STANDARDS PROCESSOR',file:'standards_processor.py',fns:[['process_document()','Main entry',['• PDF/DOCX/TXT','• Detect type','• Extract+store']],['_extract_rules()','LLM extract',['• Groq primary','• Claude fallback','• JSON output']],['_chunk_document()','Chunking',['• 500 tokens','• 50 overlap','• Paragraphs']],['_store_chromadb()','Vector store',['• __STANDARDS__','• Metadata tags','• Return count']]]},
+            {x:1100,title:'3.2 STANDARDS PROCESSOR',file:'standards_processor.py',fns:[['process_document()','Main entry',['• PDF/DOCX/TXT','• Detect type','• Extract+store']],['_extract_rules()','LLM extract',['• Primary LLM','• Fallback LLM','• JSON output']],['_chunk_document()','Chunking',['• 500 tokens','• 50 overlap','• Paragraphs']],['_store_chromadb()','Vector store',['• __STANDARDS__','• Metadata tags','• Return count']]]},
             {x:2100,title:'3.3 STRUCTURED HANDLER',file:'structured_data_handler.py',fns:[['load_file()','Ingestion',['• Auto-detect','• Multi-sheet','• Return DFs']],['_detect_horiz()','Multi-table',['• Find gaps','• Boundaries','• Merged cells']],['store_dataframe()','DuckDB',['• CREATE TABLE','• Batch INSERT','• Metadata']],['safe_fetchall()','Thread-safe',['• db_lock','• Commit first','• Release finally']]]},
             {x:3100,title:'3.4 RAG HANDLER',file:'rag_handler.py',fns:[['add_document()','Ingestion',['• Text/PDF','• Chunk+embed','• Return IDs']],['_gen_embeddings()','Vectorize',['• nomic-embed','• 768 dims','• Batch 100']],['search()','Semantic',['• Embed query','• k-NN search','• Filter proj']],['get_context()','Build ctx',['• Top chunks','• Citations','• Token limit']]]}
           ].map((sec,si)=>(
@@ -166,14 +166,17 @@ const ArchitecturePage = () => {
               <rect x={sec.x} y={800} width={980} height={42} rx="12" fill={c.sage}/>
               <text x={sec.x+490} y={828} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">{sec.title}</text>
               <text x={sec.x+20} y={862} fill={c.muted} fontSize="10" fontFamily="monospace">{sec.file}</text>
-              {sec.fns.map(([nm,desc,items],fi)=>(
+              {sec.fns.map(([nm,desc,items],fi)=>{
+                const rowOffset = Math.floor(fi/2)*160;
+                const boxX = sec.x+20+(fi%2)*480;
+                return (
                 <g key={fi}>
-                  <rect x={sec.x+20+(fi%2)*480} y={880+Math.floor(fi/2)*160} width={460} height={145} rx="6" fill={c.card} stroke={c.sage}/>
-                  <text x={sec.x+20+(fi%2)*480+230} y={905} textAnchor="middle" fill={c.sage} fontWeight="bold" fontSize="11">{nm}</text>
-                  <text x={sec.x+20+(fi%2)*480+230} y={925} textAnchor="middle" fill={c.text} fontSize="10">{desc}</text>
-                  {items.map((it,ii)=><text key={ii} x={sec.x+35+(fi%2)*480} y={948+ii*18} fill={c.muted} fontSize="10">{it}</text>)}
+                  <rect x={boxX} y={880+rowOffset} width={460} height={145} rx="6" fill={c.card} stroke={c.sage}/>
+                  <text x={boxX+230} y={905+rowOffset} textAnchor="middle" fill={c.sage} fontWeight="bold" fontSize="11">{nm}</text>
+                  <text x={boxX+230} y={925+rowOffset} textAnchor="middle" fill={c.text} fontSize="10">{desc}</text>
+                  {items.map((it,ii)=><text key={ii} x={boxX+15} y={948+rowOffset+ii*18} fill={c.muted} fontSize="10">{it}</text>)}
                 </g>
-              ))}
+              )})}
             </g>
           ))}
 
@@ -209,7 +212,7 @@ const ArchitecturePage = () => {
           <text x={PAD+1400} y={1520} fill={c.light} fontSize="9">Source: Reference library</text>
 
           {/* Intelligence functions */}
-          {[['analyze()','Universal entry',['• Question+project','• Call 3 truths','• Synthesize']],['_generate_sql()','NL to SQL',['• Schema-aware','• DeepSeek coder','• Validate syntax']],['_synthesize()','LLM combine',['• Three truths','• Mistral/Claude','• Recommendations']]].map(([nm,desc,items],i)=>(
+          {[['analyze()','Universal entry',['• Question+project','• Call 3 truths','• Synthesize']],['_generate_sql()','NL to SQL',['• Schema-aware','• Local LLM','• Validate syntax']],['_synthesize()','LLM combine',['• Three truths','• Local LLM','• Recommendations']]].map(([nm,desc,items],i)=>(
             <g key={i}>
               <rect x={PAD+20+i*680} y={1580} width={660} height={110} rx="6" fill={c.card} stroke={c.taupe}/>
               <text x={PAD+20+i*680+330} y={1608} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="11">{nm}</text>
@@ -306,7 +309,7 @@ const ArchitecturePage = () => {
 
           <rect x={3660} y={1990} width={420} height={180} rx="6" fill={c.card} stroke={c.warning}/>
           <text x={3870} y={2015} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Cloud LLMs</text>
-          {['• Groq llama-3.3-70b','• Claude Haiku','• Rate limiting','• Cost tracking'].map((t,i)=><text key={i} x={3675} y={2040+i*18} fill={c.muted} fontSize="10">{t}</text>)}
+          {['• Primary LLM','• Fallback LLM','• Rate limiting','• Cost tracking'].map((t,i)=><text key={i} x={3675} y={2040+i*18} fill={c.muted} fontSize="10">{t}</text>)}
 
           {/* ========== TIER 6: SERVICES (y=2250) ========== */}
           <text x={W/2} y={2270} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">TIER 6: CROSS-CUTTING SERVICES</text>
