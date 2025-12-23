@@ -26,8 +26,12 @@ try:
     from utils.metrics_service import MetricsService
     METRICS_AVAILABLE = True
 except ImportError:
-    METRICS_AVAILABLE = False
-    logger.warning("[METRICS-API] MetricsService not available")
+    try:
+        from backend.utils.metrics_service import MetricsService
+        METRICS_AVAILABLE = True
+    except ImportError:
+        METRICS_AVAILABLE = False
+        logger.warning("[METRICS-API] MetricsService not available")
 
 
 @router.get("/summary")
