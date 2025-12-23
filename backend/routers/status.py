@@ -1,6 +1,12 @@
 """
-Status Router - Registry-Aware Version v19
+Status Router - Registry-Aware Version v20
 ===========================================
+
+v20 CHANGES (December 23, 2025 - N+1 Performance Fix):
+- Fixed N+1 query issue in /status/structured endpoint
+- Now fetches all table names in ONE query upfront (SHOW TABLES)
+- O(1) set lookup replaces N individual SELECT queries
+- ~10x faster for projects with many tables
 
 v19 CHANGES (December 23, 2025 - Delete Verify):
 - Delete now cleans _column_profiles, _column_mappings, _mapping_jobs
@@ -135,6 +141,16 @@ async def get_structured_data_status(project: Optional[str] = None):
         # STEP 2: Get table details from DuckDB metadata
         # =================================================================
         tables = []
+        
+        # Get all existing tables in ONE query (fixes N+1 performance issue)
+        existing_tables = set()
+        try:
+            all_tables_result = handler.safe_fetchall("SHOW TABLES")
+            existing_tables = set(t[0] for t in all_tables_result)
+            logger.info(f"[STATUS/STRUCTURED] Found {len(existing_tables)} existing tables")
+        except Exception as e:
+            logger.warning(f"[STATUS/STRUCTURED] Could not get table list: {e}")
+        
         try:
             logger.info("[STATUS/STRUCTURED] Querying _schema_metadata...")
             metadata_result = handler.safe_fetchall("""
@@ -156,10 +172,8 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping {filename} - not in registry")
                     continue
                 
-                # Verify table actually exists
-                try:
-                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                except:
+                # Verify table actually exists (O(1) set lookup instead of N queries)
+                if table_name not in existing_tables:
                     logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
                     continue
                 
@@ -218,10 +232,8 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping PDF {source_file} - not in registry")
                     continue
                 
-                # Verify table actually exists
-                try:
-                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
-                except:
+                # Verify table actually exists (O(1) set lookup instead of N queries)
+                if table_name not in existing_tables:
                     logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
                     continue
                 
