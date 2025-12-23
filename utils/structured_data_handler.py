@@ -1,8 +1,14 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.10
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.11
 ============================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.11 CHANGES (Debug logging + unreliable dimension handling):
+- All dimension/chunking logs now WARNING level (visible in production)
+- Detects unreliable openpyxl dimensions (None/0) and falls back to pandas
+- Clear version indicator: "[STORE_EXCEL] ===== v5.11 FAST DIMENSION CHECK ====="
+- Explicit LARGE/small indicators in logs
 
 v5.10 CHANGES (Fast Excel Opening - CRITICAL PERFORMANCE FIX):
 - Uses openpyxl read_only mode to get sheet dimensions from metadata (INSTANT)
@@ -2272,14 +2278,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 self._archive_previous_version(project, file_name, version - 1)
             
             report_progress(10, "Reading Excel file...")
+            logger.warning(f"[STORE_EXCEL] ===== v5.11 FAST DIMENSION CHECK =====")
             
             # =================================================================
             # PERFORMANCE: Use openpyxl in read_only mode to get sheet info
             # This reads dimensions from metadata WITHOUT loading any data
             # For large files (100k+ rows), this is instant vs minutes with pandas
+            # NOTE: Some Excel files have unreliable max_row (None or 0) - we detect this
             # =================================================================
             sheet_dimensions = {}
             sheet_names_ordered = []
+            openpyxl_reliable = True
             
             if OPENPYXL_AVAILABLE:
                 try:
@@ -2289,17 +2298,34 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     for sn in sheet_names_ordered:
                         ws = wb_readonly[sn]
                         # max_row/max_col from read_only mode are from metadata (instant)
+                        rows = ws.max_row
+                        cols = ws.max_column
+                        
+                        # Check if dimensions are reliable
+                        # Some files return None or 0 for dimensions
+                        if rows is None or rows == 0 or cols is None or cols == 0:
+                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' has unreliable dimensions ({rows}x{cols}) - will use pandas")
+                            openpyxl_reliable = False
+                            break
+                        
                         sheet_dimensions[sn] = {
-                            'rows': ws.max_row or 0,
-                            'cols': ws.max_column or 0
+                            'rows': rows,
+                            'cols': cols
                         }
-                        logger.info(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {sheet_dimensions[sn]['rows']} rows x {sheet_dimensions[sn]['cols']} cols")
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {rows} rows x {cols} cols")
                     
                     wb_readonly.close()
-                    logger.info(f"[STORE_EXCEL] Got dimensions for {len(sheet_names_ordered)} sheets via openpyxl (fast path)")
+                    
+                    if openpyxl_reliable:
+                        logger.warning(f"[STORE_EXCEL] Got dimensions for {len(sheet_names_ordered)} sheets via openpyxl (fast path)")
+                    else:
+                        sheet_dimensions = {}  # Clear dimensions, but keep sheet_names_ordered
+                        logger.warning(f"[STORE_EXCEL] Falling back to pandas for dimension checks (unreliable openpyxl)")
+                        
                 except Exception as op_e:
                     logger.warning(f"[STORE_EXCEL] openpyxl dimension check failed: {op_e}, falling back to pandas")
                     sheet_dimensions = {}
+                    sheet_names_ordered = []  # Clear so pandas fallback populates it
             
             # Fallback to pandas if openpyxl failed or unavailable
             if not sheet_dimensions:
@@ -2333,15 +2359,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         # Fast path: use pre-loaded dimensions
                         sheet_rows = sheet_dimensions[sheet_name]['rows']
                         is_large_sheet = sheet_rows > self.LARGE_SHEET_THRESHOLD
-                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}': {sheet_rows} rows (from metadata)")
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {sheet_rows} rows (from openpyxl) -> {'LARGE' if is_large_sheet else 'small'}")
                     else:
                         # Slow path: use pandas (only if openpyxl failed)
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': checking size with pandas...")
                         size_check_df = pd.read_excel(get_pandas_excel(), sheet_name=sheet_name, header=None, nrows=self.LARGE_SHEET_THRESHOLD + 1)
                         is_large_sheet = len(size_check_df) > self.LARGE_SHEET_THRESHOLD
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}': {len(size_check_df)} rows (from pandas) -> {'LARGE' if is_large_sheet else 'small'}")
                         del size_check_df  # Free memory
                     
                     if is_large_sheet:
-                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}' has >{self.LARGE_SHEET_THRESHOLD} rows - using chunked processing")
+                        logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' has >{self.LARGE_SHEET_THRESHOLD} rows - USING CHUNKED PROCESSING")
                         
                         # Generate table name
                         table_name = self._generate_table_name(project, file_name, sheet_name)
@@ -2390,7 +2418,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                             results['total_rows'] += chunk_result['rows']
                             results['tables_created'].append(table_name)
                             
-                            logger.info(f"[STORE_EXCEL] Chunked: {table_name} ({chunk_result['rows']:,} rows)")
+                            logger.warning(f"[STORE_EXCEL] Chunked SUCCESS: {table_name} ({chunk_result['rows']:,} rows)")
                         else:
                             logger.warning(f"[STORE_EXCEL] Chunked processing failed for '{sheet_name}', falling back to pandas")
                             is_large_sheet = False  # Fall through to pandas processing
