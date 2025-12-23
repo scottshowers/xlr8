@@ -1,13 +1,18 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.11
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.12
 ============================================================
 
 Deploy to: utils/structured_data_handler.py
 
+v5.12 CHANGES (Hybrid dimension check - per-sheet fallback):
+- Uses openpyxl dimensions for sheets that have them
+- Falls back to pandas ONLY for sheets with None dimensions
+- No longer throws away good dimensions when one sheet is bad
+- Example: 4 sheets instant from openpyxl, 1 sheet checked with pandas
+
 v5.11 CHANGES (Debug logging + unreliable dimension handling):
 - All dimension/chunking logs now WARNING level (visible in production)
 - Detects unreliable openpyxl dimensions (None/0) and falls back to pandas
-- Clear version indicator: "[STORE_EXCEL] ===== v5.11 FAST DIMENSION CHECK ====="
 - Explicit LARGE/small indicators in logs
 
 v5.10 CHANGES (Fast Excel Opening - CRITICAL PERFORMANCE FIX):
@@ -2278,17 +2283,17 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 self._archive_previous_version(project, file_name, version - 1)
             
             report_progress(10, "Reading Excel file...")
-            logger.warning(f"[STORE_EXCEL] ===== v5.11 FAST DIMENSION CHECK =====")
+            logger.warning(f"[STORE_EXCEL] ===== v5.12 HYBRID DIMENSION CHECK =====")
             
             # =================================================================
             # PERFORMANCE: Use openpyxl in read_only mode to get sheet info
             # This reads dimensions from metadata WITHOUT loading any data
             # For large files (100k+ rows), this is instant vs minutes with pandas
-            # NOTE: Some Excel files have unreliable max_row (None or 0) - we detect this
+            # NOTE: Some sheets return None dimensions - we use pandas ONLY for those
             # =================================================================
             sheet_dimensions = {}
             sheet_names_ordered = []
-            openpyxl_reliable = True
+            sheets_needing_pandas = []
             
             if OPENPYXL_AVAILABLE:
                 try:
@@ -2302,30 +2307,23 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         cols = ws.max_column
                         
                         # Check if dimensions are reliable
-                        # Some files return None or 0 for dimensions
                         if rows is None or rows == 0 or cols is None or cols == 0:
-                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' has unreliable dimensions ({rows}x{cols}) - will use pandas")
-                            openpyxl_reliable = False
-                            break
-                        
-                        sheet_dimensions[sn] = {
-                            'rows': rows,
-                            'cols': cols
-                        }
-                        logger.warning(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {rows} rows x {cols} cols")
+                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' has unreliable dimensions ({rows}x{cols}) - will check with pandas")
+                            sheets_needing_pandas.append(sn)
+                        else:
+                            sheet_dimensions[sn] = {
+                                'rows': rows,
+                                'cols': cols
+                            }
+                            logger.warning(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {rows} rows x {cols} cols")
                     
                     wb_readonly.close()
-                    
-                    if openpyxl_reliable:
-                        logger.warning(f"[STORE_EXCEL] Got dimensions for {len(sheet_names_ordered)} sheets via openpyxl (fast path)")
-                    else:
-                        sheet_dimensions = {}  # Clear dimensions, but keep sheet_names_ordered
-                        logger.warning(f"[STORE_EXCEL] Falling back to pandas for dimension checks (unreliable openpyxl)")
+                    logger.warning(f"[STORE_EXCEL] Got dimensions for {len(sheet_dimensions)}/{len(sheet_names_ordered)} sheets via openpyxl, {len(sheets_needing_pandas)} need pandas")
                         
                 except Exception as op_e:
-                    logger.warning(f"[STORE_EXCEL] openpyxl dimension check failed: {op_e}, falling back to pandas")
+                    logger.warning(f"[STORE_EXCEL] openpyxl dimension check failed: {op_e}, falling back to pandas for all")
                     sheet_dimensions = {}
-                    sheet_names_ordered = []  # Clear so pandas fallback populates it
+                    sheet_names_ordered = []
             
             # Fallback to pandas if openpyxl failed or unavailable
             if not sheet_dimensions:
