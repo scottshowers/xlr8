@@ -1,8 +1,14 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.7
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.8
 ===========================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.8 CHANGES (Large Sheet Performance Fix):
+- FIX: Pre-check sheet size BEFORE calling detection functions
+- FIX: Skip BOTH horizontal AND vertical detection for sheets >5000 rows
+- Large sheets now only read ONCE (for size check) instead of 3x
+- Expected: 10 min → ~2-3 min for large XLSX files
 
 v5.7 CHANGES (Large Sheet Performance):
 - PERF: Skip multi-table detection for sheets >5000 rows
@@ -2115,9 +2121,23 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 
                 try:
                     # =====================================================
-                    # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
+                    # PERFORMANCE: Quick size check BEFORE detection
+                    # Large sheets (>5000 rows) skip multi-table detection entirely
+                    # This avoids reading the sheet twice (once per detection function)
                     # =====================================================
-                    horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
+                    size_check_df = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, nrows=5001)
+                    is_large_sheet = len(size_check_df) > 5000
+                    del size_check_df  # Free memory
+                    
+                    if is_large_sheet:
+                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}' has >5000 rows - skipping multi-table detection")
+                        horizontal_tables = []
+                        vertical_tables = []
+                    else:
+                        # =====================================================
+                        # CHECK FOR HORIZONTAL TABLES (tables side-by-side)
+                        # =====================================================
+                        horizontal_tables = self._split_horizontal_tables(file_path, sheet_name)
                     
                     if horizontal_tables:
                         # Process each horizontal sub-table separately
@@ -2207,8 +2227,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     
                     # =====================================================
                     # CHECK FOR VERTICAL TABLES (tables stacked on top of each other)
+                    # Only for small sheets - large sheets already set vertical_tables = []
                     # =====================================================
-                    vertical_tables = self._split_vertical_tables(file_path, sheet_name)
+                    if not is_large_sheet:
+                        vertical_tables = self._split_vertical_tables(file_path, sheet_name)
                     
                     if vertical_tables:
                         # Process each vertical sub-table separately
