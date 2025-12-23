@@ -8,10 +8,12 @@
  * - Consultant can add notes, override status
  * - Export current state anytime
  * 
+ * UPDATED: December 23, 2025 - Removed inline upload (users now upload from Data page)
  * UPDATED: Non-blocking scan-all with live progress (no more 20-min freezes!)
  */
 
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
+import { Link } from 'react-router-dom';
 import api from '../services/api';
 
 // Error Boundary to catch rendering errors and show them instead of blank screen
@@ -1522,13 +1524,10 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
 function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged, onUnacknowledge }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null);
   const [notes, setNotes] = useState(progress?.notes || '');
   const [aiContext, setAiContext] = useState(progress?.ai_context || '');
   const [localStatus, setLocalStatus] = useState(progress?.status || 'not_started');
   const [localDocsFound, setLocalDocsFound] = useState(progress?.documents_found || []);
-  const fileInputRef = React.useRef(null);
   
   // NEW: State for collapsible sections and showing acknowledged items
   const [showAcknowledged, setShowAcknowledged] = useState(false);
@@ -1648,87 +1647,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
     }
   };
 
-  const handleUploadClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileChange = async (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    
-    setUploading(true);
-    setUploadStatus(null);
-    
-    try {
-      const jobIds = [];
-      
-      for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('project', projectId);
-        
-        const res = await api.post('/upload', formData, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        });
-        
-        if (res.data?.job_id) {
-          jobIds.push(res.data.job_id);
-        }
-      }
-      
-      setUploading(false);
-      setUploadStatus('processing');
-      
-      const pollJobs = async () => {
-        let allComplete = false;
-        let attempts = 0;
-        const maxAttempts = 60;
-        
-        while (!allComplete && attempts < maxAttempts) {
-          await new Promise(r => setTimeout(r, 2000));
-          attempts++;
-          
-          try {
-            const jobsRes = await api.get('/jobs');
-            const jobs = jobsRes.data?.jobs || [];
-            
-            const ourJobs = jobs.filter(j => jobIds.includes(j.id));
-            allComplete = ourJobs.length > 0 && ourJobs.every(j => 
-              j.status === 'completed' || j.status === 'failed'
-            );
-            
-            const failed = ourJobs.filter(j => j.status === 'failed');
-            if (failed.length > 0) {
-              setUploadStatus('error');
-              setTimeout(() => setUploadStatus(null), 3000);
-              return;
-            }
-          } catch (err) {
-            console.error('Polling failed:', err);
-          }
-        }
-        
-        if (allComplete) {
-          setUploadStatus('scanning');
-          await handleScan();
-          setUploadStatus('complete');
-          setTimeout(() => setUploadStatus(null), 2000);
-        }
-      };
-      
-      pollJobs();
-      
-    } catch (err) {
-      console.error('Upload failed:', err);
-      setUploading(false);
-      setUploadStatus('error');
-      setTimeout(() => setUploadStatus(null), 3000);
-    }
-    
-    // Reset input
-    e.target.value = '';
-  };
+  // Upload removed - users should upload from Data page
 
   const handleStatusChange = async (newStatus) => {
     const previousStatus = localStatus;
@@ -1783,41 +1702,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
   };
 
   // Helper functions for upload button styling
-  const getUploadButtonStyle = () => {
-    const baseStyle = {
-      padding: '0.5rem 1rem',
-      border: 'none',
-      borderRadius: '6px',
-      fontWeight: '600',
-      fontSize: '0.85rem',
-      cursor: 'pointer',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      transition: 'background 0.2s, color 0.2s',
-    };
-    
-    if (uploading || uploadStatus === 'processing' || uploadStatus === 'scanning') {
-      return { ...baseStyle, background: '#fef3c7', color: '#92400e', cursor: 'not-allowed' };
-    }
-    if (uploadStatus === 'complete') {
-      return { ...baseStyle, background: '#d1fae5', color: '#065f46' };
-    }
-    if (uploadStatus === 'error') {
-      return { ...baseStyle, background: '#fee2e2', color: '#991b1b' };
-    }
-    return { ...baseStyle, background: COLORS.clearwater, color: COLORS.text };
-  };
-
-  const getUploadButtonContent = () => {
-    if (uploading) return '⏳ Uploading...';
-    if (uploadStatus === 'processing') return '⏳ Processing...';
-    if (uploadStatus === 'scanning') return '🔍 Scanning...';
-    if (uploadStatus === 'complete') return '✅ Complete!';
-    if (uploadStatus === 'error') return '❌ Error';
-    return '📤 Upload';
-  };
-
   const styles = {
     card: {
       background: 'white',
@@ -1953,9 +1837,6 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       color: COLORS.textLight,
       fontStyle: 'italic',
     },
-    hiddenInput: {
-      display: 'none',
-    },
   };
 
   return (
@@ -2049,29 +1930,33 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
 
           <div style={styles.section}>
             <div style={styles.buttonRow}>
-              <input
-                type="file"
-                ref={fileInputRef}
-                style={styles.hiddenInput}
-                onChange={handleFileChange}
-                multiple
-                accept=".pdf,.xlsx,.xls,.csv,.docx,.doc,.txt"
-              />
-              <button 
-                style={getUploadButtonStyle()} 
-                onClick={(e) => { e.stopPropagation(); handleUploadClick(); }}
-                disabled={uploading || scanning || uploadStatus === 'processing' || uploadStatus === 'scanning'}
-              >
-                {getUploadButtonContent()}
-              </button>
               <button 
                 style={styles.scanBtn} 
                 onClick={(e) => { e.stopPropagation(); handleScan(); }}
-                disabled={scanning || uploading}
+                disabled={scanning}
                 title="Analyze documents with AI Context"
               >
                 {scanning ? '⏳ Analyzing...' : '🔍 Analyze'}
               </button>
+              <Link 
+                to="/data"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.5rem 1rem',
+                  background: COLORS.clearwater,
+                  color: COLORS.turkishSea,
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  textDecoration: 'none',
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                📤 Upload Files
+              </Link>
             </div>
           </div>
 
