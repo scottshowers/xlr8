@@ -19,6 +19,8 @@ ROUTING LOGIC:
    - truth_type parameter (reference → standards)
    - Content analysis for PDFs (tabular vs narrative)
 
+v1.1 - Added MetricsService integration for platform analytics
+
 Deploy to: backend/routers/smart_router.py
 Then update main.py to use this instead of separate routers.
 """
@@ -34,6 +36,7 @@ import logging
 import tempfile
 import shutil
 import hashlib
+import time
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -54,6 +57,18 @@ class ProcessingType(str, Enum):
 # =============================================================================
 # IMPORTS - Graceful degradation for each processor
 # =============================================================================
+
+# Metrics Service (for analytics)
+try:
+    from utils.metrics_service import MetricsService
+    METRICS_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.metrics_service import MetricsService
+        METRICS_AVAILABLE = True
+    except ImportError:
+        METRICS_AVAILABLE = False
+        logger.warning("[SMART-ROUTER] MetricsService not available - metrics will not be recorded")
 
 # Registration Service (always needed)
 try:
@@ -401,12 +416,18 @@ async def smart_upload(
             logger.warning(f"[SMART-ROUTER] Could not resolve project: {e}")
     
     # =================================================================
-    # ROUTE TO PROCESSOR
+    # ROUTE TO PROCESSOR (with metrics)
     # =================================================================
+    
+    route_start = time.time()
+    route_name = proc_type.value
+    result = None
+    success = False
+    error_msg = None
     
     try:
         if proc_type == ProcessingType.REGISTER:
-            return await _route_to_register(
+            result = await _route_to_register(
                 background_tasks=background_tasks,
                 file_path=file_path,
                 filename=filename,
@@ -417,9 +438,10 @@ async def smart_upload(
                 async_mode=async_mode,
                 temp_dir=temp_dir
             )
+            route_name = 'register'
         
         elif proc_type == ProcessingType.STANDARDS:
-            return await _route_to_standards(
+            result = await _route_to_standards(
                 file_path=file_path,
                 filename=filename,
                 content=content,
@@ -429,9 +451,10 @@ async def smart_upload(
                 title=title,
                 temp_dir=temp_dir
             )
+            route_name = 'standards'
         
         elif proc_type == ProcessingType.STRUCTURED:
-            return await _route_to_structured(
+            result = await _route_to_structured(
                 background_tasks=background_tasks,
                 file_path=file_path,
                 filename=filename,
@@ -448,9 +471,10 @@ async def smart_upload(
                 async_mode=async_mode,
                 temp_dir=temp_dir
             )
+            route_name = 'structured'
         
         else:  # SEMANTIC or AUTO (for non-register PDFs)
-            return await _route_to_semantic(
+            result = await _route_to_semantic(
                 background_tasks=background_tasks,
                 file_path=file_path,
                 filename=filename,
@@ -467,12 +491,48 @@ async def smart_upload(
                 async_mode=async_mode,
                 temp_dir=temp_dir
             )
-    
+            route_name = 'semantic'
+        
+        # Check success from result
+        success = result.get('success', True) if isinstance(result, dict) else True
+        
     except Exception as e:
         # Cleanup on error
         shutil.rmtree(temp_dir, ignore_errors=True)
         logger.error(f"[SMART-ROUTER] Routing failed: {e}")
+        error_msg = str(e)
+        
+        # Record error metric
+        if METRICS_AVAILABLE:
+            duration_ms = int((time.time() - route_start) * 1000)
+            MetricsService.record_upload(
+                processor=route_name,
+                filename=filename,
+                duration_ms=duration_ms,
+                success=False,
+                project_id=project_id,
+                file_size_bytes=file_size,
+                error_message=error_msg
+            )
+        
         raise HTTPException(status_code=500, detail=str(e))
+    
+    # Record success metric
+    if METRICS_AVAILABLE and result:
+        duration_ms = int((time.time() - route_start) * 1000)
+        MetricsService.record_upload(
+            processor=route_name,
+            filename=filename,
+            duration_ms=duration_ms,
+            success=success,
+            project_id=project_id,
+            file_size_bytes=file_size,
+            rows_processed=result.get('total_rows') or result.get('row_count'),
+            chunks_created=result.get('chunks_added'),
+            rules_extracted=result.get('rules_extracted')
+        )
+    
+    return result
 
 
 # =============================================================================
