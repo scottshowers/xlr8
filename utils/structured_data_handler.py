@@ -1,8 +1,15 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.9
-===========================================================
+Structured Data Handler - DuckDB Storage for Excel/CSV v5.10
+============================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v5.10 CHANGES (Fast Excel Opening - CRITICAL PERFORMANCE FIX):
+- Uses openpyxl read_only mode to get sheet dimensions from metadata (INSTANT)
+- Avoids pd.ExcelFile() which parses entire file structure (was taking 6+ min)
+- Large sheets detected instantly, routed directly to chunked processing
+- Small sheets lazy-load pandas only when needed
+- Expected: 6 min startup → ~5 seconds for dimension check
 
 v5.9 CHANGES (Chunked Excel Processing - MAJOR PERFORMANCE):
 - NEW: _process_sheet_chunked() - streams large sheets using openpyxl read_only mode
@@ -2266,26 +2273,72 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             report_progress(10, "Reading Excel file...")
             
-            # Read all sheets
-            excel_file = pd.ExcelFile(file_path)
-            total_sheets = len(excel_file.sheet_names)
+            # =================================================================
+            # PERFORMANCE: Use openpyxl in read_only mode to get sheet info
+            # This reads dimensions from metadata WITHOUT loading any data
+            # For large files (100k+ rows), this is instant vs minutes with pandas
+            # =================================================================
+            sheet_dimensions = {}
+            sheet_names_ordered = []
             
+            if OPENPYXL_AVAILABLE:
+                try:
+                    wb_readonly = load_workbook(file_path, read_only=True, data_only=True)
+                    sheet_names_ordered = wb_readonly.sheetnames
+                    
+                    for sn in sheet_names_ordered:
+                        ws = wb_readonly[sn]
+                        # max_row/max_col from read_only mode are from metadata (instant)
+                        sheet_dimensions[sn] = {
+                            'rows': ws.max_row or 0,
+                            'cols': ws.max_column or 0
+                        }
+                        logger.info(f"[STORE_EXCEL] Sheet '{sn}' dimensions: {sheet_dimensions[sn]['rows']} rows x {sheet_dimensions[sn]['cols']} cols")
+                    
+                    wb_readonly.close()
+                    logger.info(f"[STORE_EXCEL] Got dimensions for {len(sheet_names_ordered)} sheets via openpyxl (fast path)")
+                except Exception as op_e:
+                    logger.warning(f"[STORE_EXCEL] openpyxl dimension check failed: {op_e}, falling back to pandas")
+                    sheet_dimensions = {}
+            
+            # Fallback to pandas if openpyxl failed or unavailable
+            if not sheet_dimensions:
+                excel_file = pd.ExcelFile(file_path)
+                sheet_names_ordered = excel_file.sheet_names
+                # We'll check dimensions per-sheet with pandas below
+            
+            total_sheets = len(sheet_names_ordered)
             all_encrypted_cols = []
             
-            for sheet_idx, sheet_name in enumerate(excel_file.sheet_names):
+            # We may need pandas ExcelFile for small sheets - lazy load it
+            _pandas_excel_file = None
+            def get_pandas_excel():
+                nonlocal _pandas_excel_file
+                if _pandas_excel_file is None:
+                    _pandas_excel_file = pd.ExcelFile(file_path)
+                return _pandas_excel_file
+            
+            for sheet_idx, sheet_name in enumerate(sheet_names_ordered):
                 # Calculate progress: 10-70% for sheet processing
                 sheet_progress = 10 + int((sheet_idx / total_sheets) * 60)
                 report_progress(sheet_progress, f"Processing sheet {sheet_idx + 1}/{total_sheets}: {sheet_name}")
                 
                 try:
                     # =====================================================
-                    # PERFORMANCE: Check sheet size first
-                    # Large sheets (>5000 rows) use chunked streaming processing
-                    # This avoids loading entire sheet into memory
+                    # PERFORMANCE: Check sheet size from pre-loaded dimensions
+                    # openpyxl read_only mode gives us row count from metadata (instant)
+                    # Only fall back to pandas if openpyxl dimensions unavailable
                     # =====================================================
-                    size_check_df = pd.read_excel(excel_file, sheet_name=sheet_name, header=None, nrows=self.LARGE_SHEET_THRESHOLD + 1)
-                    is_large_sheet = len(size_check_df) > self.LARGE_SHEET_THRESHOLD
-                    del size_check_df  # Free memory
+                    if sheet_name in sheet_dimensions:
+                        # Fast path: use pre-loaded dimensions
+                        sheet_rows = sheet_dimensions[sheet_name]['rows']
+                        is_large_sheet = sheet_rows > self.LARGE_SHEET_THRESHOLD
+                        logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}': {sheet_rows} rows (from metadata)")
+                    else:
+                        # Slow path: use pandas (only if openpyxl failed)
+                        size_check_df = pd.read_excel(get_pandas_excel(), sheet_name=sheet_name, header=None, nrows=self.LARGE_SHEET_THRESHOLD + 1)
+                        is_large_sheet = len(size_check_df) > self.LARGE_SHEET_THRESHOLD
+                        del size_check_df  # Free memory
                     
                     if is_large_sheet:
                         logger.info(f"[STORE_EXCEL] Sheet '{sheet_name}' has >{self.LARGE_SHEET_THRESHOLD} rows - using chunked processing")
