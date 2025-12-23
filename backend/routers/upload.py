@@ -2,6 +2,11 @@
 Async Upload Router for XLR8
 ============================
 
+v22 CHANGES:
+- Added MetricsService integration for analytics tracking
+- Background jobs now record upload metrics (duration, rows, success/fail)
+- Metrics available at /api/metrics/summary
+
 v21 CHANGES:
 - Added progress_callback support for structured data uploads
 - Smooth progress updates during large file processing (no more frozen UI)
@@ -81,6 +86,19 @@ except ImportError:
     STRUCTURED_HANDLER_AVAILABLE = False
     logger_temp = logging.getLogger(__name__)
     logger_temp.warning("Structured data handler not available - Excel/CSV will use RAG only")
+
+# Import metrics service for analytics tracking
+try:
+    from utils.metrics_service import MetricsService
+    METRICS_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.metrics_service import MetricsService
+        METRICS_AVAILABLE = True
+    except ImportError:
+        METRICS_AVAILABLE = False
+        logger_temp = logging.getLogger(__name__)
+        logger_temp.warning("[UPLOAD] MetricsService not available - metrics will not be recorded")
 
 # Import smart PDF analyzer for tabular PDFs
 try:
@@ -1034,6 +1052,19 @@ def process_file_background(
                 # Complete!
                 ProcessingJobModel.complete(job_id, completion_result)
                 
+                # Record metrics for analytics dashboard
+                if METRICS_AVAILABLE:
+                    times = calc_timing_ms()
+                    MetricsService.record_upload(
+                        processor='structured',
+                        filename=filename,
+                        duration_ms=times['processing_time_ms'],
+                        success=True,
+                        project_id=project_id,
+                        file_size_bytes=file_size,
+                        rows_processed=total_rows
+                    )
+                
                 logger.info(f"[BACKGROUND] Structured data job {job_id} completed!")
                 return
                 
@@ -1041,6 +1072,19 @@ def process_file_background(
                 # XLSX/CSV should NEVER go to ChromaDB - structured data doesn't chunk well
                 logger.error(f"[BACKGROUND] Structured storage failed: {e}")
                 ProcessingJobModel.fail(job_id, f"Failed to process structured data: {str(e)}")
+                
+                # Record error metric
+                if METRICS_AVAILABLE:
+                    times = calc_timing_ms()
+                    MetricsService.record_upload(
+                        processor='structured',
+                        filename=filename,
+                        duration_ms=times['processing_time_ms'],
+                        success=False,
+                        project_id=project_id,
+                        file_size_bytes=file_size,
+                        error_message=str(e)[:500]
+                    )
                 
                 # Cleanup
                 if file_path and os.path.exists(file_path):
@@ -1160,6 +1204,20 @@ def process_file_background(
                         'project': project,
                         'intelligence': pdf_result.get('intelligence')
                     })
+                    
+                    # Record metrics
+                    if METRICS_AVAILABLE:
+                        times = calc_timing_ms()
+                        MetricsService.record_upload(
+                            processor='smart_pdf',
+                            filename=filename,
+                            duration_ms=times['processing_time_ms'],
+                            success=True,
+                            project_id=project_id,
+                            file_size_bytes=file_size,
+                            rows_processed=pdf_result.get('duckdb_result', {}).get('total_rows', 0)
+                        )
+                    
                     logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only)")
                     return
                 
@@ -1686,6 +1744,19 @@ def process_file_background(
             'functional_area': functional_area
         })
         
+        # Record metrics for analytics dashboard
+        if METRICS_AVAILABLE:
+            times = calc_timing_ms()
+            MetricsService.record_upload(
+                processor='semantic',
+                filename=filename,
+                duration_ms=times['processing_time_ms'],
+                success=True,
+                project_id=project_id,
+                file_size_bytes=file_size,
+                chunks_created=chunks_added
+            )
+        
         logger.info(f"[BACKGROUND] Job {job_id} completed!")
         
     except Exception as e:
@@ -1693,6 +1764,22 @@ def process_file_background(
         logger.error(f"[BACKGROUND] {error_msg}")
         logger.error(traceback.format_exc())
         ProcessingJobModel.fail(job_id, error_msg)
+        
+        # Record error metric
+        if METRICS_AVAILABLE:
+            try:
+                times = calc_timing_ms()
+                MetricsService.record_upload(
+                    processor='unknown',
+                    filename=filename,
+                    duration_ms=times['processing_time_ms'],
+                    success=False,
+                    project_id=project_id,
+                    file_size_bytes=file_size,
+                    error_message=str(e)[:500]
+                )
+            except:
+                pass  # Don't let metrics fail the error handling
         
         # Cleanup on failure too
         if file_path and os.path.exists(file_path):
