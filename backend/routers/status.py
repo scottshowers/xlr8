@@ -1,11 +1,12 @@
 """
-Status Router - Registry-Aware Version
-======================================
+Status Router - Registry-Aware Version v19
+===========================================
 
-UPDATED December 22, 2025:
-- REMOVED per-table existence checks that were verifying each table exists
-- This was causing N queries per request where N = number of tables (~72)
-- Trust metadata instead - stale entries cleaned up by delete cascade
+v19 CHANGES (December 23, 2025 - Delete Verify):
+- Delete now cleans _column_profiles, _column_mappings, _mapping_jobs
+- Orphan cleanup now includes _column_profiles
+- Added profiling metadata to delete response
+- Complete cascade delete across all data stores
 
 UPDATED December 20, 2025:
 - Thread-safe DuckDB operations (safe_execute, safe_fetchall, safe_fetchone)
@@ -155,7 +156,12 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping {filename} - not in registry")
                     continue
                 
-                # Trust metadata - don't verify each table exists (was killing performance)
+                # Verify table actually exists
+                try:
+                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                except:
+                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent table: {table_name}")
+                    continue
                 
                 try:
                     columns_data = json.loads(columns_json) if columns_json else []
@@ -212,7 +218,12 @@ async def get_structured_data_status(project: Optional[str] = None):
                     logger.debug(f"[STATUS/STRUCTURED] Skipping PDF {source_file} - not in registry")
                     continue
                 
-                # Trust metadata - don't verify each table exists (was killing performance)
+                # Verify table actually exists
+                try:
+                    handler.safe_execute(f'SELECT 1 FROM "{table_name}" LIMIT 1')
+                except:
+                    logger.warning(f"[STATUS] Skipping stale metadata for non-existent PDF table: {table_name}")
+                    continue
                 
                 try:
                     columns = json.loads(columns_json) if columns_json else []
@@ -423,6 +434,50 @@ async def delete_structured_file(project: str, filename: str):
         # =================================================================
         # STEP 3: Find and drop tables from _pdf_tables (PDF files)
         # =================================================================
+        
+        # =================================================================
+        # STEP 2.5: Clean profiling/mapping metadata tables
+        # These are generated during upload and must be cleaned with the file
+        # =================================================================
+        profiling_cleaned = {"_column_profiles": 0, "_column_mappings": 0, "_mapping_jobs": 0}
+        
+        # Clean _column_profiles
+        try:
+            # Need to match by table_name pattern since profiles are per-table
+            for table_name in tables_from_metadata:
+                result = conn.execute("""
+                    DELETE FROM _column_profiles WHERE table_name = ?
+                """, [table_name])
+                profiling_cleaned["_column_profiles"] += 1
+            logger.info(f"[DELETE] Cleaned _column_profiles for {profiling_cleaned['_column_profiles']} tables")
+        except Exception as prof_e:
+            logger.warning(f"[DELETE] _column_profiles cleanup failed: {prof_e}")
+        
+        # Clean _column_mappings (by project + file_name)
+        try:
+            conn.execute("""
+                DELETE FROM _column_mappings 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower])
+            profiling_cleaned["_column_mappings"] = 1
+            logger.info(f"[DELETE] Cleaned _column_mappings")
+        except Exception as map_e:
+            logger.warning(f"[DELETE] _column_mappings cleanup failed: {map_e}")
+        
+        # Clean _mapping_jobs (by project + file_name)
+        try:
+            conn.execute("""
+                DELETE FROM _mapping_jobs 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower])
+            profiling_cleaned["_mapping_jobs"] = 1
+            logger.info(f"[DELETE] Cleaned _mapping_jobs")
+        except Exception as job_e:
+            logger.warning(f"[DELETE] _mapping_jobs cleanup failed: {job_e}")
+        
+        # =================================================================
+        # STEP 3: Find and drop tables from _pdf_tables (PDF files)
+        # =================================================================
         try:
             # Check if _pdf_tables exists
             table_check = conn.execute("""
@@ -611,6 +666,9 @@ async def delete_structured_file(project: str, filename: str):
                 "duckdb_tables_count": len(deleted_tables),
                 "schema_metadata_rows": metadata_cleaned["_schema_metadata"],
                 "pdf_tables_rows": metadata_cleaned["_pdf_tables"],
+                "column_profiles": profiling_cleaned["_column_profiles"],
+                "column_mappings": profiling_cleaned["_column_mappings"],
+                "mapping_jobs": profiling_cleaned["_mapping_jobs"],
                 "chromadb_chunks": chromadb_cleaned,
                 "registry": registry_cleaned,
                 "lineage_edges": lineage_cleaned,
@@ -625,6 +683,175 @@ async def delete_structured_file(project: str, filename: str):
     except Exception as e:
         logger.error(f"Failed to delete structured file: {e}")
         logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# DELETE VERIFICATION ENDPOINT
+# =============================================================================
+
+@router.get("/status/structured/verify-delete")
+async def verify_delete(project: str, filename: str):
+    """
+    Verify that a file has been completely deleted from all data stores.
+    
+    Checks:
+    - DuckDB tables
+    - _schema_metadata
+    - _pdf_tables
+    - _column_profiles
+    - _column_mappings
+    - _mapping_jobs
+    - ChromaDB
+    - Document Registry (Supabase)
+    
+    Returns detailed status for each data store.
+    """
+    if not STRUCTURED_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Structured data not available")
+    
+    project_lower = project.lower()
+    filename_lower = filename.lower()
+    
+    result = {
+        "project": project,
+        "filename": filename,
+        "fully_deleted": True,
+        "remnants": {}
+    }
+    
+    try:
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Check DuckDB tables (pattern match)
+        try:
+            safe_project = project_lower.replace(' ', '_').replace('-', '_')
+            safe_file = filename.rsplit('.', 1)[0].lower().replace(' ', '_').replace('-', '_')
+            
+            all_tables = conn.execute("SHOW TABLES").fetchall()
+            matching_tables = [t[0] for t in all_tables if t[0].lower().startswith(f"{safe_project}_{safe_file}")]
+            
+            if matching_tables:
+                result["fully_deleted"] = False
+                result["remnants"]["duckdb_tables"] = matching_tables
+        except Exception as e:
+            result["remnants"]["duckdb_tables_error"] = str(e)
+        
+        # Check _schema_metadata
+        try:
+            meta = conn.execute("""
+                SELECT table_name FROM _schema_metadata 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower]).fetchall()
+            
+            if meta:
+                result["fully_deleted"] = False
+                result["remnants"]["_schema_metadata"] = [m[0] for m in meta]
+        except Exception as e:
+            result["remnants"]["_schema_metadata_error"] = str(e)
+        
+        # Check _pdf_tables
+        try:
+            pdf = conn.execute("""
+                SELECT table_name FROM _pdf_tables 
+                WHERE LOWER(source_file) = ? OR LOWER(source_file) LIKE ?
+            """, [filename_lower, f"%{filename_lower}%"]).fetchall()
+            
+            if pdf:
+                result["fully_deleted"] = False
+                result["remnants"]["_pdf_tables"] = [p[0] for p in pdf]
+        except:
+            pass  # Table might not exist
+        
+        # Check _column_profiles
+        try:
+            profiles = conn.execute("""
+                SELECT DISTINCT table_name FROM _column_profiles 
+                WHERE LOWER(project) = ?
+            """, [project_lower]).fetchall()
+            
+            # Filter to tables matching this file
+            matching = [p[0] for p in profiles if safe_file in p[0].lower()]
+            if matching:
+                result["fully_deleted"] = False
+                result["remnants"]["_column_profiles"] = matching
+        except:
+            pass
+        
+        # Check _column_mappings
+        try:
+            mappings = conn.execute("""
+                SELECT COUNT(*) FROM _column_mappings 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower]).fetchone()
+            
+            if mappings and mappings[0] > 0:
+                result["fully_deleted"] = False
+                result["remnants"]["_column_mappings"] = mappings[0]
+        except:
+            pass
+        
+        # Check _mapping_jobs
+        try:
+            jobs = conn.execute("""
+                SELECT id, status FROM _mapping_jobs 
+                WHERE LOWER(project) = ? AND LOWER(file_name) = ?
+            """, [project_lower, filename_lower]).fetchall()
+            
+            if jobs:
+                result["fully_deleted"] = False
+                result["remnants"]["_mapping_jobs"] = [{"id": j[0], "status": j[1]} for j in jobs]
+        except:
+            pass
+        
+        # Check ChromaDB
+        try:
+            rag = RAGHandler()
+            collection = rag.client.get_or_create_collection(name="documents")
+            
+            for field in ["filename", "source", "name"]:
+                try:
+                    results = collection.get(where={field: filename})
+                    if results and results['ids']:
+                        result["fully_deleted"] = False
+                        result["remnants"]["chromadb"] = {
+                            "field": field,
+                            "count": len(results['ids'])
+                        }
+                        break
+                except:
+                    pass
+        except Exception as e:
+            result["remnants"]["chromadb_error"] = str(e)
+        
+        # Check Document Registry (Supabase)
+        try:
+            from utils.database.models import DocumentRegistryModel, ProjectModel
+            
+            project_record = ProjectModel.get_by_name(project)
+            project_id = project_record.get('id') if project_record else None
+            
+            doc = DocumentRegistryModel.get_by_filename(filename, project_id)
+            if doc:
+                result["fully_deleted"] = False
+                result["remnants"]["document_registry"] = {
+                    "id": doc.get("id"),
+                    "status": doc.get("status")
+                }
+        except Exception as e:
+            result["remnants"]["document_registry_error"] = str(e)
+        
+        # Summary
+        if result["fully_deleted"]:
+            result["message"] = "File completely deleted from all data stores"
+        else:
+            result["message"] = f"Found remnants in {len(result['remnants'])} data store(s)"
+        
+        return result
+        
+    except Exception as e:
+        logger.error(f"[VERIFY-DELETE] Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -695,6 +922,26 @@ async def clean_orphaned_metadata(project: Optional[str] = None):
                         
         except Exception as e:
             logger.warning(f"[CLEANUP] _pdf_tables cleanup error: {e}")
+        
+        # Clean orphaned _column_profiles entries
+        orphaned["_column_profiles"] = 0
+        try:
+            if project:
+                profile_result = conn.execute(
+                    "SELECT DISTINCT table_name FROM _column_profiles WHERE LOWER(project) = ?",
+                    [project.lower()]
+                ).fetchall()
+            else:
+                profile_result = conn.execute("SELECT DISTINCT table_name FROM _column_profiles").fetchall()
+            
+            for (table_name,) in profile_result:
+                if table_name not in actual_tables:
+                    conn.execute("DELETE FROM _column_profiles WHERE table_name = ?", [table_name])
+                    orphaned["_column_profiles"] += 1
+                    logger.info(f"[CLEANUP] Removed orphaned _column_profiles: {table_name}")
+                    
+        except Exception as e:
+            logger.warning(f"[CLEANUP] _column_profiles cleanup error: {e}")
         
         # Checkpoint
         try:
