@@ -2,7 +2,11 @@
 RAG Handler for XLR8
 Handles all RAG operations including document processing, embedding, and retrieval.
 
-Version: 2.0 - Universal Classification Architecture
+Version: 2.1 - Fixed chunking fallback + better embedding diagnostics
+- Fixed: Sanity check now falls through to basic chunking instead of throwing
+- Added: Embedding success/failure count logging
+- Added: Early return if all embeddings fail
+- Added: Warning when 0 chunks are added
 - Added truth_type filtering for Three Truths architecture
 - Added custom where clause support
 - Added helper methods for truth-type specific searches
@@ -267,10 +271,11 @@ class RAGHandler:
                 
                 avg_chunk_size = len(text) / len(chunks) if chunks else 0
                 if len(text) > 5000 and len(chunks) <= 2 and avg_chunk_size > 4000:
-                    logger.warning(f"[CHUNK] SANITY CHECK FAILED: forcing basic chunking fallback")
-                    raise ValueError("Chunks too large - forcing basic chunking fallback")
-                
-                return chunks
+                    logger.warning(f"[CHUNK] Large chunks detected ({len(chunks)} chunks, avg {avg_chunk_size:.0f} chars)")
+                    logger.warning(f"[CHUNK] Falling back to basic chunking for better granularity")
+                    # Don't throw - fall through to basic chunking
+                else:
+                    return chunks
                 
             except Exception as e:
                 logger.error(f"[CHUNK] Universal chunking failed: {e}", exc_info=True)
@@ -349,6 +354,15 @@ class RAGHandler:
             
             logger.info(f"[BATCH] Getting embeddings for {len(chunks)} chunks...")
             embeddings = self.get_embeddings_batch(chunks, batch_size=10)
+            
+            # Count successful embeddings
+            successful_embeddings = sum(1 for e in embeddings if e is not None)
+            failed_embeddings = len(embeddings) - successful_embeddings
+            logger.warning(f"[EMBEDDINGS] Results: {successful_embeddings} successful, {failed_embeddings} failed out of {len(chunks)}")
+            
+            if successful_embeddings == 0:
+                logger.error(f"[EMBEDDINGS] ALL EMBEDDINGS FAILED - check Ollama connection at {self.ollama_base_url}")
+                return 0
             
             if progress_callback:
                 progress_callback(60, 100, f"Embeddings complete, adding to database...")
@@ -439,6 +453,8 @@ class RAGHandler:
                 progress_callback(100, 100, f"Complete! Added {chunks_added} chunks")
             
             logger.info(f"Added {chunks_added}/{len(chunks)} chunks to collection '{collection_name}'")
+            if chunks_added == 0:
+                logger.warning(f"[RAG] WARNING: 0 chunks added for {filename} - check embedding logs above")
             if project_id:
                 logger.info(f"[PROJECT] All chunks tagged with project_id: {project_id}")
             if truth_type:
