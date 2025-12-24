@@ -1,35 +1,37 @@
 /**
  * ProjectsPage - Project Management
  * 
- * Clean professional design with:
- * - Light/dark mode support
- * - Customer color palette for project rows
- * - Consistent styling with Command Center
+ * UPDATED: December 23, 2025
+ * - Mission Control color palette (#83b16d)
+ * - Removed dark mode
+ * - Consistent styling
  */
 
 import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
-import { useTheme } from '../context/ThemeContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
 import { FolderOpen, Plus, Edit2, Trash2, Check, X } from 'lucide-react';
 
-// Theme-aware colors
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',  // Muted forest green
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  blue: '#4a6b8a',     // Slate blue
-  amber: '#8a6b4a',    // Muted rust
-  red: '#8a4a4a',      // Muted burgundy
-  divider: dark ? '#2d3548' : '#e8ecf1',
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
-  inputBorder: dark ? '#3d4555' : '#e1e8ed',
-});
+// Mission Control Colors
+const colors = {
+  bg: '#f0f2f5',
+  card: '#ffffff',
+  cardBorder: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
+  primary: '#83b16d',
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
+  warning: '#d97706',
+  warningLight: 'rgba(217, 119, 6, 0.1)',
+  red: '#dc2626',
+  redLight: 'rgba(220, 38, 38, 0.1)',
+  divider: '#e2e8f0',
+  inputBg: '#f8fafc',
+  inputBorder: '#e2e8f0',
+};
 
 // Available playbooks - must match PlaybooksPage
 const AVAILABLE_PLAYBOOKS = [
@@ -42,8 +44,6 @@ const AVAILABLE_PLAYBOOKS = [
 
 export default function ProjectsPage() {
   const { projects, createProject, updateProject, deleteProject, selectProject, activeProject } = useProject();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
   
   const [showForm, setShowForm] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
@@ -121,17 +121,22 @@ export default function ProjectsPage() {
   return (
     <div style={{ maxWidth: '1200px' }}>
       {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.5rem',
-          fontWeight: 700,
-          color: colors.text,
-          margin: 0,
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, fontSize: '20px', fontWeight: 600, color: colors.text, 
+          display: 'flex', alignItems: 'center', gap: '10px',
+          fontFamily: "'Sora', sans-serif"
         }}>
+          <div style={{ 
+            width: '36px', height: '36px', borderRadius: '10px', 
+            backgroundColor: colors.primary, 
+            display: 'flex', alignItems: 'center', justifyContent: 'center' 
+          }}>
+            <FolderOpen size={20} color="#ffffff" />
+          </div>
           Projects
         </h1>
-        <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>
           Create and manage customer projects
         </p>
       </div>
@@ -223,13 +228,13 @@ export default function ProjectsPage() {
                     }}
                     value={formData.customer}
                     onChange={(e) => setFormData({ ...formData, customer: e.target.value })}
-                    placeholder="e.g., Meyer Corporation"
+                    placeholder="e.g., Meyerhoff Industries"
                     required
                   />
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Product *
+                    Product
                   </label>
                   <select
                     style={{
@@ -242,19 +247,19 @@ export default function ProjectsPage() {
                       color: colors.text,
                       boxSizing: 'border-box',
                     }}
-                    value={formData.product || ''}
+                    value={formData.product}
                     onChange={(e) => setFormData({ ...formData, product: e.target.value })}
-                    required
                   >
-                    <option value="">Select Product...</option>
-                    <option value="UKG Pro">UKG Pro</option>
-                    <option value="WFM Dimensions">WFM Dimensions</option>
-                    <option value="UKG Ready">UKG Ready</option>
+                    <option value="">Select product...</option>
+                    <option value="Pro">UKG Pro</option>
+                    <option value="Ready">UKG Ready</option>
+                    <option value="Dimensions">UKG Dimensions</option>
+                    <option value="Pro WFM">Pro WFM</option>
                   </select>
                 </div>
                 <div>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Type
+                    Project Type
                   </label>
                   <select
                     style={{
@@ -271,15 +276,16 @@ export default function ProjectsPage() {
                     onChange={(e) => setFormData({ ...formData, type: e.target.value })}
                   >
                     <option value="Implementation">Implementation</option>
-                    <option value="Support">Support</option>
-                    <option value="Analysis">Analysis</option>
+                    <option value="Optimization">Optimization</option>
+                    <option value="Migration">Migration</option>
+                    <option value="Audit">Audit</option>
                   </select>
                 </div>
                 <div style={{ gridColumn: 'span 2' }}>
                   <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
                     Notes
                   </label>
-                  <input
+                  <textarea
                     style={{
                       width: '100%',
                       padding: '0.6rem',
@@ -289,23 +295,20 @@ export default function ProjectsPage() {
                       background: colors.card,
                       color: colors.text,
                       boxSizing: 'border-box',
+                      minHeight: '60px',
+                      resize: 'vertical',
                     }}
                     value={formData.notes}
                     onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                    placeholder="Optional notes..."
+                    placeholder="Optional project notes..."
                   />
                 </div>
-
-                {/* Playbooks Selection */}
                 <div style={{ gridColumn: 'span 2' }}>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Assigned Playbooks
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
+                    Assign Playbooks
                   </label>
-                  <p style={{ fontSize: '0.75rem', color: colors.textMuted, margin: '0 0 0.75rem 0' }}>
-                    Select which playbooks this customer can access.
-                  </p>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '0.5rem' }}>
-                    {AVAILABLE_PLAYBOOKS.map(playbook => {
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                    {AVAILABLE_PLAYBOOKS.map((playbook) => {
                       const isSelected = (formData.playbooks || []).includes(playbook.id);
                       return (
                         <div
@@ -314,8 +317,8 @@ export default function ProjectsPage() {
                           style={{
                             display: 'flex',
                             alignItems: 'center',
-                            gap: '0.5rem',
-                            padding: '0.6rem 0.75rem',
+                            gap: '0.35rem',
+                            padding: '0.4rem 0.75rem',
                             background: isSelected ? colors.primaryLight : colors.card,
                             border: `1px solid ${isSelected ? colors.primary : colors.inputBorder}`,
                             borderRadius: 6,
@@ -326,7 +329,7 @@ export default function ProjectsPage() {
                           <input
                             type="checkbox"
                             checked={isSelected}
-                            readOnly
+                            onChange={() => {}}
                             style={{ accentColor: colors.primary }}
                           />
                           <span style={{ fontSize: '1rem' }}>{playbook.icon}</span>
@@ -504,9 +507,9 @@ export default function ProjectsPage() {
                       style={{
                         padding: '0.35rem 0.5rem',
                         background: 'transparent',
-                        border: `1px solid ${colors.blue}`,
+                        border: `1px solid ${colors.accent}`,
                         borderRadius: 4,
-                        color: colors.blue,
+                        color: colors.accent,
                         cursor: 'pointer',
                         display: 'flex',
                         alignItems: 'center',
