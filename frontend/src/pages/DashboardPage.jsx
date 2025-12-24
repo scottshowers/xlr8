@@ -501,8 +501,8 @@ export default function DashboardPage() {
   useEffect(() => { fetchData(); const interval = setInterval(fetchData, 30000); return () => clearInterval(interval); }, [fetchData]);
   
   return (
-    <div style={{ minHeight: '100vh', backgroundColor: colors.background, padding: '24px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
+    <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '10px', fontFamily: "'Sora', sans-serif" }}>
             <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -512,8 +512,8 @@ export default function DashboardPage() {
           </h1>
           <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>Real-time platform intelligence • Updated {lastRefresh.toLocaleTimeString()}</p>
         </div>
-        <button onClick={fetchData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', backgroundColor: colors.primary, color: colors.white, border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 500, cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1 }}>
-          <RefreshCw size={18} className={loading ? 'spin' : ''} /> Refresh
+        <button onClick={fetchData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 16px', backgroundColor: colors.primary, color: colors.white, border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 500, cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1 }}>
+          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
         </button>
       </div>
       
