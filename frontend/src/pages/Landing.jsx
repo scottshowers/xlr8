@@ -177,9 +177,9 @@ export default function Landing() {
           </div>
           
           {/* Right - CTAs */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <Link 
-              to="/dashboard" 
+              to="/login" 
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -192,6 +192,25 @@ export default function Landing() {
                 fontSize: '0.9rem',
                 textDecoration: 'none',
                 transition: 'transform 0.15s ease',
+              }}
+            >
+              Login
+            </Link>
+            <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.3)' }} />
+            <Link 
+              to="/dashboard" 
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.625rem 1.25rem',
+                background: 'rgba(255,255,255,0.15)',
+                color: 'white',
+                border: '1px solid rgba(255,255,255,0.3)',
+                borderRadius: '8px',
+                fontWeight: '600',
+                fontSize: '0.9rem',
+                textDecoration: 'none',
               }}
             >
               <Target size={16} /> Mission Control
