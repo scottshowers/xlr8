@@ -1936,6 +1936,44 @@ async def upload_file(
                     except Exception as reg_e:
                         logger.warning(f"[STANDARDS] Could not register: {reg_e}")
                 
+                # ALSO chunk to ChromaDB for RAG search (Five Truths: regulatory docs need both rules AND RAG)
+                chunks_created = 0
+                try:
+                    rag_handler = RAGHandler()
+                    
+                    # Get text content for chunking
+                    if ext == 'pdf':
+                        # Re-read PDF for text extraction
+                        import PyPDF2
+                        with open(file_path, 'rb') as pdf_file:
+                            pdf_reader = PyPDF2.PdfReader(pdf_file)
+                            text_for_rag = ""
+                            for page in pdf_reader.pages:
+                                text_for_rag += page.extract_text() or ""
+                    else:
+                        text_for_rag = text  # Already have text from earlier
+                    
+                    if text_for_rag and len(text_for_rag.strip()) > 100:
+                        # Prepare metadata for RAG
+                        rag_metadata = {
+                            "filename": filename,
+                            "project": "Global/Universal",
+                            "is_global": True,
+                            "truth_type": "regulatory",
+                            "domain": domain or "regulatory",
+                            "rules_extracted": len(doc.rules)
+                        }
+                        
+                        chunks = rag_handler.add_document(
+                            text=text_for_rag,
+                            filename=filename,
+                            metadata=rag_metadata
+                        )
+                        chunks_created = chunks if isinstance(chunks, int) else len(chunks) if chunks else 0
+                        logger.info(f"[STANDARDS] Also chunked to ChromaDB: {chunks_created} chunks")
+                except Exception as rag_e:
+                    logger.warning(f"[STANDARDS] RAG chunking failed (rules still extracted): {rag_e}")
+                
                 return {
                     "success": True,
                     "document_id": doc.document_id,
@@ -1943,6 +1981,7 @@ async def upload_file(
                     "title": doc.title,
                     "domain": doc.domain,
                     "rules_extracted": len(doc.rules),
+                    "chunks_created": chunks_created,
                     "page_count": doc.page_count,
                     "rules": [r.to_dict() for r in doc.rules[:10]]
                 }
