@@ -6,7 +6,13 @@
  * - Metadata staging before upload with review
  * - Expandable uploads showing tables → fields
  * - Metrics everywhere (date, time, speed, who, duration)
- * - Mission Control styling
+ * - Mission Control styling (consistent with DashboardPage)
+ * - Detailed tooltips explaining each classification option
+ * 
+ * Classification Options:
+ * - Truth Type: reality, intent, reference, configuration
+ * - Functional Area: Payroll, Benefits, HR Core, etc.
+ * - Content Domains: payroll, tax, benefits, time_attendance, hr_core, recruiting, compliance
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -20,43 +26,292 @@ import api from '../services/api';
 import {
   Upload as UploadIcon, Database, Activity, CheckCircle, XCircle, Clock,
   Loader2, Trash2, FileText, Table2, ChevronDown, ChevronRight, User,
-  CheckSquare, Square, AlertTriangle, Zap, Sparkles, X, RefreshCw
+  CheckSquare, Square, AlertTriangle, Zap, Sparkles, X, RefreshCw,
+  HelpCircle, Info, Tag, Layers, Target
 } from 'lucide-react';
 import DataHealthComponent from './DataHealthPage';
 
-// Brand colors - Mission Control palette
-const COLORS = {
-  primary: '#83b16d',      // Grass green
-  accent: '#285390',       // Turkish sea
+// ============================================================================
+// BRAND COLORS (Consistent with DashboardPage)
+// ============================================================================
+const colors = {
+  primary: '#83b16d',      // Grass Green
+  accent: '#285390',       // Turkish Sea
   electricBlue: '#2766b1',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
   silver: '#a2a1a0',
-  warning: '#d97706',
+  white: '#f6f5fa',
   scarletSage: '#993c44',
+  royalPurple: '#5f4282',
+  background: '#f0f2f5',
+  cardBg: '#ffffff',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  border: '#e2e8f0',
+  warning: '#d97706',
+  success: '#285390',
 };
 
 // Theme-aware colors
 const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f0f2f5',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e2e8f0',
-  text: dark ? '#e8eaed' : '#1a2332',
-  textMuted: dark ? '#8b95a5' : '#64748b',
+  bg: dark ? '#1a1f2e' : colors.background,
+  card: dark ? '#242b3d' : colors.cardBg,
+  cardBorder: dark ? '#2d3548' : colors.border,
+  text: dark ? '#e8eaed' : colors.text,
+  textMuted: dark ? '#8b95a5' : colors.textMuted,
   textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: COLORS.primary,
+  primary: colors.primary,
   primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  accent: COLORS.accent,
+  accent: colors.accent,
   accentLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
-  warning: COLORS.warning,
+  warning: colors.warning,
   warningLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
-  red: COLORS.scarletSage,
+  red: colors.scarletSage,
   redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
-  divider: dark ? '#2d3548' : '#e2e8f0',
+  divider: dark ? '#2d3548' : colors.border,
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
-  tabBg: dark ? '#1e2433' : '#f6f5fa',
-  white: dark ? '#1a1f2e' : '#ffffff',
+  tabBg: dark ? '#1e2433' : colors.white,
+  tooltipBg: colors.text,
+  tooltipText: colors.white,
 });
+
+// ============================================================================
+// TOOLTIP COMPONENT (Matches DashboardPage exactly)
+// ============================================================================
+function Tooltip({ children, title, detail, action, width = 280 }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShow(true)} 
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <div style={{
+          position: 'absolute', 
+          bottom: '100%', 
+          left: '50%', 
+          transform: 'translateX(-50%)',
+          marginBottom: '8px', 
+          padding: '12px 16px', 
+          backgroundColor: colors.text, 
+          color: colors.white,
+          borderRadius: '8px', 
+          fontSize: '12px', 
+          width: width, 
+          zIndex: 10000, 
+          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+          lineHeight: 1.5,
+        }}>
+          {title && <div style={{ fontWeight: 600, marginBottom: '6px', fontSize: '13px' }}>{title}</div>}
+          <div style={{ opacity: 0.9 }}>{detail}</div>
+          {action && (
+            <div style={{ 
+              marginTop: '10px', 
+              paddingTop: '10px', 
+              borderTop: '1px solid rgba(255,255,255,0.2)', 
+              color: colors.skyBlue, 
+              fontWeight: 500,
+              fontSize: '11px'
+            }}>
+              💡 {action}
+            </div>
+          )}
+          <div style={{ 
+            position: 'absolute', 
+            bottom: '-6px', 
+            left: '50%', 
+            transform: 'translateX(-50%)',
+            width: 0, 
+            height: 0, 
+            borderLeft: '6px solid transparent', 
+            borderRight: '6px solid transparent', 
+            borderTop: `6px solid ${colors.text}` 
+          }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HelpIcon({ title, detail, action }) {
+  return (
+    <Tooltip title={title} detail={detail} action={action}>
+      <span style={{ 
+        display: 'inline-flex', 
+        alignItems: 'center', 
+        justifyContent: 'center',
+        width: 16, 
+        height: 16, 
+        borderRadius: '50%', 
+        backgroundColor: colors.border,
+        color: colors.textMuted,
+        fontSize: '10px',
+        fontWeight: 700,
+        cursor: 'help',
+        marginLeft: '6px',
+      }}>
+        ?
+      </span>
+    </Tooltip>
+  );
+}
+
+// ============================================================================
+// METADATA CONFIGURATION
+// ============================================================================
+const TRUTH_TYPES = [
+  { 
+    value: 'reality', 
+    label: 'Reality',
+    shortLabel: 'Structured Data',
+    icon: '📊',
+    color: colors.primary,
+    storage: 'DuckDB',
+    title: 'Reality (Structured Data)',
+    detail: 'Actual transactional data like payroll registers, employee rosters, benefits census files. This data gets parsed into DuckDB tables where it can be queried with SQL. This is your "source of truth" — the real data that reflects what actually happened or exists.',
+    action: 'Best for: Excel files, CSVs, data exports from systems'
+  },
+  { 
+    value: 'intent', 
+    label: 'Intent',
+    shortLabel: 'Customer Docs',
+    icon: '📋',
+    color: colors.electricBlue,
+    storage: 'ChromaDB',
+    title: 'Intent (Customer Documents)',
+    detail: 'Customer-specific documents that describe what SHOULD happen — implementation guides, configuration specs, business requirements, SOWs, project plans. These get chunked and stored in ChromaDB for semantic search. Used to understand what the customer wants to achieve.',
+    action: 'Best for: PDFs, Word docs describing requirements or configs'
+  },
+  { 
+    value: 'reference', 
+    label: 'Reference',
+    shortLabel: 'Standards',
+    icon: '📚',
+    color: colors.royalPurple,
+    storage: 'Reference Library',
+    title: 'Reference (Standards & Best Practices)',
+    detail: 'Industry standards, compliance checklists, best practices, vendor documentation, regulatory guidance. Goes to the Reference Library where it becomes shared knowledge. Used to compare customer intent against known standards and identify gaps.',
+    action: 'Best for: Compliance docs, vendor manuals, industry guides'
+  },
+  { 
+    value: 'configuration', 
+    label: 'Config',
+    shortLabel: 'System Setup',
+    icon: '⚙️',
+    color: colors.silver,
+    storage: 'DuckDB',
+    title: 'Configuration (System Setup)',
+    detail: 'System configuration exports, setup files, mapping documents, code tables. Treated as structured data but flagged specially for configuration analysis. Useful for comparing current state vs. desired state.',
+    action: 'Best for: Config exports, mapping tables, code lists'
+  },
+];
+
+const CONTENT_DOMAINS = [
+  { 
+    value: 'payroll', 
+    label: 'Payroll', 
+    color: colors.primary,
+    title: 'Payroll Domain',
+    detail: 'Earnings, deductions, pay registers, compensation data, garnishments, direct deposits, check history. Column patterns: gross_pay, net_pay, earnings_code, deduction_code, pay_date.',
+    action: 'Enables payroll-specific analysis and compliance checks'
+  },
+  { 
+    value: 'tax', 
+    label: 'Tax', 
+    color: colors.scarletSage,
+    title: 'Tax Domain',
+    detail: 'Federal/state/local withholdings, W2/W4 data, FICA, SUI/SUTA/FUTA, tax jurisdictions, year-end tax processing. Column patterns: federal_tax, state_tax, fica, sui.',
+    action: 'Enables tax compliance analysis and W2 reconciliation'
+  },
+  { 
+    value: 'benefits', 
+    label: 'Benefits', 
+    color: colors.electricBlue,
+    title: 'Benefits Domain',
+    detail: 'Medical/dental/vision enrollment, 401k/403b contributions, HSA/FSA, life insurance, disability, COBRA, open enrollment, dependent coverage. Column patterns: plan_code, coverage_level, premium.',
+    action: 'Enables benefits audit and ACA compliance'
+  },
+  { 
+    value: 'time_attendance', 
+    label: 'Time', 
+    color: colors.warning,
+    title: 'Time & Attendance Domain',
+    detail: 'Hours worked, schedules, PTO/leave tracking, overtime, shift differentials, attendance records, accruals. Column patterns: hours, schedule, pto_balance, overtime.',
+    action: 'Enables time-off analysis and scheduling optimization'
+  },
+  { 
+    value: 'hr_core', 
+    label: 'HR Core', 
+    color: colors.accent,
+    title: 'HR Core Domain',
+    detail: 'Employee master data, demographics, job/position information, organizational hierarchy, reporting relationships, employment status. Column patterns: employee_id, hire_date, department, job_title.',
+    action: 'Enables headcount analysis and org structure review'
+  },
+  { 
+    value: 'recruiting', 
+    label: 'Recruiting', 
+    color: colors.royalPurple,
+    title: 'Recruiting Domain',
+    detail: 'Applicant tracking, requisitions, candidates, interview feedback, offer letters, onboarding checklists. Column patterns: applicant, requisition, offer_status.',
+    action: 'Enables hiring funnel analysis'
+  },
+  { 
+    value: 'compliance', 
+    label: 'Compliance', 
+    color: colors.scarletSage,
+    title: 'Compliance Domain',
+    detail: 'Audit trails, regulatory filings, EEO/AAP, OSHA, ACA reporting, SOX controls, policy acknowledgments. Column patterns: audit, compliance, filing.',
+    action: 'Enables compliance gap analysis and audit prep'
+  },
+];
+
+const FUNCTIONAL_AREAS = [
+  { 
+    value: 'Payroll', 
+    title: 'Payroll Functional Area',
+    detail: 'Pay processing, earnings calculations, deduction management, garnishments, direct deposits, check printing, pay statements.',
+    action: 'Routes to payroll expertise and analysis templates'
+  },
+  { 
+    value: 'Benefits', 
+    title: 'Benefits Functional Area',
+    detail: 'Health plans, retirement plans, open enrollment, COBRA administration, carrier feeds, premium calculations.',
+    action: 'Routes to benefits expertise and enrollment analysis'
+  },
+  { 
+    value: 'HR Core', 
+    title: 'HR Core Functional Area',
+    detail: 'Employee records, position management, organizational structure, workflow approvals, manager self-service.',
+    action: 'Routes to core HR expertise and data quality checks'
+  },
+  { 
+    value: 'Time & Attendance', 
+    title: 'Time & Attendance Functional Area',
+    detail: 'Timekeeping, scheduling, absence management, leave tracking, overtime rules, clock integration.',
+    action: 'Routes to time tracking expertise'
+  },
+  { 
+    value: 'Recruiting', 
+    title: 'Recruiting Functional Area',
+    detail: 'Talent acquisition, applicant tracking, job postings, interview scheduling, background checks, onboarding.',
+    action: 'Routes to recruiting expertise'
+  },
+  { 
+    value: 'Compliance', 
+    title: 'Compliance Functional Area',
+    detail: 'ACA reporting, EEO/AAP, OSHA, regulatory filings, audit support, policy management.',
+    action: 'Routes to compliance expertise and audit checks'
+  },
+  { 
+    value: 'Other', 
+    title: 'Other / General',
+    detail: 'Cross-functional or general documents that span multiple areas or don\'t fit a specific category.',
+    action: 'Will be analyzed without domain-specific context'
+  },
+];
 
 const TABS = [
   { id: 'upload', label: 'Upload', icon: UploadIcon },
@@ -64,59 +319,55 @@ const TABS = [
   { id: 'health', label: 'Health', icon: Activity },
 ];
 
-const FUNCTIONAL_AREAS = ['Payroll', 'Benefits', 'HR Core', 'Time & Attendance', 'Recruiting', 'Compliance', 'Other'];
-const DOC_TYPES = [
-  { value: 'structured', label: 'Structured Data (Reality)' },
-  { value: 'intent', label: 'Customer Doc (Intent)' },
-  { value: 'reference', label: 'Reference Doc (Standards)' },
-];
-
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 export default function DataPage() {
   const { activeProject, projectName, customerName } = useProject();
   const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
+  const themeColors = getColors(darkMode);
   const [activeTab, setActiveTab] = useState('upload');
   const { uploads, hasActive } = useUpload();
   
   const customerColors = activeProject ? getCustomerColorPalette(customerName || projectName) : null;
-  const stagedCount = 0; // Will come from staging logic
+  const [stagedCount, setStagedCount] = useState(0);
 
   return (
     <div>
       {/* Header */}
       <div style={{ marginBottom: '24px' }}>
         <h1 style={{ 
-          margin: 0, fontSize: '28px', fontWeight: 700, color: colors.text, 
+          margin: 0, fontSize: '28px', fontWeight: 700, color: themeColors.text, 
           display: 'flex', alignItems: 'center', gap: '12px',
           fontFamily: "'Sora', sans-serif"
         }}>
           <div style={{ 
             width: '48px', height: '48px', borderRadius: '12px', 
-            backgroundColor: colors.primary, 
+            backgroundColor: themeColors.primary, 
             display: 'flex', alignItems: 'center', justifyContent: 'center' 
           }}>
             <Database size={28} color="#ffffff" />
           </div>
           Data
         </h1>
-        <p style={{ margin: '8px 0 0 60px', fontSize: '14px', color: colors.textMuted }}>
-          Upload, manage, and monitor your project data
+        <p style={{ margin: '8px 0 0 60px', fontSize: '14px', color: themeColors.textMuted }}>
+          Upload, classify, and manage your project data
           {projectName && (
-            <span style={{ color: colors.primary, fontWeight: 600 }}> • {projectName}</span>
+            <span style={{ color: themeColors.primary, fontWeight: 600 }}> • {projectName}</span>
           )}
         </p>
       </div>
 
       {/* Main Card */}
       <div style={{ 
-        backgroundColor: colors.card, 
-        borderRadius: '16px', 
-        border: `1px solid ${colors.cardBorder}`, 
+        backgroundColor: themeColors.card, 
+        borderRadius: '12px', 
+        border: `1px solid ${themeColors.cardBorder}`, 
         overflow: 'hidden', 
         boxShadow: '0 1px 3px rgba(0,0,0,0.04)' 
       }}>
         {/* Tabs */}
-        <div style={{ display: 'flex', borderBottom: `1px solid ${colors.divider}`, backgroundColor: colors.tabBg }}>
+        <div style={{ display: 'flex', borderBottom: `1px solid ${themeColors.divider}`, backgroundColor: themeColors.tabBg }}>
           {TABS.map(tab => {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
@@ -127,10 +378,10 @@ export default function DataPage() {
                 onClick={() => setActiveTab(tab.id)}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 24px',
-                  border: 'none', background: isActive ? colors.card : 'transparent',
-                  color: isActive ? colors.primary : colors.textMuted, 
+                  border: 'none', background: isActive ? themeColors.card : 'transparent',
+                  color: isActive ? themeColors.primary : themeColors.textMuted, 
                   fontWeight: 600, fontSize: '14px', cursor: 'pointer', 
-                  borderBottom: isActive ? `2px solid ${colors.primary}` : '2px solid transparent',
+                  borderBottom: isActive ? `2px solid ${themeColors.primary}` : '2px solid transparent',
                   marginBottom: '-1px', transition: 'all 0.15s ease',
                 }}
               >
@@ -139,7 +390,7 @@ export default function DataPage() {
                 {showBadge && (
                   <span style={{ 
                     minWidth: 18, height: 18, borderRadius: '50%', 
-                    backgroundColor: hasActive ? colors.warning : colors.primary,
+                    backgroundColor: hasActive ? themeColors.warning : themeColors.primary,
                     color: 'white', fontSize: '11px', fontWeight: 700,
                     display: 'flex', alignItems: 'center', justifyContent: 'center'
                   }}>
@@ -153,8 +404,8 @@ export default function DataPage() {
 
         {/* Tab Content */}
         <div style={{ padding: '24px' }}>
-          {activeTab === 'upload' && <UploadTab colors={colors} />}
-          {activeTab === 'files' && <FilesTab colors={colors} />}
+          {activeTab === 'upload' && <UploadTab colors={themeColors} onStagedCountChange={setStagedCount} />}
+          {activeTab === 'files' && <FilesTab colors={themeColors} />}
           {activeTab === 'health' && <DataHealthComponent embedded />}
         </div>
       </div>
@@ -165,11 +416,13 @@ export default function DataPage() {
   );
 }
 
-// ============ UPLOAD TAB ============
-function UploadTab({ colors }) {
+// ============================================================================
+// UPLOAD TAB
+// ============================================================================
+function UploadTab({ colors, onStagedCountChange }) {
   const { activeProject, projectName } = useProject();
   const { user } = useAuth();
-  const { uploads, addUpload, clearCompleted } = useUpload();
+  const { uploads, addUpload } = useUpload();
   const fileInputRef = useRef(null);
   
   const [dragOver, setDragOver] = useState(false);
@@ -180,6 +433,13 @@ function UploadTab({ colors }) {
   const [completedUploads, setCompletedUploads] = useState([]);
   const [tableProfiles, setTableProfiles] = useState({});
   const [loadingProfiles, setLoadingProfiles] = useState(new Set());
+  const [expandedStaged, setExpandedStaged] = useState(new Set());
+  const [uploading, setUploading] = useState(false);
+
+  // Notify parent of staged count
+  useEffect(() => {
+    onStagedCountChange?.(stagedFiles.length);
+  }, [stagedFiles.length, onStagedCountChange]);
 
   // Load recent completed jobs on mount
   useEffect(() => {
@@ -199,7 +459,6 @@ function UploadTab({ colors }) {
         .filter(j => j.status === 'completed' && (!activeProject || j.project_id === activeProject.id))
         .slice(0, 10);
       
-      // Enrich jobs with table data from structured endpoint
       const enrichedJobs = jobs.map(job => {
         const filename = job.input_data?.filename || job.result_data?.filename || job.filename;
         const matchingFile = (structRes.data.files || []).find(f => f.filename === filename);
@@ -230,36 +489,49 @@ function UploadTab({ colors }) {
     }
   };
 
-  const detectFileType = (file) => {
+  // ========== AUTO-DETECTION ==========
+  const detectTruthType = (file) => {
     const ext = file.name.split('.').pop().toLowerCase();
-    if (['xlsx', 'xls', 'csv'].includes(ext)) return 'structured';
-    if (['pdf', 'docx', 'doc'].includes(ext)) {
-      // Heuristic: reference docs often have these keywords
-      const name = file.name.toLowerCase();
-      if (name.includes('checklist') || name.includes('guide') || name.includes('standard') || name.includes('policy')) {
-        return 'reference';
-      }
-      return 'intent';
-    }
+    const name = file.name.toLowerCase();
+    
+    if (['xlsx', 'xls', 'csv'].includes(ext)) return 'reality';
+    if (name.includes('config') || name.includes('setup') || name.includes('mapping')) return 'configuration';
+    if (name.includes('checklist') || name.includes('guide') || name.includes('standard') || name.includes('compliance') || name.includes('best practice')) return 'reference';
     return 'intent';
   };
 
   const detectFunctionalArea = (file) => {
     const name = file.name.toLowerCase();
     if (name.includes('payroll') || name.includes('pay_') || name.includes('earning') || name.includes('deduction')) return 'Payroll';
-    if (name.includes('benefit') || name.includes('health') || name.includes('401k') || name.includes('insurance')) return 'Benefits';
-    if (name.includes('employee') || name.includes('roster') || name.includes('census') || name.includes('master')) return 'HR Core';
-    if (name.includes('time') || name.includes('attendance') || name.includes('schedule')) return 'Time & Attendance';
-    if (name.includes('compliance') || name.includes('audit') || name.includes('checklist')) return 'Compliance';
+    if (name.includes('benefit') || name.includes('health') || name.includes('401k') || name.includes('insurance') || name.includes('enrollment')) return 'Benefits';
+    if (name.includes('employee') || name.includes('roster') || name.includes('census') || name.includes('master') || name.includes('demographic')) return 'HR Core';
+    if (name.includes('time') || name.includes('attendance') || name.includes('schedule') || name.includes('pto') || name.includes('leave')) return 'Time & Attendance';
+    if (name.includes('compliance') || name.includes('audit') || name.includes('aca') || name.includes('eeo')) return 'Compliance';
+    if (name.includes('recruit') || name.includes('applicant') || name.includes('candidate') || name.includes('hire')) return 'Recruiting';
     return 'Other';
+  };
+
+  const detectContentDomains = (file) => {
+    const name = file.name.toLowerCase();
+    const domains = [];
+    
+    if (name.includes('payroll') || name.includes('earning') || name.includes('deduction') || name.includes('pay_') || name.includes('compensation')) domains.push('payroll');
+    if (name.includes('tax') || name.includes('w2') || name.includes('w4') || name.includes('withhold') || name.includes('fica')) domains.push('tax');
+    if (name.includes('benefit') || name.includes('medical') || name.includes('dental') || name.includes('401k') || name.includes('hsa')) domains.push('benefits');
+    if (name.includes('time') || name.includes('hour') || name.includes('schedule') || name.includes('pto') || name.includes('attendance')) domains.push('time_attendance');
+    if (name.includes('employee') || name.includes('roster') || name.includes('census') || name.includes('demographic') || name.includes('master')) domains.push('hr_core');
+    if (name.includes('recruit') || name.includes('applicant') || name.includes('candidate')) domains.push('recruiting');
+    if (name.includes('compliance') || name.includes('audit') || name.includes('aca') || name.includes('eeo')) domains.push('compliance');
+    
+    return domains.length > 0 ? domains : ['hr_core'];
   };
 
   const getConfidence = (file) => {
     const ext = file.name.split('.').pop().toLowerCase();
     if (['xlsx', 'xls', 'csv'].includes(ext)) return 'high';
     const name = file.name.toLowerCase();
-    if (name.includes('checklist') || name.includes('payroll') || name.includes('benefit')) return 'high';
-    if (name.includes('report') || name.includes('summary')) return 'medium';
+    if (name.includes('payroll') || name.includes('benefit') || name.includes('employee') || name.includes('checklist')) return 'high';
+    if (name.includes('report') || name.includes('summary') || name.includes('export')) return 'medium';
     return 'low';
   };
 
@@ -269,11 +541,14 @@ function UploadTab({ colors }) {
       file,
       filename: file.name,
       size: formatFileSize(file.size),
-      detectedType: detectFileType(file),
-      detectedArea: detectFunctionalArea(file),
+      truthType: detectTruthType(file),
+      functionalArea: detectFunctionalArea(file),
+      contentDomains: detectContentDomains(file),
       confidence: getConfidence(file),
     }));
     setStagedFiles(prev => [...prev, ...newStaged]);
+    // Auto-expand new files
+    newStaged.forEach(f => setExpandedStaged(prev => new Set([...prev, f.id])));
   };
 
   const handleDrop = (e) => {
@@ -289,13 +564,32 @@ function UploadTab({ colors }) {
 
   const removeStaged = (id) => {
     setStagedFiles(prev => prev.filter(f => f.id !== id));
+    setExpandedStaged(prev => { const n = new Set(prev); n.delete(id); return n; });
   };
 
   const updateStagedFile = (id, updates) => {
     setStagedFiles(prev => prev.map(f => f.id === id ? { ...f, ...updates } : f));
   };
 
-  const uploadAll = () => {
+  const toggleDomain = (fileId, domain) => {
+    setStagedFiles(prev => prev.map(f => {
+      if (f.id !== fileId) return f;
+      const domains = f.contentDomains.includes(domain)
+        ? f.contentDomains.filter(d => d !== domain)
+        : [...f.contentDomains, domain];
+      return { ...f, contentDomains: domains };
+    }));
+  };
+
+  const toggleStagedExpand = (id) => {
+    setExpandedStaged(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+
+  const uploadAll = async () => {
     const target = uploadTarget === 'reference' 
       ? { id: 'reference_library', name: 'Reference Library' }
       : { id: activeProject?.id, name: projectName };
@@ -305,19 +599,35 @@ function UploadTab({ colors }) {
       return;
     }
 
-    stagedFiles.forEach(staged => {
-      // Add metadata to upload options
-      const options = {
-        functional_area: staged.detectedArea,
-        doc_type: staged.detectedType,
-      };
-      if (staged.detectedType === 'reference') {
-        options.standards_mode = true;
+    setUploading(true);
+    
+    for (const staged of stagedFiles) {
+      const formData = new FormData();
+      formData.append('file', staged.file);
+      formData.append('project', target.name || target.id);
+      formData.append('functional_area', staged.functionalArea);
+      formData.append('truth_type', staged.truthType);
+      formData.append('content_domain', staged.contentDomains.join(','));
+      
+      if (staged.truthType === 'reference') {
+        formData.append('standards_mode', 'true');
       }
-      addUpload(staged.file, target.id, target.name, options);
-    });
+
+      try {
+        await api.post('/upload', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      } catch (err) {
+        console.error('Upload failed:', err);
+      }
+    }
 
     setStagedFiles([]);
+    setExpandedStaged(new Set());
+    setUploading(false);
+    
+    // Refresh jobs list
+    setTimeout(loadRecentJobs, 2000);
   };
 
   const toggleUpload = (id) => {
@@ -355,11 +665,11 @@ function UploadTab({ colors }) {
       identifier: colors.accent,
       name: colors.primary,
       currency: '#059669',
-      date: COLORS.electricBlue,
-      category: COLORS.silver,
+      date: colors.electricBlue,
+      category: colors.silver,
       code: colors.warning,
-      quantity: '#8b5cf6',
-      status: COLORS.skyBlue,
+      quantity: colors.royalPurple,
+      status: colors.skyBlue,
       text: colors.textMuted,
       number: '#059669',
     };
@@ -367,12 +677,11 @@ function UploadTab({ colors }) {
   };
 
   const getConfidenceBadge = (confidence) => {
-    if (confidence === 'high') return { bg: colors.primaryLight, color: colors.primary, label: 'Auto-detected', icon: <CheckCircle size={12} /> };
-    if (confidence === 'medium') return { bg: colors.warningLight, color: colors.warning, label: 'Review suggested', icon: <AlertTriangle size={12} /> };
-    return { bg: colors.redLight, color: colors.red, label: 'Needs review', icon: <AlertTriangle size={12} /> };
+    if (confidence === 'high') return { bg: `${colors.primary}15`, color: colors.primary, label: 'Auto-detected' };
+    if (confidence === 'medium') return { bg: `${colors.warning}15`, color: colors.warning, label: 'Review suggested' };
+    return { bg: `${colors.scarletSage}15`, color: colors.scarletSage, label: 'Needs review' };
   };
 
-  // Active uploads from context
   const activeUploads = uploads.filter(u => u.status === 'uploading' || u.status === 'processing');
 
   return (
@@ -385,8 +694,8 @@ function UploadTab({ colors }) {
             onClick={() => setUploadTarget('current')}
             style={{
               padding: '10px 16px', borderRadius: '8px', 
-              border: `1px solid ${uploadTarget === 'current' ? colors.primary : colors.divider}`,
-              backgroundColor: uploadTarget === 'current' ? colors.primaryLight : colors.card,
+              border: `1px solid ${uploadTarget === 'current' ? colors.primary : colors.border}`,
+              backgroundColor: uploadTarget === 'current' ? `${colors.primary}15` : colors.cardBg,
               color: uploadTarget === 'current' ? colors.primary : colors.textMuted,
               fontWeight: 600, fontSize: '13px', cursor: 'pointer', 
               display: 'flex', alignItems: 'center', gap: '6px'
@@ -398,9 +707,9 @@ function UploadTab({ colors }) {
             onClick={() => setUploadTarget('reference')}
             style={{
               padding: '10px 16px', borderRadius: '8px', 
-              border: `1px solid ${uploadTarget === 'reference' ? colors.accent : colors.divider}`,
-              backgroundColor: uploadTarget === 'reference' ? colors.accentLight : colors.card,
-              color: uploadTarget === 'reference' ? colors.accent : colors.textMuted,
+              border: `1px solid ${uploadTarget === 'reference' ? colors.royalPurple : colors.border}`,
+              backgroundColor: uploadTarget === 'reference' ? `${colors.royalPurple}15` : colors.cardBg,
+              color: uploadTarget === 'reference' ? colors.royalPurple : colors.textMuted,
               fontWeight: 600, fontSize: '13px', cursor: 'pointer', 
               display: 'flex', alignItems: 'center', gap: '6px'
             }}
@@ -408,6 +717,11 @@ function UploadTab({ colors }) {
             <FileText size={16} /> Reference Library
           </button>
         </div>
+        <HelpIcon 
+          title="Upload Destination"
+          detail="Current Project: Data specific to this implementation. Reference Library: Shared knowledge available across all projects (standards, compliance guides, best practices)."
+          action="Reference docs become part of XLR8's knowledge base"
+        />
       </div>
 
       {/* Dropzone */}
@@ -425,15 +739,15 @@ function UploadTab({ colors }) {
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
         style={{
-          border: `2px dashed ${dragOver ? colors.primary : colors.divider}`,
+          border: `2px dashed ${dragOver ? colors.primary : colors.border}`,
           borderRadius: '12px', padding: '40px', textAlign: 'center', cursor: 'pointer',
-          backgroundColor: dragOver ? colors.primaryLight : colors.white,
+          backgroundColor: dragOver ? `${colors.primary}10` : colors.white,
           transition: 'all 0.2s ease', marginBottom: '24px',
         }}
       >
         <div style={{ 
           width: 56, height: 56, borderRadius: '14px', 
-          backgroundColor: colors.primaryLight, 
+          backgroundColor: `${colors.primary}15`, 
           display: 'flex', alignItems: 'center', justifyContent: 'center', 
           margin: '0 auto 12px' 
         }}>
@@ -447,101 +761,223 @@ function UploadTab({ colors }) {
         </p>
       </div>
 
-      {/* Staged Files (Before Upload) */}
+      {/* ========== STAGED FILES (Before Upload) ========== */}
       {stagedFiles.length > 0 && (
         <div style={{ 
-          backgroundColor: colors.warningLight, 
+          backgroundColor: `${colors.warning}08`, 
           border: `1px solid ${colors.warning}40`, 
           borderRadius: '12px', marginBottom: '24px', overflow: 'hidden' 
         }}>
+          {/* Header */}
           <div style={{ 
-            padding: '14px 20px', 
+            padding: '16px 20px', 
             borderBottom: `1px solid ${colors.warning}30`, 
             display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-            backgroundColor: `${colors.warning}08`
+            backgroundColor: `${colors.warning}05`
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
               <AlertTriangle size={18} color={colors.warning} />
-              <span style={{ fontSize: '14px', fontWeight: 600, color: colors.text }}>
-                Review Before Upload
+              <span style={{ fontSize: '15px', fontWeight: 600, color: colors.text }}>
+                Review & Classify Before Upload
               </span>
               <span style={{ fontSize: '12px', color: colors.textMuted }}>
                 {stagedFiles.length} file{stagedFiles.length > 1 ? 's' : ''} staged
               </span>
+              <HelpIcon 
+                title="Why Classify?"
+                detail="Proper classification helps XLR8 route your data correctly. Reality goes to DuckDB for queries, Intent/Reference go to ChromaDB for semantic search. Domains enable specialized analysis."
+                action="Better classification = better insights"
+              />
             </div>
             <button 
               onClick={uploadAll}
+              disabled={uploading}
               style={{ 
-                display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', 
-                backgroundColor: colors.primary, color: 'white', border: 'none', 
-                borderRadius: '8px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' 
+                display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 20px', 
+                backgroundColor: uploading ? colors.textMuted : colors.primary, 
+                color: 'white', border: 'none', 
+                borderRadius: '8px', fontSize: '14px', fontWeight: 600, 
+                cursor: uploading ? 'not-allowed' : 'pointer',
+                opacity: uploading ? 0.7 : 1
               }}
             >
-              <UploadIcon size={14} /> Upload All
+              {uploading ? (
+                <>
+                  <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <UploadIcon size={16} /> Upload All
+                </>
+              )}
             </button>
           </div>
           
+          {/* Staged Files List */}
           {stagedFiles.map((file, idx) => {
             const conf = getConfidenceBadge(file.confidence);
+            const truthType = TRUTH_TYPES.find(t => t.value === file.truthType);
+            const isExpanded = expandedStaged.has(file.id);
+            
             return (
               <div key={file.id} style={{ 
-                padding: '16px 20px', 
                 borderBottom: idx < stagedFiles.length - 1 ? `1px solid ${colors.warning}20` : 'none',
-                backgroundColor: colors.card
+                backgroundColor: colors.cardBg
               }}>
-                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px' }}>
-                  <FileText size={20} color={colors.textMuted} style={{ marginTop: 2 }} />
+                {/* File Header Row */}
+                <div style={{ 
+                  padding: '16px 20px', 
+                  display: 'flex', alignItems: 'center', gap: '12px',
+                  cursor: 'pointer'
+                }} onClick={() => toggleStagedExpand(file.id)}>
+                  {isExpanded ? <ChevronDown size={18} color={colors.textMuted} /> : <ChevronRight size={18} color={colors.textMuted} />}
+                  
+                  <span style={{ fontSize: '18px' }}>{truthType?.icon}</span>
+                  
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '10px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                       <span style={{ fontSize: '14px', fontWeight: 600, color: colors.text }}>{file.filename}</span>
                       <span style={{ fontSize: '12px', color: colors.textMuted }}>{file.size}</span>
                       <span style={{ 
-                        display: 'flex', alignItems: 'center', gap: '4px',
                         padding: '2px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600,
                         backgroundColor: conf.bg, color: conf.color
                       }}>
-                        {conf.icon} {conf.label}
+                        {conf.label}
                       </span>
                     </div>
                     
-                    <div style={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '12px', color: colors.textMuted }}>Type:</span>
-                        <select 
-                          value={file.detectedType}
-                          onChange={(e) => updateStagedFile(file.id, { detectedType: e.target.value })}
-                          style={{ 
-                            padding: '4px 8px', borderRadius: '4px', border: `1px solid ${colors.divider}`,
-                            fontSize: '12px', backgroundColor: colors.white, cursor: 'pointer', color: colors.text
-                          }}
-                        >
-                          {DOC_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-                        </select>
+                    {/* Summary when collapsed */}
+                    {!isExpanded && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '4px', fontSize: '12px', color: colors.textMuted }}>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Target size={12} color={truthType?.color} /> {truthType?.label}
+                        </span>
+                        <span>→ {truthType?.storage}</span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Layers size={12} /> {file.functionalArea}
+                        </span>
+                        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <Tag size={12} /> {file.contentDomains.length} domain{file.contentDomains.length !== 1 ? 's' : ''}
+                        </span>
                       </div>
-                      
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                        <span style={{ fontSize: '12px', color: colors.textMuted }}>Area:</span>
-                        <select 
-                          value={file.detectedArea}
-                          onChange={(e) => updateStagedFile(file.id, { detectedArea: e.target.value })}
-                          style={{ 
-                            padding: '4px 8px', borderRadius: '4px', border: `1px solid ${colors.divider}`,
-                            fontSize: '12px', backgroundColor: colors.white, cursor: 'pointer', color: colors.text
-                          }}
-                        >
-                          {FUNCTIONAL_AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-                        </select>
-                      </div>
-                    </div>
+                    )}
                   </div>
                   
                   <button 
-                    onClick={() => removeStaged(file.id)} 
+                    onClick={(e) => { e.stopPropagation(); removeStaged(file.id); }} 
                     style={{ background: 'none', border: 'none', color: colors.textMuted, cursor: 'pointer', padding: '4px' }}
                   >
-                    <X size={16} />
+                    <X size={18} />
                   </button>
                 </div>
+                
+                {/* Expanded Classification Options */}
+                {isExpanded && (
+                  <div style={{ padding: '0 20px 20px 52px' }}>
+                    {/* Truth Type */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                        <Target size={14} color={colors.textMuted} />
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: colors.text }}>Truth Type</span>
+                        <HelpIcon 
+                          title="What is Truth Type?"
+                          detail="Determines how XLR8 stores and uses this file. Reality = actual data (DuckDB). Intent = customer requirements (ChromaDB). Reference = standards/best practices (Reference Library). Config = system setup data."
+                          action="This controls where data is stored and how it's queried"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {TRUTH_TYPES.map(tt => (
+                          <Tooltip key={tt.value} title={tt.title} detail={tt.detail} action={tt.action} width={320}>
+                            <button
+                              onClick={() => updateStagedFile(file.id, { truthType: tt.value })}
+                              style={{
+                                padding: '8px 14px', borderRadius: '8px', cursor: 'pointer',
+                                border: file.truthType === tt.value ? `2px solid ${tt.color}` : `1px solid ${colors.border}`,
+                                backgroundColor: file.truthType === tt.value ? `${tt.color}12` : colors.cardBg,
+                                color: file.truthType === tt.value ? tt.color : colors.textMuted,
+                                fontWeight: 500, fontSize: '13px',
+                                display: 'flex', alignItems: 'center', gap: '6px',
+                              }}
+                            >
+                              <span>{tt.icon}</span>
+                              <span>{tt.label}</span>
+                              <span style={{ fontSize: '10px', opacity: 0.7 }}>→ {tt.storage}</span>
+                            </button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Functional Area */}
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                        <Layers size={14} color={colors.textMuted} />
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: colors.text }}>Functional Area</span>
+                        <HelpIcon 
+                          title="What is Functional Area?"
+                          detail="The HCM module or business function this file relates to. Helps XLR8 apply the right expertise and analysis templates when processing your data."
+                          action="Enables domain-specific insights and validations"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {FUNCTIONAL_AREAS.map(fa => (
+                          <Tooltip key={fa.value} title={fa.title} detail={fa.detail} action={fa.action}>
+                            <button
+                              onClick={() => updateStagedFile(file.id, { functionalArea: fa.value })}
+                              style={{
+                                padding: '6px 12px', borderRadius: '6px', cursor: 'pointer',
+                                border: file.functionalArea === fa.value ? `2px solid ${colors.accent}` : `1px solid ${colors.border}`,
+                                backgroundColor: file.functionalArea === fa.value ? `${colors.accent}15` : colors.cardBg,
+                                color: file.functionalArea === fa.value ? colors.accent : colors.textMuted,
+                                fontWeight: 500, fontSize: '12px',
+                              }}
+                            >
+                              {fa.value}
+                            </button>
+                          </Tooltip>
+                        ))}
+                      </div>
+                    </div>
+                    
+                    {/* Content Domains (Multi-select) */}
+                    <div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px' }}>
+                        <Tag size={14} color={colors.textMuted} />
+                        <span style={{ fontSize: '12px', fontWeight: 600, color: colors.text }}>Content Domains</span>
+                        <span style={{ fontSize: '11px', color: colors.textMuted }}>(select all that apply)</span>
+                        <HelpIcon 
+                          title="What are Content Domains?"
+                          detail="Tags that describe what data is IN this file. A payroll register might have payroll + tax domains. Multi-select allowed. These tags improve search relevance and enable cross-domain analysis."
+                          action="More accurate tags = better semantic search results"
+                        />
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                        {CONTENT_DOMAINS.map(cd => {
+                          const isSelected = file.contentDomains.includes(cd.value);
+                          return (
+                            <Tooltip key={cd.value} title={cd.title} detail={cd.detail} action={cd.action}>
+                              <button
+                                onClick={() => toggleDomain(file.id, cd.value)}
+                                style={{
+                                  padding: '6px 12px', borderRadius: '20px', cursor: 'pointer',
+                                  border: isSelected ? `2px solid ${cd.color}` : `1px solid ${colors.border}`,
+                                  backgroundColor: isSelected ? `${cd.color}15` : colors.cardBg,
+                                  color: isSelected ? cd.color : colors.textMuted,
+                                  fontWeight: 500, fontSize: '12px',
+                                  display: 'flex', alignItems: 'center', gap: '4px',
+                                }}
+                              >
+                                {isSelected && <CheckCircle size={12} />}
+                                {cd.label}
+                              </button>
+                            </Tooltip>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -551,13 +987,13 @@ function UploadTab({ colors }) {
       {/* Active Uploads */}
       {activeUploads.length > 0 && (
         <div style={{ 
-          backgroundColor: colors.white, 
-          border: `1px solid ${colors.divider}`, 
+          backgroundColor: colors.cardBg, 
+          border: `1px solid ${colors.border}`, 
           borderRadius: '12px', marginBottom: '24px', overflow: 'hidden' 
         }}>
           <div style={{ 
             padding: '14px 20px', 
-            borderBottom: `1px solid ${colors.divider}`, 
+            borderBottom: `1px solid ${colors.border}`, 
             display: 'flex', justifyContent: 'space-between', alignItems: 'center' 
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -566,7 +1002,7 @@ function UploadTab({ colors }) {
                 Active Uploads
               </span>
               <span style={{ 
-                padding: '2px 8px', backgroundColor: colors.warningLight, 
+                padding: '2px 8px', backgroundColor: `${colors.warning}15`, 
                 color: colors.warning, borderRadius: '10px', fontSize: '11px', fontWeight: 600 
               }}>
                 {activeUploads.length} processing
@@ -577,7 +1013,7 @@ function UploadTab({ colors }) {
           {activeUploads.map(upload => (
             <div key={upload.id} style={{ 
               padding: '14px 20px', 
-              borderBottom: `1px solid ${colors.divider}`,
+              borderBottom: `1px solid ${colors.border}`,
               display: 'flex', alignItems: 'center', gap: '12px'
             }}>
               <Clock size={18} color={colors.warning} style={{ animation: 'pulse 2s infinite' }} />
@@ -586,7 +1022,7 @@ function UploadTab({ colors }) {
               </span>
               <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: colors.textMuted }}>
                 <span>{upload.status === 'processing' ? 'Processing...' : 'Uploading...'}</span>
-                <div style={{ width: 80, height: 6, backgroundColor: colors.divider, borderRadius: 3 }}>
+                <div style={{ width: 80, height: 6, backgroundColor: colors.iceFlow, borderRadius: 3 }}>
                   <div style={{ 
                     width: `${upload.progress}%`, height: '100%', 
                     backgroundColor: colors.warning, borderRadius: 3,
@@ -603,16 +1039,16 @@ function UploadTab({ colors }) {
         </div>
       )}
 
-      {/* Completed Uploads with Expandable Tables */}
+      {/* Completed Uploads */}
       {completedUploads.length > 0 && (
         <div style={{ 
-          backgroundColor: colors.white, 
-          border: `1px solid ${colors.divider}`, 
+          backgroundColor: colors.cardBg, 
+          border: `1px solid ${colors.border}`, 
           borderRadius: '12px', overflow: 'hidden' 
         }}>
           <div style={{ 
             padding: '14px 20px', 
-            borderBottom: `1px solid ${colors.divider}`, 
+            borderBottom: `1px solid ${colors.border}`, 
             display: 'flex', justifyContent: 'space-between', alignItems: 'center' 
           }}>
             <span style={{ fontSize: '14px', fontWeight: 600, color: colors.text }}>Recent Uploads</span>
@@ -626,15 +1062,13 @@ function UploadTab({ colors }) {
           
           {completedUploads.map(job => (
             <div key={job.id}>
-              {/* Job Row */}
               <div 
                 onClick={() => job.tables?.length > 0 && toggleUpload(job.id)}
                 style={{ 
                   padding: '14px 20px', 
-                  borderBottom: `1px solid ${colors.divider}`,
+                  borderBottom: `1px solid ${colors.border}`,
                   cursor: job.tables?.length > 0 ? 'pointer' : 'default',
-                  backgroundColor: expandedUploads.has(job.id) ? colors.inputBg : 'transparent',
-                  transition: 'background 0.15s'
+                  backgroundColor: expandedUploads.has(job.id) ? colors.background : 'transparent',
                 }}
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -642,15 +1076,12 @@ function UploadTab({ colors }) {
                     expandedUploads.has(job.id) ? 
                       <ChevronDown size={18} color={colors.textMuted} /> : 
                       <ChevronRight size={18} color={colors.textMuted} />
-                  ) : (
-                    <div style={{ width: 18 }} />
-                  )}
-                  <CheckCircle size={18} color={colors.primary} />
+                  ) : <div style={{ width: 18 }} />}
+                  <CheckCircle size={18} color={colors.success} />
                   <span style={{ flex: 1, fontSize: '14px', fontWeight: 500, color: colors.text }}>
                     {job.filename}
                   </span>
                   
-                  {/* Metrics */}
                   <div style={{ display: 'flex', alignItems: 'center', gap: '16px', fontSize: '12px', color: colors.textMuted }}>
                     <span>{formatDate(job.created_at)}</span>
                     {job.result_data?.processing_time_seconds && (
@@ -663,7 +1094,7 @@ function UploadTab({ colors }) {
                     </span>
                     {job.tables?.length > 0 && (
                       <span style={{ 
-                        padding: '2px 8px', backgroundColor: colors.primaryLight, 
+                        padding: '2px 8px', backgroundColor: `${colors.primary}15`, 
                         color: colors.primary, borderRadius: '4px', fontWeight: 600, fontSize: '11px'
                       }}>
                         {job.tables.length} table{job.tables.length > 1 ? 's' : ''} • {job.totalRows.toLocaleString()} rows
@@ -671,7 +1102,7 @@ function UploadTab({ colors }) {
                     )}
                     {job.result_data?.chunks_created > 0 && (
                       <span style={{ 
-                        padding: '2px 8px', backgroundColor: colors.accentLight, 
+                        padding: '2px 8px', backgroundColor: `${colors.accent}15`, 
                         color: colors.accent, borderRadius: '4px', fontWeight: 600, fontSize: '11px'
                       }}>
                         {job.result_data.chunks_created} chunks
@@ -681,9 +1112,8 @@ function UploadTab({ colors }) {
                 </div>
               </div>
               
-              {/* Expanded Tables & Columns */}
               {expandedUploads.has(job.id) && job.tables?.length > 0 && (
-                <div style={{ backgroundColor: colors.inputBg, borderBottom: `1px solid ${colors.divider}` }}>
+                <div style={{ backgroundColor: colors.background, borderBottom: `1px solid ${colors.border}` }}>
                   {job.tables.map(table => {
                     const profile = tableProfiles[table.table_name];
                     const isLoading = loadingProfiles.has(table.table_name);
@@ -695,7 +1125,7 @@ function UploadTab({ colors }) {
                             padding: '10px 20px 10px 52px', 
                             display: 'flex', alignItems: 'center', gap: '10px',
                             cursor: 'pointer', 
-                            backgroundColor: expandedTables.has(table.table_name) ? colors.primaryLight : 'transparent'
+                            backgroundColor: expandedTables.has(table.table_name) ? `${colors.primary}10` : 'transparent'
                           }}
                         >
                           {expandedTables.has(table.table_name) ? 
@@ -725,8 +1155,8 @@ function UploadTab({ colors }) {
                               return (
                                 <div key={ci} style={{ 
                                   display: 'flex', alignItems: 'center', gap: '6px',
-                                  padding: '4px 10px', backgroundColor: colors.card, 
-                                  border: `1px solid ${colors.divider}`, borderRadius: '6px',
+                                  padding: '4px 10px', backgroundColor: colors.cardBg, 
+                                  border: `1px solid ${colors.border}`, borderRadius: '6px',
                                   fontSize: '12px'
                                 }}>
                                   <span style={{ fontWeight: 500, color: colors.text }}>{colName}</span>
@@ -741,21 +1171,13 @@ function UploadTab({ colors }) {
                                     </span>
                                   )}
                                   {fillRate !== undefined && (
-                                    <span style={{ 
-                                      fontSize: '9px', 
-                                      color: fillRate < 50 ? colors.warning : colors.textMuted 
-                                    }}>
+                                    <span style={{ fontSize: '9px', color: fillRate < 50 ? colors.warning : colors.textMuted }}>
                                       {fillRate}%
                                     </span>
                                   )}
                                 </div>
                               );
                             })}
-                            {((profile?.columns || table.columns || []).length > 20) && (
-                              <span style={{ fontSize: '11px', color: colors.textMuted, padding: '4px' }}>
-                                +{(profile?.columns || table.columns).length - 20} more
-                              </span>
-                            )}
                           </div>
                         )}
                       </div>
@@ -771,9 +1193,9 @@ function UploadTab({ colors }) {
       {/* Register Extractor Link */}
       <div style={{ 
         marginTop: '20px', padding: '16px 20px', 
-        backgroundColor: colors.accentLight, 
+        backgroundColor: `${colors.accent}10`, 
         border: `1px solid ${colors.accent}40`, 
-        borderRadius: '10px', 
+        borderRadius: '12px', 
         display: 'flex', alignItems: 'center', gap: '12px' 
       }}>
         <Sparkles size={20} color={colors.accent} />
@@ -782,13 +1204,13 @@ function UploadTab({ colors }) {
             Need to extract payroll registers?
           </span>
           <span style={{ fontSize: '13px', color: colors.textMuted, marginLeft: '8px' }}>
-            Deep extraction for complex PDFs
+            Deep extraction for complex PDFs with embedded tables
           </span>
         </div>
         <Link 
           to="/vacuum"
           style={{ 
-            display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 16px', 
+            display: 'flex', alignItems: 'center', gap: '6px', padding: '10px 16px', 
             backgroundColor: colors.accent, color: 'white', border: 'none', 
             borderRadius: '8px', fontSize: '13px', fontWeight: 600, textDecoration: 'none' 
           }}
@@ -800,7 +1222,9 @@ function UploadTab({ colors }) {
   );
 }
 
-// ============ FILES TAB ============
+// ============================================================================
+// FILES TAB
+// ============================================================================
 function FilesTab({ colors }) {
   const { projects, activeProject } = useProject();
   const { darkMode } = useTheme();
@@ -813,7 +1237,6 @@ function FilesTab({ colors }) {
   const [fileFilter, setFileFilter] = useState('all');
   const [searchQuery, setSearchQuery] = useState('');
   
-  // Deep Clean state
   const [deepCleanLoading, setDeepCleanLoading] = useState(false);
   const [deepCleanResult, setDeepCleanResult] = useState(null);
   const [showDeepCleanModal, setShowDeepCleanModal] = useState(false);
@@ -848,9 +1271,7 @@ function FilesTab({ colors }) {
   const totalTables = structuredFiles.reduce((sum, f) => sum + (f.sheets?.length || 1), 0);
   const totalRows = structuredFiles.reduce((sum, f) => sum + (f.total_rows || 0), 0);
   const totalDocs = docs.length;
-  const totalChunks = docs.reduce((sum, d) => sum + (d.chunk_count || d.chunks || 0), 0);
 
-  // Combined file list for unified view
   const allFiles = [
     ...structuredFiles.map(f => ({ ...f, type: 'structured', key: `${f.project}:${f.filename}` })),
     ...docs.map(d => ({ ...d, type: 'document', key: d.filename })),
@@ -949,38 +1370,46 @@ function FilesTab({ colors }) {
       {/* Stats Bar */}
       <div style={{ 
         display: 'flex', gap: '24px', marginBottom: '20px', padding: '16px 20px', 
-        backgroundColor: colors.white, border: `1px solid ${colors.divider}`, borderRadius: '10px' 
+        backgroundColor: colors.card, border: `1px solid ${colors.divider}`, borderRadius: '12px' 
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Table2 size={18} color={colors.primary} />
-          <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>{totalTables}</span>
-          <span style={{ fontSize: '13px', color: colors.textMuted }}>Tables</span>
-        </div>
+        <Tooltip title="Structured Tables" detail="Tables created from Excel, CSV files stored in DuckDB. Queryable with SQL." action="Upload more Excel/CSV files to add tables">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+            <Table2 size={18} color={colors.primary} />
+            <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>{totalTables}</span>
+            <span style={{ fontSize: '13px', color: colors.textMuted }}>Tables</span>
+          </div>
+        </Tooltip>
         <div style={{ width: 1, backgroundColor: colors.divider }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <FileText size={18} color={colors.accent} />
-          <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>{totalDocs}</span>
-          <span style={{ fontSize: '13px', color: colors.textMuted }}>Documents</span>
-        </div>
+        <Tooltip title="Documents" detail="PDFs and Word docs stored in ChromaDB. Searchable via semantic similarity." action="Upload PDFs to add to knowledge base">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+            <FileText size={18} color={colors.accent} />
+            <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>{totalDocs}</span>
+            <span style={{ fontSize: '13px', color: colors.textMuted }}>Documents</span>
+          </div>
+        </Tooltip>
         <div style={{ width: 1, backgroundColor: colors.divider }} />
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <Database size={18} color={COLORS.silver} />
-          <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>
-            {totalRows > 1000000 ? (totalRows / 1000000).toFixed(1) + 'M' : totalRows > 1000 ? (totalRows / 1000).toFixed(0) + 'K' : totalRows}
-          </span>
-          <span style={{ fontSize: '13px', color: colors.textMuted }}>Rows</span>
-        </div>
+        <Tooltip title="Total Rows" detail="Sum of all rows across all structured tables. This is your queryable data volume." action="More rows = richer analysis">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+            <Database size={18} color={colors.silver} />
+            <span style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>
+              {totalRows > 1000000 ? (totalRows / 1000000).toFixed(1) + 'M' : totalRows > 1000 ? (totalRows / 1000).toFixed(0) + 'K' : totalRows}
+            </span>
+            <span style={{ fontSize: '13px', color: colors.textMuted }}>Rows</span>
+          </div>
+        </Tooltip>
         <div style={{ flex: 1 }} />
-        <button
-          onClick={() => setShowDeepCleanModal(true)}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
-            background: colors.warningLight, border: `1px solid ${colors.warning}40`,
-            borderRadius: 8, color: colors.warning, fontSize: '13px', fontWeight: 600, cursor: 'pointer',
-          }}
-        >
-          <Zap size={14} /> Deep Clean
-        </button>
+        <Tooltip title="Deep Clean" detail="Removes orphaned data from ChromaDB, DuckDB metadata, and Supabase. Safe to run anytime." action="Use when data seems out of sync">
+          <button
+            onClick={() => setShowDeepCleanModal(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px',
+              background: `${colors.warning}15`, border: `1px solid ${colors.warning}40`,
+              borderRadius: 8, color: colors.warning, fontSize: '13px', fontWeight: 600, cursor: 'pointer',
+            }}
+          >
+            <Zap size={14} /> Deep Clean
+          </button>
+        </Tooltip>
       </div>
 
       {/* Filter & Search */}
@@ -992,7 +1421,7 @@ function FilesTab({ colors }) {
               onClick={() => setFileFilter(filter)}
               style={{
                 padding: '8px 14px', borderRadius: '6px',
-                border: fileFilter === filter ? 'none' : `1px solid ${colors.divider}`,
+                border: fileFilter === filter ? 'none' : `1px solid ${colors.border}`,
                 backgroundColor: fileFilter === filter ? colors.primary : colors.card,
                 color: fileFilter === filter ? 'white' : colors.textMuted,
                 fontSize: '13px', fontWeight: 500, cursor: 'pointer', textTransform: 'capitalize'
@@ -1009,7 +1438,7 @@ function FilesTab({ colors }) {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             style={{ 
-              padding: '8px 12px', border: `1px solid ${colors.divider}`, 
+              padding: '8px 12px', border: `1px solid ${colors.border}`, 
               borderRadius: '6px', fontSize: '13px', width: 200,
               backgroundColor: colors.card, color: colors.text
             }}
@@ -1020,7 +1449,7 @@ function FilesTab({ colors }) {
               disabled={deleting}
               style={{ 
                 display: 'flex', alignItems: 'center', gap: '6px', padding: '8px 14px', 
-                backgroundColor: colors.red, color: 'white', border: 'none', 
+                backgroundColor: colors.scarletSage, color: 'white', border: 'none', 
                 borderRadius: '6px', fontSize: '13px', fontWeight: 500, cursor: 'pointer' 
               }}
             >
@@ -1032,16 +1461,16 @@ function FilesTab({ colors }) {
 
       {/* File List */}
       <div style={{ 
-        backgroundColor: colors.white, 
-        border: `1px solid ${colors.divider}`, 
-        borderRadius: '10px', overflow: 'hidden' 
+        backgroundColor: colors.card, 
+        border: `1px solid ${colors.border}`, 
+        borderRadius: '12px', overflow: 'hidden' 
       }}>
         <div style={{ 
           display: 'grid', 
           gridTemplateColumns: '40px 1fr 100px 140px 100px 80px', 
           padding: '10px 16px', 
-          borderBottom: `1px solid ${colors.divider}`, 
-          backgroundColor: colors.tabBg, 
+          borderBottom: `1px solid ${colors.border}`, 
+          backgroundColor: colors.white, 
           gap: '8px' 
         }}>
           <span></span>
@@ -1059,7 +1488,7 @@ function FilesTab({ colors }) {
           </div>
         ) : (
           <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-            {allFiles.map((file, i) => {
+            {allFiles.map((file) => {
               const isSelected = file.type === 'structured' 
                 ? selectedStructured.has(file.key) 
                 : selectedDocs.has(file.key);
@@ -1070,10 +1499,10 @@ function FilesTab({ colors }) {
                     display: 'grid', 
                     gridTemplateColumns: '40px 1fr 100px 140px 100px 80px', 
                     padding: '12px 16px', 
-                    borderBottom: `1px solid ${colors.divider}`, 
+                    borderBottom: `1px solid ${colors.border}`, 
                     alignItems: 'center', 
                     gap: '8px',
-                    backgroundColor: isSelected ? colors.primaryLight : 'transparent'
+                    backgroundColor: isSelected ? `${colors.primary}10` : 'transparent'
                   }}
                 >
                   <button 
@@ -1091,7 +1520,7 @@ function FilesTab({ colors }) {
                     </span>
                     <span style={{ 
                       marginLeft: '8px', padding: '2px 6px', 
-                      backgroundColor: file.type === 'structured' ? colors.primaryLight : colors.accentLight, 
+                      backgroundColor: file.type === 'structured' ? `${colors.primary}15` : `${colors.accent}15`, 
                       color: file.type === 'structured' ? colors.primary : colors.accent, 
                       borderRadius: '4px', fontSize: '10px', fontWeight: 600 
                     }}>
@@ -1112,7 +1541,7 @@ function FilesTab({ colors }) {
                   </span>
                   <span style={{ 
                     fontSize: '11px', padding: '3px 8px', 
-                    backgroundColor: getProjectName(file.project) === 'GLOBAL' ? colors.accentLight : colors.primaryLight, 
+                    backgroundColor: getProjectName(file.project) === 'GLOBAL' ? `${colors.accent}15` : `${colors.primary}15`, 
                     color: getProjectName(file.project) === 'GLOBAL' ? colors.accent : colors.primary, 
                     borderRadius: '4px', fontWeight: 500 
                   }}>
@@ -1133,13 +1562,13 @@ function FilesTab({ colors }) {
           alignItems: 'center', justifyContent: 'center', zIndex: 1000,
         }}>
           <div style={{
-            background: colors.card, borderRadius: 12, padding: '24px',
+            background: colors.cardBg, borderRadius: 12, padding: '24px',
             maxWidth: 500, width: '90%', maxHeight: '80vh', overflow: 'auto',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10,
-                background: colors.warningLight,
+                background: `${colors.warning}15`,
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
               }}>
                 <Zap size={20} color={colors.warning} />
@@ -1153,7 +1582,7 @@ function FilesTab({ colors }) {
             </div>
 
             <div style={{
-              background: colors.inputBg, border: `1px solid ${colors.divider}`,
+              background: colors.background, border: `1px solid ${colors.border}`,
               borderRadius: 8, padding: '16px', marginBottom: '16px',
             }}>
               <p style={{ margin: '0 0 12px', fontSize: '14px', color: colors.text, fontWeight: 500 }}>
@@ -1170,8 +1599,8 @@ function FilesTab({ colors }) {
             <label style={{
               display: 'flex', alignItems: 'flex-start', gap: '12px',
               padding: '12px 16px',
-              background: forceClean ? colors.redLight : colors.inputBg,
-              border: `1px solid ${forceClean ? colors.red + '40' : colors.divider}`,
+              background: forceClean ? `${colors.scarletSage}15` : colors.background,
+              border: `1px solid ${forceClean ? colors.scarletSage + '40' : colors.border}`,
               borderRadius: 8, marginBottom: '16px', cursor: 'pointer',
             }}>
               <input
@@ -1181,7 +1610,7 @@ function FilesTab({ colors }) {
                 style={{ marginTop: 2 }}
               />
               <div>
-                <div style={{ fontSize: '14px', fontWeight: 500, color: forceClean ? colors.red : colors.text }}>
+                <div style={{ fontSize: '14px', fontWeight: 500, color: forceClean ? colors.scarletSage : colors.text }}>
                   Force clean (full wipe)
                 </div>
                 <div style={{ fontSize: '12px', color: colors.textMuted, marginTop: 2 }}>
@@ -1192,8 +1621,8 @@ function FilesTab({ colors }) {
 
             {deepCleanResult && (
               <div style={{
-                background: deepCleanResult.success ? colors.primaryLight : colors.redLight,
-                border: `1px solid ${deepCleanResult.success ? colors.primary : colors.red}40`,
+                background: deepCleanResult.success ? `${colors.primary}15` : `${colors.scarletSage}15`,
+                border: `1px solid ${deepCleanResult.success ? colors.primary : colors.scarletSage}40`,
                 borderRadius: 8, padding: '16px', marginBottom: '16px',
               }}>
                 {deepCleanResult.success ? (
@@ -1205,8 +1634,8 @@ function FilesTab({ colors }) {
                   </div>
                 ) : (
                   <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <XCircle size={16} color={colors.red} />
-                    <span style={{ fontWeight: 600, color: colors.red }}>
+                    <XCircle size={16} color={colors.scarletSage} />
+                    <span style={{ fontWeight: 600, color: colors.scarletSage }}>
                       {deepCleanResult.error || 'Clean failed'}
                     </span>
                   </div>
@@ -1218,8 +1647,8 @@ function FilesTab({ colors }) {
               <button
                 onClick={() => { setShowDeepCleanModal(false); setDeepCleanResult(null); setForceClean(false); }}
                 style={{
-                  padding: '10px 20px', border: `1px solid ${colors.divider}`,
-                  borderRadius: 8, background: colors.card, color: colors.text,
+                  padding: '10px 20px', border: `1px solid ${colors.border}`,
+                  borderRadius: 8, background: colors.cardBg, color: colors.text,
                   fontSize: '14px', fontWeight: 500, cursor: 'pointer',
                 }}
               >
