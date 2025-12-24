@@ -144,7 +144,7 @@ function Tooltip({ children, title, detail, action, position = 'top' }) {
           borderRadius: '8px',
           fontSize: '12px',
           width: '260px',
-          zIndex: 1000,
+          zIndex: 9999,
           boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
         }}>
           <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
@@ -329,11 +329,11 @@ function UploadPanel({ c, project }) {
   return (
     <div style={{ 
       position: 'sticky', top: '1rem',
-      background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 12, overflow: 'hidden',
+      background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 12,
       boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
     }}>
       {/* Scope Toggle */}
-      <div style={{ display: 'flex', background: c.background }}>
+      <div style={{ display: 'flex', background: c.background, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' }}>
         {[
           { value: 'project', label: '📁 Project Files', tooltip: 'Customer-specific documents for this project' },
           { value: 'global', label: '📚 Reference Library', tooltip: 'Global docs shared across all projects' }
