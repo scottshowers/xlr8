@@ -306,7 +306,7 @@ function ValueDelivered({ data }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
         {stats.map((s) => (
           <Tooltip key={s.key} title={s.label} detail={s.tooltip.detail} action={s.tooltip.action}>
-            <div style={{ cursor: 'help' }}>
+            <div style={{ cursor: 'help', textAlign: 'center' }}>
               <div style={{ fontSize: '32px', fontWeight: 700, color: s.format === 'currency' ? colors.success : colors.white }}>{formatValue(data[s.key] || 0, s.format)}</div>
               <div style={{ fontSize: '12px', opacity: 0.8 }}>{s.label}</div>
             </div>
@@ -473,13 +473,13 @@ export default function DashboardPage() {
     <div style={{ minHeight: '100vh', backgroundColor: colors.background, padding: '24px', fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '24px' }}>
         <div>
-          <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: colors.text, display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ width: '48px', height: '48px', borderRadius: '12px', backgroundColor: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Target size={28} color={colors.white} />
+          <h1 style={{ margin: 0, fontSize: '20px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '10px', fontFamily: "'Sora', sans-serif" }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', backgroundColor: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <Target size={20} color={colors.white} />
             </div>
             Mission Control
           </h1>
-          <p style={{ margin: '8px 0 0 60px', fontSize: '14px', color: colors.textMuted }}>Real-time platform intelligence • Updated {lastRefresh.toLocaleTimeString()}</p>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>Real-time platform intelligence • Updated {lastRefresh.toLocaleTimeString()}</p>
         </div>
         <button onClick={fetchData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 20px', backgroundColor: colors.primary, color: colors.white, border: 'none', borderRadius: '10px', fontSize: '14px', fontWeight: 500, cursor: loading ? 'wait' : 'pointer', opacity: loading ? 0.7 : 1 }}>
           <RefreshCw size={18} className={loading ? 'spin' : ''} /> Refresh
