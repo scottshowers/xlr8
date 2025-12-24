@@ -4034,7 +4034,7 @@ async def run_compliance_check(request: dict):
     try:
         # Get rules from standards processor
         try:
-            from utils.standards_processor import get_rule_registry
+            from backend.utils.standards_processor import get_rule_registry
             registry = get_rule_registry()
             all_rules = registry.get_all_rules()
         except Exception as e:
