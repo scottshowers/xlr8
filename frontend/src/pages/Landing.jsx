@@ -176,64 +176,24 @@ export default function Landing() {
             </div>
           </div>
           
-          {/* Right - CTAs */}
-          <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
-            <Link 
-              to="/login" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'white',
-                color: COLORS.primary,
-                borderRadius: '8px',
-                fontWeight: '600',
-                fontSize: '0.9rem',
-                textDecoration: 'none',
-                transition: 'transform 0.15s ease',
-              }}
-            >
-              Login
-            </Link>
-            <div style={{ width: 1, height: 24, background: 'rgba(255,255,255,0.3)' }} />
-            <Link 
-              to="/dashboard" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'rgba(255,255,255,0.15)',
-                color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '8px',
-                fontWeight: '600',
-                fontSize: '0.9rem',
-                textDecoration: 'none',
-              }}
-            >
-              <Target size={16} /> Mission Control
-            </Link>
-            <Link 
-              to="/workspace" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.625rem 1.25rem',
-                background: 'rgba(255,255,255,0.15)',
-                color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '8px',
-                fontWeight: '600',
-                fontSize: '0.9rem',
-                textDecoration: 'none',
-              }}
-            >
-              <MessageSquare size={16} /> AI Assist
-            </Link>
-          </div>
+          {/* Right - Login */}
+          <Link 
+            to="/login" 
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.625rem 1.5rem',
+              background: 'white',
+              color: COLORS.primary,
+              borderRadius: '8px',
+              fontWeight: '600',
+              fontSize: '0.9rem',
+              textDecoration: 'none',
+            }}
+          >
+            Login
+          </Link>
         </div>
       </div>
 
@@ -558,12 +518,12 @@ export default function Landing() {
           </p>
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
             <Link 
-              to="/dashboard" 
+              to="/login" 
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: '0.5rem',
-                padding: '0.875rem 1.75rem',
+                padding: '0.875rem 2rem',
                 background: 'white',
                 color: COLORS.primary,
                 border: 'none',
@@ -573,27 +533,8 @@ export default function Landing() {
                 textDecoration: 'none'
               }}
             >
-              Launch Mission Control
+              Get Started
               <ArrowRight size={18} />
-            </Link>
-            <Link 
-              to="/data" 
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.875rem 1.75rem',
-                background: 'rgba(255,255,255,0.15)',
-                color: 'white',
-                border: '1px solid rgba(255,255,255,0.3)',
-                borderRadius: '8px',
-                fontSize: '1rem',
-                fontWeight: '600',
-                textDecoration: 'none'
-              }}
-            >
-              <Upload size={18} />
-              Upload Data
             </Link>
           </div>
         </section>
