@@ -130,19 +130,52 @@ function UploadTab({ project, projectName, colors }) {
     return { id: project, name: projectName };
   };
 
-  // Truth types based on upload target
+  // Truth types based on upload target - with clear labels and examples
   const customerTruthTypes = [
-    { value: 'intent', label: '📋 Customer Intent', desc: 'SOWs, requirements, meeting notes' },
-    { value: 'configuration', label: '⚙️ Configuration', desc: 'Code tables, mappings, system setup' },
+    { 
+      value: 'intent', 
+      label: '📋 Customer Requirements', 
+      shortDesc: 'What the customer wants',
+      fullDesc: 'SOWs, requirements documents, meeting notes, project plans, business rules they need implemented.',
+      examples: 'Statement of Work.pdf, Requirements Gathering Notes.docx, Phase 2 Scope.pdf'
+    },
+    { 
+      value: 'configuration', 
+      label: '⚙️ Customer Setup', 
+      shortDesc: 'What the customer configured',
+      fullDesc: 'Their actual code tables, mappings, and configured values exported from their system.',
+      examples: 'Earnings Codes.xlsx, Deduction Mapping.csv, Tax Jurisdictions.pdf, Org Structure.xlsx'
+    },
   ];
   
   const globalTruthTypes = [
-    { value: 'reference', label: '📚 Reference', desc: 'Product docs, how-to guides, standards' },
-    { value: 'regulatory', label: '⚖️ Regulatory', desc: 'Laws, IRS rules, federal mandates' },
-    { value: 'compliance', label: '🔒 Compliance', desc: 'Audit requirements, SOC 2, controls' },
+    { 
+      value: 'reference', 
+      label: '📚 Vendor Docs & How-To', 
+      shortDesc: 'How the vendor solves it',
+      fullDesc: 'Product documentation, configuration guides, implementation standards, best practice guides from the software vendor.',
+      examples: 'UKG Earnings Setup Guide.pdf, ADP Tax Configuration.pdf, Workday Security Guide.docx'
+    },
+    { 
+      value: 'regulatory', 
+      label: '⚖️ Laws & Government Rules', 
+      shortDesc: 'What the law requires',
+      fullDesc: 'IRS publications, state tax rules, federal mandates, DOL regulations - official government requirements.',
+      examples: 'IRS Publication 15.pdf, Secure 2.0 Summary.pdf, State Withholding Rates.xlsx, FLSA Overtime Rules.pdf'
+    },
+    { 
+      value: 'compliance', 
+      label: '🔒 Audit & Controls', 
+      shortDesc: 'What must be proven',
+      fullDesc: 'SOC 2 requirements, internal audit checklists, data retention policies, security controls documentation.',
+      examples: 'SOC 2 Checklist.pdf, Annual Audit Requirements.docx, Data Retention Policy.pdf'
+    },
   ];
   
   const availableTruthTypes = targetProject === 'reference' ? globalTruthTypes : customerTruthTypes;
+  
+  // Tooltip state
+  const [hoveredType, setHoveredType] = useState(null);
   
   // Reset truth_type when switching target
   useEffect(() => {
@@ -172,38 +205,105 @@ function UploadTab({ project, projectName, colors }) {
         </select>
       </div>
       
-      {/* Truth Type Selection */}
-      <div style={{ marginBottom: '1rem', display: 'flex', alignItems: 'flex-start', gap: '0.75rem', flexWrap: 'wrap' }}>
-        <label style={{ fontWeight: 500, color: colors.text, fontSize: '0.9rem', paddingTop: '0.5rem' }}>Document Type:</label>
-        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+      {/* Truth Type Selection with Hover Tooltips */}
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ fontWeight: 500, color: colors.text, fontSize: '0.9rem', display: 'block', marginBottom: '0.5rem' }}>Document Type:</label>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', position: 'relative' }}>
           {availableTruthTypes.map(tt => (
-            <button
-              key={tt.value}
-              onClick={() => setTruthType(tt.value)}
-              style={{
-                padding: '0.5rem 1rem',
-                borderRadius: 8,
-                border: `2px solid ${truthType === tt.value ? colors.primary : colors.divider}`,
-                background: truthType === tt.value ? colors.primaryLight : colors.card,
-                color: truthType === tt.value ? colors.primary : colors.text,
-                cursor: 'pointer',
-                fontSize: '0.85rem',
-                fontWeight: truthType === tt.value ? 600 : 400,
-                transition: 'all 0.2s ease'
-              }}
-              title={tt.desc}
+            <div 
+              key={tt.value} 
+              style={{ position: 'relative' }}
+              onMouseEnter={() => setHoveredType(tt.value)}
+              onMouseLeave={() => setHoveredType(null)}
             >
-              {tt.label}
-            </button>
+              <button
+                onClick={() => setTruthType(tt.value)}
+                style={{
+                  padding: '0.5rem 1rem',
+                  borderRadius: 8,
+                  border: `2px solid ${truthType === tt.value ? colors.primary : colors.divider}`,
+                  background: truthType === tt.value ? colors.primaryLight : colors.card,
+                  color: truthType === tt.value ? colors.primary : colors.text,
+                  cursor: 'pointer',
+                  fontSize: '0.85rem',
+                  fontWeight: truthType === tt.value ? 600 : 400,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                {tt.label}
+              </button>
+              
+              {/* Hover Tooltip */}
+              {hoveredType === tt.value && (
+                <div style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  marginTop: '8px',
+                  padding: '0.75rem 1rem',
+                  background: colors.card,
+                  border: `1px solid ${colors.divider}`,
+                  borderRadius: 8,
+                  boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                  zIndex: 100,
+                  minWidth: '280px',
+                  maxWidth: '320px'
+                }}>
+                  {/* Tooltip arrow */}
+                  <div style={{
+                    position: 'absolute',
+                    top: '-6px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 0,
+                    height: 0,
+                    borderLeft: '6px solid transparent',
+                    borderRight: '6px solid transparent',
+                    borderBottom: `6px solid ${colors.divider}`
+                  }} />
+                  <div style={{
+                    position: 'absolute',
+                    top: '-5px',
+                    left: '50%',
+                    transform: 'translateX(-50%)',
+                    width: 0,
+                    height: 0,
+                    borderLeft: '5px solid transparent',
+                    borderRight: '5px solid transparent',
+                    borderBottom: `5px solid ${colors.card}`
+                  }} />
+                  
+                  <div style={{ fontWeight: 600, color: colors.text, marginBottom: '0.35rem', fontSize: '0.85rem' }}>
+                    {tt.shortDesc}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: colors.textMuted, marginBottom: '0.5rem', lineHeight: 1.4 }}>
+                    {tt.fullDesc}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: colors.primary, borderTop: `1px solid ${colors.divider}`, paddingTop: '0.5rem' }}>
+                    <strong>Examples:</strong> {tt.examples}
+                  </div>
+                </div>
+              )}
+            </div>
           ))}
         </div>
       </div>
       
-      {/* Description of selected truth type */}
-      <div style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: colors.inputBg, borderRadius: 8, border: `1px solid ${colors.divider}` }}>
-        <span style={{ fontSize: '0.8rem', color: colors.textMuted }}>
-          {availableTruthTypes.find(t => t.value === truthType)?.desc}
-        </span>
+      {/* Selected Type Info Box */}
+      <div style={{ 
+        marginBottom: '1rem', 
+        padding: '0.75rem 1rem', 
+        background: colors.primaryLight, 
+        borderRadius: 8, 
+        border: `1px solid ${colors.primary}30` 
+      }}>
+        <div style={{ fontSize: '0.85rem', color: colors.primary, fontWeight: 600, marginBottom: '0.25rem' }}>
+          {availableTruthTypes.find(t => t.value === truthType)?.label}
+        </div>
+        <div style={{ fontSize: '0.8rem', color: colors.text }}>
+          {availableTruthTypes.find(t => t.value === truthType)?.fullDesc}
+        </div>
       </div>
 
       <input type="file" ref={fileInputRef} style={{ display: 'none' }} multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md" onChange={handleFileSelect} />
@@ -297,14 +397,14 @@ function FilesTab({ colors }) {
   
   const recentJobs = jobs.filter(j => !activeProject || j.project_id === activeProject.id).slice(0, 20);
 
-  // Truth type labels for display
+  // Truth type labels for display (short versions for table column)
   const getTruthTypeLabel = (tt) => {
     const labels = {
-      'intent': '📋 Intent',
-      'configuration': '⚙️ Config',
-      'reference': '📚 Reference',
-      'regulatory': '⚖️ Regulatory',
-      'compliance': '🔒 Compliance'
+      'intent': '📋 Requirements',
+      'configuration': '⚙️ Setup',
+      'reference': '📚 Vendor',
+      'regulatory': '⚖️ Legal',
+      'compliance': '🔒 Audit'
     };
     return labels[tt] || tt || '—';
   };
