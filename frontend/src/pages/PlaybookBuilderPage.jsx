@@ -13,15 +13,23 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
-// Brand Colors
+// Mission Control Colors
 const COLORS = {
-  grassGreen: '#5a8a4a',
-  skyBlue: '#4a6b8a',
+  primary: '#83b16d',
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
   iceFlow: '#c9d3d4',
-  clearwater: '#b2d6de',
   white: '#f6f5fa',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
+  background: '#f0f2f5',
+  card: '#ffffff',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
+  border: '#e2e8f0',
+  warning: '#d97706',
+  success: '#16a34a',
+  error: '#dc2626',
 };
 
 // Playbook type definitions
@@ -74,14 +82,14 @@ function StartScreen({ onSelectMode }) {
       icon: '🧩',
       title: 'Build Custom',
       description: 'Mix and match components to create a unique playbook. For power users.',
-      color: COLORS.skyBlue,
+      color: COLORS.accent,
     },
     {
       id: 'clone',
       icon: '📋',
       title: 'Clone Existing',
       description: 'Copy an existing playbook and customize it. Fastest way to get started.',
-      color: COLORS.clearwater,
+      color: COLORS.accentLight,
     },
   ];
 
@@ -208,7 +216,7 @@ function TemplateMode({ onBack, onSave }) {
                 <h3 style={{ margin: 0, color: COLORS.text }}>{type.name}</h3>
               </div>
               <p style={{ color: COLORS.textLight, fontSize: '0.9rem', margin: '0 0 0.5rem 0' }}>{type.description}</p>
-              <p style={{ color: COLORS.skyBlue, fontSize: '0.8rem', margin: 0 }}>Example: {type.example}</p>
+              <p style={{ color: COLORS.accent, fontSize: '0.8rem', margin: 0 }}>Example: {type.example}</p>
             </div>
           ))}
         </div>
