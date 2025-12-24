@@ -52,20 +52,80 @@ const brandColors = {
 function Tooltip({ children, title, detail, action, position = 'top' }) {
   const [show, setShow] = useState(false);
   
-  const positionStyles = {
-    top: {
-      bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-      marginBottom: '8px',
-      arrowBottom: '-6px', arrowBorder: `6px solid ${brandColors.text}`, arrowDir: 'borderTop'
-    },
-    right: {
-      left: '100%', top: '50%', transform: 'translateY(-50%)',
-      marginLeft: '8px',
-      arrowLeft: '-6px', arrowBorder: `6px solid ${brandColors.text}`, arrowDir: 'borderRight'
+  // Position-specific styles
+  const getPositionStyles = () => {
+    switch (position) {
+      case 'left':
+        return {
+          right: '100%',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          marginRight: '8px',
+        };
+      case 'right':
+        return {
+          left: '100%',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          marginLeft: '8px',
+        };
+      case 'bottom':
+        return {
+          top: '100%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          marginTop: '8px',
+        };
+      default: // top
+        return {
+          bottom: '100%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          marginBottom: '8px',
+        };
     }
   };
   
-  const pos = positionStyles[position] || positionStyles.top;
+  const getArrowStyles = () => {
+    switch (position) {
+      case 'left':
+        return {
+          right: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          borderTop: '6px solid transparent',
+          borderBottom: '6px solid transparent',
+          borderLeft: `6px solid ${brandColors.text}`,
+        };
+      case 'right':
+        return {
+          left: '-6px',
+          top: '50%',
+          transform: 'translateY(-50%)',
+          borderTop: '6px solid transparent',
+          borderBottom: '6px solid transparent',
+          borderRight: `6px solid ${brandColors.text}`,
+        };
+      case 'bottom':
+        return {
+          top: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          borderLeft: '6px solid transparent',
+          borderRight: '6px solid transparent',
+          borderBottom: `6px solid ${brandColors.text}`,
+        };
+      default: // top
+        return {
+          bottom: '-6px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          borderLeft: '6px solid transparent',
+          borderRight: '6px solid transparent',
+          borderTop: `6px solid ${brandColors.text}`,
+        };
+    }
+  };
   
   return (
     <div 
@@ -77,12 +137,7 @@ function Tooltip({ children, title, detail, action, position = 'top' }) {
       {show && (
         <div style={{
           position: 'absolute',
-          [position === 'top' ? 'bottom' : 'left']: position === 'top' ? '100%' : '100%',
-          left: position === 'top' ? '50%' : undefined,
-          top: position === 'right' ? '50%' : undefined,
-          transform: pos.transform,
-          marginBottom: position === 'top' ? '8px' : undefined,
-          marginLeft: position === 'right' ? '8px' : undefined,
+          ...getPositionStyles(),
           padding: '12px 16px',
           backgroundColor: brandColors.text,
           color: brandColors.white,
@@ -107,16 +162,9 @@ function Tooltip({ children, title, detail, action, position = 'top' }) {
           )}
           <div style={{ 
             position: 'absolute', 
-            bottom: position === 'top' ? '-6px' : undefined,
-            left: position === 'top' ? '50%' : '-6px',
-            top: position === 'right' ? '50%' : undefined,
-            transform: position === 'top' ? 'translateX(-50%)' : 'translateY(-50%)',
             width: 0, 
-            height: 0, 
-            borderLeft: position === 'top' ? '6px solid transparent' : `6px solid ${brandColors.text}`,
-            borderRight: position === 'top' ? '6px solid transparent' : '6px solid transparent',
-            borderTop: position === 'top' ? `6px solid ${brandColors.text}` : '6px solid transparent',
-            borderBottom: position === 'top' ? undefined : '6px solid transparent',
+            height: 0,
+            ...getArrowStyles(),
           }} />
         </div>
       )}
