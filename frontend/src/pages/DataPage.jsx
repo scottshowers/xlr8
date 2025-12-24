@@ -537,7 +537,7 @@ function FilesPanel({ c, project, targetScope }) {
   
   // Reference library files (always global)
   const refFiles = referenceFiles?.files || [];
-  const extractedRules = referenceFiles?.rules || [];
+  const extractedRules = Array.isArray(referenceFiles?.rules) ? referenceFiles.rules : [];
 
   const recentlyCompleted = uploads.filter(u => u.status === 'completed').slice(0, 5);
   const totalTables = structuredFiles.reduce((sum, f) => sum + (f.sheets?.length || 1), 0);
