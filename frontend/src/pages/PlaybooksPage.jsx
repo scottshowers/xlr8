@@ -11,44 +11,43 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
 import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card } from '../components/ui';
 import api from '../services/api';
 import { getCustomerColorPalette } from '../utils/customerColors';
 
-// Theme-aware colors - muted professional palette
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  blue: '#4a6b8a',
-  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',
-  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
-  red: '#8a4a4a',
-  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
-  green: '#5a8a5a',
-  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
-  purple: '#6b5a7a',
-  purpleLight: dark ? 'rgba(107, 90, 122, 0.15)' : 'rgba(107, 90, 122, 0.1)',
-  divider: dark ? '#2d3548' : '#e8ecf1',
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
-});
+// Mission Control Colors
+const colors = {
+  bg: '#f0f2f5',
+  card: '#ffffff',
+  cardBorder: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
+  primary: '#83b16d',
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
+  warning: '#d97706',
+  warningLight: 'rgba(217, 119, 6, 0.1)',
+  red: '#dc2626',
+  redLight: 'rgba(220, 38, 38, 0.1)',
+  green: '#16a34a',
+  greenLight: 'rgba(22, 163, 74, 0.1)',
+  purple: '#7c3aed',
+  purpleLight: 'rgba(124, 58, 237, 0.1)',
+  divider: '#e2e8f0',
+  inputBg: '#f8fafc',
+};
 
-// Category colors - muted
+// Category colors - Mission Control palette
 const CATEGORY_COLORS = {
-  'Year-End': { color: '#5a8a4a', bg: 'rgba(90, 138, 74, 0.1)' },
-  'Compliance': { color: '#4a6b8a', bg: 'rgba(74, 107, 138, 0.1)' },
-  'Regulatory': { color: '#8a6b4a', bg: 'rgba(138, 107, 74, 0.1)' },
-  'Audit': { color: '#6b5a7a', bg: 'rgba(107, 90, 122, 0.1)' },
-  'Implementation': { color: '#4a7a7a', bg: 'rgba(74, 122, 122, 0.1)' },
+  'Year-End': { color: '#83b16d', bg: 'rgba(131, 177, 109, 0.1)' },
+  'Compliance': { color: '#285390', bg: 'rgba(40, 83, 144, 0.1)' },
+  'Regulatory': { color: '#d97706', bg: 'rgba(217, 119, 6, 0.1)' },
+  'Audit': { color: '#7c3aed', bg: 'rgba(124, 58, 237, 0.1)' },
+  'Implementation': { color: '#0891b2', bg: 'rgba(8, 145, 178, 0.1)' },
 };
 
 // Playbook Definitions
@@ -818,8 +817,6 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
 export default function PlaybooksPage() {
   const { activeProject, projectName, customerName, hasActiveProject, loading: projectLoading } = useProject();
   const { isAdmin } = useAuth();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
   const navigate = useNavigate();
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [activePlaybook, setActivePlaybook] = useState(null);
