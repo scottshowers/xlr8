@@ -11,8 +11,9 @@
  * - ThemeProvider (consistent dark/light)
  * - UploadProvider (background uploads)
  * - OnboardingProvider (Joyride tours)
+ * - TooltipProvider (global tooltip toggle)
  * 
- * Updated: December 20, 2025 - Added Welcome/Story/Journey/Intelligence Demo pages
+ * Updated: December 23, 2025 - Added TooltipProvider for global tooltip control
  */
 
 import React from 'react';
@@ -24,6 +25,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { UploadProvider } from './context/UploadContext';
 import { OnboardingProvider } from './context/OnboardingContext';
+import { TooltipProvider } from './context/TooltipContext';
 
 // Auth Components
 import ProtectedRoute from './components/ProtectedRoute';
@@ -186,11 +188,13 @@ function App() {
     <AuthProvider>
       <ProjectProvider>
         <ThemeProvider>
-          <UploadProvider>
-            <Router>
-              <AppRoutes />
-            </Router>
-          </UploadProvider>
+          <TooltipProvider>
+            <UploadProvider>
+              <Router>
+                <AppRoutes />
+              </Router>
+            </UploadProvider>
+          </TooltipProvider>
         </ThemeProvider>
       </ProjectProvider>
     </AuthProvider>
