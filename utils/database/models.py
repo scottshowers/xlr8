@@ -258,15 +258,26 @@ class DocumentRegistryModel:
     """
     
     # ==========================================================================
-    # TRUTH TYPES - The core classification
+    # TRUTH TYPES - The core classification (Five Truths Architecture)
     # ==========================================================================
-    TRUTH_REALITY = 'reality'
-    TRUTH_INTENT = 'intent'
-    TRUTH_REFERENCE = 'reference'
-    TRUTH_CONFIGURATION = 'configuration'
-    TRUTH_OUTPUT = 'output'
+    # Customer Truths (project-scoped):
+    TRUTH_REALITY = 'reality'           # Data in DuckDB (what exists)
+    TRUTH_INTENT = 'intent'             # Customer goals, SOWs (what they want)
+    TRUTH_CONFIGURATION = 'configuration'  # Customer system setup (how they configured)
     
-    VALID_TRUTH_TYPES = [TRUTH_REALITY, TRUTH_INTENT, TRUTH_REFERENCE, TRUTH_CONFIGURATION, TRUTH_OUTPUT]
+    # Reference Library Truths (global-scoped):
+    TRUTH_REFERENCE = 'reference'       # Vendor docs, how-to guides
+    TRUTH_REGULATORY = 'regulatory'     # Laws, IRS rules, mandates
+    TRUTH_COMPLIANCE = 'compliance'     # Audit requirements, SOC 2
+    
+    # System:
+    TRUTH_OUTPUT = 'output'             # System-generated outputs
+    
+    VALID_TRUTH_TYPES = [
+        TRUTH_REALITY, TRUTH_INTENT, TRUTH_CONFIGURATION,
+        TRUTH_REFERENCE, TRUTH_REGULATORY, TRUTH_COMPLIANCE,
+        TRUTH_OUTPUT
+    ]
     
     # ==========================================================================
     # STORAGE TYPES
@@ -309,12 +320,17 @@ class DocumentRegistryModel:
     
     @classmethod
     def get_storage_for_truth_type(cls, truth_type: str) -> str:
-        """Determine storage type based on truth_type."""
+        """Determine storage type based on truth_type (Five Truths Architecture)."""
         routing = {
+            # Customer truths
             cls.TRUTH_REALITY: cls.STORAGE_DUCKDB,
             cls.TRUTH_INTENT: cls.STORAGE_CHROMADB,
-            cls.TRUTH_REFERENCE: cls.STORAGE_CHROMADB,
             cls.TRUTH_CONFIGURATION: cls.STORAGE_BOTH,
+            # Reference library truths (all global, all ChromaDB)
+            cls.TRUTH_REFERENCE: cls.STORAGE_CHROMADB,
+            cls.TRUTH_REGULATORY: cls.STORAGE_CHROMADB,
+            cls.TRUTH_COMPLIANCE: cls.STORAGE_CHROMADB,
+            # System
             cls.TRUTH_OUTPUT: cls.STORAGE_CHROMADB,
         }
         return routing.get(truth_type, cls.STORAGE_CHROMADB)
@@ -324,7 +340,7 @@ class DocumentRegistryModel:
         """Map truth_type to legacy usage_type for backward compatibility."""
         if truth_type == cls.TRUTH_REALITY:
             return cls.USAGE_STRUCTURED_DATA
-        elif truth_type == cls.TRUTH_REFERENCE:
+        elif truth_type in [cls.TRUTH_REFERENCE, cls.TRUTH_REGULATORY, cls.TRUTH_COMPLIANCE]:
             return cls.USAGE_PLAYBOOK_SOURCE if is_global else cls.USAGE_TEMPLATE
         elif truth_type == cls.TRUTH_CONFIGURATION:
             return cls.USAGE_STRUCTURED_DATA
