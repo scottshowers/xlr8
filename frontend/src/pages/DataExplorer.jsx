@@ -1,0 +1,569 @@
+/**
+ * DataExplorer.jsx - Tables, Fields, Relationships, Health
+ * =========================================================
+ * 
+ * Deploy to: frontend/src/pages/DataExplorer.jsx
+ * 
+ * Features:
+ * - View all tables and columns
+ * - See data types and fill rates
+ * - View detected relationships
+ * - Data health issues with actions
+ * - Mission Control color scheme
+ */
+
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import { 
+  Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
+  ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2
+} from 'lucide-react';
+import { useTheme } from '../context/ThemeContext';
+import { useProject } from '../context/ProjectContext';
+import api from '../services/api';
+
+// ============================================================================
+// BRAND COLORS (from Mission Control)
+// ============================================================================
+const brandColors = {
+  primary: '#83b16d',
+  accent: '#285390',
+  electricBlue: '#2766b1',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  silver: '#a2a1a0',
+  white: '#f6f5fa',
+  scarletSage: '#993c44',
+  royalPurple: '#5f4282',
+  background: '#f0f2f5',
+  cardBg: '#ffffff',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  border: '#e2e8f0',
+  warning: '#d97706',
+  success: '#285390',
+};
+
+// ============================================================================
+// TOOLTIP COMPONENT (from Mission Control)
+// ============================================================================
+function Tooltip({ children, title, detail, action }) {
+  const [show, setShow] = useState(false);
+  
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShow(true)} 
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+          marginBottom: '8px', padding: '12px 16px', backgroundColor: brandColors.text, color: brandColors.white,
+          borderRadius: '8px', fontSize: '12px', width: '260px', zIndex: 1000,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
+          <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
+          {action && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', color: brandColors.skyBlue, fontWeight: 500 }}>
+              💡 {action}
+            </div>
+          )}
+          <div style={{ position: 'absolute', bottom: '-6px', left: '50%', transform: 'translateX(-50%)',
+            width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', 
+            borderTop: `6px solid ${brandColors.text}` }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
+// MAIN PAGE
+// ============================================================================
+export default function DataExplorer() {
+  const { colors } = useTheme();
+  const { activeProject } = useProject();
+  
+  const [activeTab, setActiveTab] = useState('tables');
+  const [tables, setTables] = useState([]);
+  const [selectedTable, setSelectedTable] = useState(null);
+  const [tableDetails, setTableDetails] = useState(null);
+  const [relationships, setRelationships] = useState([]);
+  const [healthIssues, setHealthIssues] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadingDetails, setLoadingDetails] = useState(false);
+  
+  const c = { ...colors, ...brandColors };
+
+  // Load tables
+  useEffect(() => {
+    loadTables();
+  }, [activeProject?.id]);
+
+  const loadTables = async () => {
+    setLoading(true);
+    try {
+      const res = await api.get('/status/structured');
+      const files = res.data?.files || [];
+      
+      // Flatten sheets from all files into tables
+      const allTables = [];
+      files.forEach(file => {
+        if (file.sheets) {
+          file.sheets.forEach(sheet => {
+            allTables.push({
+              ...sheet,
+              filename: file.filename,
+              project: file.project,
+              truth_type: file.truth_type
+            });
+          });
+        } else {
+          allTables.push({
+            table_name: file.filename.replace(/\.[^.]+$/, ''),
+            filename: file.filename,
+            row_count: file.row_count || 0,
+            columns: file.columns || [],
+            project: file.project,
+            truth_type: file.truth_type
+          });
+        }
+      });
+      
+      setTables(allTables);
+      
+      // Select first table by default
+      if (allTables.length > 0 && !selectedTable) {
+        setSelectedTable(allTables[0].table_name);
+      }
+      
+      // Load health issues
+      try {
+        const healthRes = await api.get('/status/data-integrity');
+        setHealthIssues(healthRes.data?.issues || []);
+      } catch (e) {
+        console.log('No health data available');
+      }
+      
+      // Load relationships (if endpoint exists)
+      try {
+        const relRes = await api.get('/status/relationships');
+        setRelationships(relRes.data?.relationships || []);
+      } catch (e) {
+        // Generate mock relationships from common columns
+        const mockRels = generateMockRelationships(allTables);
+        setRelationships(mockRels);
+      }
+      
+    } catch (err) {
+      console.error('Failed to load tables:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Load table details when selected
+  useEffect(() => {
+    if (selectedTable) {
+      loadTableDetails(selectedTable);
+    }
+  }, [selectedTable]);
+
+  const loadTableDetails = async (tableName) => {
+    setLoadingDetails(true);
+    try {
+      const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
+      setTableDetails(res.data);
+    } catch (err) {
+      // Build details from tables list
+      const table = tables.find(t => t.table_name === tableName);
+      setTableDetails({
+        table_name: tableName,
+        columns: table?.columns?.map(col => ({
+          name: typeof col === 'string' ? col : col.name,
+          type: typeof col === 'string' ? 'VARCHAR' : col.type,
+          fill_rate: typeof col === 'string' ? 100 : col.fill_rate || 100
+        })) || [],
+        row_count: table?.row_count || 0
+      });
+    } finally {
+      setLoadingDetails(false);
+    }
+  };
+
+  // Generate mock relationships based on common column patterns
+  const generateMockRelationships = (tables) => {
+    const rels = [];
+    const keyColumns = ['employee_id', 'emp_id', 'company_code', 'co_code', 'dept_id', 'location_id'];
+    
+    tables.forEach(table => {
+      const cols = table.columns?.map(c => typeof c === 'string' ? c : c.name) || [];
+      cols.forEach(col => {
+        const colLower = col.toLowerCase();
+        if (keyColumns.some(k => colLower.includes(k))) {
+          // Find other tables with same column
+          tables.forEach(otherTable => {
+            if (otherTable.table_name !== table.table_name) {
+              const otherCols = otherTable.columns?.map(c => typeof c === 'string' ? c : c.name) || [];
+              if (otherCols.some(oc => oc.toLowerCase() === colLower)) {
+                // Avoid duplicates
+                if (!rels.some(r => 
+                  (r.from_table === table.table_name && r.to_table === otherTable.table_name && r.column === col) ||
+                  (r.from_table === otherTable.table_name && r.to_table === table.table_name && r.column === col)
+                )) {
+                  rels.push({
+                    from_table: table.table_name,
+                    to_table: otherTable.table_name,
+                    column: col,
+                    type: colLower.includes('employee') ? '1:1' : 'N:1'
+                  });
+                }
+              }
+            }
+          });
+        }
+      });
+    });
+    
+    return rels;
+  };
+
+  const getTableHealth = (tableName) => {
+    const issues = healthIssues.filter(i => i.table === tableName);
+    if (issues.some(i => i.severity === 'error')) return 'error';
+    if (issues.some(i => i.severity === 'warning')) return 'warning';
+    return 'good';
+  };
+
+  const getFillRateColor = (rate) => {
+    if (rate >= 90) return c.accent;
+    if (rate >= 50) return c.warning;
+    return c.scarletSage;
+  };
+
+  const tabs = [
+    { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet },
+    { id: 'relationships', label: '🔗 Relationships', icon: Link2 },
+    { id: 'health', label: '❤️ Data Health', icon: Heart },
+  ];
+
+  const totalTables = tables.length;
+  const totalColumns = tables.reduce((sum, t) => sum + (t.columns?.length || 0), 0);
+  const totalIssues = healthIssues.length;
+
+  if (loading) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', color: c.textMuted }}>
+        <Loader2 size={40} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+        <p>Loading data explorer...</p>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto', background: c.background, minHeight: '100vh' }}>
+      {/* Breadcrumb */}
+      <div style={{ marginBottom: '1rem' }}>
+        <Link to="/data" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: c.textMuted, textDecoration: 'none', fontSize: '0.85rem' }}>
+          <ArrowLeft size={16} /> Back to Data Management
+        </Link>
+      </div>
+      
+      {/* Header */}
+      <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <h1 style={{ fontSize: '1.5rem', fontWeight: 600, color: c.text, margin: 0, fontFamily: "'Sora', sans-serif" }}>
+            Data Explorer
+          </h1>
+          <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0.25rem 0 0' }}>
+            View tables, columns, relationships, and data health
+          </p>
+        </div>
+        <button 
+          onClick={loadTables}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.5rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`,
+            borderRadius: 8, fontSize: '0.85rem', color: c.text, cursor: 'pointer'
+          }}
+        >
+          <RefreshCw size={16} /> Refresh
+        </button>
+      </div>
+
+      {/* Tabs */}
+      <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', background: c.border, padding: 4, borderRadius: 10, width: 'fit-content' }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              padding: '0.6rem 1.25rem', border: 'none',
+              background: activeTab === tab.id ? c.cardBg : 'transparent',
+              fontWeight: 500, fontSize: '0.85rem',
+              color: activeTab === tab.id ? c.primary : c.textMuted,
+              cursor: 'pointer', borderRadius: 8, transition: 'all 0.2s',
+              boxShadow: activeTab === tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+            }}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats Row */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+        <Tooltip title="Tables" detail="Total structured tables loaded into the system." action="Click a table to view columns">
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
+            <span style={{ fontSize: '1.5rem' }}>🗄️</span>
+            <div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{totalTables}</div>
+              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Tables</div>
+            </div>
+          </div>
+        </Tooltip>
+        
+        <Tooltip title="Columns" detail="Total columns across all tables." action="Check fill rates in table detail">
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
+            <span style={{ fontSize: '1.5rem' }}>📋</span>
+            <div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{totalColumns}</div>
+              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Columns</div>
+            </div>
+          </div>
+        </Tooltip>
+        
+        <Tooltip title="Relationships" detail="Detected joins between tables based on matching columns." action="Used for smart SQL generation">
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
+            <span style={{ fontSize: '1.5rem' }}>🔗</span>
+            <div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{relationships.length}</div>
+              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Relationships</div>
+            </div>
+          </div>
+        </Tooltip>
+        
+        <Tooltip title="Health Issues" detail="Data quality issues that may affect analysis." action="Review and fix for better results">
+          <div style={{ 
+            background: totalIssues > 0 ? `${c.warning}10` : c.cardBg, 
+            border: `1px solid ${totalIssues > 0 ? c.warning : c.border}`, 
+            borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' 
+          }}>
+            <span style={{ fontSize: '1.5rem' }}>{totalIssues > 0 ? '⚠️' : '✅'}</span>
+            <div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: totalIssues > 0 ? c.warning : c.text }}>{totalIssues}</div>
+              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Issues</div>
+            </div>
+          </div>
+        </Tooltip>
+      </div>
+
+      {/* Tab Content */}
+      {activeTab === 'tables' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem' }}>
+          {/* Table List */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '0.875rem 1rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+              Tables ({tables.length})
+            </div>
+            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              {tables.map((table, i) => {
+                const health = getTableHealth(table.table_name);
+                return (
+                  <div
+                    key={i}
+                    onClick={() => setSelectedTable(table.table_name)}
+                    style={{
+                      padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
+                      background: selectedTable === table.table_name ? `${c.primary}15` : 'transparent',
+                      borderLeft: selectedTable === table.table_name ? `3px solid ${c.primary}` : '3px solid transparent',
+                      transition: 'all 0.15s'
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 500, fontSize: '0.85rem', color: c.text }}>
+                      <span style={{ 
+                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+                        background: health === 'good' ? c.accent : health === 'warning' ? c.warning : c.scarletSage
+                      }} />
+                      {table.table_name}
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.25rem' }}>
+                      {(table.row_count || 0).toLocaleString()} rows • {table.columns?.length || 0} columns
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Table Detail */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+            {loadingDetails ? (
+              <div style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>
+                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
+              </div>
+            ) : tableDetails ? (
+              <>
+                <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600, fontSize: '1.1rem', color: c.text }}>
+                    🗄️ {tableDetails.table_name}
+                  </div>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.25rem 0.6rem', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>
+                      {(tableDetails.row_count || 0).toLocaleString()} rows
+                    </span>
+                  </div>
+                </div>
+                
+                <div style={{ padding: '1.25rem' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Column</th>
+                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Type</th>
+                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Fill Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {tableDetails.columns?.map((col, i) => {
+                        const colName = typeof col === 'string' ? col : col.name;
+                        const colType = typeof col === 'string' ? 'VARCHAR' : (col.type || 'VARCHAR');
+                        const fillRate = typeof col === 'string' ? 100 : (col.fill_rate ?? 100);
+                        const isKey = colName.toLowerCase().includes('_id') || colName.toLowerCase() === 'id';
+                        
+                        return (
+                          <tr key={i}>
+                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}`, fontSize: '0.85rem' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 500, color: c.text }}>
+                                {isKey && <Key size={12} style={{ color: c.warning }} />}
+                                {colName}
+                              </div>
+                            </td>
+                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}` }}>
+                              <span style={{ fontSize: '0.75rem', color: c.textMuted, fontFamily: 'monospace' }}>{colType}</span>
+                            </td>
+                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}` }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <div style={{ width: 60, height: 6, background: c.border, borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ height: '100%', width: `${fillRate}%`, background: getFillRateColor(fillRate), borderRadius: 3 }} />
+                                </div>
+                                <span style={{ fontSize: '0.8rem', color: getFillRateColor(fillRate) }}>{fillRate}%</span>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                  
+                  {/* Table Relationships */}
+                  {(() => {
+                    const tableRels = relationships.filter(r => r.from_table === selectedTable || r.to_table === selectedTable);
+                    if (tableRels.length === 0) return null;
+                    
+                    return (
+                      <div style={{ marginTop: '1.5rem' }}>
+                        <div style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          🔗 Relationships
+                        </div>
+                        {tableRels.map((rel, i) => (
+                          <div key={i} style={{ background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                            <span style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text }}>{rel.from_table}</span>
+                            <span style={{ fontSize: '0.8rem', color: c.textMuted, fontFamily: 'monospace' }}>{rel.column}</span>
+                            <span style={{ color: c.primary, fontSize: '1.1rem' }}>→</span>
+                            <span style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text }}>{rel.to_table}</span>
+                            <span style={{ fontSize: '0.7rem', color: c.textMuted, padding: '0.15rem 0.4rem', background: c.cardBg, borderRadius: 4 }}>{rel.type}</span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </>
+            ) : (
+              <div style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>
+                Select a table to view details
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'relationships' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text }}>
+            All Relationships ({relationships.length})
+          </div>
+          <div style={{ padding: '1rem' }}>
+            {relationships.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+                No relationships detected yet
+              </div>
+            ) : (
+              relationships.map((rel, i) => (
+                <div key={i} style={{ background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                  <span style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{rel.from_table}</span>
+                  <span style={{ fontSize: '0.8rem', color: c.textMuted, fontFamily: 'monospace', background: c.cardBg, padding: '0.2rem 0.5rem', borderRadius: 4 }}>{rel.column}</span>
+                  <span style={{ color: c.primary, fontSize: '1.25rem' }}>→</span>
+                  <span style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{rel.to_table}</span>
+                  <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: c.textMuted, padding: '0.2rem 0.5rem', background: c.cardBg, borderRadius: 4 }}>{rel.type}</span>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'health' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text }}>
+            Data Health Issues ({healthIssues.length})
+          </div>
+          <div style={{ padding: '1rem' }}>
+            {healthIssues.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <CheckCircle size={40} style={{ color: c.accent, marginBottom: '0.75rem' }} />
+                <p style={{ color: c.text, fontWeight: 500, margin: '0 0 0.25rem' }}>All systems healthy</p>
+                <p style={{ color: c.textMuted, fontSize: '0.85rem', margin: 0 }}>No data quality issues detected</p>
+              </div>
+            ) : (
+              healthIssues.map((issue, i) => (
+                <div key={i} style={{ 
+                  background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`, 
+                  border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}30`, 
+                  borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '0.5rem',
+                  display: 'flex', alignItems: 'flex-start', gap: '0.75rem'
+                }}>
+                  {issue.severity === 'error' 
+                    ? <XCircle size={18} style={{ color: c.scarletSage, flexShrink: 0, marginTop: 2 }} />
+                    : <AlertTriangle size={18} style={{ color: c.warning, flexShrink: 0, marginTop: 2 }} />
+                  }
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{issue.title}</div>
+                    <div style={{ fontSize: '0.8rem', color: c.textMuted, marginTop: '0.25rem' }}>{issue.description}</div>
+                    {issue.table && (
+                      <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.35rem' }}>
+                        Table: <span style={{ fontFamily: 'monospace' }}>{issue.table}</span>
+                      </div>
+                    )}
+                    {issue.action && (
+                      <div style={{ fontSize: '0.8rem', color: c.primary, marginTop: '0.5rem', cursor: 'pointer' }}>
+                        → {issue.action}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+      
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
