@@ -1708,15 +1708,27 @@ async def clear_all_references(confirm: bool = False):
 @router.get("/status/rules")
 async def list_rules():
     """
-    List all rules in the standards rule registry.
+    List all extracted compliance rules.
+    
+    Returns rules from standards_processor for viewing/editing.
+    Used by Data Explorer Rules tab.
     """
     try:
-        from utils.standards_processor import get_rule_registry
+        from backend.utils.standards_processor import get_rule_registry
         registry = get_rule_registry()
+        all_rules = registry.get_all_rules()
         
+        # Convert to dict format with full details
+        rules_list = []
+        for rule in all_rules:
+            try:
+                rule_dict = rule.to_dict() if hasattr(rule, 'to_dict') else rule
+                rules_list.append(rule_dict)
+            except Exception as e:
+                logger.warning(f"[RULES] Could not convert rule: {e}")
+        
+        # Also get document summary
         documents = []
-        total_rules = 0
-        
         if hasattr(registry, 'documents'):
             for doc in registry.documents:
                 doc_info = {
@@ -1727,24 +1739,32 @@ async def list_rules():
                     'rules_count': len(getattr(doc, 'rules', []))
                 }
                 documents.append(doc_info)
-                total_rules += doc_info['rules_count']
+        
+        logger.info(f"[RULES] Returning {len(rules_list)} rules from {len(documents)} documents")
         
         return {
-            'documents': len(documents),
-            'total_rules': total_rules,
-            'registry': documents
+            'rules': rules_list,
+            'count': len(rules_list),
+            'documents': documents,
+            'document_count': len(documents)
         }
         
-    except ImportError:
+    except ImportError as ie:
+        logger.warning(f"[RULES] Standards processor not available: {ie}")
         return {
-            'documents': 0,
-            'total_rules': 0,
-            'registry': [],
+            'rules': [],
+            'count': 0,
+            'documents': [],
+            'document_count': 0,
             'note': 'Standards processor not available'
         }
     except Exception as e:
-        logger.error(f"Error listing rules: {e}")
-        raise HTTPException(500, str(e))
+        logger.error(f"[RULES] Error listing rules: {e}")
+        return {
+            'rules': [],
+            'count': 0,
+            'error': str(e)
+        }
 
 
 @router.get("/status/registry")
