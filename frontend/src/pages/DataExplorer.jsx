@@ -1,6 +1,6 @@
 /**
- * DataExplorer.jsx - Tables, Fields, Relationships, Health
- * =========================================================
+ * DataExplorer.jsx - Tables, Fields, Relationships, Health, Compliance
+ * =====================================================================
  * 
  * Deploy to: frontend/src/pages/DataExplorer.jsx
  * 
@@ -9,6 +9,7 @@
  * - See data types and fill rates
  * - View detected relationships
  * - Data health issues with actions
+ * - Compliance check against extracted rules
  * - Mission Control color scheme
  */
 
@@ -16,7 +17,8 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
-  ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2
+  ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
+  Shield, Play, Folder
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -96,6 +98,11 @@ export default function DataExplorer() {
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   
+  // Compliance state
+  const [complianceRunning, setComplianceRunning] = useState(false);
+  const [complianceResults, setComplianceResults] = useState(null);
+  const [complianceError, setComplianceError] = useState(null);
+  
   const c = { ...colors, ...brandColors };
 
   // Load tables
@@ -174,23 +181,52 @@ export default function DataExplorer() {
 
   const loadTableDetails = async (tableName) => {
     setLoadingDetails(true);
+    
+    // Get the table from our list - this is the source of truth for row count
+    const tableFromList = tables.find(t => t.table_name === tableName);
+    const knownRowCount = tableFromList?.row_count || 0;
+    
     try {
       const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
-      setTableDetails(res.data);
+      // Use API for column details, but always use list row count (more reliable)
+      setTableDetails({
+        ...res.data,
+        row_count: knownRowCount // Always use the count from table list
+      });
     } catch (err) {
       // Build details from tables list
-      const table = tables.find(t => t.table_name === tableName);
       setTableDetails({
         table_name: tableName,
-        columns: table?.columns?.map(col => ({
+        columns: tableFromList?.columns?.map(col => ({
           name: typeof col === 'string' ? col : col.name,
           type: typeof col === 'string' ? 'VARCHAR' : col.type,
           fill_rate: typeof col === 'string' ? 100 : col.fill_rate || 100
         })) || [],
-        row_count: table?.row_count || 0
+        row_count: knownRowCount
       });
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  // Run compliance check against extracted rules
+  const runComplianceCheck = async () => {
+    if (!activeProject?.id) {
+      setComplianceError('Please select a project first');
+      return;
+    }
+    
+    setComplianceRunning(true);
+    setComplianceError(null);
+    setComplianceResults(null);
+    
+    try {
+      const response = await api.post('/standards/check', { project_id: activeProject.id }, { timeout: 180000 });
+      setComplianceResults(response.data);
+    } catch (err) {
+      setComplianceError(err.response?.data?.detail || err.message || 'Compliance check failed');
+    } finally {
+      setComplianceRunning(false);
     }
   };
 
@@ -248,6 +284,7 @@ export default function DataExplorer() {
     { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet },
     { id: 'relationships', label: '🔗 Relationships', icon: Link2 },
     { id: 'health', label: '❤️ Data Health', icon: Heart },
+    { id: 'compliance', label: '✅ Compliance', icon: Shield },
   ];
 
   const totalTables = tables.length;
@@ -558,6 +595,158 @@ export default function DataExplorer() {
                   </div>
                 </div>
               ))
+            )}
+          </div>
+        </div>
+      )}
+
+      {activeTab === 'compliance' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Shield size={18} style={{ color: c.primary }} />
+            Compliance Check
+          </div>
+          <div style={{ padding: '1.25rem' }}>
+            {/* Project Context */}
+            {activeProject ? (
+              <div style={{ padding: '1rem', background: `${c.primary}10`, border: `1px solid ${c.primary}40`, borderLeft: `4px solid ${c.primary}`, borderRadius: 8, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <Folder size={24} style={{ color: c.primary }} />
+                <div>
+                  <div style={{ fontWeight: 600, color: c.primary }}>{activeProject.name}</div>
+                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>Run compliance check against extracted rules</div>
+                </div>
+              </div>
+            ) : (
+              <div style={{ padding: '1rem', background: `${c.warning}10`, border: `1px solid ${c.warning}40`, borderRadius: 8, marginBottom: '1.5rem', color: c.warning }}>
+                ⚠️ Select a project to run compliance checks
+              </div>
+            )}
+            
+            {/* Run Button */}
+            <Tooltip title="Run Compliance Check" detail="Compares your data against extracted rules from uploaded regulatory and compliance documents." action="Results show rule violations with corrective actions">
+              <button 
+                onClick={runComplianceCheck} 
+                disabled={complianceRunning || !activeProject}
+                style={{ 
+                  padding: '0.75rem 1.5rem', background: c.primary, color: 'white', 
+                  border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', 
+                  opacity: (complianceRunning || !activeProject) ? 0.5 : 1, 
+                  display: 'flex', alignItems: 'center', gap: '0.5rem',
+                  transition: 'all 0.2s'
+                }}
+              >
+                {complianceRunning ? (
+                  <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Running...</>
+                ) : (
+                  <><Play size={16} /> Run Compliance Check</>
+                )}
+              </button>
+            </Tooltip>
+
+            {/* Error */}
+            {complianceError && (
+              <div style={{ padding: '1rem', background: `${c.scarletSage}10`, border: `1px solid ${c.scarletSage}40`, borderRadius: 8, marginTop: '1rem', color: c.scarletSage, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <XCircle size={18} /> {complianceError}
+              </div>
+            )}
+
+            {/* Results */}
+            {complianceResults && (
+              <div style={{ marginTop: '1.5rem' }}>
+                {/* Stats Cards */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+                  <Tooltip title="Rules Checked" detail="Total rules extracted from your uploaded compliance documents." action="Upload more docs to add rules">
+                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 700, color: c.primary, fontFamily: 'monospace' }}>{complianceResults.rules_checked || 0}</div>
+                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Rules Checked</div>
+                    </div>
+                  </Tooltip>
+                  <Tooltip title="Findings" detail="Rules that found violations in your data." action="Review each finding below">
+                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 700, color: (complianceResults.findings_count || 0) > 0 ? c.warning : c.accent, fontFamily: 'monospace' }}>{complianceResults.findings_count || 0}</div>
+                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Findings</div>
+                    </div>
+                  </Tooltip>
+                  <Tooltip title="Compliant" detail="Rules that passed with no violations." action="Great job!">
+                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
+                      <div style={{ fontSize: '2rem', fontWeight: 700, color: c.accent, fontFamily: 'monospace' }}>{complianceResults.compliant_count || 0}</div>
+                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Compliant</div>
+                    </div>
+                  </Tooltip>
+                </div>
+
+                {/* Findings List */}
+                {complianceResults.findings && complianceResults.findings.length > 0 && (
+                  <div>
+                    <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <AlertTriangle size={16} style={{ color: c.warning }} />
+                      Findings ({complianceResults.findings.length})
+                    </h4>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {complianceResults.findings.map((finding, i) => {
+                        const severityColor = finding.severity === 'critical' ? c.scarletSage : finding.severity === 'high' ? c.warning : c.electricBlue;
+                        return (
+                          <div key={i} style={{ 
+                            background: c.background, 
+                            border: `1px solid ${c.border}`, 
+                            borderLeft: `4px solid ${severityColor}`, 
+                            borderRadius: 8, 
+                            padding: '1rem' 
+                          }}>
+                            <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span>{finding.condition || finding.title}</span>
+                              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', background: `${severityColor}20`, color: severityColor, borderRadius: 4, textTransform: 'uppercase' }}>
+                                {finding.severity || 'medium'}
+                              </span>
+                            </div>
+                            {finding.criteria && (
+                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.text }}>
+                                <strong>Criteria:</strong> {finding.criteria}
+                              </p>
+                            )}
+                            {finding.cause && (
+                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.text }}>
+                                <strong>Cause:</strong> {finding.cause}
+                              </p>
+                            )}
+                            {finding.corrective_action && (
+                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.primary }}>
+                                <strong>Action:</strong> {finding.corrective_action}
+                              </p>
+                            )}
+                            {finding.affected_count && (
+                              <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: c.textMuted, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <Database size={14} />
+                                Affected: {finding.affected_count.toLocaleString()} records
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* All Clear Message */}
+                {(!complianceResults.findings || complianceResults.findings.length === 0) && (
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>
+                    <CheckCircle size={48} style={{ color: c.accent, marginBottom: '0.75rem' }} />
+                    <p style={{ color: c.text, fontWeight: 600, margin: '0 0 0.25rem', fontSize: '1.1rem' }}>All Clear!</p>
+                    <p style={{ color: c.textMuted, fontSize: '0.9rem', margin: 0 }}>No compliance issues found in your data</p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Empty State */}
+            {!complianceResults && !complianceRunning && !complianceError && (
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted, marginTop: '1rem' }}>
+                <Shield size={40} style={{ opacity: 0.3, marginBottom: '0.75rem' }} />
+                <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>Ready to check compliance</p>
+                <p style={{ margin: 0, fontSize: '0.85rem' }}>
+                  Upload regulatory documents to the Reference Library, then run a check to find violations in your data.
+                </p>
+              </div>
             )}
           </div>
         </div>
