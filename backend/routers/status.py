@@ -1382,7 +1382,7 @@ async def list_references():
     """
     List all reference/standards files (global documents).
     
-    These are documents with truth_type='reference' or is_global=true.
+    These are documents with truth_type in reference/regulatory/compliance or is_global=true.
     """
     try:
         from utils.database.supabase_client import get_supabase
@@ -1391,33 +1391,45 @@ async def list_references():
         if not supabase:
             raise HTTPException(500, "Supabase not available")
         
-        # Get from document_registry - reference or global
+        # Get from document_registry - reference, regulatory, compliance, or global
         result = supabase.table('document_registry') \
             .select('*') \
-            .or_('truth_type.eq.reference,is_global.eq.true') \
+            .or_('truth_type.eq.reference,truth_type.eq.regulatory,truth_type.eq.compliance,is_global.eq.true') \
             .order('created_at', desc=True) \
             .execute()
         
         files = result.data or []
         
         # Also get rules from standards processor
+        rules_list = []
         rules_info = {'available': False, 'documents': 0, 'total_rules': 0}
         try:
-            from utils.standards_processor import get_rule_registry
+            from backend.utils.standards_processor import get_rule_registry
             registry = get_rule_registry()
+            all_rules = registry.get_all_rules()
+            
+            # Convert to dict format
+            for rule in all_rules:
+                try:
+                    rule_dict = rule.to_dict() if hasattr(rule, 'to_dict') else rule
+                    rules_list.append(rule_dict)
+                except:
+                    pass
+            
             if hasattr(registry, 'documents'):
                 rules_info['available'] = True
                 rules_info['documents'] = len(registry.documents)
-                rules_info['total_rules'] = sum(len(getattr(d, 'rules', [])) for d in registry.documents)
-        except ImportError:
-            pass
+                rules_info['total_rules'] = len(rules_list)
+        except ImportError as ie:
+            logger.warning(f"Standards processor not available: {ie}")
         except Exception as e:
             logger.warning(f"Could not get rules info: {e}")
         
         return {
             'count': len(files),
             'files': files,
-            'rules': rules_info
+            'rules': rules_list,  # Full rules list for Rules tab
+            'rules_info': rules_info
         }
         
     except HTTPException:
