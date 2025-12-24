@@ -179,6 +179,9 @@ export default function DataPage() {
   const { colors, darkMode } = useTheme();
   const { activeProject } = useProject();
   
+  // Shared state for scope toggle - lifted up so FilesPanel can filter accordingly
+  const [targetScope, setTargetScope] = useState('project');
+  
   // Merge theme colors with brand colors
   const c = { ...colors, ...brandColors };
   
@@ -191,7 +194,9 @@ export default function DataPage() {
             Data Management
           </h1>
           <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0.25rem 0 0' }}>
-            {activeProject ? `Project: ${activeProject.name}` : 'Select a project to get started'}
+            {targetScope === 'project' 
+              ? (activeProject ? `Project: ${activeProject.name}` : 'Select a project to get started')
+              : 'Reference Library (Global)'}
           </p>
         </div>
         
@@ -225,8 +230,8 @@ export default function DataPage() {
 
       {/* Main Two-Column Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '1.5rem', alignItems: 'start' }}>
-        <UploadPanel c={c} project={activeProject} />
-        <FilesPanel c={c} project={activeProject} />
+        <UploadPanel c={c} project={activeProject} targetScope={targetScope} setTargetScope={setTargetScope} />
+        <FilesPanel c={c} project={activeProject} targetScope={targetScope} />
       </div>
     </div>
   );
@@ -236,9 +241,8 @@ export default function DataPage() {
 // ============================================================================
 // UPLOAD PANEL (Left - Sticky)
 // ============================================================================
-function UploadPanel({ c, project }) {
+function UploadPanel({ c, project, targetScope, setTargetScope }) {
   const { addUpload, uploads } = useUpload();
-  const [targetScope, setTargetScope] = useState('project');
   const [truthType, setTruthType] = useState('intent');
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
@@ -486,24 +490,27 @@ function UploadPanel({ c, project }) {
 // ============================================================================
 // FILES PANEL (Right)
 // ============================================================================
-function FilesPanel({ c, project }) {
+function FilesPanel({ c, project, targetScope }) {
   const { uploads } = useUpload();
   const [structuredData, setStructuredData] = useState(null);
   const [documents, setDocuments] = useState(null);
+  const [referenceFiles, setReferenceFiles] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [expandedSections, setExpandedSections] = useState({ structured: true, documents: true });
+  const [expandedSections, setExpandedSections] = useState({ structured: true, documents: true, reference: true });
 
-  useEffect(() => { loadData(); }, [project?.id]);
+  useEffect(() => { loadData(); }, [project?.id, targetScope]);
 
   const loadData = async () => {
     setLoading(true);
     try {
-      const [structRes, docsRes] = await Promise.all([
+      const [structRes, docsRes, refRes] = await Promise.all([
         api.get('/status/structured').catch(() => ({ data: { files: [], total_rows: 0 } })),
         api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
+        api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       setStructuredData(structRes.data);
       setDocuments(docsRes.data);
+      setReferenceFiles(refRes.data);
     } catch (err) {
       console.error('Failed to load:', err);
     } finally {
@@ -511,12 +518,26 @@ function FilesPanel({ c, project }) {
     }
   };
 
-  const structuredFiles = (structuredData?.files || []).filter(f => 
-    !project || f.project === project.id || f.project === project.name
-  );
-  const docs = (documents?.documents || []).filter(d => 
-    !project || d.project === project.id || d.project === project.name
-  );
+  // Filter based on scope
+  const isGlobalScope = targetScope === 'global';
+  
+  const structuredFiles = (structuredData?.files || []).filter(f => {
+    if (isGlobalScope) {
+      return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library';
+    }
+    return !project || f.project === project.id || f.project === project.name;
+  });
+  
+  const docs = (documents?.documents || []).filter(d => {
+    if (isGlobalScope) {
+      return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library';
+    }
+    return !project || d.project === project.id || d.project === project.name;
+  });
+  
+  // Reference library files (always global)
+  const refFiles = referenceFiles?.files || [];
+  const extractedRules = referenceFiles?.rules || [];
 
   const recentlyCompleted = uploads.filter(u => u.status === 'completed').slice(0, 5);
   const totalTables = structuredFiles.reduce((sum, f) => sum + (f.sheets?.length || 1), 0);
@@ -543,24 +564,49 @@ function FilesPanel({ c, project }) {
         display: 'flex', gap: '1.5rem', marginBottom: '1rem',
         padding: '0.875rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10
       }}>
-        <Tooltip title="Tables" detail="Total structured tables created from uploaded files." action="Click Data Explorer to view details">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-            <Database size={18} style={{ color: c.primary }} />
-            <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalTables}</strong> tables</span>
-          </div>
-        </Tooltip>
-        <Tooltip title="Rows" detail="Total data rows available for querying." action="Query in AI Chat">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-            <HardDrive size={18} style={{ color: c.electricBlue }} />
-            <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalRows.toLocaleString()}</strong> rows</span>
-          </div>
-        </Tooltip>
-        <Tooltip title="Documents" detail="Documents chunked for AI retrieval." action="Referenced in AI responses">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-            <FileText size={18} style={{ color: c.accent }} />
-            <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> documents</span>
-          </div>
-        </Tooltip>
+        {isGlobalScope ? (
+          <>
+            <Tooltip title="Reference Files" detail="Global documents in the Reference Library." action="Standards, laws, vendor docs">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <FileText size={18} style={{ color: c.accent }} />
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.length}</strong> files</span>
+              </div>
+            </Tooltip>
+            <Tooltip title="Extracted Rules" detail="Compliance rules extracted from regulatory documents." action="Used in Compliance Check">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <span style={{ fontSize: '1rem' }}>⚖️</span>
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{extractedRules.length}</strong> rules</span>
+              </div>
+            </Tooltip>
+            <Tooltip title="Documents" detail="Global docs chunked for AI retrieval." action="Referenced across all projects">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <Database size={18} style={{ color: c.electricBlue }} />
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> chunks</span>
+              </div>
+            </Tooltip>
+          </>
+        ) : (
+          <>
+            <Tooltip title="Tables" detail="Total structured tables created from uploaded files." action="Click Data Explorer to view details">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <Database size={18} style={{ color: c.primary }} />
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalTables}</strong> tables</span>
+              </div>
+            </Tooltip>
+            <Tooltip title="Rows" detail="Total data rows available for querying." action="Query in AI Chat">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <HardDrive size={18} style={{ color: c.electricBlue }} />
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalRows.toLocaleString()}</strong> rows</span>
+              </div>
+            </Tooltip>
+            <Tooltip title="Documents" detail="Documents chunked for AI retrieval." action="Referenced in AI responses">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
+                <FileText size={18} style={{ color: c.accent }} />
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> documents</span>
+              </div>
+            </Tooltip>
+          </>
+        )}
         <div style={{ flex: 1 }} />
         <button 
           onClick={loadData}
@@ -697,6 +743,86 @@ function FilesPanel({ c, project }) {
           </div>
         )}
       </div>
+
+      {/* Reference Library Section - Only shown in global scope */}
+      {isGlobalScope && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden', marginTop: '1rem' }}>
+          <button
+            onClick={() => toggleSection('reference')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
+              padding: '0.875rem 1rem', background: c.background, border: 'none',
+              borderBottom: expandedSections.reference ? `1px solid ${c.border}` : 'none',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+          >
+            {expandedSections.reference ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
+            <span style={{ fontSize: '1.1rem' }}>⚖️</span>
+            <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Reference Library Files</span>
+            <span style={{ background: `${c.royalPurple}15`, color: c.royalPurple, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+              {refFiles.length} files • {extractedRules.length} rules
+            </span>
+          </button>
+          
+          {expandedSections.reference && (
+            <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
+              {refFiles.length === 0 ? (
+                <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+                  <span style={{ fontSize: '2rem', opacity: 0.3, display: 'block', marginBottom: '0.5rem' }}>⚖️</span>
+                  <p style={{ margin: '0 0 0.5rem', fontWeight: 500 }}>No reference files yet</p>
+                  <p style={{ margin: 0, fontSize: '0.85rem' }}>Upload regulatory docs to extract compliance rules</p>
+                </div>
+              ) : (
+                refFiles.map((file, i) => {
+                  const fileRules = extractedRules.filter(r => r.source_document === file.filename);
+                  return (
+                    <div key={i} style={{ 
+                      display: 'flex', alignItems: 'center', gap: '0.75rem', 
+                      padding: '0.75rem 1rem', 
+                      borderBottom: `1px solid ${c.border}`,
+                      background: fileRules.length > 0 ? `${c.royalPurple}05` : 'transparent'
+                    }}>
+                      <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {file.filename}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', gap: '0.75rem', marginTop: '0.15rem' }}>
+                          <span>{getTruthLabel(file.truth_type)}</span>
+                          {file.chunk_count && <span>{file.chunk_count} chunks</span>}
+                          {fileRules.length > 0 && (
+                            <span style={{ color: c.royalPurple, fontWeight: 500 }}>
+                              {fileRules.length} rules extracted
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`Delete "${file.filename}" and its extracted rules?`)) {
+                            try {
+                              await api.delete(`/status/references/${encodeURIComponent(file.filename)}`);
+                              loadData();
+                            } catch (err) {
+                              alert('Delete failed: ' + (err.response?.data?.detail || err.message));
+                            }
+                          }
+                        }}
+                        style={{
+                          padding: '0.35rem 0.5rem', background: 'transparent', border: `1px solid ${c.border}`,
+                          borderRadius: 4, cursor: 'pointer', color: c.textMuted, fontSize: '0.75rem'
+                        }}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
