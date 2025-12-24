@@ -314,7 +314,13 @@ function UploadPanel({ c, project }) {
     }
     
     Array.from(files).forEach(file => {
-      addUpload(file, projectId, projectName, { truth_type: truthType });
+      // For regulatory/compliance docs, trigger rule extraction
+      const isRuleSource = truthType === 'regulatory' || truthType === 'compliance';
+      addUpload(file, projectId, projectName, { 
+        truth_type: truthType,
+        standards_mode: isRuleSource,
+        domain: isRuleSource ? 'regulatory' : undefined
+      });
     });
   };
 
