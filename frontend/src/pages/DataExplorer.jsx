@@ -18,7 +18,7 @@ import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
-  Shield, Play, Folder
+  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -102,6 +102,10 @@ export default function DataExplorer() {
   const [complianceRunning, setComplianceRunning] = useState(false);
   const [complianceResults, setComplianceResults] = useState(null);
   const [complianceError, setComplianceError] = useState(null);
+  
+  // Rules state
+  const [rules, setRules] = useState([]);
+  const [loadingRules, setLoadingRules] = useState(false);
   
   const c = { ...colors, ...brandColors };
 
@@ -230,6 +234,33 @@ export default function DataExplorer() {
     }
   };
 
+  // Load extracted rules
+  const loadRules = async () => {
+    setLoadingRules(true);
+    try {
+      const response = await api.get('/status/rules');
+      setRules(response.data?.rules || []);
+    } catch (err) {
+      console.log('Could not load rules:', err);
+      // Try fallback to references endpoint
+      try {
+        const refRes = await api.get('/status/references');
+        setRules(refRes.data?.rules || []);
+      } catch (e) {
+        setRules([]);
+      }
+    } finally {
+      setLoadingRules(false);
+    }
+  };
+
+  // Load rules when switching to rules tab
+  useEffect(() => {
+    if (activeTab === 'rules') {
+      loadRules();
+    }
+  }, [activeTab]);
+
   // Generate mock relationships based on common column patterns
   const generateMockRelationships = (tables) => {
     const rels = [];
@@ -285,6 +316,7 @@ export default function DataExplorer() {
     { id: 'relationships', label: '🔗 Relationships', icon: Link2 },
     { id: 'health', label: '❤️ Data Health', icon: Heart },
     { id: 'compliance', label: '✅ Compliance', icon: Shield },
+    { id: 'rules', label: '📜 Rules', icon: BookOpen },
   ];
 
   const totalTables = tables.length;
@@ -746,6 +778,144 @@ export default function DataExplorer() {
                 <p style={{ margin: 0, fontSize: '0.85rem' }}>
                   Upload regulatory documents to the Reference Library, then run a check to find violations in your data.
                 </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Rules Tab */}
+      {activeTab === 'rules' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <BookOpen size={18} style={{ color: c.royalPurple }} />
+              Extracted Rules ({rules.length})
+            </div>
+            <button 
+              onClick={loadRules}
+              disabled={loadingRules}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${c.border}`,
+                borderRadius: 6, fontSize: '0.8rem', color: c.textMuted, cursor: 'pointer'
+              }}
+            >
+              <RefreshCw size={14} style={{ animation: loadingRules ? 'spin 1s linear infinite' : 'none' }} /> Refresh
+            </button>
+          </div>
+          <div style={{ padding: '1rem' }}>
+            {loadingRules ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+                <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }} />
+                <p>Loading rules...</p>
+              </div>
+            ) : rules.length === 0 ? (
+              <div style={{ padding: '2rem', textAlign: 'center' }}>
+                <BookOpen size={48} style={{ color: c.textMuted, opacity: 0.3, marginBottom: '0.75rem' }} />
+                <p style={{ color: c.text, fontWeight: 500, margin: '0 0 0.5rem' }}>No rules extracted yet</p>
+                <p style={{ color: c.textMuted, fontSize: '0.85rem', margin: 0 }}>
+                  Upload regulatory documents (IRS Pub 15, SECURE 2.0, etc.) to the Reference Library to extract compliance rules.
+                </p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {rules.map((rule, i) => {
+                  const severityColor = rule.severity === 'critical' ? c.scarletSage : rule.severity === 'high' ? c.warning : c.electricBlue;
+                  return (
+                    <div key={i} style={{ 
+                      background: c.background, 
+                      border: `1px solid ${c.border}`, 
+                      borderLeft: `4px solid ${severityColor}`, 
+                      borderRadius: 8, 
+                      padding: '1rem',
+                      overflow: 'hidden'
+                    }}>
+                      {/* Rule Header */}
+                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, color: c.text, marginBottom: '0.25rem' }}>
+                            {rule.title || rule.rule_id || `Rule ${i + 1}`}
+                          </div>
+                          <div style={{ fontSize: '0.8rem', color: c.textMuted }}>
+                            Source: {rule.source_document || 'Unknown'}
+                            {rule.source_section && ` • ${rule.source_section}`}
+                          </div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          <span style={{ 
+                            fontSize: '0.7rem', padding: '0.2rem 0.5rem', 
+                            background: `${severityColor}20`, color: severityColor, 
+                            borderRadius: 4, textTransform: 'uppercase', fontWeight: 600 
+                          }}>
+                            {rule.severity || 'medium'}
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Rule Description */}
+                      {rule.description && (
+                        <p style={{ fontSize: '0.85rem', color: c.text, margin: '0.5rem 0', lineHeight: 1.5 }}>
+                          {rule.description}
+                        </p>
+                      )}
+                      
+                      {/* Rule Details */}
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
+                        {rule.applies_to && Object.keys(rule.applies_to).length > 0 && (
+                          <div style={{ background: c.cardBg, padding: '0.5rem 0.75rem', borderRadius: 6, border: `1px solid ${c.border}` }}>
+                            <div style={{ fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Applies To</div>
+                            <div style={{ fontSize: '0.8rem', color: c.text, fontFamily: 'monospace' }}>
+                              {JSON.stringify(rule.applies_to)}
+                            </div>
+                          </div>
+                        )}
+                        {rule.requirement && Object.keys(rule.requirement).length > 0 && (
+                          <div style={{ background: c.cardBg, padding: '0.5rem 0.75rem', borderRadius: 6, border: `1px solid ${c.border}` }}>
+                            <div style={{ fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Requirement</div>
+                            <div style={{ fontSize: '0.8rem', color: c.text, fontFamily: 'monospace' }}>
+                              {JSON.stringify(rule.requirement)}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                      
+                      {/* SQL Query Pattern */}
+                      {rule.suggested_sql_pattern && (
+                        <div style={{ marginTop: '0.75rem' }}>
+                          <div style={{ 
+                            display: 'flex', alignItems: 'center', gap: '0.5rem', 
+                            fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.35rem' 
+                          }}>
+                            <Code size={12} /> SQL Query Pattern
+                          </div>
+                          <div style={{ 
+                            background: '#1e1e1e', 
+                            color: '#d4d4d4', 
+                            padding: '0.75rem', 
+                            borderRadius: 6, 
+                            fontSize: '0.8rem', 
+                            fontFamily: 'monospace',
+                            whiteSpace: 'pre-wrap',
+                            overflowX: 'auto'
+                          }}>
+                            {rule.suggested_sql_pattern}
+                          </div>
+                        </div>
+                      )}
+                      
+                      {/* Source Text */}
+                      {rule.source_text && (
+                        <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', background: `${c.skyBlue}10`, borderRadius: 6, borderLeft: `3px solid ${c.skyBlue}` }}>
+                          <div style={{ fontSize: '0.7rem', color: c.textMuted, marginBottom: '0.25rem' }}>Original Text</div>
+                          <div style={{ fontSize: '0.8rem', color: c.text, fontStyle: 'italic', lineHeight: 1.4 }}>
+                            "{rule.source_text.slice(0, 300)}{rule.source_text.length > 300 ? '...' : ''}"
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>
