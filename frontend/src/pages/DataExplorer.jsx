@@ -221,7 +221,7 @@ export default function DataExplorer() {
     setComplianceResults(null);
     
     try {
-      const response = await api.post('/standards/check', { project_id: activeProject.id }, { timeout: 180000 });
+      const response = await api.post('/status/standards/check', { project_id: activeProject.id }, { timeout: 180000 });
       setComplianceResults(response.data);
     } catch (err) {
       setComplianceError(err.response?.data?.detail || err.message || 'Compliance check failed');
