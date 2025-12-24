@@ -14,11 +14,12 @@
 
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Rocket, HelpCircle, ChevronDown, ChevronUp, MessageSquare } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
+import { useTooltips } from '../context/TooltipContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
 
 // Mission Control Color Palette
@@ -141,6 +142,7 @@ function Navigation({ onOpenGenome }) {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
   const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
+  const { tooltipsEnabled, toggleTooltips } = useTooltips();
   const [adminExpanded, setAdminExpanded] = useState(false);
 
   const isActive = (path) => {
@@ -418,6 +420,20 @@ function Navigation({ onOpenGenome }) {
             title={tourEnabled ? 'Turn off guide' : 'Turn on guide'}
           >
             <HelpCircle size={16} />
+          </button>
+
+          {/* Tooltip Toggle */}
+          <button
+            onClick={toggleTooltips}
+            style={{
+              ...styles.helpBtn,
+              background: tooltipsEnabled ? COLORS.primary : COLORS.cardBg,
+              color: tooltipsEnabled ? 'white' : COLORS.textMuted,
+              borderColor: tooltipsEnabled ? COLORS.primary : COLORS.border,
+            }}
+            title={tooltipsEnabled ? 'Turn off tooltips' : 'Turn on tooltips'}
+          >
+            <MessageSquare size={16} />
           </button>
 
           {/* User menu */}
