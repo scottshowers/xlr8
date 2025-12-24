@@ -1,39 +1,38 @@
 /**
  * StoryPage.jsx - The XLR8 Story (Narrative Version)
  * 
+ * UPDATED: December 23, 2025
+ * - Mission Control color palette (#83b16d)
+ * - Removed dark mode
+ * 
  * Scrolling chapter-based narrative explaining the platform.
  * Route: /story
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
+import { Rocket } from 'lucide-react';
 
-const getColors = (dark) => ({
-  bg: dark ? '#12151c' : '#f5f6f8',
-  bgAlt: dark ? '#1a1e28' : '#eef0f4',
-  card: dark ? '#1e232e' : '#ffffff',
-  cardBorder: dark ? '#2a2f3a' : '#e4e7ec',
-  text: dark ? '#e4e6ea' : '#2d3643',
-  textMuted: dark ? '#8b95a5' : '#6b7a8f',
-  textLight: dark ? '#5f6a7d' : '#9aa5b5',
+// Mission Control Colors
+const colors = {
+  bg: '#f0f2f5',
+  bgAlt: '#e8ebf0',
+  card: '#ffffff',
+  cardBorder: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
   primary: '#83b16d',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  primaryDark: '#6a9b5a',
-  dustyBlue: '#7889a0',
-  dustyBlueLight: dark ? 'rgba(120, 137, 160, 0.15)' : 'rgba(120, 137, 160, 0.1)',
-  taupe: '#9b8f82',
-  taupeLight: dark ? 'rgba(155, 143, 130, 0.15)' : 'rgba(155, 143, 130, 0.1)',
-  slate: '#6b7a8f',
-  slateLight: dark ? 'rgba(107, 122, 143, 0.15)' : 'rgba(107, 122, 143, 0.1)',
-  error: '#a07070',
-  errorLight: dark ? 'rgba(160, 112, 112, 0.15)' : 'rgba(160, 112, 112, 0.1)',
-});
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  primaryDark: '#6b9b5a',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
+  warning: '#d97706',
+  error: '#dc2626',
+};
 
 export default function StoryPage() {
   const navigate = useNavigate();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
   const [scrollProgress, setScrollProgress] = useState(0);
 
   useEffect(() => {
@@ -86,12 +85,13 @@ export default function StoryPage() {
     </section>
   );
 
-  const Lead = ({ children }) => (
+  const Lead = ({ children, style = {} }) => (
     <p style={{
       fontSize: '1.15rem',
       color: colors.textMuted,
       maxWidth: 600,
       lineHeight: 1.7,
+      ...style
     }}>{children}</p>
   );
 
@@ -119,17 +119,20 @@ export default function StoryPage() {
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
-        background: darkMode ? 'rgba(18, 21, 28, 0.95)' : 'rgba(245, 246, 248, 0.95)',
+        background: 'rgba(240, 242, 245, 0.95)',
         backdropFilter: 'blur(10px)',
         zIndex: 100,
         borderBottom: `1px solid ${colors.cardBorder}`,
       }}>
-        <div style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.4rem',
-          fontWeight: 800,
-          color: colors.primary,
-        }}>XLR8</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{
+            fontFamily: "'Sora', sans-serif",
+            fontSize: '1.4rem',
+            fontWeight: 800,
+            color: colors.primary,
+          }}>XLR8</span>
+          <Rocket size={18} color={colors.primary} />
+        </div>
         <button
           onClick={() => navigate('/dashboard')}
           style={{
@@ -168,129 +171,93 @@ export default function StoryPage() {
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: colors.cardBorder }} />
             <span style={{ width: 10, height: 10, borderRadius: '50%', background: colors.cardBorder }} />
           </div>
-          <div style={{ color: colors.slate }}>// The question we asked</div>
+          <div style={{ color: colors.textLight }}>// The question we asked</div>
           <div style={{ marginTop: '0.5rem' }}>
             <span style={{ color: colors.primary }}>const</span> problem = {'{'}
           </div>
           <div style={{ paddingLeft: '1rem', color: colors.textMuted }}>
-            hours: <span style={{ color: colors.dustyBlue }}>"too many"</span>,
+            hours: <span style={{ color: colors.accent }}>"too many"</span>,
           </div>
           <div style={{ paddingLeft: '1rem', color: colors.textMuted }}>
-            mistakes: <span style={{ color: colors.dustyBlue }}>"inevitable"</span>,
+            mistakes: <span style={{ color: colors.accent }}>"inevitable"</span>,
           </div>
           <div style={{ paddingLeft: '1rem', color: colors.textMuted }}>
-            knowledge: <span style={{ color: colors.dustyBlue }}>"trapped"</span>
+            knowledge: <span style={{ color: colors.accent }}>"siloed"</span>,
           </div>
           <div>{'}'}</div>
         </div>
       </Chapter>
 
-      {/* Chapter 2: The Transformation */}
-      <Chapter num={2} title="The Transformation" style={{ background: colors.bgAlt }}>
-        <Lead>Here's what changed when we stopped accepting "that's just how it's done."</Lead>
-        
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '2rem', marginTop: '2rem', alignItems: 'center' }}>
-          {/* Old Way */}
-          <div style={{ background: colors.card, border: `1px solid ${colors.cardBorder}`, borderRadius: 12, padding: '1.5rem' }}>
-            <div style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.75rem', fontWeight: 700, color: colors.slate, letterSpacing: 1, marginBottom: '1rem' }}>THE OLD WAY</div>
-            {['Weeks in spreadsheets', 'Manual validation', 'Knowledge silos', 'Incomplete coverage'].map((item, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 0', borderBottom: i < 3 ? `1px dashed ${colors.cardBorder}` : 'none' }}>
-                <span style={{ color: colors.error }}>✗</span>
-                <span style={{ fontSize: '0.85rem', color: colors.textMuted }}>{item}</span>
-              </div>
-            ))}
-          </div>
-          
-          {/* Arrow */}
-          <div style={{ fontSize: '2rem', color: colors.primary }}>→</div>
-          
-          {/* New Way */}
-          <div style={{ background: colors.card, border: `2px solid ${colors.primary}`, borderRadius: 12, padding: '1.5rem' }}>
-            <div style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.75rem', fontWeight: 700, color: colors.primary, letterSpacing: 1, marginBottom: '1rem' }}>THE XLR8 WAY</div>
-            {['Minutes, not weeks', 'Automatic validation', 'Knowledge captured', 'Complete coverage'].map((item, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 0', borderBottom: i < 3 ? `1px dashed ${colors.primaryLight}` : 'none' }}>
-                <span style={{ color: colors.primary }}>✓</span>
-                <span style={{ fontSize: '0.85rem', color: colors.textMuted }}>{item}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </Chapter>
-
-      {/* Chapter 3: The Core Insight */}
-      <Chapter num={3} title="The Core Insight" style={{ background: colors.bg }}>
-        <Lead>Every engagement has three sources of truth. The magic happens when you connect them—especially when compliance is on the line.</Lead>
-        
-        <div style={{
-          background: colors.card,
-          border: `1px solid ${colors.cardBorder}`,
-          borderRadius: 16,
-          padding: '3rem',
-          marginTop: '2rem',
-          textAlign: 'center',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '1.5rem', flexWrap: 'wrap' }}>
-            {[
-              { icon: '🗄️', label: 'Reality', sub: 'What exists', color: colors.primary, bg: colors.primaryLight },
-              { icon: '📋', label: 'Intent', sub: 'What was asked', color: colors.dustyBlue, bg: colors.dustyBlueLight },
-              { icon: '⚖️', label: 'Reference', sub: 'Laws & Compliance', color: colors.taupe, bg: colors.taupeLight },
-            ].map((truth, i) => (
-              <React.Fragment key={i}>
-                {i > 0 && <span style={{ fontFamily: "'Sora', sans-serif", fontSize: '2rem', fontWeight: 800, color: colors.cardBorder }}>×</span>}
-                <div style={{
-                  padding: '1.5rem 2rem',
-                  borderRadius: 12,
-                  background: truth.bg,
-                  border: `2px solid ${truth.color}`,
-                  minWidth: 140,
-                }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>{truth.icon}</div>
-                  <div style={{ fontFamily: "'Sora', sans-serif", fontWeight: 700, color: truth.color }}>{truth.label}</div>
-                  <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{truth.sub}</div>
-                </div>
-              </React.Fragment>
-            ))}
-            <span style={{ fontFamily: "'Sora', sans-serif", fontSize: '2rem', fontWeight: 800, color: colors.cardBorder }}>=</span>
-            <div style={{
-              background: `linear-gradient(135deg, ${colors.primary}, ${colors.dustyBlue})`,
-              color: 'white',
-              padding: '1rem 2rem',
+      {/* Chapter 2: The Problem */}
+      <Chapter num={2} title="What We Were Fighting" style={{ background: colors.bgAlt }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem', marginTop: '2rem' }}>
+          {[
+            { icon: '📊', label: 'Spreadsheet Hell', desc: 'Every project started with blank Excel. Copy. Paste. Pray.' },
+            { icon: '⏰', label: 'Time Drain', desc: 'Weeks spent on manual validation. Same checks, every time.' },
+            { icon: '🔍', label: 'Missed Issues', desc: 'Human eyes miss things. Compliance gaps slip through.' },
+            { icon: '🧠', label: 'Knowledge Loss', desc: 'Senior consultants leave. Expertise walks out the door.' },
+          ].map((item, i) => (
+            <div key={i} style={{
+              background: colors.card,
+              border: `1px solid ${colors.cardBorder}`,
               borderRadius: 12,
-              fontFamily: "'Sora', sans-serif",
-              fontWeight: 700,
+              padding: '1.5rem',
             }}>
-              Complete Picture
+              <div style={{ fontSize: '2rem', marginBottom: '0.75rem' }}>{item.icon}</div>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, marginBottom: '0.5rem', color: colors.text }}>{item.label}</h3>
+              <p style={{ fontSize: '0.85rem', color: colors.textMuted, lineHeight: 1.5 }}>{item.desc}</p>
             </div>
-          </div>
-          
-          {/* Compliance callout */}
-          <div style={{
-            marginTop: '2rem',
-            padding: '1.5rem',
-            background: colors.taupeLight,
-            border: `1px solid ${colors.taupe}`,
-            borderRadius: 12,
-          }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', gap: '1rem' }}>
-              <span style={{ fontSize: '1.5rem' }}>⚖️</span>
-              <div>
-                <div style={{ fontWeight: 700, color: colors.text, marginBottom: '0.5rem' }}>
-                  Reference = The "Oh Shit" Layer
-                </div>
-                <p style={{ fontSize: '0.9rem', color: colors.textMuted, margin: 0, lineHeight: 1.6 }}>
-                  Legislation. Regulations. Compliance requirements. FLSA, ACA, state labor laws, data privacy rules. 
-                  This isn't just best practice—it's legal exposure. XLR8 validates your data against the laws that 
-                  matter, catching compliance gaps before they become audit findings or lawsuits.
-                </p>
-              </div>
-            </div>
-          </div>
+          ))}
         </div>
       </Chapter>
 
-      {/* Chapter 4: Built-In Intelligence */}
-      <Chapter num={4} title="Built-In Intelligence" style={{ background: colors.bgAlt }}>
-        <Lead>Not just storage. Not just search. Actual understanding.</Lead>
+      {/* Chapter 3: The Solution */}
+      <Chapter num={3} title="Three Truths Architecture" style={{ background: colors.bg }}>
+        <Lead>Every question has three sides. We built a system that knows them all.</Lead>
+        
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', marginTop: '2rem' }}>
+          {[
+            { 
+              color: colors.primary, 
+              title: 'Reality', 
+              subtitle: 'What IS',
+              desc: 'Your actual data. Employee rosters, pay registers, transactions. Parsed into queryable tables.',
+              storage: '→ DuckDB'
+            },
+            { 
+              color: colors.accent, 
+              title: 'Intent', 
+              subtitle: 'What SHOULD BE',
+              desc: 'Customer documents describing requirements. Implementation guides, SOWs, specs.',
+              storage: '→ ChromaDB'
+            },
+            { 
+              color: '#5f4282', 
+              title: 'Reference', 
+              subtitle: 'Best Practice',
+              desc: 'Industry standards, compliance rules, regulatory requirements. Shared knowledge base.',
+              storage: '→ Reference Library'
+            },
+          ].map((item, i) => (
+            <div key={i} style={{
+              background: colors.card,
+              border: `1px solid ${colors.cardBorder}`,
+              borderTop: `4px solid ${item.color}`,
+              borderRadius: 12,
+              padding: '1.5rem',
+            }}>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '0.25rem', color: colors.text }}>{item.title}</h3>
+              <div style={{ fontSize: '0.8rem', fontWeight: 600, color: item.color, marginBottom: '0.75rem' }}>{item.subtitle}</div>
+              <p style={{ fontSize: '0.85rem', color: colors.textMuted, lineHeight: 1.5, marginBottom: '0.75rem' }}>{item.desc}</p>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, color: item.color }}>{item.storage}</span>
+            </div>
+          ))}
+        </div>
+      </Chapter>
+
+      {/* Chapter 4: The Intelligence */}
+      <Chapter num={4} title="It Learns. It Finds. It Validates." style={{ background: colors.bgAlt }}>
+        <Lead>The platform gets smarter with every upload, every query, every validation.</Lead>
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', marginTop: '2rem' }}>
           {[
@@ -306,8 +273,6 @@ export default function StoryPage() {
               border: `1px solid ${colors.cardBorder}`,
               borderRadius: 12,
               padding: '1.5rem',
-              transition: 'all 0.2s ease',
-              cursor: 'default',
             }}>
               <div style={{
                 width: 40, height: 40, borderRadius: 10,
@@ -339,7 +304,7 @@ export default function StoryPage() {
             top: 0,
             bottom: 0,
             width: 3,
-            background: `linear-gradient(180deg, ${colors.primary}, ${colors.dustyBlue}, ${colors.taupe})`,
+            background: `linear-gradient(180deg, ${colors.primary}, ${colors.accent}, #5f4282)`,
           }} />
           
           {[
@@ -362,7 +327,7 @@ export default function StoryPage() {
                 borderRadius: 12, padding: '1.5rem',
               }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '0.75rem' }}>
-                  <div style={{ fontWeight: 700 }}>{step.title}</div>
+                  <div style={{ fontWeight: 700, color: colors.text }}>{step.title}</div>
                   <span style={{
                     fontFamily: "'JetBrains Mono', monospace", fontSize: '0.7rem',
                     color: colors.primary, background: colors.primaryLight,
@@ -420,7 +385,7 @@ export default function StoryPage() {
                 }}>{panel.badge}</span>
               </h3>
               <p style={{ fontSize: '0.85rem', color: colors.textMuted, marginBottom: '1.5rem' }}>{panel.subtitle}</p>
-              <ul style={{ listStyle: 'none' }}>
+              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                 {panel.items.map((item, j) => (
                   <li key={j} style={{
                     display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
@@ -453,7 +418,6 @@ export default function StoryPage() {
               padding: '1rem 2rem', background: colors.primary, color: 'white',
               border: 'none', borderRadius: 12, fontSize: '1rem', fontWeight: 700,
               cursor: 'pointer', fontFamily: "'Sora', sans-serif",
-              transition: 'all 0.2s ease',
             }}
           >
             Enter XLR8 <span>→</span>
