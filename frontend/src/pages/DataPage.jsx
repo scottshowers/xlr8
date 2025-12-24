@@ -20,7 +20,7 @@ import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import { useAuth } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
+import { useTooltips } from '../context/TooltipContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
 import api from '../services/api';
 import {
@@ -53,40 +53,21 @@ const colors = {
   success: '#285390',
 };
 
-// Theme-aware colors
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : colors.background,
-  card: dark ? '#242b3d' : colors.cardBg,
-  cardBg: dark ? '#242b3d' : colors.cardBg,
-  cardBorder: dark ? '#2d3548' : colors.border,
-  text: dark ? '#e8eaed' : colors.text,
-  textMuted: dark ? '#8b95a5' : colors.textMuted,
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: colors.primary,
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  accent: colors.accent,
-  accentLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
-  warning: colors.warning,
-  warningLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
-  red: colors.scarletSage,
-  redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
-  divider: dark ? '#2d3548' : colors.border,
-  border: dark ? '#2d3548' : colors.border,
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
-  tabBg: dark ? '#1e2433' : colors.white,
-  white: dark ? '#242b3d' : colors.white,
-  tooltipBg: colors.text,
-  tooltipText: colors.white,
-  // Add missing static colors
-  royalPurple: colors.royalPurple,
-  electricBlue: colors.electricBlue,
-  skyBlue: colors.skyBlue,
-  iceFlow: colors.iceFlow,
-  silver: colors.silver,
-  scarletSage: colors.scarletSage,
-  success: colors.success,
-  background: dark ? '#1a1f2e' : colors.background,
-});
+// Extended colors object with all needed properties (no theme switching)
+colors.bg = colors.background;
+colors.card = colors.cardBg;
+colors.cardBorder = colors.border;
+colors.textLight = '#94a3b8';
+colors.primaryLight = 'rgba(131, 177, 109, 0.1)';
+colors.accentLight = 'rgba(40, 83, 144, 0.1)';
+colors.warningLight = 'rgba(217, 119, 6, 0.1)';
+colors.red = colors.scarletSage;
+colors.redLight = 'rgba(153, 60, 68, 0.1)';
+colors.divider = colors.border;
+colors.inputBg = '#f8fafc';
+colors.tabBg = colors.white;
+colors.tooltipBg = colors.text;
+colors.tooltipText = colors.white;
 
 // ============================================================================
 // TOOLTIP COMPONENT (Fixed positioning to avoid clipping)
@@ -95,8 +76,20 @@ function Tooltip({ children, title, detail, action, width = 280 }) {
   const [show, setShow] = useState(false);
   const [coords, setCoords] = useState({ x: 0, y: 0, showBelow: false });
   const triggerRef = useRef(null);
+  
+  // Get global tooltip setting
+  let tooltipsEnabled = true;
+  try {
+    const context = useTooltips();
+    tooltipsEnabled = context.tooltipsEnabled;
+  } catch {
+    // If not wrapped in TooltipProvider, default to enabled
+    tooltipsEnabled = true;
+  }
 
   const handleMouseEnter = () => {
+    if (!tooltipsEnabled) return;
+    
     if (triggerRef.current) {
       const rect = triggerRef.current.getBoundingClientRect();
       const spaceAbove = rect.top;
@@ -111,6 +104,8 @@ function Tooltip({ children, title, detail, action, width = 280 }) {
     setShow(true);
   };
 
+  const shouldShow = show && tooltipsEnabled;
+
   return (
     <div 
       ref={triggerRef}
@@ -119,7 +114,7 @@ function Tooltip({ children, title, detail, action, width = 280 }) {
       onMouseLeave={() => setShow(false)}
     >
       {children}
-      {show && (
+      {shouldShow && (
         <div style={{
           position: 'fixed',
           left: Math.min(Math.max(coords.x, width / 2 + 16), window.innerWidth - width / 2 - 16),
@@ -348,9 +343,9 @@ const FUNCTIONAL_AREAS = [
 ];
 
 const TABS = [
-  { id: 'upload', label: 'Upload', icon: UploadIcon },
-  { id: 'files', label: 'Files', icon: Database },
-  { id: 'health', label: 'Health', icon: Activity },
+  { id: 'upload', label: 'Upload', icon: UploadIcon, tooltip: { title: 'Upload Files', detail: 'Drag & drop or browse to upload files. AI classifies them by Truth Type, Functional Area, and Content Domain before processing.', action: 'Supports Excel, CSV, PDF, Word' } },
+  { id: 'files', label: 'Files', icon: Database, tooltip: { title: 'Uploaded Files', detail: 'View all processed files with their tables, columns, and row counts. Expand to see detailed schema information.', action: 'Click to expand and explore data' } },
+  { id: 'health', label: 'Health', icon: Activity, tooltip: { title: 'Data Health', detail: 'Monitor data integrity across DuckDB, ChromaDB, and Supabase. See relationship maps and run diagnostics.', action: 'Run Deep Clean to fix sync issues' } },
 ];
 
 // ============================================================================
@@ -358,8 +353,7 @@ const TABS = [
 // ============================================================================
 export default function DataPage() {
   const { activeProject, projectName, customerName } = useProject();
-  const { darkMode } = useTheme();
-  const themeColors = getColors(darkMode);
+  const themeColors = colors; // Use static Mission Control colors
   const [activeTab, setActiveTab] = useState('upload');
   const { uploads, hasActive } = useUpload();
   
@@ -407,31 +401,32 @@ export default function DataPage() {
             const isActive = activeTab === tab.id;
             const showBadge = tab.id === 'upload' && (hasActive || stagedCount > 0);
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 24px',
-                  border: 'none', background: isActive ? themeColors.card : 'transparent',
-                  color: isActive ? themeColors.primary : themeColors.textMuted, 
-                  fontWeight: 600, fontSize: '14px', cursor: 'pointer', 
-                  borderBottom: isActive ? `2px solid ${themeColors.primary}` : '2px solid transparent',
-                  marginBottom: '-1px', transition: 'all 0.15s ease',
-                }}
-              >
-                <Icon size={18} />
-                {tab.label}
-                {showBadge && (
-                  <span style={{ 
-                    minWidth: 18, height: 18, borderRadius: '50%', 
-                    backgroundColor: hasActive ? themeColors.warning : themeColors.primary,
-                    color: 'white', fontSize: '11px', fontWeight: 700,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center'
-                  }}>
-                    {hasActive ? '•' : stagedCount}
-                  </span>
-                )}
-              </button>
+              <Tooltip key={tab.id} title={tab.tooltip.title} detail={tab.tooltip.detail} action={tab.tooltip.action}>
+                <button
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '8px', padding: '16px 24px',
+                    border: 'none', background: isActive ? themeColors.card : 'transparent',
+                    color: isActive ? themeColors.primary : themeColors.textMuted, 
+                    fontWeight: 600, fontSize: '14px', cursor: 'pointer', 
+                    borderBottom: isActive ? `2px solid ${themeColors.primary}` : '2px solid transparent',
+                    marginBottom: '-1px', transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Icon size={18} />
+                  {tab.label}
+                  {showBadge && (
+                    <span style={{ 
+                      minWidth: 18, height: 18, borderRadius: '50%', 
+                      backgroundColor: hasActive ? themeColors.warning : themeColors.primary,
+                      color: 'white', fontSize: '11px', fontWeight: 700,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center'
+                    }}>
+                      {hasActive ? '•' : stagedCount}
+                    </span>
+                  )}
+                </button>
+              </Tooltip>
             );
           })}
         </div>
@@ -1261,7 +1256,6 @@ function UploadTab({ colors, onStagedCountChange }) {
 // ============================================================================
 function FilesTab({ colors }) {
   const { projects, activeProject } = useProject();
-  const { darkMode } = useTheme();
   const [structuredData, setStructuredData] = useState(null);
   const [documents, setDocuments] = useState(null);
   const [loading, setLoading] = useState(true);
