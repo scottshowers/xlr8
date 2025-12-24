@@ -12,7 +12,6 @@
 
 import { useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { useTheme } from '../context/ThemeContext'
 import api from '../services/api'
 import { 
   Database, Play, Download, 
@@ -26,12 +25,16 @@ import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContaine
 // CONSTANTS
 // =============================================================================
 
+// Mission Control Colors
 const COLORS = {
-  grassGreen: '#83b16d',
-  grassGreenLight: '#f0f7ed',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
-  border: '#e1e8ed',
+  primary: '#83b16d',
+  primaryLight: '#f0f7ed',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  border: '#e2e8f0',
+  card: '#ffffff',
+  bg: '#f0f2f5',
+  inputBg: '#f8fafc',
 }
 
 const CHART_COLORS = ['#83b16d', '#93abd9', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#14b8a6']
@@ -82,7 +85,6 @@ function parseSmartTableName(fullName, file, sheet) {
 
 export default function QueryBuilderPage() {
   const { projectName, activeProject } = useProject()
-  const { darkMode, T } = useTheme()
   
   // Schema state
   const [tables, setTables] = useState([])
@@ -436,36 +438,36 @@ export default function QueryBuilderPage() {
   const styles = {
     container: { minHeight: '100%' },
     header: { marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' },
-    title: { fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: 700, color: T.text, margin: 0 },
-    subtitle: { color: T.textDim, marginTop: '0.25rem' },
+    title: { fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: 700, color: '#1a2332', margin: 0 },
+    subtitle: { color: '#1a2332'Dim, marginTop: '0.25rem' },
     headerActions: { display: 'flex', gap: '0.5rem' },
-    btn: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', border: `1px solid ${T.border}`, borderRadius: '8px', background: T.bgCard, color: T.textDim, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer' },
-    btnActive: { background: COLORS.grassGreenLight, borderColor: COLORS.grassGreen, color: COLORS.grassGreen },
-    mainCard: { background: T.bgCard, borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' },
+    btn: { display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 1rem', border: `1px solid ${'#e2e8f0'}`, borderRadius: '8px', background: '#ffffff', color: '#1a2332'Dim, fontSize: '0.875rem', fontWeight: 500, cursor: 'pointer' },
+    btnActive: { background: COLORS.primaryLight, borderColor: COLORS.primary, color: COLORS.primary },
+    mainCard: { background: '#ffffff', borderRadius: '16px', boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)', overflow: 'hidden' },
     grid: { display: 'grid', gridTemplateColumns: '320px 1fr', minHeight: '600px' },
-    leftPanel: { borderRight: `1px solid ${T.border}`, padding: '1rem', overflowY: 'auto', maxHeight: '75vh' },
+    leftPanel: { borderRight: `1px solid ${'#e2e8f0'}`, padding: '1rem', overflowY: 'auto', maxHeight: '75vh' },
     rightPanel: { display: 'flex', flexDirection: 'column', overflow: 'hidden' },
     section: { marginBottom: '1.25rem' },
     sectionHeader: { display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem' },
-    stepNumber: { width: '24px', height: '24px', borderRadius: '6px', background: COLORS.grassGreen, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 600 },
-    sectionTitle: { fontWeight: 600, color: T.text, fontSize: '0.875rem' },
-    tableCard: { padding: '0.75rem', border: `2px solid ${T.border}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '0.5rem', transition: 'all 0.15s ease' },
-    tableCardSelected: { borderColor: COLORS.grassGreen, background: darkMode ? 'rgba(131, 177, 109, 0.1)' : COLORS.grassGreenLight },
-    tableName: { fontWeight: 600, color: T.text, fontSize: '0.85rem', wordBreak: 'break-word' },
-    tableMeta: { fontSize: '0.7rem', color: T.textDim, marginTop: '0.25rem', wordBreak: 'break-word' },
-    columnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', maxHeight: '140px', overflowY: 'auto', padding: '0.5rem', background: T.panelLight, borderRadius: '8px' },
-    columnBtn: { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem', border: 'none', borderRadius: '4px', background: 'transparent', color: T.textDim, fontSize: '0.7rem', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' },
-    columnBtnSelected: { background: darkMode ? 'rgba(131, 177, 109, 0.15)' : COLORS.grassGreenLight, color: COLORS.grassGreen, fontWeight: 500 },
-    checkbox: (checked) => ({ width: '12px', height: '12px', borderRadius: '3px', border: `2px solid ${checked ? COLORS.grassGreen : T.border}`, background: checked ? COLORS.grassGreen : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }),
-    filterRow: { display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.4rem', padding: '0.5rem', background: T.panelLight, borderRadius: '6px', flexWrap: 'wrap' },
-    select: { flex: 1, minWidth: '80px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
-    input: { flex: 1, minWidth: '60px', padding: '0.4rem', border: `1px solid ${T.border}`, borderRadius: '4px', background: T.bgCard, color: T.text, fontSize: '0.75rem' },
-    runBtn: { width: '100%', padding: '0.875rem', border: 'none', borderRadius: '10px', background: COLORS.grassGreen, color: 'white', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' },
-    sqlPreview: { background: '#1e293b', color: '#4ade80', padding: '1rem', fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', borderBottom: `1px solid ${T.border}`, maxHeight: '120px', overflowY: 'auto' },
-    resultsHeader: { padding: '1rem', borderBottom: `1px solid ${T.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' },
+    stepNumber: { width: '24px', height: '24px', borderRadius: '6px', background: COLORS.primary, color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 600 },
+    sectionTitle: { fontWeight: 600, color: '#1a2332', fontSize: '0.875rem' },
+    tableCard: { padding: '0.75rem', border: `2px solid ${'#e2e8f0'}`, borderRadius: '10px', cursor: 'pointer', marginBottom: '0.5rem', transition: 'all 0.15s ease' },
+    tableCardSelected: { borderColor: COLORS.primary, background: COLORS.primaryLight },
+    tableName: { fontWeight: 600, color: '#1a2332', fontSize: '0.85rem', wordBreak: 'break-word' },
+    tableMeta: { fontSize: '0.7rem', color: '#1a2332'Dim, marginTop: '0.25rem', wordBreak: 'break-word' },
+    columnGrid: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.25rem', maxHeight: '140px', overflowY: 'auto', padding: '0.5rem', background: '#f8fafc', borderRadius: '8px' },
+    columnBtn: { display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.4rem', border: 'none', borderRadius: '4px', background: 'transparent', color: '#1a2332'Dim, fontSize: '0.7rem', cursor: 'pointer', textAlign: 'left', overflow: 'hidden' },
+    columnBtnSelected: { background: COLORS.primaryLight, color: COLORS.primary, fontWeight: 500 },
+    checkbox: (checked) => ({ width: '12px', height: '12px', borderRadius: '3px', border: `2px solid ${checked ? COLORS.primary : '#e2e8f0'}`, background: checked ? COLORS.primary : 'transparent', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }),
+    filterRow: { display: 'flex', gap: '0.4rem', alignItems: 'center', marginBottom: '0.4rem', padding: '0.5rem', background: '#f8fafc', borderRadius: '6px', flexWrap: 'wrap' },
+    select: { flex: 1, minWidth: '80px', padding: '0.4rem', border: `1px solid ${'#e2e8f0'}`, borderRadius: '4px', background: '#ffffff', color: '#1a2332', fontSize: '0.75rem' },
+    input: { flex: 1, minWidth: '60px', padding: '0.4rem', border: `1px solid ${'#e2e8f0'}`, borderRadius: '4px', background: '#ffffff', color: '#1a2332', fontSize: '0.75rem' },
+    runBtn: { width: '100%', padding: '0.875rem', border: 'none', borderRadius: '10px', background: COLORS.primary, color: 'white', fontSize: '0.9rem', fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' },
+    sqlPreview: { background: '#1e293b', color: '#4ade80', padding: '1rem', fontFamily: 'monospace', fontSize: '0.75rem', whiteSpace: 'pre-wrap', borderBottom: `1px solid ${'#e2e8f0'}`, maxHeight: '120px', overflowY: 'auto' },
+    resultsHeader: { padding: '1rem', borderBottom: `1px solid ${'#e2e8f0'}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' },
     table: { width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem' },
-    th: { textAlign: 'left', padding: '0.6rem 0.75rem', background: T.panelLight, borderBottom: `1px solid ${T.border}`, fontWeight: 600, color: T.text, fontSize: '0.75rem' },
-    td: { padding: '0.6rem 0.75rem', borderBottom: `1px solid ${T.border}`, color: T.textDim, fontSize: '0.75rem' },
+    th: { textAlign: 'left', padding: '0.6rem 0.75rem', background: '#f8fafc', borderBottom: `1px solid ${'#e2e8f0'}`, fontWeight: 600, color: '#1a2332', fontSize: '0.75rem' },
+    td: { padding: '0.6rem 0.75rem', borderBottom: `1px solid ${'#e2e8f0'}`, color: '#1a2332'Dim, fontSize: '0.75rem' },
     emptyState: { display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem 2rem', textAlign: 'center' },
   }
 
@@ -477,9 +479,9 @@ export default function QueryBuilderPage() {
     return (
       <div style={styles.container}>
         <div style={styles.emptyState}>
-          <Database size={48} color={T.textDim} style={{ marginBottom: '1rem' }} />
-          <h2 style={{ color: T.text, marginBottom: '0.5rem' }}>Select a Project</h2>
-          <p style={{ color: T.textDim }}>Choose a project from the header to start querying</p>
+          <Database size={48} color={'#1a2332'Dim} style={{ marginBottom: '1rem' }} />
+          <h2 style={{ color: '#1a2332', marginBottom: '0.5rem' }}>Select a Project</h2>
+          <p style={{ color: '#1a2332'Dim }}>Choose a project from the header to start querying</p>
         </div>
       </div>
     )
@@ -527,12 +529,12 @@ export default function QueryBuilderPage() {
               </div>
               
               {isLoadingSchema ? (
-                <div style={{ textAlign: 'center', padding: '1.5rem', color: T.textDim }}>
+                <div style={{ textAlign: 'center', padding: '1.5rem', color: '#1a2332'Dim }}>
                   <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
                   <p style={{ marginTop: '0.5rem', fontSize: '0.85rem' }}>Loading...</p>
                 </div>
               ) : tables.length === 0 ? (
-                <div style={{ textAlign: 'center', padding: '1.5rem', color: T.textDim, fontSize: '0.85rem' }}>
+                <div style={{ textAlign: 'center', padding: '1.5rem', color: '#1a2332'Dim, fontSize: '0.85rem' }}>
                   No tables found. Upload data first.
                 </div>
               ) : (
@@ -554,14 +556,14 @@ export default function QueryBuilderPage() {
                               {table.rows.toLocaleString()} rows • {table.columns.length} cols
                             </div>
                           </div>
-                          {isSelected && <Check size={16} color={COLORS.grassGreen} />}
+                          {isSelected && <Check size={16} color={COLORS.primary} />}
                         </div>
                       </div>
                       
                       {/* Related tables */}
                       {related.length > 0 && (
                         <div style={{ marginLeft: '0.75rem', marginBottom: '0.5rem' }}>
-                          <div style={{ fontSize: '0.65rem', color: T.textDim, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                          <div style={{ fontSize: '0.65rem', color: '#1a2332'Dim, marginBottom: '0.25rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
                             <Link2 size={10} /> Auto-join:
                           </div>
                           {related.slice(0, 3).map(r => (
@@ -571,12 +573,12 @@ export default function QueryBuilderPage() {
                               style={{ 
                                 display: 'flex', alignItems: 'center', gap: '0.4rem',
                                 padding: '0.4rem 0.6rem', marginBottom: '0.25rem',
-                                border: `1px dashed ${T.border}`, borderRadius: '6px',
-                                background: 'transparent', color: T.textDim,
+                                border: `1px dashed ${'#e2e8f0'}`, borderRadius: '6px',
+                                background: 'transparent', color: '#1a2332'Dim,
                                 fontSize: '0.7rem', cursor: 'pointer', width: '100%',
                               }}
                             >
-                              <Plus size={12} color={COLORS.grassGreen} />
+                              <Plus size={12} color={COLORS.primary} />
                               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.table.displayName}</span>
                             </button>
                           ))}
@@ -601,10 +603,10 @@ export default function QueryBuilderPage() {
                 {selectedTables.map(table => (
                   <div key={table.sqlName} style={{ marginBottom: '0.75rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: T.text }}>{table.displayName}</span>
+                      <span style={{ fontSize: '0.75rem', fontWeight: 500, color: '#1a2332' }}>{table.displayName}</span>
                       <div style={{ display: 'flex', gap: '0.5rem', flexShrink: 0 }}>
-                        <button onClick={() => selectAllColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: COLORS.grassGreen, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
-                        <button onClick={() => clearTableColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: T.textDim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
+                        <button onClick={() => selectAllColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: COLORS.primary, background: 'none', border: 'none', cursor: 'pointer' }}>All</button>
+                        <button onClick={() => clearTableColumns(table.sqlName)} style={{ fontSize: '0.65rem', color: '#1a2332'Dim, background: 'none', border: 'none', cursor: 'pointer' }}>Clear</button>
                       </div>
                     </div>
                     <div style={styles.columnGrid}>
@@ -644,7 +646,7 @@ export default function QueryBuilderPage() {
                 </div>
                 
                 {filters.length === 0 ? (
-                  <div style={{ padding: '0.75rem', textAlign: 'center', color: T.textDim, fontSize: '0.75rem', background: T.panelLight, borderRadius: '6px' }}>
+                  <div style={{ padding: '0.75rem', textAlign: 'center', color: '#1a2332'Dim, fontSize: '0.75rem', background: '#f8fafc', borderRadius: '6px' }}>
                     No filters
                   </div>
                 ) : (
@@ -684,7 +686,7 @@ export default function QueryBuilderPage() {
                           placeholder="value"
                         />
                       )}
-                      <button onClick={() => removeFilter(filter.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: T.textDim, padding: '0.2rem' }}>
+                      <button onClick={() => removeFilter(filter.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#1a2332'Dim, padding: '0.2rem' }}>
                         <X size={14} />
                       </button>
                     </div>
@@ -719,8 +721,8 @@ export default function QueryBuilderPage() {
                       onClick={() => setLimit(n)}
                       style={{
                         flex: 1, padding: '0.4rem', border: 'none', borderRadius: '4px',
-                        background: limit === n ? COLORS.grassGreen : T.panelLight,
-                        color: limit === n ? 'white' : T.textDim,
+                        background: limit === n ? COLORS.primary : '#f8fafc',
+                        color: limit === n ? 'white' : '#1a2332'Dim,
                         fontWeight: 500, cursor: 'pointer', fontSize: '0.75rem',
                       }}
                     >
@@ -769,10 +771,10 @@ export default function QueryBuilderPage() {
               <>
                 <div style={styles.resultsHeader}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <Activity size={18} color={COLORS.grassGreen} />
+                    <Activity size={18} color={COLORS.primary} />
                     <div>
-                      <div style={{ fontWeight: 600, color: T.text, fontSize: '0.9rem' }}>Results</div>
-                      <div style={{ fontSize: '0.75rem', color: T.textDim }}>
+                      <div style={{ fontWeight: 600, color: '#1a2332', fontSize: '0.9rem' }}>Results</div>
+                      <div style={{ fontSize: '0.75rem', color: '#1a2332'Dim }}>
                         {results.rowCount} rows • {results.executionTime}ms
                       </div>
                     </div>
@@ -793,7 +795,7 @@ export default function QueryBuilderPage() {
                 
                 {/* Chart */}
                 {showChart && results.data.length > 0 && (
-                  <div style={{ borderBottom: `1px solid ${T.border}`, padding: '1rem' }}>
+                  <div style={{ borderBottom: `1px solid ${'#e2e8f0'}`, padding: '1rem' }}>
                     <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', alignItems: 'center', flexWrap: 'wrap' }}>
                       <select 
                         style={{ ...styles.select, width: 'auto' }}
@@ -804,7 +806,7 @@ export default function QueryBuilderPage() {
                         <option value="pie">Pie</option>
                         <option value="line">Line</option>
                       </select>
-                      <span style={{ fontSize: '0.7rem', color: T.textDim }}>X:</span>
+                      <span style={{ fontSize: '0.7rem', color: '#1a2332'Dim }}>X:</span>
                       <select 
                         style={{ ...styles.select, width: 'auto' }}
                         value={chartConfig.xAxis}
@@ -812,7 +814,7 @@ export default function QueryBuilderPage() {
                       >
                         {results.columns.map(c => <option key={c} value={c}>{c}</option>)}
                       </select>
-                      <span style={{ fontSize: '0.7rem', color: T.textDim }}>Y:</span>
+                      <span style={{ fontSize: '0.7rem', color: '#1a2332'Dim }}>Y:</span>
                       <select 
                         style={{ ...styles.select, width: 'auto' }}
                         value={chartConfig.yAxis}
@@ -826,11 +828,11 @@ export default function QueryBuilderPage() {
                       <ResponsiveContainer width="100%" height="100%">
                         {chartType === 'bar' ? (
                           <BarChart data={getChartData()}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.textDim }} />
-                            <YAxis tick={{ fontSize: 10, fill: T.textDim }} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={'#e2e8f0'} />
+                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
+                            <YAxis tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
                             <Tooltip />
-                            <Bar dataKey="value" fill={COLORS.grassGreen} radius={[4, 4, 0, 0]} />
+                            <Bar dataKey="value" fill={COLORS.primary} radius={[4, 4, 0, 0]} />
                           </BarChart>
                         ) : chartType === 'pie' ? (
                           <RePieChart>
@@ -852,11 +854,11 @@ export default function QueryBuilderPage() {
                           </RePieChart>
                         ) : (
                           <LineChart data={getChartData()}>
-                            <CartesianGrid strokeDasharray="3 3" stroke={T.border} />
-                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: T.textDim }} />
-                            <YAxis tick={{ fontSize: 10, fill: T.textDim }} />
+                            <CartesianGrid strokeDasharray="3 3" stroke={'#e2e8f0'} />
+                            <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
+                            <YAxis tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
                             <Tooltip />
-                            <Line type="monotone" dataKey="value" stroke={COLORS.grassGreen} strokeWidth={2} dot={{ fill: COLORS.grassGreen }} />
+                            <Line type="monotone" dataKey="value" stroke={COLORS.primary} strokeWidth={2} dot={{ fill: COLORS.primary }} />
                           </LineChart>
                         )}
                       </ResponsiveContainer>
@@ -887,7 +889,7 @@ export default function QueryBuilderPage() {
                     </tbody>
                   </table>
                   {results.data.length > 100 && (
-                    <div style={{ textAlign: 'center', padding: '1rem', color: T.textDim, fontSize: '0.8rem' }}>
+                    <div style={{ textAlign: 'center', padding: '1rem', color: '#1a2332'Dim, fontSize: '0.8rem' }}>
                       Showing 100 of {results.data.length} rows
                     </div>
                   )}
@@ -895,9 +897,9 @@ export default function QueryBuilderPage() {
               </>
             ) : (
               <div style={styles.emptyState}>
-                <Sparkles size={40} color={T.textDim} style={{ marginBottom: '1rem' }} />
-                <h3 style={{ color: T.text, marginBottom: '0.5rem', fontSize: '1.1rem' }}>Build Your Query</h3>
-                <p style={{ color: T.textDim, maxWidth: '280px', fontSize: '0.85rem' }}>
+                <Sparkles size={40} color={'#1a2332'Dim} style={{ marginBottom: '1rem' }} />
+                <h3 style={{ color: '#1a2332', marginBottom: '0.5rem', fontSize: '1.1rem' }}>Build Your Query</h3>
+                <p style={{ color: '#1a2332'Dim, maxWidth: '280px', fontSize: '0.85rem' }}>
                   Select tables, choose columns, add filters, and click Run Query.
                 </p>
               </div>
