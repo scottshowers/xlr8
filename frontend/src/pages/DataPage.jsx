@@ -801,7 +801,7 @@ function FilesPanel({ c, project, targetScope }) {
                         onClick={async () => {
                           if (window.confirm(`Delete "${file.filename}" and its extracted rules?`)) {
                             try {
-                              await api.delete(`/status/references/${encodeURIComponent(file.filename)}`);
+                              await api.delete(`/status/references/${encodeURIComponent(file.filename)}?confirm=true`);
                               loadData();
                             } catch (err) {
                               alert('Delete failed: ' + (err.response?.data?.detail || err.message));
