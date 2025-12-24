@@ -1,6 +1,14 @@
 """
-RAG Handler for XLR8
+RAG Handler for XLR8 - FIVE TRUTHS ARCHITECTURE
+================================================
+
 Handles all RAG operations including document processing, embedding, and retrieval.
+
+Version: 2.2 - Five Truths Architecture Support
+- Added support for 5 truth types: intent, configuration, reference, regulatory, compliance
+- Customer Truths (project-scoped): intent, configuration
+- Reference Library Truths (global-scoped): reference, regulatory, compliance
+- Added search helpers for all 5 truth types
 
 Version: 2.1 - Fixed chunking fallback + better embedding diagnostics
 - Fixed: Sanity check now falls through to basic chunking instead of throwing
@@ -10,6 +18,17 @@ Version: 2.1 - Fixed chunking fallback + better embedding diagnostics
 - Added truth_type filtering for Three Truths architecture
 - Added custom where clause support
 - Added helper methods for truth-type specific searches
+
+FIVE TRUTHS TAXONOMY:
+---------------------
+Customer Truths (require project_id):
+  - intent: Customer goals, SOWs, requirements
+  - configuration: Code tables, mappings, system setup
+
+Reference Library Truths (global, no project_id):
+  - reference: Product docs, how-to guides, implementation standards
+  - regulatory: Laws, IRS rules, state/federal mandates
+  - compliance: Audit requirements, SOC 2, internal controls
 
 NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
 - Automatic document structure detection (tabular, code, hierarchical, linear, mixed)
@@ -613,7 +632,10 @@ class RAGHandler:
             return []
 
     # ==========================================================================
-    # TRUTH-TYPE SPECIFIC SEARCH HELPERS
+    # TRUTH-TYPE SPECIFIC SEARCH HELPERS (FIVE TRUTHS ARCHITECTURE)
+    # ==========================================================================
+    # Customer Truths: intent, configuration
+    # Reference Library Truths: reference, regulatory, compliance
     # ==========================================================================
     
     def search_intent(
@@ -624,22 +646,33 @@ class RAGHandler:
         n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
-        Search for INTENT documents (customer documentation).
-        
-        Args:
-            collection_name: Collection to search
-            query: Search query
-            project_id: Project to search within
-            n_results: Number of results
-            
-        Returns:
-            List of search results filtered to intent documents
+        Search for INTENT documents (customer goals, SOWs, requirements).
+        Customer-scoped - requires project_id.
         """
         return self.search(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
             truth_type='intent',
+            project_id=project_id
+        )
+    
+    def search_configuration(
+        self,
+        collection_name: str,
+        query: str,
+        project_id: str,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for CONFIGURATION documents (code tables, mappings, system setup).
+        Customer-scoped - requires project_id.
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type='configuration',
             project_id=project_id
         )
     
@@ -650,22 +683,48 @@ class RAGHandler:
         n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
-        Search for REFERENCE documents (standards, checklists).
-        Reference is always global - no project filter needed.
-        
-        Args:
-            collection_name: Collection to search
-            query: Search query
-            n_results: Number of results
-            
-        Returns:
-            List of search results filtered to reference documents
+        Search for REFERENCE documents (product docs, how-to guides, standards).
+        Global-scoped - no project filter needed.
         """
         return self.search(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
             truth_type='reference'
+        )
+    
+    def search_regulatory(
+        self,
+        collection_name: str,
+        query: str,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for REGULATORY documents (laws, IRS rules, state/federal mandates).
+        Global-scoped - no project filter needed.
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type='regulatory'
+        )
+    
+    def search_compliance(
+        self,
+        collection_name: str,
+        query: str,
+        n_results: int = 10
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for COMPLIANCE documents (audit requirements, SOC 2, controls).
+        Global-scoped - no project filter needed.
+        """
+        return self.search(
+            collection_name=collection_name,
+            query=query,
+            n_results=n_results,
+            truth_type='compliance'
         )
     
     def search_by_truth_type(
@@ -682,8 +741,8 @@ class RAGHandler:
         Args:
             collection_name: Collection to search
             query: Search query
-            truth_type: 'reality', 'intent', 'reference', 'configuration', 'output'
-            project_id: Optional project filter
+            truth_type: One of: 'intent', 'configuration', 'reference', 'regulatory', 'compliance'
+            project_id: Required for customer truths (intent, configuration), optional for global
             n_results: Number of results
             
         Returns:
