@@ -1475,7 +1475,7 @@ async def delete_reference(filename: str, confirm: bool = False):
             result = supabase.table('document_registry') \
                 .delete() \
                 .eq('filename', filename) \
-                .or_('truth_type.eq.reference,is_global.eq.true') \
+                .or_('truth_type.eq.reference,truth_type.eq.regulatory,truth_type.eq.compliance,is_global.eq.true') \
                 .execute()
             deleted['registry'] = len(result.data or []) > 0
         except Exception as e:
