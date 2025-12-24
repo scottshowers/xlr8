@@ -57,6 +57,7 @@ const colors = {
 const getColors = (dark) => ({
   bg: dark ? '#1a1f2e' : colors.background,
   card: dark ? '#242b3d' : colors.cardBg,
+  cardBg: dark ? '#242b3d' : colors.cardBg,
   cardBorder: dark ? '#2d3548' : colors.border,
   text: dark ? '#e8eaed' : colors.text,
   textMuted: dark ? '#8b95a5' : colors.textMuted,
@@ -70,40 +71,71 @@ const getColors = (dark) => ({
   red: colors.scarletSage,
   redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
   divider: dark ? '#2d3548' : colors.border,
+  border: dark ? '#2d3548' : colors.border,
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   tabBg: dark ? '#1e2433' : colors.white,
+  white: dark ? '#242b3d' : colors.white,
   tooltipBg: colors.text,
   tooltipText: colors.white,
+  // Add missing static colors
+  royalPurple: colors.royalPurple,
+  electricBlue: colors.electricBlue,
+  skyBlue: colors.skyBlue,
+  iceFlow: colors.iceFlow,
+  silver: colors.silver,
+  scarletSage: colors.scarletSage,
+  success: colors.success,
+  background: dark ? '#1a1f2e' : colors.background,
 });
 
 // ============================================================================
-// TOOLTIP COMPONENT (Matches DashboardPage exactly)
+// TOOLTIP COMPONENT (Fixed positioning to avoid clipping)
 // ============================================================================
 function Tooltip({ children, title, detail, action, width = 280 }) {
   const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0, showBelow: false });
+  const triggerRef = useRef(null);
+
+  const handleMouseEnter = () => {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const showBelow = spaceAbove < 200; // If less than 200px above, show below instead
+      
+      setCoords({
+        x: rect.left + rect.width / 2,
+        y: showBelow ? rect.bottom + 8 : rect.top - 8,
+        showBelow
+      });
+    }
+    setShow(true);
+  };
+
   return (
     <div 
+      ref={triggerRef}
       style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => setShow(true)} 
+      onMouseEnter={handleMouseEnter} 
       onMouseLeave={() => setShow(false)}
     >
       {children}
       {show && (
         <div style={{
-          position: 'absolute', 
-          bottom: '100%', 
-          left: '50%', 
+          position: 'fixed',
+          left: Math.min(Math.max(coords.x, width / 2 + 16), window.innerWidth - width / 2 - 16),
+          top: coords.showBelow ? coords.y : 'auto',
+          bottom: coords.showBelow ? 'auto' : `calc(100vh - ${coords.y}px)`,
           transform: 'translateX(-50%)',
-          marginBottom: '8px', 
           padding: '12px 16px', 
           backgroundColor: colors.text, 
           color: colors.white,
           borderRadius: '8px', 
           fontSize: '12px', 
           width: width, 
-          zIndex: 10000, 
-          boxShadow: '0 4px 12px rgba(0,0,0,0.25)',
+          zIndex: 99999, 
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
           lineHeight: 1.5,
+          pointerEvents: 'none',
         }}>
           {title && <div style={{ fontWeight: 600, marginBottom: '6px', fontSize: '13px' }}>{title}</div>}
           <div style={{ opacity: 0.9 }}>{detail}</div>
@@ -121,14 +153,16 @@ function Tooltip({ children, title, detail, action, width = 280 }) {
           )}
           <div style={{ 
             position: 'absolute', 
-            bottom: '-6px', 
             left: '50%', 
             transform: 'translateX(-50%)',
+            ...(coords.showBelow 
+              ? { top: '-6px', borderBottom: `6px solid ${colors.text}`, borderTop: 'none' }
+              : { bottom: '-6px', borderTop: `6px solid ${colors.text}`, borderBottom: 'none' }
+            ),
             width: 0, 
             height: 0, 
             borderLeft: '6px solid transparent', 
-            borderRight: '6px solid transparent', 
-            borderTop: `6px solid ${colors.text}` 
+            borderRight: '6px solid transparent',
           }} />
         </div>
       )}
@@ -335,22 +369,22 @@ export default function DataPage() {
   return (
     <div>
       {/* Header */}
-      <div style={{ marginBottom: '24px' }}>
+      <div style={{ marginBottom: '20px' }}>
         <h1 style={{ 
-          margin: 0, fontSize: '28px', fontWeight: 700, color: themeColors.text, 
-          display: 'flex', alignItems: 'center', gap: '12px',
+          margin: 0, fontSize: '20px', fontWeight: 600, color: themeColors.text, 
+          display: 'flex', alignItems: 'center', gap: '10px',
           fontFamily: "'Sora', sans-serif"
         }}>
           <div style={{ 
-            width: '48px', height: '48px', borderRadius: '12px', 
+            width: '36px', height: '36px', borderRadius: '10px', 
             backgroundColor: themeColors.primary, 
             display: 'flex', alignItems: 'center', justifyContent: 'center' 
           }}>
-            <Database size={28} color="#ffffff" />
+            <Database size={20} color="#ffffff" />
           </div>
           Data
         </h1>
-        <p style={{ margin: '8px 0 0 60px', fontSize: '14px', color: themeColors.textMuted }}>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: themeColors.textMuted }}>
           Upload, classify, and manage your project data
           {projectName && (
             <span style={{ color: themeColors.primary, fontWeight: 600 }}> • {projectName}</span>
