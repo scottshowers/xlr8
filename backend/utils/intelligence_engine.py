@@ -4404,6 +4404,11 @@ SQL:"""
         - configuration: Code lists, mappings (when stored as documents)
         
         Excludes reference/standards materials (those are global best practices).
+        
+        TRIPLE FALLBACK STRATEGY:
+        1. Search by truth_type + project_id (ideal)
+        2. Search by project_id only (docs without truth_type)
+        3. Search ALL docs, filter manually (legacy docs)
         """
         logger.warning(f"[GATHER_INTENT] Starting - rag_handler={'SET' if self.rag_handler else 'NONE'}, project={self.project}, project_id={self.project_id}")
         
@@ -4420,47 +4425,105 @@ SQL:"""
                 logger.warning(f"[GATHER_INTENT] No collection found - returning empty")
                 return []
             
-            # Search customer documents - both intent AND configuration types
-            # Configuration docs (like "Earnings Codes.pdf") are customer-specific too
-            customer_truth_types = ['intent', 'configuration']
-            
             all_results = []
-            for truth_type in customer_truth_types:
-                try:
-                    logger.warning(f"[GATHER_INTENT] Searching truth_type={truth_type}...")
-                    results = self.rag_handler.search(
-                        collection_name=collection_name,
-                        query=question,
-                        n_results=5,  # Get fewer per type to avoid overwhelming
-                        truth_type=truth_type,
-                        project_id=self.project_id  # Use UUID, not name
-                    )
-                    logger.warning(f"[GATHER_INTENT] {truth_type} returned {len(results)} results")
-                    all_results.extend(results)
-                except Exception as e:
-                    logger.warning(f"[GATHER_INTENT] Search for {truth_type} failed: {e}")
             
-            # Also try without truth_type filter as fallback (catches any miscategorized docs)
-            if not all_results:
-                logger.warning(f"[GATHER_INTENT] No results from typed search, trying fallback...")
+            # =================================================================
+            # FALLBACK 1: Search by truth_type + project_id (ideal path)
+            # =================================================================
+            if self.project_id:
+                customer_truth_types = ['intent', 'configuration']
+                for truth_type in customer_truth_types:
+                    try:
+                        logger.warning(f"[GATHER_INTENT] Fallback 1: truth_type={truth_type}, project_id={self.project_id}")
+                        results = self.rag_handler.search(
+                            collection_name=collection_name,
+                            query=question,
+                            n_results=5,
+                            truth_type=truth_type,
+                            project_id=self.project_id
+                        )
+                        logger.warning(f"[GATHER_INTENT] Fallback 1 ({truth_type}): {len(results)} results")
+                        all_results.extend(results)
+                    except Exception as e:
+                        logger.warning(f"[GATHER_INTENT] Fallback 1 ({truth_type}) failed: {e}")
+            
+            # =================================================================
+            # FALLBACK 2: Search by project_id only (no truth_type filter)
+            # For docs uploaded without truth_type classification
+            # =================================================================
+            if not all_results and self.project_id:
                 try:
+                    logger.warning(f"[GATHER_INTENT] Fallback 2: project_id only, no truth_type filter")
                     results = self.rag_handler.search(
                         collection_name=collection_name,
                         query=question,
                         n_results=10,
-                        project_id=self.project_id  # Use UUID, not name
-                        # No truth_type filter - get any project docs
+                        project_id=self.project_id
+                        # No truth_type filter
                     )
-                    logger.warning(f"[GATHER_INTENT] Fallback returned {len(results)} results")
+                    logger.warning(f"[GATHER_INTENT] Fallback 2: {len(results)} results")
                     # Filter out reference/global docs manually
                     for r in results:
                         metadata = r.get('metadata', {})
-                        if metadata.get('truth_type') != 'reference' and not metadata.get('is_global'):
+                        tt = metadata.get('truth_type', '')
+                        is_global = metadata.get('is_global', False)
+                        pid = metadata.get('project_id', '')
+                        # Exclude reference docs and global docs
+                        if tt != 'reference' and not is_global and pid != 'Global/Universal':
                             all_results.append(r)
+                    logger.warning(f"[GATHER_INTENT] Fallback 2 after filtering: {len(all_results)} results")
                 except Exception as e:
-                    logger.warning(f"[GATHER_INTENT] Fallback search failed: {e}")
+                    logger.warning(f"[GATHER_INTENT] Fallback 2 failed: {e}")
             
-            logger.warning(f"[GATHER_INTENT] Total results after all searches: {len(all_results)}")
+            # =================================================================
+            # FALLBACK 3: Search ALL docs, filter by project name
+            # For legacy docs that might have project name instead of UUID
+            # =================================================================
+            if not all_results:
+                try:
+                    logger.warning(f"[GATHER_INTENT] Fallback 3: No filters, searching ALL docs")
+                    results = self.rag_handler.search(
+                        collection_name=collection_name,
+                        query=question,
+                        n_results=20
+                        # No filters at all
+                    )
+                    logger.warning(f"[GATHER_INTENT] Fallback 3: {len(results)} total results")
+                    
+                    # Log what we found for diagnostics
+                    seen_projects = set()
+                    seen_truth_types = set()
+                    for r in results:
+                        metadata = r.get('metadata', {})
+                        seen_projects.add(metadata.get('project_id', 'NONE'))
+                        seen_truth_types.add(metadata.get('truth_type', 'NONE'))
+                    logger.warning(f"[GATHER_INTENT] Fallback 3 found project_ids: {seen_projects}")
+                    logger.warning(f"[GATHER_INTENT] Fallback 3 found truth_types: {seen_truth_types}")
+                    
+                    # Filter to just this project (by name OR UUID) and non-reference
+                    for r in results:
+                        metadata = r.get('metadata', {})
+                        tt = metadata.get('truth_type', '')
+                        is_global = metadata.get('is_global', False)
+                        pid = metadata.get('project_id', '')
+                        
+                        # Check if this doc belongs to our project (by UUID or name)
+                        is_our_project = (
+                            pid == self.project_id or  # UUID match
+                            pid == self.project or      # Name match (legacy)
+                            (self.project and self.project.lower() in str(pid).lower())  # Partial match
+                        )
+                        
+                        # Exclude reference and global, include our project
+                        if tt != 'reference' and not is_global and pid != 'Global/Universal':
+                            if is_our_project or not pid:  # Include if our project OR no project set
+                                all_results.append(r)
+                    
+                    logger.warning(f"[GATHER_INTENT] Fallback 3 after filtering: {len(all_results)} results")
+                except Exception as e:
+                    logger.warning(f"[GATHER_INTENT] Fallback 3 failed: {e}")
+            
+            logger.warning(f"[GATHER_INTENT] Total results after all fallbacks: {len(all_results)}")
             
             # Sort by relevance (distance) and take top results
             all_results.sort(key=lambda x: x.get('distance', 1.0))
@@ -4482,6 +4545,8 @@ SQL:"""
         
         except Exception as e:
             logger.error(f"Error gathering intent: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
         
         return truths
     
