@@ -119,7 +119,7 @@ export default function ProjectsPage() {
   };
 
   return (
-    <div style={{ maxWidth: '1200px' }}>
+    <div>
       {/* Header */}
       <div style={{ marginBottom: '20px' }}>
         <h1 style={{ 
