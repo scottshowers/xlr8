@@ -40,6 +40,7 @@ import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import DataPage from './pages/DataPage';
+import DataExplorer from './pages/DataExplorer';
 import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
@@ -105,6 +106,9 @@ function AppRoutes() {
         {/* Data */}
         <Route path="/data" element={
           <ProtectedRoute><Layout><DataPage /></Layout></ProtectedRoute>
+        } />
+        <Route path="/data/explorer" element={
+          <ProtectedRoute><Layout><DataExplorer /></Layout></ProtectedRoute>
         } />
         
         {/* Vacuum (sub-pages of Data) */}
