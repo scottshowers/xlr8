@@ -1,0 +1,175 @@
+/**
+ * Tooltip.jsx - Shared Tooltip Component
+ * 
+ * Smart positioning tooltip that:
+ * - Respects global tooltip enable/disable setting
+ * - Positions above or below based on available space
+ * - Stays within viewport bounds
+ * 
+ * Deploy to: frontend/src/components/ui/Tooltip.jsx
+ */
+
+import React, { useState, useRef } from 'react';
+import { useTooltips } from '../../context/TooltipContext';
+
+// Mission Control Colors
+const colors = {
+  text: '#1a2332',
+  white: '#ffffff',
+  skyBlue: '#93abd9',
+};
+
+export default function Tooltip({ 
+  children, 
+  title, 
+  detail, 
+  action, 
+  width = 280,
+  disabled = false  // Allow individual tooltips to be disabled
+}) {
+  const [show, setShow] = useState(false);
+  const [coords, setCoords] = useState({ x: 0, y: 0, showBelow: false });
+  const triggerRef = useRef(null);
+  
+  // Get global tooltip setting
+  let tooltipsEnabled = true;
+  try {
+    const context = useTooltips();
+    tooltipsEnabled = context.tooltipsEnabled;
+  } catch {
+    // If not wrapped in TooltipProvider, default to enabled
+    tooltipsEnabled = true;
+  }
+
+  const handleMouseEnter = () => {
+    if (!tooltipsEnabled || disabled) return;
+    
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect();
+      const spaceAbove = rect.top;
+      const showBelow = spaceAbove < 200;
+      
+      setCoords({
+        x: rect.left + rect.width / 2,
+        y: showBelow ? rect.bottom + 8 : rect.top - 8,
+        showBelow
+      });
+    }
+    setShow(true);
+  };
+
+  const handleMouseLeave = () => {
+    setShow(false);
+  };
+
+  const shouldShow = show && tooltipsEnabled && !disabled;
+
+  return (
+    <div 
+      ref={triggerRef}
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={handleMouseEnter} 
+      onMouseLeave={handleMouseLeave}
+    >
+      {children}
+      {shouldShow && (
+        <div style={{
+          position: 'fixed',
+          left: Math.min(Math.max(coords.x, width / 2 + 16), window.innerWidth - width / 2 - 16),
+          top: coords.showBelow ? coords.y : 'auto',
+          bottom: coords.showBelow ? 'auto' : `calc(100vh - ${coords.y}px)`,
+          transform: 'translateX(-50%)',
+          padding: '12px 16px', 
+          backgroundColor: colors.text, 
+          color: colors.white,
+          borderRadius: '8px', 
+          fontSize: '12px', 
+          width: width, 
+          zIndex: 99999, 
+          boxShadow: '0 4px 20px rgba(0,0,0,0.3)',
+          lineHeight: 1.5,
+          pointerEvents: 'none',
+        }}>
+          {title && <div style={{ fontWeight: 600, marginBottom: '6px', fontSize: '13px' }}>{title}</div>}
+          <div style={{ opacity: 0.9 }}>{detail}</div>
+          {action && (
+            <div style={{ 
+              marginTop: '10px', 
+              paddingTop: '10px', 
+              borderTop: '1px solid rgba(255,255,255,0.2)', 
+              color: colors.skyBlue, 
+              fontWeight: 500,
+              fontSize: '11px'
+            }}>
+              💡 {action}
+            </div>
+          )}
+          {/* Arrow */}
+          <div style={{ 
+            position: 'absolute', 
+            left: '50%', 
+            transform: 'translateX(-50%)',
+            ...(coords.showBelow 
+              ? { top: '-6px', borderBottom: `6px solid ${colors.text}`, borderTop: 'none' }
+              : { bottom: '-6px', borderTop: `6px solid ${colors.text}`, borderBottom: 'none' }
+            ),
+            width: 0, 
+            height: 0, 
+            borderLeft: '6px solid transparent', 
+            borderRight: '6px solid transparent',
+          }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Simple inline tooltip for smaller hints
+ */
+export function SimpleTooltip({ children, text, position = 'top' }) {
+  const [show, setShow] = useState(false);
+  
+  let tooltipsEnabled = true;
+  try {
+    const context = useTooltips();
+    tooltipsEnabled = context.tooltipsEnabled;
+  } catch {
+    tooltipsEnabled = true;
+  }
+
+  if (!tooltipsEnabled) {
+    return children;
+  }
+
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <div style={{
+          position: 'absolute',
+          [position === 'top' ? 'bottom' : 'top']: '100%',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          marginBottom: position === 'top' ? '8px' : 0,
+          marginTop: position === 'bottom' ? '8px' : 0,
+          padding: '6px 10px',
+          backgroundColor: colors.text,
+          color: colors.white,
+          borderRadius: '6px',
+          fontSize: '11px',
+          fontWeight: 500,
+          whiteSpace: 'nowrap',
+          zIndex: 99999,
+          pointerEvents: 'none',
+        }}>
+          {text}
+        </div>
+      )}
+    </div>
+  );
+}
