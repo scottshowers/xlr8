@@ -1,44 +1,43 @@
 /**
  * WelcomePage.jsx - Sales backdrop / Onboarding page
  * 
- * Three presentation options for sales team preference:
+ * UPDATED: December 23, 2025
+ * - Mission Control color palette (#83b16d)
+ * - Removed dark mode
+ * 
+ * Three presentation options:
  * 1. The Story - Narrative chapter-based
  * 2. The Journey - Visual infographic
  * 3. Watch It Think - Live intelligence demo
- * 
- * Strong security messaging around AI/data protection.
- * Route: /welcome
  */
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
 import { 
   BookOpen, Map, Sparkles, ArrowRight, Shield, Lock, 
-  Server, Eye, ChevronRight, Play, FileText, Zap
+  Server, FileText, Rocket
 } from 'lucide-react';
 
-const getColors = (dark) => ({
-  bg: dark ? '#12151c' : '#f5f6f8',
-  bgAlt: dark ? '#1a1e28' : '#eef0f4',
-  card: dark ? '#1e232e' : '#ffffff',
-  border: dark ? '#2a2f3a' : '#e4e7ec',
-  text: dark ? '#e4e6ea' : '#2d3643',
-  textMuted: dark ? '#8b95a5' : '#6b7a8f',
-  textLight: dark ? '#5f6a7d' : '#9aa5b5',
+// Mission Control Colors
+const colors = {
+  bg: '#f0f2f5',
+  bgAlt: '#e8ebf0',
+  card: '#ffffff',
+  border: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
   primary: '#83b16d',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  primaryDark: '#6a9b5a',
-  dustyBlue: '#7889a0',
-  dustyBlueLight: dark ? 'rgba(120, 137, 160, 0.15)' : 'rgba(120, 137, 160, 0.1)',
-  taupe: '#9b8f82',
-  taupeLight: dark ? 'rgba(155, 143, 130, 0.15)' : 'rgba(155, 143, 130, 0.1)',
-});
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  primaryDark: '#6b9b5a',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
+  purple: '#5f4282',
+  purpleLight: 'rgba(95, 66, 130, 0.1)',
+};
 
 export default function WelcomePage() {
   const navigate = useNavigate();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
   const [hoveredCard, setHoveredCard] = useState(null);
 
   const presentations = [
@@ -61,8 +60,8 @@ export default function WelcomePage() {
       subtitle: 'Visual Infographic',
       description: 'Connected visual flowchart showing the transformation from manual work to intelligent automation.',
       duration: '~3 min',
-      color: colors.dustyBlue,
-      colorLight: colors.dustyBlueLight,
+      color: colors.accent,
+      colorLight: colors.accentLight,
     },
     {
       id: 'think',
@@ -72,8 +71,8 @@ export default function WelcomePage() {
       subtitle: 'Live Demo',
       description: 'See the intelligence engine process data in real-time. Watch classifications, relationships, and patterns emerge.',
       duration: 'Interactive',
-      color: colors.taupe,
-      colorLight: colors.taupeLight,
+      color: colors.purple,
+      colorLight: colors.purpleLight,
     },
   ];
 
@@ -108,19 +107,22 @@ export default function WelcomePage() {
     }}>
       {/* Header */}
       <div style={{
-        background: colors.primary,
+        background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
         padding: '1rem 2rem',
         display: 'flex',
         justifyContent: 'space-between',
         alignItems: 'center',
       }}>
-        <div style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.5rem',
-          fontWeight: 800,
-          color: 'white',
-        }}>
-          XLR8
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <span style={{
+            fontFamily: "'Sora', sans-serif",
+            fontSize: '1.5rem',
+            fontWeight: 800,
+            color: 'white',
+          }}>
+            XLR8
+          </span>
+          <Rocket size={20} color="white" />
         </div>
         <button
           onClick={() => navigate('/dashboard')}
@@ -136,7 +138,6 @@ export default function WelcomePage() {
             fontSize: '0.85rem',
             fontWeight: 600,
             cursor: 'pointer',
-            transition: 'all 0.15s ease',
           }}
         >
           Skip to Platform <ArrowRight size={16} />
@@ -277,9 +278,8 @@ export default function WelcomePage() {
                   color: hoveredCard === pres.id ? pres.color : colors.textMuted,
                   fontSize: '0.85rem',
                   fontWeight: 600,
-                  transition: 'color 0.15s ease',
                 }}>
-                  Start <ChevronRight size={16} />
+                  Start <ArrowRight size={16} />
                 </div>
               </div>
             </div>
@@ -379,7 +379,7 @@ export default function WelcomePage() {
               width: 64,
               height: 64,
               borderRadius: 16,
-              background: `linear-gradient(135deg, ${colors.primary}, ${colors.dustyBlue})`,
+              background: `linear-gradient(135deg, ${colors.primary}, ${colors.accent})`,
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -441,7 +441,6 @@ export default function WelcomePage() {
             fontWeight: 700,
             fontFamily: "'Sora', sans-serif",
             cursor: 'pointer',
-            transition: 'all 0.2s ease',
           }}
         >
           Go to Dashboard <ArrowRight size={18} />
