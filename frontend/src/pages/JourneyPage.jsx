@@ -1,36 +1,40 @@
 /**
  * JourneyPage.jsx - The XLR8 Journey (Visual Infographic)
  * 
+ * UPDATED: December 23, 2025
+ * - Mission Control color palette (#83b16d)
+ * - Removed dark mode
+ * 
  * Connected flowchart-style visual journey with illustrations.
  * Route: /journey
  */
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
+import { Rocket } from 'lucide-react';
 
-const getColors = (dark) => ({
-  bg: dark ? '#12151c' : '#f5f6f8',
-  bgPattern: dark ? '#1a1e28' : '#e8eaef',
-  card: dark ? '#1e232e' : '#ffffff',
-  border: dark ? '#2a2f3a' : '#d4d9e1',
-  text: dark ? '#e4e6ea' : '#2d3643',
-  textMuted: dark ? '#8b95a5' : '#6b7a8f',
+// Mission Control Colors
+const colors = {
+  bg: '#f0f2f5',
+  bgPattern: '#e8ebf0',
+  card: '#ffffff',
+  border: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  textLight: '#94a3b8',
   primary: '#83b16d',
-  primaryDark: '#6a9b5a',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.12)',
-  dustyBlue: '#7889a0',
-  dustyBlueLight: dark ? 'rgba(120, 137, 160, 0.15)' : 'rgba(120, 137, 160, 0.12)',
-  taupe: '#9b8f82',
-  taupeLight: dark ? 'rgba(155, 143, 130, 0.15)' : 'rgba(155, 143, 130, 0.12)',
-  slate: '#6b7a8f',
-  error: '#a07070',
-});
+  primaryDark: '#6b9b5a',
+  primaryLight: 'rgba(131, 177, 109, 0.12)',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.12)',
+  purple: '#5f4282',
+  purpleLight: 'rgba(95, 66, 130, 0.12)',
+  warning: '#d97706',
+  warningLight: 'rgba(217, 119, 6, 0.12)',
+};
 
 export default function JourneyPage() {
   const navigate = useNavigate();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
 
   const ArrowDown = () => (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', margin: '1rem 0' }}>
@@ -83,7 +87,7 @@ export default function JourneyPage() {
         
         {/* Header Banner */}
         <div style={{
-          background: colors.primary,
+          background: `linear-gradient(135deg, ${colors.primary} 0%, ${colors.primaryDark} 100%)`,
           borderRadius: '12px 12px 0 0',
           padding: '1.5rem 2rem',
           textAlign: 'center',
@@ -94,12 +98,14 @@ export default function JourneyPage() {
             position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
             background: `repeating-linear-gradient(90deg, transparent, transparent 20px, rgba(255,255,255,0.03) 20px, rgba(255,255,255,0.03) 40px)`,
           }} />
-          <h1 style={{
-            fontFamily: "'Sora', sans-serif", fontSize: '2rem', fontWeight: 800,
-            color: 'white', letterSpacing: '0.1em', textTransform: 'uppercase',
-            position: 'relative',
-          }}>The XLR8 Journey</h1>
-          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem', marginTop: '0.5rem', position: 'relative' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', marginBottom: '0.5rem', position: 'relative' }}>
+            <h1 style={{
+              fontFamily: "'Sora', sans-serif", fontSize: '2rem', fontWeight: 800,
+              color: 'white', letterSpacing: '0.1em', textTransform: 'uppercase',
+            }}>The XLR8 Journey</h1>
+            <Rocket size={24} color="white" />
+          </div>
+          <p style={{ color: 'rgba(255,255,255,0.8)', fontSize: '0.85rem', position: 'relative' }}>
             How We Transformed Implementation Analysis
           </p>
           <button
@@ -152,91 +158,57 @@ export default function JourneyPage() {
                 <line x1="44" y1="46" x2="68" y2="46" stroke={colors.border} strokeWidth="2"/>
                 
                 {/* Arrow */}
-                <path d="M 105 45 L 135 45" stroke={colors.slate} strokeWidth="2" strokeDasharray="4,4"/>
+                <path d="M 105 45 L 135 45" stroke={colors.textLight} strokeWidth="2" strokeDasharray="4,4"/>
                 
                 {/* Person stressed */}
-                <circle cx="175" cy="40" r="18" fill={colors.bg} stroke={colors.slate} strokeWidth="2"/>
-                <circle cx="169" cy="37" r="2" fill={colors.slate}/>
-                <circle cx="181" cy="37" r="2" fill={colors.slate}/>
-                <path d="M 169 47 Q 175 43 181 47" stroke={colors.slate} strokeWidth="2" fill="none"/>
+                <circle cx="175" cy="40" r="18" fill={colors.bg} stroke={colors.textLight} strokeWidth="2"/>
+                <circle cx="169" cy="37" r="2" fill={colors.textLight}/>
+                <circle cx="181" cy="37" r="2" fill={colors.textLight}/>
+                <path d="M 169 47 Q 175 43 181 47" stroke={colors.textLight} strokeWidth="2" fill="none"/>
                 
                 {/* Clock */}
                 <circle cx="245" cy="45" r="22" fill={colors.bg} stroke={colors.border} strokeWidth="2"/>
-                <circle cx="245" cy="45" r="3" fill={colors.slate}/>
-                <line x1="245" y1="45" x2="245" y2="32" stroke={colors.slate} strokeWidth="2"/>
-                <line x1="245" y1="45" x2="255" y2="50" stroke={colors.slate} strokeWidth="2"/>
-                <text x="235" y="78" fontSize="10" fill={colors.textMuted}>WEEKS</text>
+                <circle cx="245" cy="45" r="3" fill={colors.textLight}/>
+                <line x1="245" y1="45" x2="245" y2="32" stroke={colors.textLight} strokeWidth="2"/>
+                <line x1="245" y1="45" x2="257" y2="45" stroke={colors.textLight} strokeWidth="2"/>
               </svg>
             </div>
 
             <ArrowDown />
 
-            {/* Chapter 2: The Trigger */}
-            <StoryBlock chapter={2} title="The Trigger">
-              We asked ourselves: what if we could teach a system to do what we do? What if our expertise could scale without us?
+            {/* Chapter 2: The Insight */}
+            <StoryBlock chapter={2} title="The Insight">
+              Every question about a project has three sides: what IS (the data), what SHOULD BE (the requirements), and what's RIGHT (the standards).
             </StoryBlock>
 
-            {/* Side by side comparison */}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr', gap: '1.5rem', margin: '2rem 0', alignItems: 'center' }}>
-              <div style={{ background: colors.bg, borderRadius: 12, padding: '1.25rem', borderLeft: `4px solid ${colors.slate}` }}>
-                <div style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.7rem', fontWeight: 700, color: colors.slate, letterSpacing: 1, marginBottom: '0.75rem' }}>THE OLD WAY</div>
-                {['Weeks in spreadsheets', 'Manual cross-referencing', 'Hope you didn\'t miss anything', 'Start over every project'].map((item, i) => (
-                  <div key={i} style={{ fontSize: '0.75rem', color: colors.textMuted, padding: '0.4rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ color: colors.error }}>✗</span> {item}
-                  </div>
-                ))}
-              </div>
-              
-              <div style={{ fontSize: '1.5rem', color: colors.primary }}>→</div>
-              
-              <div style={{ background: colors.bg, borderRadius: 12, padding: '1.25rem', borderLeft: `4px solid ${colors.primary}` }}>
-                <div style={{ fontFamily: "'Sora', sans-serif", fontSize: '0.7rem', fontWeight: 700, color: colors.primary, letterSpacing: 1, marginBottom: '0.75rem' }}>THE XLR8 WAY</div>
-                {['Minutes, not weeks', 'Automatic analysis', 'Nothing missed—ever', 'Patterns learned & reused'].map((item, i) => (
-                  <div key={i} style={{ fontSize: '0.75rem', color: colors.textMuted, padding: '0.4rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span style={{ color: colors.primary }}>✓</span> {item}
-                  </div>
-                ))}
-              </div>
-            </div>
+            <SectionDivider label="Three Truths" />
 
-            <ArrowDown />
-
-            {/* Chapter 3: The Insight */}
-            <StoryBlock chapter={3} title="The Core Insight">
-              Every engagement has three sources of truth. Connect them, and you see everything—including compliance gaps that could sink you.
+            {/* Chapter 3: Three Truths */}
+            <StoryBlock chapter={3} title="The Three Truths">
+              We built a system that knows all three—and can compare them instantly.
             </StoryBlock>
 
-            {/* Three Truths */}
-            <div style={{ display: 'flex', justifyContent: 'center', gap: '1rem', margin: '2rem 0', flexWrap: 'wrap', alignItems: 'center' }}>
-              {[
-                { icon: '🗄️', label: 'Reality', sub: 'What exists', bg: colors.primaryLight, border: colors.primary, color: colors.primaryDark },
-                { icon: '📋', label: 'Intent', sub: 'What was asked', bg: colors.dustyBlueLight, border: colors.dustyBlue, color: colors.dustyBlue },
-                { icon: '⚖️', label: 'Reference', sub: 'Laws & Compliance', bg: colors.taupeLight, border: colors.taupe, color: colors.taupe },
-              ].map((truth, i) => (
-                <React.Fragment key={i}>
-                  {i > 0 && <span style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.5rem', fontWeight: 800, color: colors.border }}>×</span>}
-                  <div style={{
-                    width: 120, padding: '1rem', borderRadius: 12, textAlign: 'center',
-                    background: truth.bg, border: `2px solid ${truth.border}`,
-                  }}>
-                    <div style={{ fontSize: '1.75rem', marginBottom: '0.4rem' }}>{truth.icon}</div>
-                    <div style={{ fontFamily: "'Sora', sans-serif", fontWeight: 700, fontSize: '0.8rem', color: truth.color }}>{truth.label}</div>
-                    <div style={{ fontSize: '0.65rem', color: colors.textMuted }}>{truth.sub}</div>
-                  </div>
-                </React.Fragment>
-              ))}
-            </div>
+            {/* Three Truths Diagram */}
+            <div style={{ display: 'flex', justifyContent: 'center', margin: '2rem 0' }}>
+              <svg width="320" height="80" viewBox="0 0 320 80">
+                {/* Reality */}
+                <rect x="10" y="15" width="80" height="50" rx="8" fill={colors.primaryLight} stroke={colors.primary} strokeWidth="2"/>
+                <text x="50" y="35" textAnchor="middle" fill={colors.primary} fontWeight="bold" fontSize="10">REALITY</text>
+                <text x="50" y="48" textAnchor="middle" fill={colors.primary} fontSize="8">What IS</text>
 
-            {/* Connecting visual */}
-            <div style={{ display: 'flex', justifyContent: 'center', margin: '1.5rem 0' }}>
-              <svg width="300" height="70" viewBox="0 0 300 70">
-                <line x1="60" y1="35" x2="150" y2="35" stroke={colors.primary} strokeWidth="2"/>
-                <line x1="240" y1="35" x2="150" y2="35" stroke={colors.primary} strokeWidth="2"/>
-                <circle cx="150" cy="35" r="25" fill={colors.primary} stroke={colors.primaryDark} strokeWidth="3"/>
-                <text x="150" y="32" textAnchor="middle" fill="white" fontSize="9" fontWeight="bold">COMPLETE</text>
-                <text x="150" y="43" textAnchor="middle" fill="rgba(255,255,255,0.8)" fontSize="8">PICTURE</text>
-                <circle cx="150" cy="35" r="30" fill="none" stroke={colors.primary} strokeWidth="1" opacity="0.3"/>
-                <circle cx="150" cy="35" r="36" fill="none" stroke={colors.primary} strokeWidth="1" opacity="0.15"/>
+                {/* Intent */}
+                <rect x="120" y="15" width="80" height="50" rx="8" fill={colors.accentLight} stroke={colors.accent} strokeWidth="2"/>
+                <text x="160" y="35" textAnchor="middle" fill={colors.accent} fontWeight="bold" fontSize="10">INTENT</text>
+                <text x="160" y="48" textAnchor="middle" fill={colors.accent} fontSize="8">What SHOULD BE</text>
+
+                {/* Reference */}
+                <rect x="230" y="15" width="80" height="50" rx="8" fill={colors.purpleLight} stroke={colors.purple} strokeWidth="2"/>
+                <text x="270" y="35" textAnchor="middle" fill={colors.purple} fontWeight="bold" fontSize="10">REFERENCE</text>
+                <text x="270" y="48" textAnchor="middle" fill={colors.purple} fontSize="8">Best Practice</text>
+
+                {/* Connecting lines */}
+                <line x1="90" y1="40" x2="120" y2="40" stroke={colors.border} strokeWidth="2"/>
+                <line x1="200" y1="40" x2="230" y2="40" stroke={colors.border} strokeWidth="2"/>
               </svg>
             </div>
             
@@ -245,8 +217,8 @@ export default function JourneyPage() {
               margin: '1.5rem auto',
               maxWidth: 500,
               padding: '1rem',
-              background: colors.taupeLight,
-              border: `2px solid ${colors.taupe}`,
+              background: colors.warningLight,
+              border: `2px solid ${colors.warning}`,
               borderRadius: 10,
               display: 'flex',
               alignItems: 'flex-start',
@@ -285,7 +257,6 @@ export default function JourneyPage() {
                 <div key={i} style={{
                   width: 85, height: 70, background: colors.card, border: `2px solid ${colors.border}`,
                   borderRadius: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-                  transition: 'all 0.2s ease', cursor: 'default',
                 }}>
                   <div style={{ fontSize: '1.4rem', marginBottom: '0.2rem' }}>{block.icon}</div>
                   <div style={{ fontSize: '0.6rem', fontWeight: 600, color: colors.textMuted, textTransform: 'uppercase', letterSpacing: '0.5px' }}>{block.label}</div>
