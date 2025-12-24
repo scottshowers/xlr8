@@ -3922,7 +3922,7 @@ async def verify_file_deleted(filename: str, project: Optional[str] = None):
 # RELATIONSHIPS ENDPOINT (for Data Explorer)
 # =============================================================================
 
-@router.get("/relationships")
+@router.get("/status/relationships")
 async def get_relationships():
     """
     Get detected relationships between tables.
@@ -4007,7 +4007,7 @@ async def get_relationships():
 # STANDARDS/COMPLIANCE CHECK ENDPOINT (for Data Explorer Compliance tab)
 # =============================================================================
 
-@router.post("/standards/check")
+@router.post("/status/standards/check")
 async def run_compliance_check(request: dict):
     """
     Run compliance check against extracted rules.
