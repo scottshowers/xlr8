@@ -3,6 +3,15 @@
  * 
  * Allows uploads to continue when navigating away.
  * Shows status indicator in header.
+ * 
+ * Five Truths Support:
+ * - Passes truth_type to backend for proper routing
+ * - reality → DuckDB
+ * - intent → ChromaDB (project-scoped)
+ * - configuration → DuckDB + ChromaDB
+ * - reference → ChromaDB (global)
+ * - regulatory → ChromaDB (global)
+ * - compliance → ChromaDB (global)
  */
 
 import React, { createContext, useContext, useState, useCallback } from 'react';
@@ -51,6 +60,11 @@ export function UploadProvider({ children }) {
     if (options.standards_mode) {
       formData.append('standards_mode', 'true');
       formData.append('domain', options.domain || 'general');
+    }
+    
+    // Five Truths: Pass truth_type for proper routing
+    if (options.truth_type) {
+      formData.append('truth_type', options.truth_type);
     }
 
     api.post('/upload', formData, {
