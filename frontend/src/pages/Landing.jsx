@@ -246,7 +246,7 @@ export default function Landing() {
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center' }}>
               <Link 
-                to="/journey" 
+                to="/hype" 
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',
@@ -260,8 +260,7 @@ export default function Landing() {
                   textDecoration: 'none',
                 }}
               >
-                See the Journey
-                <ArrowRight size={18} />
+                ▶ Watch the Film
               </Link>
               <Link 
                 to="/login" 
