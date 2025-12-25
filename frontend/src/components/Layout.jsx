@@ -2,7 +2,7 @@
  * Layout.jsx - Main App Wrapper
  * 
  * RESTRUCTURED NAV:
- * Main: Mission Control | Projects | Data | Playbooks | AI Assist
+ * Main: Command Center | Projects | Data | Playbooks | AI Assist
  * Admin: Collapsible dropdown with Standards, Work Advisor, Playbook Builder, Learning, System
  * 
  * Includes: Upload status indicator, theme toggle, help button, Customer Genome
@@ -72,7 +72,7 @@ const COLORS = {
 
 // Main nav items - core workflow
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Mission Control', icon: '🎯', permission: null },
+  { path: '/dashboard', label: 'Mission Control', icon: '🏠', permission: null },
   { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
   { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD },
   { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
@@ -82,7 +82,6 @@ const MAIN_NAV = [
 
 // Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/reference-library', label: 'Reference Library', icon: '📚', permission: Permissions.OPS_CENTER },
   { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER },
   { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER },
   { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
