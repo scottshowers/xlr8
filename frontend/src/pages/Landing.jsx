@@ -207,14 +207,14 @@ export default function Landing() {
                   <Rocket style={{ width: 32, height: 32 }} />
                 </div>
                 <div style={{ 
-                  fontSize: '1rem', 
-                  opacity: 0.85, 
-                  fontWeight: '500',
-                  letterSpacing: '0.15em',
-                  textTransform: 'uppercase',
-                  marginTop: '0.25rem'
+                  fontSize: '1.1rem', 
+                  opacity: 0.9, 
+                  fontWeight: '600',
+                  letterSpacing: '0.08em',
+                  marginTop: '0.25rem',
+                  fontStyle: 'italic'
                 }}>
-                  Analysis Platform
+                  Context That Compounds
                 </div>
               </div>
             </div>
@@ -724,7 +724,7 @@ export default function Landing() {
           color: COLORS.textMuted, 
           margin: 0 
         }}>
-          © 2025 HCMPACT. The system of record for configuration decisions.
+          © 2025 HCMPACT. XLR8 — Context That Compounds.
         </p>
       </footer>
     </div>
