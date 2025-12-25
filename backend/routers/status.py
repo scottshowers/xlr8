@@ -1403,6 +1403,26 @@ async def list_references():
         # Also get rules from standards processor
         rules_list = []
         rules_info = {'available': False, 'documents': 0, 'total_rules': 0}
+        
+        def make_json_safe(obj):
+            """Recursively convert object to JSON-safe format."""
+            if obj is None:
+                return None
+            if isinstance(obj, (str, int, float, bool)):
+                return obj
+            if isinstance(obj, (list, tuple)):
+                return [make_json_safe(item) for item in obj]
+            if isinstance(obj, dict):
+                return {str(k): make_json_safe(v) for k, v in obj.items() if not callable(v)}
+            if hasattr(obj, 'isoformat'):
+                return obj.isoformat()
+            if callable(obj):
+                return None
+            try:
+                return str(obj)
+            except:
+                return None
+        
         try:
             from backend.utils.standards_processor import get_rule_registry
             registry = get_rule_registry()
@@ -1411,33 +1431,15 @@ async def list_references():
             # Convert to dict format - same careful serialization as /status/rules
             for rule in all_rules:
                 try:
-                    if hasattr(rule, 'to_dict') and callable(rule.to_dict):
-                        rule_dict = rule.to_dict()
-                    elif isinstance(rule, dict):
-                        rule_dict = rule
-                    else:
-                        rule_dict = {
-                            "rule_id": getattr(rule, 'rule_id', ''),
-                            "title": getattr(rule, 'title', ''),
-                            "description": getattr(rule, 'description', ''),
-                            "source_document": getattr(rule, 'source_document', ''),
-                            "severity": getattr(rule, 'severity', 'medium'),
-                            "suggested_sql_pattern": getattr(rule, 'suggested_sql_pattern', None)
-                        }
-                    
-                    # Clean for JSON serialization
-                    clean_dict = {}
-                    for k, v in rule_dict.items():
-                        if callable(v):
-                            continue
-                        if hasattr(v, 'isoformat'):
-                            clean_dict[k] = v.isoformat()
-                        elif isinstance(v, (str, int, float, bool, type(None), list, dict)):
-                            clean_dict[k] = v
-                        else:
-                            clean_dict[k] = str(v)
-                    
-                    rules_list.append(clean_dict)
+                    rule_dict = {
+                        "rule_id": make_json_safe(getattr(rule, 'rule_id', '')),
+                        "title": make_json_safe(getattr(rule, 'title', '')),
+                        "description": make_json_safe(getattr(rule, 'description', '')),
+                        "source_document": make_json_safe(getattr(rule, 'source_document', '')),
+                        "severity": make_json_safe(getattr(rule, 'severity', 'medium')),
+                        "suggested_sql_pattern": make_json_safe(getattr(rule, 'suggested_sql_pattern', None))
+                    }
+                    rules_list.append(rule_dict)
                 except Exception as e:
                     logger.warning(f"[REFERENCES] Could not convert rule: {e}")
             
@@ -1750,6 +1752,27 @@ async def list_rules():
     Returns rules from standards_processor for viewing/editing.
     Used by Data Explorer Rules tab.
     """
+    
+    def make_json_safe(obj):
+        """Recursively convert object to JSON-safe format."""
+        if obj is None:
+            return None
+        if isinstance(obj, (str, int, float, bool)):
+            return obj
+        if isinstance(obj, (list, tuple)):
+            return [make_json_safe(item) for item in obj]
+        if isinstance(obj, dict):
+            return {str(k): make_json_safe(v) for k, v in obj.items() if not callable(v)}
+        if hasattr(obj, 'isoformat'):
+            return obj.isoformat()
+        if callable(obj):
+            return None
+        # For any other object, try to convert to string
+        try:
+            return str(obj)
+        except:
+            return None
+    
     try:
         from backend.utils.standards_processor import get_rule_registry
         registry = get_rule_registry()
@@ -1759,44 +1782,25 @@ async def list_rules():
         rules_list = []
         for rule in all_rules:
             try:
-                # If it has to_dict method, use it
-                if hasattr(rule, 'to_dict') and callable(rule.to_dict):
-                    rule_dict = rule.to_dict()
-                # If it's already a dict, use it
-                elif isinstance(rule, dict):
-                    rule_dict = rule
-                # Otherwise manually extract fields
-                else:
-                    rule_dict = {
-                        "rule_id": getattr(rule, 'rule_id', ''),
-                        "title": getattr(rule, 'title', ''),
-                        "description": getattr(rule, 'description', ''),
-                        "applies_to": getattr(rule, 'applies_to', {}),
-                        "requirement": getattr(rule, 'requirement', {}),
-                        "source_document": getattr(rule, 'source_document', ''),
-                        "source_page": getattr(rule, 'source_page', None),
-                        "source_section": getattr(rule, 'source_section', ''),
-                        "source_text": getattr(rule, 'source_text', ''),
-                        "category": getattr(rule, 'category', 'general'),
-                        "severity": getattr(rule, 'severity', 'medium'),
-                        "effective_date": getattr(rule, 'effective_date', None),
-                        "check_type": getattr(rule, 'check_type', 'data'),
-                        "suggested_sql_pattern": getattr(rule, 'suggested_sql_pattern', None)
-                    }
+                # Manually extract all fields and make JSON-safe
+                rule_dict = {
+                    "rule_id": make_json_safe(getattr(rule, 'rule_id', '')),
+                    "title": make_json_safe(getattr(rule, 'title', '')),
+                    "description": make_json_safe(getattr(rule, 'description', '')),
+                    "applies_to": make_json_safe(getattr(rule, 'applies_to', {})),
+                    "requirement": make_json_safe(getattr(rule, 'requirement', {})),
+                    "source_document": make_json_safe(getattr(rule, 'source_document', '')),
+                    "source_page": make_json_safe(getattr(rule, 'source_page', None)),
+                    "source_section": make_json_safe(getattr(rule, 'source_section', '')),
+                    "source_text": make_json_safe(getattr(rule, 'source_text', '')),
+                    "category": make_json_safe(getattr(rule, 'category', 'general')),
+                    "severity": make_json_safe(getattr(rule, 'severity', 'medium')),
+                    "effective_date": make_json_safe(getattr(rule, 'effective_date', None)),
+                    "check_type": make_json_safe(getattr(rule, 'check_type', 'data')),
+                    "suggested_sql_pattern": make_json_safe(getattr(rule, 'suggested_sql_pattern', None))
+                }
                 
-                # Ensure all values are JSON-serializable
-                clean_dict = {}
-                for k, v in rule_dict.items():
-                    if callable(v):
-                        continue  # Skip methods
-                    if hasattr(v, 'isoformat'):
-                        clean_dict[k] = v.isoformat()
-                    elif isinstance(v, (str, int, float, bool, type(None), list, dict)):
-                        clean_dict[k] = v
-                    else:
-                        clean_dict[k] = str(v)
-                
-                rules_list.append(clean_dict)
+                rules_list.append(rule_dict)
             except Exception as e:
                 logger.warning(f"[RULES] Could not convert rule: {e}")
         
@@ -1806,10 +1810,10 @@ async def list_rules():
             for doc_id, doc in registry.documents.items():
                 try:
                     doc_info = {
-                        'document_id': getattr(doc, 'document_id', doc_id),
-                        'filename': getattr(doc, 'filename', 'unknown'),
-                        'title': getattr(doc, 'title', ''),
-                        'domain': getattr(doc, 'domain', 'general'),
+                        'document_id': make_json_safe(getattr(doc, 'document_id', doc_id)),
+                        'filename': make_json_safe(getattr(doc, 'filename', 'unknown')),
+                        'title': make_json_safe(getattr(doc, 'title', '')),
+                        'domain': make_json_safe(getattr(doc, 'domain', 'general')),
                         'rules_count': len(getattr(doc, 'rules', []))
                     }
                     documents.append(doc_info)
