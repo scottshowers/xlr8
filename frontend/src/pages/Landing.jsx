@@ -58,19 +58,19 @@ const COLORS = {
 const SpeedLinesStyles = () => (
   <style>{`
     @keyframes speedLine {
-      0% { opacity: 0; transform: translateX(-20px); }
+      0% { opacity: 0; transform: translateX(-30px); }
       50% { opacity: 1; }
-      100% { opacity: 0; transform: translateX(40px); }
+      100% { opacity: 0; transform: translateX(60px); }
     }
     .speed-line {
-      height: 5px;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+      height: 6px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.7), transparent);
       animation: speedLine 1.8s ease-out infinite;
-      border-radius: 2px;
+      border-radius: 3px;
     }
-    .speed-line:nth-child(1) { width: 40px; animation-delay: 0s; }
-    .speed-line:nth-child(2) { width: 60px; animation-delay: 0.25s; }
-    .speed-line:nth-child(3) { width: 32px; animation-delay: 0.5s; }
+    .speed-line:nth-child(1) { animation-delay: 0s; }
+    .speed-line:nth-child(2) { animation-delay: 0.25s; }
+    .speed-line:nth-child(3) { animation-delay: 0.5s; }
     @keyframes pulse {
       0%, 100% { transform: scale(1); opacity: 1; }
       50% { transform: scale(1.05); opacity: 0.9; }
@@ -84,17 +84,17 @@ const SpeedLinesStyles = () => (
 const SpeedLines = () => (
   <div style={{
     position: 'absolute',
-    left: '-35px',
+    left: '-50px',
     top: '50%',
     transform: 'translateY(-50%)',
     display: 'flex',
     flexDirection: 'column',
-    gap: '14px',
+    gap: '18px',
     zIndex: 0
   }}>
-    <div className="speed-line" />
-    <div className="speed-line" />
-    <div className="speed-line" />
+    <div className="speed-line" style={{ width: '55px' }} />
+    <div className="speed-line" style={{ width: '80px' }} />
+    <div className="speed-line" style={{ width: '45px' }} />
   </div>
 )
 
@@ -148,39 +148,19 @@ export default function Landing() {
       <div style={{
         background: `linear-gradient(135deg, ${COLORS.primary} 0%, ${COLORS.primaryDark} 100%)`,
         color: 'white',
-        padding: '2rem 2rem 2.5rem'
+        padding: '2rem 2rem 3rem'
       }}>
         <div style={{ 
           maxWidth: '1200px', 
           margin: '0 auto',
         }}>
-          {/* Top Bar */}
+          {/* Top Bar - Login only */}
           <div style={{
             display: 'flex',
             alignItems: 'center',
-            justifyContent: 'space-between',
-            marginBottom: '2rem'
+            justifyContent: 'flex-end',
+            marginBottom: '1rem'
           }}>
-            {/* Logo + Title */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-              <div style={{ position: 'relative' }}>
-                <SpeedLines />
-                <HLogoWhite size={80} />
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ 
-                  fontFamily: "'Ubuntu Mono', monospace",
-                  fontSize: '1.75rem',
-                  fontWeight: '700',
-                  letterSpacing: '0.05em'
-                }}>
-                  XLR8
-                </span>
-                <Rocket style={{ width: 22, height: 22 }} />
-              </div>
-            </div>
-            
-            {/* Login */}
             <Link 
               to="/login" 
               style={{
@@ -200,8 +180,44 @@ export default function Landing() {
             </Link>
           </div>
 
-          {/* Hero Content */}
+          {/* Hero Content - Logo Centered and PROMINENT */}
           <div style={{ textAlign: 'center', maxWidth: '800px', margin: '0 auto' }}>
+            {/* Big Beautiful Logo */}
+            <div style={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center', 
+              gap: '1.5rem',
+              marginBottom: '1.5rem'
+            }}>
+              <div style={{ position: 'relative' }}>
+                <SpeedLines />
+                <HLogoWhite size={140} />
+              </div>
+              <div style={{ textAlign: 'left' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span style={{ 
+                    fontFamily: "'Ubuntu Mono', monospace",
+                    fontSize: '3rem',
+                    fontWeight: '700',
+                    letterSpacing: '0.08em'
+                  }}>
+                    XLR8
+                  </span>
+                  <Rocket style={{ width: 32, height: 32 }} />
+                </div>
+                <div style={{ 
+                  fontSize: '1rem', 
+                  opacity: 0.85, 
+                  fontWeight: '500',
+                  letterSpacing: '0.15em',
+                  textTransform: 'uppercase',
+                  marginTop: '0.25rem'
+                }}>
+                  Analysis Platform
+                </div>
+              </div>
+            </div>
             <div className="pulse-badge" style={{ 
               display: 'inline-flex', alignItems: 'center', gap: '0.5rem',
               padding: '0.4rem 1rem', background: 'rgba(255,255,255,0.2)', 
