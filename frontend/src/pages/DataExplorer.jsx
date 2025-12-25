@@ -106,6 +106,8 @@ export default function DataExplorer() {
   // Rules state
   const [rules, setRules] = useState([]);
   const [loadingRules, setLoadingRules] = useState(false);
+  const [testingRule, setTestingRule] = useState(null);
+  const [testResults, setTestResults] = useState({});
   
   const c = { ...colors, ...brandColors };
 
@@ -260,6 +262,74 @@ export default function DataExplorer() {
       loadRules();
     }
   }, [activeTab]);
+
+  // Extract table names from SQL query
+  const extractTablesFromSQL = (sql) => {
+    if (!sql) return [];
+    const upperSQL = sql.toUpperCase();
+    const tables = new Set();
+    
+    // Match FROM table_name and JOIN table_name patterns
+    const fromMatch = upperSQL.match(/FROM\s+([a-zA-Z0-9_]+)/gi);
+    const joinMatch = upperSQL.match(/JOIN\s+([a-zA-Z0-9_]+)/gi);
+    
+    if (fromMatch) {
+      fromMatch.forEach(m => {
+        const tableName = m.replace(/FROM\s+/i, '').toLowerCase();
+        if (!['select', 'where', 'and', 'or'].includes(tableName)) {
+          tables.add(tableName);
+        }
+      });
+    }
+    if (joinMatch) {
+      joinMatch.forEach(m => {
+        const tableName = m.replace(/JOIN\s+/i, '').toLowerCase();
+        tables.add(tableName);
+      });
+    }
+    
+    return Array.from(tables);
+  };
+
+  // Check if tables exist in user's data
+  const getTableStatus = (sqlTables) => {
+    const userTables = tables.map(t => t.table_name?.toLowerCase() || t.name?.toLowerCase());
+    return sqlTables.map(t => ({
+      name: t,
+      exists: userTables.includes(t.toLowerCase())
+    }));
+  };
+
+  // Test SQL query against DuckDB
+  const testRuleSQL = async (ruleId, sql) => {
+    setTestingRule(ruleId);
+    try {
+      const response = await api.post('/status/test-sql', { sql }, { timeout: 30000 });
+      setTestResults(prev => ({
+        ...prev,
+        [ruleId]: {
+          success: true,
+          rowCount: response.data?.row_count || 0,
+          columns: response.data?.columns || [],
+          sample: response.data?.sample || [],
+          error: null
+        }
+      }));
+    } catch (err) {
+      setTestResults(prev => ({
+        ...prev,
+        [ruleId]: {
+          success: false,
+          rowCount: 0,
+          columns: [],
+          sample: [],
+          error: err.response?.data?.detail || err.message
+        }
+      }));
+    } finally {
+      setTestingRule(null);
+    }
+  };
 
   // Generate mock relationships based on common column patterns
   const generateMockRelationships = (tables) => {
@@ -884,11 +954,68 @@ export default function DataExplorer() {
                       {rule.suggested_sql_pattern && (
                         <div style={{ marginTop: '0.75rem' }}>
                           <div style={{ 
-                            display: 'flex', alignItems: 'center', gap: '0.5rem', 
-                            fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.35rem' 
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            marginBottom: '0.35rem' 
                           }}>
-                            <Code size={12} /> SQL Query Pattern
+                            <div style={{ 
+                              display: 'flex', alignItems: 'center', gap: '0.5rem', 
+                              fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase'
+                            }}>
+                              <Code size={12} /> SQL Query Pattern
+                            </div>
+                            <button
+                              onClick={() => testRuleSQL(rule.rule_id, rule.suggested_sql_pattern)}
+                              disabled={testingRule === rule.rule_id}
+                              style={{
+                                display: 'flex', alignItems: 'center', gap: '0.35rem',
+                                padding: '0.3rem 0.6rem', 
+                                background: c.accent, 
+                                border: 'none',
+                                borderRadius: 4, 
+                                fontSize: '0.75rem', 
+                                color: 'white', 
+                                cursor: testingRule === rule.rule_id ? 'wait' : 'pointer',
+                                opacity: testingRule === rule.rule_id ? 0.7 : 1
+                              }}
+                            >
+                              {testingRule === rule.rule_id ? (
+                                <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Testing...</>
+                              ) : (
+                                <><Play size={12} /> Test Query</>
+                              )}
+                            </button>
                           </div>
+                          
+                          {/* Table Validation */}
+                          {(() => {
+                            const sqlTables = extractTablesFromSQL(rule.suggested_sql_pattern);
+                            const tableStatus = getTableStatus(sqlTables);
+                            if (sqlTables.length > 0) {
+                              return (
+                                <div style={{ 
+                                  display: 'flex', gap: '0.5rem', flexWrap: 'wrap', 
+                                  marginBottom: '0.5rem', fontSize: '0.75rem' 
+                                }}>
+                                  <span style={{ color: c.textMuted }}>Tables:</span>
+                                  {tableStatus.map((t, idx) => (
+                                    <span key={idx} style={{ 
+                                      display: 'flex', alignItems: 'center', gap: '0.25rem',
+                                      padding: '0.15rem 0.4rem',
+                                      background: t.exists ? `${c.primary}20` : `${c.scarletSage}20`,
+                                      color: t.exists ? c.primary : c.scarletSage,
+                                      borderRadius: 4,
+                                      fontFamily: 'monospace'
+                                    }}>
+                                      {t.exists ? <CheckCircle size={10} /> : <XCircle size={10} />}
+                                      {t.name}
+                                    </span>
+                                  ))}
+                                </div>
+                              );
+                            }
+                            return null;
+                          })()}
+                          
                           <div style={{ 
                             background: '#1e1e1e', 
                             color: '#d4d4d4', 
@@ -901,6 +1028,66 @@ export default function DataExplorer() {
                           }}>
                             {rule.suggested_sql_pattern}
                           </div>
+                          
+                          {/* Test Results */}
+                          {testResults[rule.rule_id] && (
+                            <div style={{ 
+                              marginTop: '0.5rem', 
+                              padding: '0.75rem', 
+                              background: testResults[rule.rule_id].success ? `${c.primary}10` : `${c.scarletSage}10`,
+                              border: `1px solid ${testResults[rule.rule_id].success ? c.primary : c.scarletSage}`,
+                              borderRadius: 6 
+                            }}>
+                              {testResults[rule.rule_id].success ? (
+                                <>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                                    <CheckCircle size={16} style={{ color: c.primary }} />
+                                    <span style={{ fontWeight: 600, color: c.text }}>
+                                      Query returned {testResults[rule.rule_id].rowCount} row(s)
+                                    </span>
+                                    {testResults[rule.rule_id].rowCount > 0 && (
+                                      <span style={{ 
+                                        fontSize: '0.7rem', padding: '0.15rem 0.4rem', 
+                                        background: c.scarletSage, color: 'white', 
+                                        borderRadius: 4 
+                                      }}>
+                                        POTENTIAL VIOLATION
+                                      </span>
+                                    )}
+                                  </div>
+                                  {testResults[rule.rule_id].columns?.length > 0 && (
+                                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginBottom: '0.35rem' }}>
+                                      Columns: {testResults[rule.rule_id].columns.join(', ')}
+                                    </div>
+                                  )}
+                                  {testResults[rule.rule_id].sample?.length > 0 && (
+                                    <div style={{ 
+                                      background: c.cardBg, padding: '0.5rem', borderRadius: 4, 
+                                      fontSize: '0.75rem', fontFamily: 'monospace', 
+                                      maxHeight: '150px', overflowY: 'auto' 
+                                    }}>
+                                      <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: c.textMuted }}>Sample Data (first 5 rows):</div>
+                                      {testResults[rule.rule_id].sample.map((row, idx) => (
+                                        <div key={idx} style={{ color: c.text, borderBottom: `1px solid ${c.border}`, padding: '0.25rem 0' }}>
+                                          {JSON.stringify(row)}
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </>
+                              ) : (
+                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
+                                  <XCircle size={16} style={{ color: c.scarletSage, flexShrink: 0, marginTop: '0.1rem' }} />
+                                  <div>
+                                    <span style={{ fontWeight: 600, color: c.scarletSage }}>Query failed</span>
+                                    <div style={{ fontSize: '0.8rem', color: c.text, marginTop: '0.25rem', fontFamily: 'monospace' }}>
+                                      {testResults[rule.rule_id].error}
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
                         </div>
                       )}
                       
