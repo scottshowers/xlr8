@@ -56,6 +56,7 @@ import AnalyticsPage from './pages/AnalyticsPage';
 import WelcomePage from './pages/WelcomePage';
 import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
+import HypeVideo from './pages/HypeVideo';
 import IntelligenceDemo from './pages/IntelligenceDemo';
 import ArchitecturePage from './pages/ArchitecturePage';
 
@@ -81,6 +82,9 @@ function AppRoutes() {
         
         {/* Journey - Visual infographic */}
         <Route path="/journey" element={<JourneyPage />} />
+        
+        {/* Hype Video - Cinematic brand film */}
+        <Route path="/hype" element={<HypeVideo />} />
         
         {/* Intelligence Demo - Watch XLR8 Think */}
         <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
