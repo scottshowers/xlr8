@@ -4316,20 +4316,27 @@ async def test_sql_query(request: dict):
 # GENERATE SQL FOR RULE (Option B - on-demand SQL generation)
 # =============================================================================
 
+# =============================================================================
+# GENERATE SQL FOR RULE (Option B - on-demand SQL generation)
+# Uses LLMOrchestrator to call local Ollama (DeepSeek for SQL)
+# =============================================================================
+
 @router.post("/status/rules/{rule_id}/generate-sql")
 async def generate_sql_for_rule(rule_id: str, request: dict = None):
     """
     Generate a SQL query pattern for a specific rule based on available tables.
-    
-    Uses LLM to create a query that checks the rule's conditions against
-    the user's actual DuckDB schema.
+    Uses local LLM (DeepSeek via Ollama) to create a query.
     """
     import logging
     logger = logging.getLogger(__name__)
     
     try:
         # 1. Get the rule
-        from backend.utils.standards_processor import get_rule_registry
+        try:
+            from backend.utils.standards_processor import get_rule_registry
+        except ImportError:
+            from utils.standards_processor import get_rule_registry
+            
         registry = get_rule_registry()
         
         rule = None
@@ -4343,7 +4350,11 @@ async def generate_sql_for_rule(rule_id: str, request: dict = None):
             raise HTTPException(404, f"Rule {rule_id} not found")
         
         # 2. Get available tables and columns from DuckDB
-        from utils.structured_data_handler import get_structured_handler
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+            
         handler = get_structured_handler()
         
         if not handler or not handler.conn:
@@ -4351,12 +4362,14 @@ async def generate_sql_for_rule(rule_id: str, request: dict = None):
         
         # Get schema info
         tables_info = []
+        all_columns = set()
         try:
             tables = handler.conn.execute("SHOW TABLES").fetchall()
             for (table_name,) in tables:
                 try:
                     cols = handler.conn.execute(f"DESCRIBE {table_name}").fetchall()
                     col_names = [c[0] for c in cols]
+                    all_columns.update(col_names)
                     tables_info.append({
                         "table": table_name,
                         "columns": col_names
@@ -4407,77 +4420,41 @@ INSTRUCTIONS:
 5. Include relevant columns that help identify the violation
 6. Use DuckDB SQL syntax
 
-Return ONLY the SQL query, no explanation. If the rule cannot be checked with available data, return:
+Output ONLY the SQL query, no explanation. If the rule cannot be checked with available data, output:
 -- Cannot check: [brief reason]
 """
         
-        # 4. Call LLM (try Groq first, then Claude)
+        # 4. Call LLM using LLMOrchestrator (local Ollama)
         sql_result = None
+        model_used = None
         
         try:
-            # Try Groq
-            import os
-            groq_key = os.environ.get('GROQ_API_KEY')
-            if groq_key:
-                import httpx
-                response = httpx.post(
-                    "https://api.groq.com/openai/v1/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {groq_key}",
-                        "Content-Type": "application/json"
-                    },
-                    json={
-                        "model": "llama-3.1-70b-versatile",
-                        "messages": [
-                            {"role": "system", "content": "You are a SQL expert. Generate only SQL code, no explanations."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        "max_tokens": 500,
-                        "temperature": 0.1
-                    },
-                    timeout=30.0
-                )
-                if response.status_code == 200:
-                    data = response.json()
-                    sql_result = data['choices'][0]['message']['content'].strip()
-                    logger.info(f"[GENERATE-SQL] Groq generated SQL for rule {rule_id}")
-        except Exception as e:
-            logger.warning(f"[GENERATE-SQL] Groq failed: {e}")
-        
-        if not sql_result:
             try:
-                # Try Claude
-                import os
-                claude_key = os.environ.get('ANTHROPIC_API_KEY')
-                if claude_key:
-                    import httpx
-                    response = httpx.post(
-                        "https://api.anthropic.com/v1/messages",
-                        headers={
-                            "x-api-key": claude_key,
-                            "anthropic-version": "2023-06-01",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "claude-3-haiku-20240307",
-                            "max_tokens": 500,
-                            "messages": [
-                                {"role": "user", "content": prompt}
-                            ]
-                        },
-                        timeout=30.0
-                    )
-                    if response.status_code == 200:
-                        data = response.json()
-                        sql_result = data['content'][0]['text'].strip()
-                        logger.info(f"[GENERATE-SQL] Claude generated SQL for rule {rule_id}")
-            except Exception as e:
-                logger.warning(f"[GENERATE-SQL] Claude failed: {e}")
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            
+            orchestrator = LLMOrchestrator()
+            
+            # Use generate_sql which tries DeepSeek then Mistral
+            result = orchestrator.generate_sql(prompt, all_columns)
+            
+            if result.get('success') and result.get('sql'):
+                sql_result = result['sql']
+                model_used = result.get('model', 'local')
+                logger.info(f"[GENERATE-SQL] Success via {model_used} for rule {rule_id}")
+            else:
+                logger.warning(f"[GENERATE-SQL] LLM failed: {result.get('error', 'unknown')}")
+                
+        except Exception as e:
+            logger.error(f"[GENERATE-SQL] LLMOrchestrator error: {e}")
+            import traceback
+            traceback.print_exc()
         
         if not sql_result:
             return {
                 "success": False,
-                "error": "Could not generate SQL - no LLM available",
+                "error": "Could not generate SQL - LLM unavailable or failed",
                 "sql": None
             }
         
@@ -4510,6 +4487,7 @@ Return ONLY the SQL query, no explanation. If the rule cannot be checked with av
             "success": True,
             "rule_id": rule_id,
             "sql": sql_result,
+            "model": model_used,
             "tables_checked": [t['table'] for t in tables_info[:10]]
         }
         
