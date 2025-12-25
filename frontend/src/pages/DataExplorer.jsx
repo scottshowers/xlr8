@@ -18,7 +18,7 @@ import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
-  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3
+  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -108,6 +108,7 @@ export default function DataExplorer() {
   const [loadingRules, setLoadingRules] = useState(false);
   const [testingRule, setTestingRule] = useState(null);
   const [testResults, setTestResults] = useState({});
+  const [generatingSQL, setGeneratingSQL] = useState(null);
   
   const c = { ...colors, ...brandColors };
 
@@ -328,6 +329,28 @@ export default function DataExplorer() {
       }));
     } finally {
       setTestingRule(null);
+    }
+  };
+
+  // Generate SQL pattern for a rule using LLM
+  const generateSQL = async (ruleId) => {
+    setGeneratingSQL(ruleId);
+    try {
+      const response = await api.post(`/status/rules/${ruleId}/generate-sql`, {}, { timeout: 60000 });
+      if (response.data?.success && response.data?.sql) {
+        // Update the rule in local state with the new SQL
+        setRules(prev => prev.map(r => 
+          r.rule_id === ruleId 
+            ? { ...r, suggested_sql_pattern: response.data.sql }
+            : r
+        ));
+      } else {
+        alert('Could not generate SQL: ' + (response.data?.error || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Failed to generate SQL: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setGeneratingSQL(null);
     }
   };
 
@@ -950,8 +973,8 @@ export default function DataExplorer() {
                         )}
                       </div>
                       
-                      {/* SQL Query Pattern */}
-                      {rule.suggested_sql_pattern && (
+                      {/* SQL Query Pattern - or Generate Button */}
+                      {rule.suggested_sql_pattern ? (
                         <div style={{ marginTop: '0.75rem' }}>
                           <div style={{ 
                             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1088,6 +1111,34 @@ export default function DataExplorer() {
                               )}
                             </div>
                           )}
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: '0.75rem' }}>
+                          <button
+                            onClick={() => generateSQL(rule.rule_id)}
+                            disabled={generatingSQL === rule.rule_id}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: '0.5rem',
+                              padding: '0.5rem 1rem',
+                              background: `${c.royalPurple}15`,
+                              border: `1px dashed ${c.royalPurple}`,
+                              borderRadius: 6,
+                              fontSize: '0.8rem',
+                              color: c.royalPurple,
+                              cursor: generatingSQL === rule.rule_id ? 'wait' : 'pointer',
+                              width: '100%',
+                              justifyContent: 'center'
+                            }}
+                          >
+                            {generatingSQL === rule.rule_id ? (
+                              <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Generating SQL...</>
+                            ) : (
+                              <><Sparkles size={14} /> Generate SQL Query</>
+                            )}
+                          </button>
+                          <div style={{ fontSize: '0.7rem', color: c.textMuted, textAlign: 'center', marginTop: '0.35rem' }}>
+                            Uses AI to create a compliance check query based on your data
+                          </div>
                         </div>
                       )}
                       
