@@ -4310,3 +4310,213 @@ async def test_sql_query(request: dict):
     except Exception as e:
         logger.error(f"[TEST-SQL] Error: {e}")
         raise HTTPException(400, str(e))
+
+
+# =============================================================================
+# GENERATE SQL FOR RULE (Option B - on-demand SQL generation)
+# =============================================================================
+
+@router.post("/status/rules/{rule_id}/generate-sql")
+async def generate_sql_for_rule(rule_id: str, request: dict = None):
+    """
+    Generate a SQL query pattern for a specific rule based on available tables.
+    
+    Uses LLM to create a query that checks the rule's conditions against
+    the user's actual DuckDB schema.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        # 1. Get the rule
+        from backend.utils.standards_processor import get_rule_registry
+        registry = get_rule_registry()
+        
+        rule = None
+        for r in registry.get_all_rules():
+            rid = getattr(r, 'rule_id', None)
+            if rid == rule_id:
+                rule = r
+                break
+        
+        if not rule:
+            raise HTTPException(404, f"Rule {rule_id} not found")
+        
+        # 2. Get available tables and columns from DuckDB
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        if not handler or not handler.conn:
+            raise HTTPException(503, "DuckDB not available")
+        
+        # Get schema info
+        tables_info = []
+        try:
+            tables = handler.conn.execute("SHOW TABLES").fetchall()
+            for (table_name,) in tables:
+                try:
+                    cols = handler.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                    col_names = [c[0] for c in cols]
+                    tables_info.append({
+                        "table": table_name,
+                        "columns": col_names
+                    })
+                except:
+                    pass
+        except Exception as e:
+            logger.warning(f"Could not get schema: {e}")
+        
+        if not tables_info:
+            return {
+                "success": False,
+                "error": "No tables available in DuckDB",
+                "sql": None
+            }
+        
+        # 3. Build prompt for LLM
+        rule_info = {
+            "title": getattr(rule, 'title', ''),
+            "description": getattr(rule, 'description', ''),
+            "applies_to": getattr(rule, 'applies_to', {}),
+            "requirement": getattr(rule, 'requirement', {}),
+            "source_text": getattr(rule, 'source_text', '')[:500]
+        }
+        
+        schema_text = "\n".join([
+            f"Table: {t['table']}\n  Columns: {', '.join(t['columns'][:20])}"
+            for t in tables_info[:10]  # Limit to 10 tables
+        ])
+        
+        prompt = f"""Generate a DuckDB SQL query to check compliance with this rule.
+
+RULE:
+Title: {rule_info['title']}
+Description: {rule_info['description']}
+Applies To: {rule_info['applies_to']}
+Requirement: {rule_info['requirement']}
+Original Text: {rule_info['source_text']}
+
+AVAILABLE TABLES:
+{schema_text}
+
+INSTRUCTIONS:
+1. Create a SELECT query that finds rows that VIOLATE this rule
+2. Use only tables and columns that exist in the schema above
+3. If no tables match the rule's domain, return a comment explaining why
+4. The query should return violating records (non-compliance)
+5. Include relevant columns that help identify the violation
+6. Use DuckDB SQL syntax
+
+Return ONLY the SQL query, no explanation. If the rule cannot be checked with available data, return:
+-- Cannot check: [brief reason]
+"""
+        
+        # 4. Call LLM (try Groq first, then Claude)
+        sql_result = None
+        
+        try:
+            # Try Groq
+            import os
+            groq_key = os.environ.get('GROQ_API_KEY')
+            if groq_key:
+                import httpx
+                response = httpx.post(
+                    "https://api.groq.com/openai/v1/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {groq_key}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.1-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": "You are a SQL expert. Generate only SQL code, no explanations."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        "max_tokens": 500,
+                        "temperature": 0.1
+                    },
+                    timeout=30.0
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    sql_result = data['choices'][0]['message']['content'].strip()
+                    logger.info(f"[GENERATE-SQL] Groq generated SQL for rule {rule_id}")
+        except Exception as e:
+            logger.warning(f"[GENERATE-SQL] Groq failed: {e}")
+        
+        if not sql_result:
+            try:
+                # Try Claude
+                import os
+                claude_key = os.environ.get('ANTHROPIC_API_KEY')
+                if claude_key:
+                    import httpx
+                    response = httpx.post(
+                        "https://api.anthropic.com/v1/messages",
+                        headers={
+                            "x-api-key": claude_key,
+                            "anthropic-version": "2023-06-01",
+                            "Content-Type": "application/json"
+                        },
+                        json={
+                            "model": "claude-3-haiku-20240307",
+                            "max_tokens": 500,
+                            "messages": [
+                                {"role": "user", "content": prompt}
+                            ]
+                        },
+                        timeout=30.0
+                    )
+                    if response.status_code == 200:
+                        data = response.json()
+                        sql_result = data['content'][0]['text'].strip()
+                        logger.info(f"[GENERATE-SQL] Claude generated SQL for rule {rule_id}")
+            except Exception as e:
+                logger.warning(f"[GENERATE-SQL] Claude failed: {e}")
+        
+        if not sql_result:
+            return {
+                "success": False,
+                "error": "Could not generate SQL - no LLM available",
+                "sql": None
+            }
+        
+        # Clean up SQL (remove markdown code blocks if present)
+        if sql_result.startswith("```"):
+            lines = sql_result.split("\n")
+            sql_result = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
+        sql_result = sql_result.strip()
+        
+        # 5. Save to Supabase
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                supabase.table('standards_rules').update({
+                    'suggested_sql_pattern': sql_result
+                }).eq('rule_id', rule_id).execute()
+                logger.info(f"[GENERATE-SQL] Saved SQL for rule {rule_id}")
+        except Exception as e:
+            logger.warning(f"[GENERATE-SQL] Could not save to Supabase: {e}")
+        
+        # 6. Update in-memory registry
+        try:
+            if hasattr(rule, 'suggested_sql_pattern'):
+                rule.suggested_sql_pattern = sql_result
+        except:
+            pass
+        
+        return {
+            "success": True,
+            "rule_id": rule_id,
+            "sql": sql_result,
+            "tables_checked": [t['table'] for t in tables_info[:10]]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[GENERATE-SQL] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(500, str(e))
