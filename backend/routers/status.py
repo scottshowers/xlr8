@@ -4157,3 +4157,86 @@ async def run_compliance_check(request: dict):
             "compliant_count": 0,
             "findings": []
         }
+
+
+
+# =============================================================================
+# TEST SQL ENDPOINT (for Rules tab SQL validation)
+# =============================================================================
+
+@router.post("/status/test-sql")
+async def test_sql_query(request: dict):
+    """
+    Test a SQL query against DuckDB and return results.
+    
+    Used by Rules tab to validate SQL patterns against actual data.
+    Returns row count, columns, and sample data.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    sql = request.get("sql", "").strip()
+    
+    if not sql:
+        raise HTTPException(400, "SQL query required")
+    
+    # Security: Only allow SELECT queries
+    sql_upper = sql.upper().strip()
+    if not sql_upper.startswith("SELECT"):
+        raise HTTPException(400, "Only SELECT queries allowed for testing")
+    
+    # Block dangerous operations
+    dangerous = ["DROP", "DELETE", "INSERT", "UPDATE", "ALTER", "CREATE", "TRUNCATE"]
+    for d in dangerous:
+        if d in sql_upper:
+            raise HTTPException(400, f"Query contains forbidden operation: {d}")
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        if not handler or not handler.conn:
+            raise HTTPException(503, "DuckDB not available")
+        
+        # Execute query with limit for safety
+        # Add LIMIT if not present
+        if "LIMIT" not in sql_upper:
+            sql = sql.rstrip(";") + " LIMIT 100"
+        
+        result = handler.conn.execute(sql).fetchall()
+        
+        # Get column names
+        columns = []
+        try:
+            columns = [desc[0] for desc in handler.conn.description]
+        except:
+            pass
+        
+        # Get sample (first 5 rows)
+        sample = []
+        for row in result[:5]:
+            row_dict = {}
+            for i, col in enumerate(columns):
+                val = row[i] if i < len(row) else None
+                # Convert to JSON-serializable
+                if hasattr(val, 'isoformat'):
+                    val = val.isoformat()
+                elif isinstance(val, (bytes, bytearray)):
+                    val = str(val)
+                row_dict[col] = val
+            sample.append(row_dict)
+        
+        logger.info(f"[TEST-SQL] Query returned {len(result)} rows")
+        
+        return {
+            "success": True,
+            "row_count": len(result),
+            "columns": columns,
+            "sample": sample
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[TEST-SQL] Error: {e}")
+        raise HTTPException(400, str(e))
