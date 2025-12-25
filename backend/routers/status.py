@@ -1408,13 +1408,38 @@ async def list_references():
             registry = get_rule_registry()
             all_rules = registry.get_all_rules()
             
-            # Convert to dict format
+            # Convert to dict format - same careful serialization as /status/rules
             for rule in all_rules:
                 try:
-                    rule_dict = rule.to_dict() if hasattr(rule, 'to_dict') else rule
-                    rules_list.append(rule_dict)
-                except:
-                    pass
+                    if hasattr(rule, 'to_dict') and callable(rule.to_dict):
+                        rule_dict = rule.to_dict()
+                    elif isinstance(rule, dict):
+                        rule_dict = rule
+                    else:
+                        rule_dict = {
+                            "rule_id": getattr(rule, 'rule_id', ''),
+                            "title": getattr(rule, 'title', ''),
+                            "description": getattr(rule, 'description', ''),
+                            "source_document": getattr(rule, 'source_document', ''),
+                            "severity": getattr(rule, 'severity', 'medium'),
+                            "suggested_sql_pattern": getattr(rule, 'suggested_sql_pattern', None)
+                        }
+                    
+                    # Clean for JSON serialization
+                    clean_dict = {}
+                    for k, v in rule_dict.items():
+                        if callable(v):
+                            continue
+                        if hasattr(v, 'isoformat'):
+                            clean_dict[k] = v.isoformat()
+                        elif isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                            clean_dict[k] = v
+                        else:
+                            clean_dict[k] = str(v)
+                    
+                    rules_list.append(clean_dict)
+                except Exception as e:
+                    logger.warning(f"[REFERENCES] Could not convert rule: {e}")
             
             if hasattr(registry, 'documents'):
                 rules_info['available'] = True
@@ -1730,27 +1755,66 @@ async def list_rules():
         registry = get_rule_registry()
         all_rules = registry.get_all_rules()
         
-        # Convert to dict format with full details
+        # Convert to dict format with full details - handle serialization carefully
         rules_list = []
         for rule in all_rules:
             try:
-                rule_dict = rule.to_dict() if hasattr(rule, 'to_dict') else rule
-                rules_list.append(rule_dict)
+                # If it has to_dict method, use it
+                if hasattr(rule, 'to_dict') and callable(rule.to_dict):
+                    rule_dict = rule.to_dict()
+                # If it's already a dict, use it
+                elif isinstance(rule, dict):
+                    rule_dict = rule
+                # Otherwise manually extract fields
+                else:
+                    rule_dict = {
+                        "rule_id": getattr(rule, 'rule_id', ''),
+                        "title": getattr(rule, 'title', ''),
+                        "description": getattr(rule, 'description', ''),
+                        "applies_to": getattr(rule, 'applies_to', {}),
+                        "requirement": getattr(rule, 'requirement', {}),
+                        "source_document": getattr(rule, 'source_document', ''),
+                        "source_page": getattr(rule, 'source_page', None),
+                        "source_section": getattr(rule, 'source_section', ''),
+                        "source_text": getattr(rule, 'source_text', ''),
+                        "category": getattr(rule, 'category', 'general'),
+                        "severity": getattr(rule, 'severity', 'medium'),
+                        "effective_date": getattr(rule, 'effective_date', None),
+                        "check_type": getattr(rule, 'check_type', 'data'),
+                        "suggested_sql_pattern": getattr(rule, 'suggested_sql_pattern', None)
+                    }
+                
+                # Ensure all values are JSON-serializable
+                clean_dict = {}
+                for k, v in rule_dict.items():
+                    if callable(v):
+                        continue  # Skip methods
+                    if hasattr(v, 'isoformat'):
+                        clean_dict[k] = v.isoformat()
+                    elif isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                        clean_dict[k] = v
+                    else:
+                        clean_dict[k] = str(v)
+                
+                rules_list.append(clean_dict)
             except Exception as e:
                 logger.warning(f"[RULES] Could not convert rule: {e}")
         
         # Also get document summary
         documents = []
         if hasattr(registry, 'documents'):
-            for doc in registry.documents:
-                doc_info = {
-                    'document_id': getattr(doc, 'document_id', 'unknown'),
-                    'filename': getattr(doc, 'filename', 'unknown'),
-                    'title': getattr(doc, 'title', ''),
-                    'domain': getattr(doc, 'domain', 'general'),
-                    'rules_count': len(getattr(doc, 'rules', []))
-                }
-                documents.append(doc_info)
+            for doc_id, doc in registry.documents.items():
+                try:
+                    doc_info = {
+                        'document_id': getattr(doc, 'document_id', doc_id),
+                        'filename': getattr(doc, 'filename', 'unknown'),
+                        'title': getattr(doc, 'title', ''),
+                        'domain': getattr(doc, 'domain', 'general'),
+                        'rules_count': len(getattr(doc, 'rules', []))
+                    }
+                    documents.append(doc_info)
+                except Exception as e:
+                    logger.warning(f"[RULES] Could not convert document: {e}")
         
         logger.info(f"[RULES] Returning {len(rules_list)} rules from {len(documents)} documents")
         
@@ -1772,6 +1836,8 @@ async def list_rules():
         }
     except Exception as e:
         logger.error(f"[RULES] Error listing rules: {e}")
+        import traceback
+        traceback.print_exc()
         return {
             'rules': [],
             'count': 0,
