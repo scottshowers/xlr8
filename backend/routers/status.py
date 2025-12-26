@@ -553,12 +553,12 @@ async def delete_structured_file(project: str, filename: str):
                             # Also clean metadata for this table
                             try:
                                 conn.execute("DELETE FROM _schema_metadata WHERE table_name = ?", [tbl])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Suppressed: {e}")
                             try:
                                 conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [tbl])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Suppressed: {e}")
                                 
                         except Exception as drop_e:
                             logger.warning(f"[DELETE] Could not drop {tbl}: {drop_e}")
@@ -597,8 +597,8 @@ async def delete_structured_file(project: str, filename: str):
                         chromadb_cleaned = len(results['ids'])
                         logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (field: {field})")
                         break
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
             
             # Also try case-insensitive if nothing found
             if chromadb_cleaned == 0:
@@ -614,8 +614,8 @@ async def delete_structured_file(project: str, filename: str):
                         collection.delete(ids=ids_to_delete)
                         chromadb_cleaned = len(ids_to_delete)
                         logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (case-insensitive)")
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
         except Exception as chroma_e:
             logger.warning(f"[DELETE] ChromaDB cleanup failed: {chroma_e}")
         
@@ -773,8 +773,8 @@ async def verify_delete(project: str, filename: str):
             if pdf:
                 result["fully_deleted"] = False
                 result["remnants"]["_pdf_tables"] = [p[0] for p in pdf]
-        except:
-            pass  # Table might not exist
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")  # Table might not exist
         
         # Check _column_profiles
         try:
@@ -788,8 +788,8 @@ async def verify_delete(project: str, filename: str):
             if matching:
                 result["fully_deleted"] = False
                 result["remnants"]["_column_profiles"] = matching
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Check _column_mappings
         try:
@@ -801,8 +801,8 @@ async def verify_delete(project: str, filename: str):
             if mappings and mappings[0] > 0:
                 result["fully_deleted"] = False
                 result["remnants"]["_column_mappings"] = mappings[0]
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Check _mapping_jobs
         try:
@@ -814,8 +814,8 @@ async def verify_delete(project: str, filename: str):
             if jobs:
                 result["fully_deleted"] = False
                 result["remnants"]["_mapping_jobs"] = [{"id": j[0], "status": j[1]} for j in jobs]
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Check ChromaDB
         try:
@@ -832,8 +832,8 @@ async def verify_delete(project: str, filename: str):
                             "count": len(results['ids'])
                         }
                         break
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
         except Exception as e:
             result["remnants"]["chromadb_error"] = str(e)
         
@@ -958,8 +958,8 @@ async def clean_orphaned_metadata(project: Optional[str] = None):
         # Checkpoint
         try:
             conn.execute("CHECKPOINT")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         logger.info(f"[CLEANUP] Orphan cleanup complete: {orphaned}")
         return {
@@ -2031,8 +2031,8 @@ async def sync_document_registry():
                             proj = ProjectModel.get_by_name(file_info['project_name'])
                             if proj:
                                 project_id = proj.get('id')
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     DocumentRegistryModel.register(
                         filename=filename,
@@ -2872,8 +2872,8 @@ async def check_data_integrity(project: Optional[str] = None):
                             else:
                                 if table_name not in tables_to_check:
                                     tables_to_check.append(table_name)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
                 
             logger.info(f"[INTEGRITY] Found {len(tables_to_check)} tables for registered files")
             
@@ -2999,8 +2999,8 @@ async def check_data_integrity(project: Optional[str] = None):
                         SELECT COUNT(*) FROM "{table_name}" WHERE "{first_col}" IS NULL
                     ''')[0]
                     fill_rate = round(((row_count - null_count) / row_count) * 100)
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
             
             total_issues += len(table_issues)
             total_insights += len(table_insights)
@@ -3435,8 +3435,8 @@ async def comprehensive_health_check(
                     WHERE is_current = TRUE AND file_name IS NOT NULL
                 """)
                 duckdb_files = {r[0] for r in duckdb_result if r[0]}
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         chroma_files = set()
         try:
@@ -3448,8 +3448,8 @@ async def comprehensive_health_check(
                     filename = metadata.get("source") or metadata.get("filename")
                     if filename:
                         chroma_files.add(filename)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         all_actual_files = duckdb_files | chroma_files
         
@@ -3927,8 +3927,8 @@ async def verify_file_deleted(filename: str, project: Optional[str] = None):
                 results = collection.get(where={field: filename})
                 if results and results['ids']:
                     chunk_count += len(results['ids'])
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # Case-insensitive fallback
         if chunk_count == 0:
@@ -3938,8 +3938,8 @@ async def verify_file_deleted(filename: str, project: Optional[str] = None):
                     doc_filename = metadata.get("source") or metadata.get("filename") or ""
                     if doc_filename.lower() == filename_lower:
                         chunk_count += 1
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         if chunk_count > 0:
             remnants["chromadb_chunks"] = chunk_count
@@ -4058,8 +4058,8 @@ async def get_relationships():
             try:
                 cols = handler.conn.execute(f"DESCRIBE {table}").fetchall()
                 table_columns[table] = [c[0].lower() for c in cols]
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # Find relationships based on common column patterns
         key_patterns = ['_id', '_code', '_key', '_num', '_no']
@@ -4279,8 +4279,8 @@ async def test_sql_query(request: dict):
         columns = []
         try:
             columns = [desc[0] for desc in handler.conn.description]
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Get sample (first 5 rows)
         sample = []
@@ -4374,8 +4374,8 @@ async def generate_sql_for_rule(rule_id: str, request: dict = None):
                         "table": table_name,
                         "columns": col_names
                     })
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
         except Exception as e:
             logger.warning(f"Could not get schema: {e}")
         
@@ -4480,8 +4480,8 @@ Output ONLY the SQL query, no explanation. If the rule cannot be checked with av
         try:
             if hasattr(rule, 'suggested_sql_pattern'):
                 rule.suggested_sql_pattern = sql_result
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         return {
             "success": True,
