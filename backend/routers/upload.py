@@ -229,8 +229,8 @@ def _cleanup_existing_file(filename: str, project: str = None, project_id: str =
                         conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                         result['duckdb_tables_deleted'] += 1
                         logger.info(f"[CLEANUP] Dropped DuckDB table: {table_name}")
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
                 
                 # Clean metadata
                 conn.execute("""
@@ -258,15 +258,15 @@ def _cleanup_existing_file(filename: str, project: str = None, project_id: str =
                         try:
                             conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                             result['duckdb_tables_deleted'] += 1
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     conn.execute("""
                         DELETE FROM _pdf_tables WHERE LOWER(source_file) = ?
                     """, [filename_lower])
                     
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
             
             # Clean support tables
             for support_table in ['file_metadata', '_column_profiles']:
@@ -275,13 +275,13 @@ def _cleanup_existing_file(filename: str, project: str = None, project_id: str =
                         DELETE FROM {support_table} 
                         WHERE LOWER(filename) = ? OR LOWER(file_name) = ?
                     """, [filename_lower, filename_lower])
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
             
             try:
                 conn.execute("CHECKPOINT")
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
                 
         except Exception as duck_e:
             logger.warning(f"[CLEANUP] DuckDB cleanup error: {duck_e}")
@@ -1039,8 +1039,8 @@ def process_file_background(
                 if file_path and os.path.exists(file_path):
                     try:
                         os.remove(file_path)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
                 
                 # Build completion result
                 completion_result = {
@@ -1103,8 +1103,8 @@ def process_file_background(
                 if file_path and os.path.exists(file_path):
                     try:
                         os.remove(file_path)
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
                 return  # Do NOT fall through to RAG
         
         # =================================================================
@@ -1206,8 +1206,8 @@ def process_file_background(
                     if file_path and os.path.exists(file_path):
                         try:
                             os.remove(file_path)
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     ProcessingJobModel.complete(job_id, {
                         'filename': filename,
@@ -1273,8 +1273,8 @@ def process_file_background(
                     if file_path and os.path.exists(file_path):
                         try:
                             os.remove(file_path)
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     ProcessingJobModel.complete(job_id, {
                         'filename': filename,
@@ -1377,8 +1377,8 @@ def process_file_background(
                                             # Cleanup temp file
                                             try:
                                                 os.remove(temp_csv)
-                                            except:
-                                                pass
+                                            except Exception as e:
+                                                logger.debug(f"Suppressed: {e}")
                                             
                                             ProcessingJobModel.update_progress(job_id, 70, 
                                                 f"Created table with {result.get('row_count', 0):,} rows")
@@ -1448,8 +1448,8 @@ def process_file_background(
                                             if file_path and os.path.exists(file_path):
                                                 try:
                                                     os.remove(file_path)
-                                                except:
-                                                    pass
+                                                except Exception as e:
+                                                    logger.debug(f"Suppressed: {e}")
                                             
                                             ProcessingJobModel.complete(job_id, {
                                                 'filename': filename,
@@ -1494,8 +1494,8 @@ def process_file_background(
                                                 
                                                 try:
                                                     os.remove(temp_csv)
-                                                except:
-                                                    pass
+                                                except Exception as e:
+                                                    logger.debug(f"Suppressed: {e}")
                                                 
                                                 # Run intelligence analysis
                                                 intelligence_summary = run_intelligence_analysis(project, handler, job_id)
@@ -1504,8 +1504,8 @@ def process_file_background(
                                                 if file_path and os.path.exists(file_path):
                                                     try:
                                                         os.remove(file_path)
-                                                    except:
-                                                        pass
+                                                    except Exception as e:
+                                                        logger.debug(f"Suppressed: {e}")
                                                 
                                                 ProcessingJobModel.complete(job_id, {
                                                     'filename': filename,
@@ -1598,8 +1598,8 @@ def process_file_background(
                             collection.delete(ids=results['ids'])
                             logger.info(f"[BACKGROUND] Cleaned {len(results['ids'])} existing ChromaDB chunks")
                             break
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
             except Exception as chroma_e:
                 logger.warning(f"[BACKGROUND] ChromaDB cleanup error: {chroma_e}")
         else:
@@ -1745,8 +1745,8 @@ def process_file_background(
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # Complete!
         ProcessingJobModel.complete(job_id, {
@@ -1791,15 +1791,15 @@ def process_file_background(
                     file_size_bytes=file_size,
                     error_message=str(e)[:500]
                 )
-            except:
-                pass  # Don't let metrics fail the error handling
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")  # Don't let metrics fail the error handling
         
         # Cleanup on failure too
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
 
 
 # =============================================================================
@@ -1893,8 +1893,8 @@ async def standards_health():
             registry = get_rule_registry()
             status["rules_loaded"] = len(registry.rules)
             status["documents_loaded"] = len(registry.documents)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     return status
 
 
