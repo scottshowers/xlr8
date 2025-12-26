@@ -2115,9 +2115,10 @@ async def unified_chat(request: UnifiedChatRequest):
                 # Clear clarification flag - we have a real answer now
                 response["needs_clarification"] = False
                 response["clarification_questions"] = []
-                # Clear heavy data - we have the answer already
-                response["from_reality"] = []
-                response["structured_output"] = None
+                # Keep from_reality minimal (frontend may check it exists)
+                # but remove heavy structured_output
+                response["from_reality"] = response["from_reality"][:1] if response["from_reality"] else []
+                response["structured_output"] = {"type": "validation_complete"}
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
