@@ -180,8 +180,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 
                 try:
                     conn.execute(f"DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
                 
                 results["duckdb_metadata"]["cleaned"] += 1
                 logger.info(f"[DEEP-CLEAN] Cleaned metadata for: {table_name} (file: {file_name})")
@@ -239,8 +239,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
         # Checkpoint
         try:
             conn.execute("CHECKPOINT")
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
             
     except Exception as e:
         logger.error(f"[DEEP-CLEAN] DuckDB cleanup failed: {e}")
@@ -360,8 +360,8 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
                 if file_name and file_name.lower() not in valid_files:
                     preview["duckdb_orphan_tables"] += 1
                     orphan_file_set.add(file_name)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Check _pdf_tables
         try:
@@ -370,11 +370,11 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
                 if source_file and source_file.lower() not in valid_files:
                     preview["duckdb_orphan_tables"] += 1
                     orphan_file_set.add(source_file)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
             
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
     
     # Check ChromaDB
     try:
@@ -388,8 +388,8 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
             if filename and filename.lower() not in valid_files:
                 preview["chromadb_orphan_chunks"] += 1
                 orphan_file_set.add(filename)
-    except:
-        pass
+    except Exception as e:
+        logger.debug(f"Suppressed: {e}")
     
     preview["orphan_files"] = list(orphan_file_set)[:20]  # First 20
     
