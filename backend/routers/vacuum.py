@@ -1230,8 +1230,8 @@ Return the JSON array now:"""
         try:
             obj = json.loads(obj_str)
             return self._normalize_employee(obj)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Fallback: regex extraction
         try:
@@ -1567,8 +1567,8 @@ def process_extraction_job(job_id: str, file_path: str, max_pages: int,
                 parent = os.path.dirname(file_path)
                 if os.path.isdir(parent):
                     shutil.rmtree(parent, ignore_errors=True)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
 
 
 # =============================================================================
@@ -1979,8 +1979,8 @@ async def debug_extract(
         try:
             os.remove(temp_path)
             os.rmdir(temp_dir)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
 
 
 @router.get("/vacuum/health")
