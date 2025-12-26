@@ -1,5 +1,5 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.17.0 - FIVE TRUTHS ARCHITECTURE
+XLR8 INTELLIGENCE ENGINE v5.18.0 - SQLCODER OPTIMIZATION
 ============================================================
 
 Deploy to: backend/utils/intelligence_engine.py
@@ -17,6 +17,15 @@ Reference Library Truths (global-scoped):
   (+ COMPLIANCE - Audit requirements, SOC 2, internal controls)
 
 UPDATES:
+- v5.18.0: SQLCODER OPTIMIZATION - Major SQL generation overhaul:
+           * Added _build_create_table_schema() - SQLCoder's training format
+           * Added _is_simple_query() - detect single-table queries
+           * Added _check_sql_columns() - validate LLM output
+           * Simple queries now use CREATE TABLE format with exact column types
+           * Only sends #1 scored table for simple queries (not 5)
+           * Gets actual column types from DuckDB PRAGMA table_info
+           * Includes sample data for column disambiguation
+           * Falls back to multi-table flow for complex queries
 - v5.17.0: FIVE TRUTHS ARCHITECTURE - Complete overhaul:
            * Added CONFIGURATION truth type (customer system setup)
            * Split "best practice" into REFERENCE, REGULATORY, COMPLIANCE
@@ -100,7 +109,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.17.0 FIVE TRUTHS ARCHITECTURE ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.18.0 SQLCODER OPTIMIZATION ======")
 
 
 # =============================================================================
@@ -3401,9 +3410,182 @@ class IntelligenceEngine:
         
         return relevant
     
+    def _build_create_table_schema(self, table_name: str, short_alias: str = None) -> Tuple[str, set]:
+        """
+        Build CREATE TABLE schema from DuckDB for SQLCoder.
+        
+        SQLCoder was trained on CREATE TABLE statements, so this format
+        dramatically improves column accuracy vs our old format.
+        
+        Returns:
+            (schema_string, set_of_valid_columns)
+        """
+        try:
+            # Get exact column info from DuckDB
+            col_info = self.structured_handler.conn.execute(
+                f'PRAGMA table_info("{table_name}")'
+            ).fetchall()
+            
+            if not col_info:
+                return "", set()
+            
+            # Build CREATE TABLE statement
+            alias = short_alias or table_name.split('_')[-1]
+            columns = []
+            valid_cols = set()
+            
+            for row in col_info:
+                col_name = row[1]  # name at index 1
+                col_type = row[2]  # type at index 2
+                
+                # Skip junk columns
+                col_lower = col_name.lower()
+                if col_lower in ['nan', 'none', ''] or col_lower.startswith('unnamed'):
+                    continue
+                    
+                valid_cols.add(col_name)
+                
+                # Simplify type for LLM (don't need precision details)
+                simple_type = col_type.split('(')[0].upper()
+                if simple_type in ['VARCHAR', 'TEXT', 'STRING']:
+                    simple_type = 'TEXT'
+                elif simple_type in ['INTEGER', 'INT', 'BIGINT', 'SMALLINT']:
+                    simple_type = 'INTEGER'
+                elif simple_type in ['FLOAT', 'DOUBLE', 'DECIMAL', 'NUMERIC', 'REAL']:
+                    simple_type = 'DECIMAL'
+                elif simple_type in ['BOOLEAN', 'BOOL']:
+                    simple_type = 'BOOLEAN'
+                elif 'DATE' in simple_type or 'TIME' in simple_type:
+                    simple_type = 'DATE'
+                
+                columns.append(f"    {col_name} {simple_type}")
+            
+            # Get sample values for key columns (helps disambiguation)
+            sample_comment = ""
+            try:
+                sample_rows = self.structured_handler.query(
+                    f'SELECT * FROM "{table_name}" LIMIT 3'
+                )
+                if sample_rows:
+                    # Pick 3-4 interesting columns for sample
+                    sample_cols = list(sample_rows[0].keys())[:4]
+                    sample_vals = []
+                    for col in sample_cols:
+                        vals = [str(r.get(col, ''))[:20] for r in sample_rows if r.get(col)]
+                        if vals:
+                            sample_vals.append(f"{col}='{vals[0]}'")
+                    if sample_vals:
+                        sample_comment = f"\n-- Sample: {', '.join(sample_vals[:3])}"
+            except:
+                pass
+            
+            schema = f"CREATE TABLE {alias} (\n" + ",\n".join(columns) + "\n);" + sample_comment
+            
+            return schema, valid_cols
+            
+        except Exception as e:
+            logger.error(f"[SQL-GEN] Error building CREATE TABLE schema: {e}")
+            return "", set()
+    
+    def _is_simple_query(self, question: str) -> bool:
+        """
+        Detect if question is a simple single-table query.
+        
+        Simple queries: show X, list X, count X, what are the X
+        Complex queries: compare X to Y, join X with Y, X by Y from multiple tables
+        """
+        q_lower = question.lower()
+        
+        # Simple patterns - single table operations
+        simple_patterns = [
+            r'^show\s+(me\s+)?(the\s+)?',      # "show me the sui rates"
+            r'^list\s+(all\s+)?(the\s+)?',     # "list all earnings codes"
+            r'^what\s+are\s+(the\s+)?',        # "what are the deductions"
+            r'^give\s+me\s+(the\s+)?',         # "give me the tax codes"
+            r'^display\s+(the\s+)?',           # "display the rates"
+            r'^get\s+(me\s+)?(the\s+)?',       # "get the configuration"
+        ]
+        
+        # Complex patterns - likely need multiple tables or complex logic
+        complex_patterns = [
+            r'\bcompare\b',                     # compare X to Y
+            r'\bjoin\b',                        # explicit join request
+            r'\bcross.?reference\b',            # cross-reference
+            r'\bvs\.?\b',                       # X vs Y
+            r'\bversus\b',                      # X versus Y
+            r'\bfrom\s+\w+\s+and\s+',          # from X and Y
+            r'\bbetween\s+\w+\s+and\s+',       # between X and Y
+        ]
+        
+        # Check complex first (takes priority)
+        for pattern in complex_patterns:
+            if re.search(pattern, q_lower):
+                return False
+        
+        # Check simple
+        for pattern in simple_patterns:
+            if re.search(pattern, q_lower):
+                return True
+        
+        # Default to simple for short questions
+        return len(question.split()) <= 8
+
+    def _check_sql_columns(self, sql: str, valid_columns: set) -> List[str]:
+        """
+        Check SQL for columns not in the valid set.
+        
+        Returns list of invalid column names found.
+        """
+        if not valid_columns:
+            return []
+        
+        # Extract potential column references (simplified)
+        # Look for words that could be columns (after SELECT, in WHERE, etc.)
+        invalid = []
+        
+        # Common SQL keywords to skip
+        sql_keywords = {
+            'select', 'from', 'where', 'and', 'or', 'not', 'in', 'is', 'null',
+            'like', 'ilike', 'as', 'on', 'join', 'left', 'right', 'inner', 'outer',
+            'group', 'by', 'order', 'asc', 'desc', 'limit', 'offset', 'having',
+            'count', 'sum', 'avg', 'min', 'max', 'distinct', 'case', 'when', 'then',
+            'else', 'end', 'cast', 'nulls', 'last', 'first', 'true', 'false',
+            'between', 'exists', 'all', 'any', 'union', 'except', 'intersect',
+            'coalesce', 'upper', 'lower', 'trim', 'substring', 'concat'
+        }
+        
+        # Create lowercase valid columns set for case-insensitive matching
+        valid_lower = {c.lower() for c in valid_columns}
+        
+        # Find all word-like tokens
+        tokens = re.findall(r'\b([a-zA-Z_][a-zA-Z0-9_]*)\b', sql)
+        
+        for token in tokens:
+            token_lower = token.lower()
+            # Skip SQL keywords
+            if token_lower in sql_keywords:
+                continue
+            # Skip if it matches a valid column (case-insensitive)
+            if token_lower in valid_lower:
+                continue
+            # Skip table aliases (short names)
+            if len(token) < 4:
+                continue
+            # Skip if it's clearly a value (in quotes nearby)
+            if token_lower.startswith('t_'):  # table alias prefix
+                continue
+                
+            # Potential invalid column
+            # But only flag if it looks like a column reference (has underscore or specific patterns)
+            if '_' in token or token_lower.endswith('_code') or token_lower.endswith('_id'):
+                if token_lower not in valid_lower:
+                    invalid.append(token)
+        
+        return list(set(invalid))[:5]  # Limit to 5
+
     def _generate_sql_for_question(self, question: str, analysis: Dict) -> Optional[Dict]:
         """Generate SQL query using LLMOrchestrator with SMART table selection."""
-        logger.warning(f"[SQL-GEN] v5.11.3 - Starting SQL generation")
+        logger.warning(f"[SQL-GEN] v5.18.0 - Starting SQL generation")
         logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
         
         if not self.structured_handler or not self.schema:
@@ -3429,6 +3611,92 @@ class IntelligenceEngine:
         q_lower = question.lower()
         relevant_tables = self._select_relevant_tables(tables, q_lower)
         
+        # SIMPLE QUERY OPTIMIZATION: Use CREATE TABLE format for single-table queries
+        # This dramatically improves SQLCoder accuracy by matching its training format
+        is_simple = self._is_simple_query(question)
+        logger.warning(f"[SQL-GEN] Simple query detection: {is_simple} for '{question[:50]}...'")
+        
+        if is_simple and relevant_tables:
+            # For simple queries, use ONLY the top-scored table with proper CREATE TABLE format
+            primary_table_info = relevant_tables[0]
+            primary_full_name = primary_table_info.get('table_name', '')
+            
+            # Extract short alias for the primary table
+            short_alias = primary_full_name.split('_')[-2] + '_' + primary_full_name.split('_')[-1] \
+                if '_' in primary_full_name else primary_full_name[-20:]
+            # Clean alias - no numbers at start
+            if short_alias and short_alias[0].isdigit():
+                short_alias = 't_' + short_alias
+            short_alias = short_alias[:25]  # Keep it short
+            
+            # Build CREATE TABLE schema (SQLCoder's training format)
+            create_table_schema, valid_columns = self._build_create_table_schema(
+                primary_full_name, short_alias
+            )
+            
+            if create_table_schema and valid_columns:
+                logger.warning(f"[SQL-GEN] Using CREATE TABLE format with {len(valid_columns)} columns")
+                
+                # Store for post-processing
+                self._table_aliases = {short_alias: primary_full_name}
+                
+                # Build focused prompt
+                prompt = f"""### Task
+Generate a SQL query to answer: {question}
+
+### Database Schema
+{create_table_schema}
+
+### Rules
+- Use ONLY columns from the schema above
+- Table name: {short_alias}
+- For text search, use ILIKE '%term%'
+- Return all relevant columns
+
+### Answer
+Given the schema, here is the SQL query:
+```sql
+SELECT"""
+                
+                logger.warning(f"[SQL-GEN] Simple query prompt ({len(prompt)} chars)")
+                
+                result = orchestrator.generate_sql(prompt, valid_columns)
+                
+                if result.get('success') and result.get('sql'):
+                    sql = result['sql'].strip()
+                    
+                    # Clean markdown
+                    if '```' in sql:
+                        sql = re.sub(r'```sql\s*', '', sql, flags=re.IGNORECASE)
+                        sql = re.sub(r'```\s*$', '', sql)
+                        sql = sql.replace('```', '').strip()
+                    
+                    # Prepend SELECT if needed (SQLCoder prompt ends with SELECT)
+                    if not sql.upper().startswith('SELECT') and not sql.upper().startswith('WITH'):
+                        sql = 'SELECT ' + sql
+                    
+                    logger.warning(f"[SQL-GEN] Simple query SQL: {sql[:100]}...")
+                    
+                    # Expand alias to full table name
+                    sql = re.sub(
+                        rf'\bFROM\s+{re.escape(short_alias)}\b(?!\s+AS)',
+                        f'FROM "{primary_full_name}" AS {short_alias}',
+                        sql, flags=re.IGNORECASE
+                    )
+                    
+                    # Validate columns exist
+                    invalid_cols = self._check_sql_columns(sql, valid_columns)
+                    if not invalid_cols:
+                        return {
+                            'sql': sql,
+                            'table': short_alias,
+                            'query_type': 'simple',
+                            'all_columns': valid_columns
+                        }
+                    else:
+                        logger.warning(f"[SQL-GEN] Simple query had invalid cols: {invalid_cols}, falling back")
+        
+        # FALLBACK: Complex query handling (multiple tables, existing logic)
         # Build COMPACT schema with SHORT ALIASES
         tables_info = []
         all_columns = set()
