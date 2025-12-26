@@ -119,7 +119,7 @@ async def list_users(
             {"id": "3", "email": "customer@acme.com", "full_name": "Customer User", "role": "customer", "project_id": "proj-123"},
         ]
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
             f"{SUPABASE_URL}/rest/v1/profiles?select=*&order=created_at.desc",
             headers={
@@ -143,7 +143,7 @@ async def create_user(
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         raise HTTPException(500, "Supabase not configured for user creation")
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         # Create auth user via Supabase Admin API
         response = await client.post(
             f"{SUPABASE_URL}/auth/v1/admin/users",
@@ -225,7 +225,7 @@ async def update_user(
     if not update_data:
         raise HTTPException(400, "No fields to update")
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
             headers={
@@ -257,7 +257,7 @@ async def delete_user(
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         return {"status": "deleted", "user_id": user_id}
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         # Delete from Supabase Auth
         response = await client.delete(
             f"{SUPABASE_URL}/auth/v1/admin/users/{user_id}",
@@ -355,7 +355,7 @@ async def get_role_permissions(
             },
         }
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.get(
             f"{SUPABASE_URL}/rest/v1/role_permissions?select=*",
             headers={
@@ -417,7 +417,7 @@ async def update_role_permissions(
     if not SUPABASE_URL or not SUPABASE_KEY:
         return {"status": "updated", "count": len(data.updates)}
     
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(timeout=30.0) as client:
         updated_count = 0
         
         for update in data.updates:
