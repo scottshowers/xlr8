@@ -504,7 +504,7 @@ class DocumentRegistryModel:
         try:
             data = {
                 'filename': filename,
-                'display_name': display_name,  # NEW: Human-friendly name
+                # 'display_name': display_name,  # TODO: Add column to Supabase first
                 'file_type': file_type,
                 'truth_type': truth_type,
                 'classification_method': classification_method,
