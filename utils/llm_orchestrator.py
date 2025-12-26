@@ -512,15 +512,18 @@ Analyze the data. Answer the question with real numbers and real values from the
     
     def _generate_sql_local(self, prompt: str, schema_columns: set = None) -> Dict[str, Any]:
         """
-        Generate SQL using local LLM with validation, retry, and auto-correction.
+        Generate SQL using SQLCoder (specialized text-to-SQL model).
+        
+        SQLCoder outperforms GPT-4 on text-to-SQL tasks and is specifically
+        trained to avoid column hallucination - our main problem with DeepSeek.
         """
         if not self.ollama_url:
             return {"sql": None, "error": "No LLM configured", "success": False}
         
-        # Try DeepSeek twice (with different prompts) before falling back
+        # SQLCoder is purpose-built for SQL - try it twice before fallback
         attempts = [
-            ('deepseek-coder:6.7b', 'initial'),
-            ('deepseek-coder:6.7b', 'simplified'),
+            ('sqlcoder:7b', 'sqlcoder_format'),
+            ('sqlcoder:7b', 'sqlcoder_strict'),
             ('mistral:7b', 'fallback')
         ]
         last_invalid_cols = []
@@ -530,26 +533,35 @@ Analyze the data. Answer the question with real numbers and real values from the
         for attempt, (model, prompt_type) in enumerate(attempts):
             try:
                 # Build prompt based on attempt type
-                if prompt_type == 'initial':
-                    local_prompt = f"""You are a SQL generator. Output ONLY a valid SQL SELECT statement. No explanations.
+                if prompt_type == 'sqlcoder_format':
+                    # SQLCoder's expected format (from Defog documentation)
+                    local_prompt = f"""### Task
+Generate a SQL query to answer the question below.
 
+### Database Schema
 {prompt}
 
-Output ONLY the SQL starting with SELECT:"""
-
-                elif prompt_type == 'simplified':
-                    col_list = ', '.join(sorted(schema_columns)[:50]) if schema_columns else ''
-                    local_prompt = f"""Generate SQL. Output ONLY the SELECT statement.
-
-VALID COLUMNS: {col_list}
-
-INVALID (do not use): {', '.join(last_invalid_cols)}
-
-{prompt}
-
+### Answer
+Given the database schema, here is the SQL query that answers the question:
+```sql
 SELECT"""
 
-                else:  # fallback
+                elif prompt_type == 'sqlcoder_strict':
+                    # Stricter version with explicit column constraints
+                    col_list = ', '.join(sorted(schema_columns)[:50]) if schema_columns else ''
+                    local_prompt = f"""### Task
+Generate a SQL query. Use ONLY these columns: {col_list}
+
+DO NOT USE these columns (they don't exist): {', '.join(last_invalid_cols)}
+
+### Database Schema
+{prompt}
+
+### Answer
+```sql
+SELECT"""
+
+                else:  # fallback to mistral
                     local_prompt = f"""SQL query only. No explanation. Start with SELECT.
 
 {prompt}
@@ -566,7 +578,8 @@ SELECT"""
                         logger.warning(f"[SQL-LOCAL] {model} ({prompt_type}) returned prose, skipping")
                         continue
                     
-                    if prompt_type in ['simplified', 'fallback'] and not sql.upper().startswith('SELECT'):
+                    # SQLCoder and fallback prompts end with "SELECT" - prepend it
+                    if prompt_type in ['sqlcoder_format', 'sqlcoder_strict', 'fallback'] and not sql.upper().startswith('SELECT'):
                         sql = 'SELECT ' + sql
                     
                     if sql.startswith("```"):
