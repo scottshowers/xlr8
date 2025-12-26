@@ -2078,8 +2078,12 @@ async def unified_chat(request: UnifiedChatRequest):
             logger.warning(f"[UNIFIED] EXPERT CHECK: is_analytical={is_analytical}, EXPERT_AVAILABLE={EXPERT_CONTEXT_AVAILABLE}, msg='{message[:50]}'")
             
             # Check if engine already produced a validation analysis (has our consultant formatting)
-            is_validation_response = engine_answer and any(
-                indicator in engine_answer for indicator in ['🔴', '🟡', '✅', 'Rates Valid', 'Rate Issues', 'Zero Rates', 'Years Old']
+            # OR if consultative synthesis produced a substantial answer (v5.20.0+)
+            is_validation_response = engine_answer and (
+                # Original emoji-based detection
+                any(indicator in engine_answer for indicator in ['🔴', '🟡', '✅', 'Rates Valid', 'Rate Issues', 'Zero Rates', 'Years Old'])
+                # Consultative synthesis detection - substantial prose answer
+                or (len(engine_answer) > 200 and not any(g in engine_answer.lower() for g in ['configured correctly', 'no issues found', 'everything looks', 'appears to be']))
             )
             
             # Detect garbage SQL responses (just literals, no real data)
