@@ -3084,6 +3084,10 @@ class IntelligenceEngine:
         logger.warning(f"[FILTER-INJECT] Injecting: {conditions}")
         logger.warning(f"[FILTER-INJECT] SQL length before: {len(sql)}")
         
+        # Strip trailing semicolon - we'll add it back at the end
+        had_semicolon = sql.rstrip().endswith(';')
+        sql = sql.rstrip().rstrip(';').rstrip()
+        
         sql_upper = sql.upper()
         
         # Check if SQL already has WHERE
@@ -3095,7 +3099,7 @@ class IntelligenceEngine:
             where_pos = where_match.end()
             
             # Find the end of existing WHERE conditions
-            end_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING', ';']
+            end_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
             end_pos = len(sql)
             
             for keyword in end_keywords:
@@ -3114,7 +3118,7 @@ class IntelligenceEngine:
             
             # Insert before GROUP BY, ORDER BY, LIMIT, or at end
             insert_keywords = ['GROUP BY', 'ORDER BY', 'LIMIT', 'HAVING']
-            insert_pos = len(sql.rstrip().rstrip(';'))
+            insert_pos = len(sql)
             
             for keyword in insert_keywords:
                 kw_match = re.search(rf'\b{keyword}\b', sql, re.IGNORECASE)
@@ -3136,8 +3140,13 @@ class IntelligenceEngine:
             else:
                 sql = f"{before} WHERE {conditions}"
         
+        # Add semicolon back if it was there
+        sql = sql.strip()
+        if had_semicolon and not sql.endswith(';'):
+            sql = sql + ';'
+        
         logger.warning(f"[FILTER-INJECT] SQL length after: {len(sql)}")
-        return sql.strip()
+        return sql
     
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
         """Detect the appropriate intelligence mode."""
