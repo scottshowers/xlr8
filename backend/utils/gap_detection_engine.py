@@ -463,9 +463,9 @@ class GapDetectionEngine:
                     Be specific with numbers, rates, and thresholds.
                     If uncertain, say so."""
                     
-                    # Try local first (Mistral via Ollama)
+                    # Try local first (Mistral via Ollama) - use full model name
                     response, success = llm._call_ollama(
-                        model="mistral",
+                        model="mistral:7b",
                         prompt=prompt,
                         system_prompt=system_prompt
                     )
@@ -700,7 +700,7 @@ Format as JSON array of objects with keys: promised, actual, severity, recommend
 
             try:
                 response, success = llm._call_ollama(
-                    model="mistral",
+                    model="mistral:7b",
                     prompt=prompt,
                     system_prompt="You are an implementation analyst comparing project scope to actual data."
                 )
