@@ -564,8 +564,8 @@ class DataModelService:
                         count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                         if count <= 500:  # Small table might be a lookup
                             is_reference = True
-                    except Exception as e:
-                        logger.debug(f"Suppressed: {e}")
+                    except:
+                        pass
                 
                 if is_reference:
                     self._load_lookup_table(handler, table_name)
@@ -1361,8 +1361,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                             """, [table_name]).fetchone()
                             if file_result:
                                 source_file = file_result[0]
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
+                        except:
+                            pass
                         
                         if not source_file:
                             try:
@@ -1371,8 +1371,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                                 """, [table_name]).fetchone()
                                 if file_result:
                                     source_file = file_result[0]
-                            except Exception as e:
-                                logger.debug(f"Suppressed: {e}")
+                            except:
+                                pass
                         
                         if source_file and source_file.lower() not in valid_files:
                             logger.debug(f"[SCHEMA] Skipping {table_name} - file '{source_file}' not in registry")
@@ -1476,14 +1476,14 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                         if prow[3]:  # distinct_values
                             try:
                                 profile['distinct_values'] = json.loads(prow[3])
-                            except Exception as e:
-                                logger.debug(f"Suppressed: {e}")
+                            except:
+                                pass
                         
                         if prow[4]:  # value_distribution
                             try:
                                 profile['value_distribution'] = json.loads(prow[4])
-                            except Exception as e:
-                                logger.debug(f"Suppressed: {e}")
+                            except:
+                                pass
                         
                         if prow[1] == 'numeric':
                             profile['min_value'] = prow[6]
@@ -1514,8 +1514,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}' (registry_filtered={registry_available})")
         
@@ -1817,8 +1817,8 @@ async def unified_chat(request: UnifiedChatRequest):
         if request.mode:
             try:
                 mode = IntelligenceMode(request.mode)
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         # Check learning for similar queries
         learned_sql = None
@@ -1911,10 +1911,13 @@ async def unified_chat(request: UnifiedChatRequest):
                 if answer.structured_output else []
             ),
             
-            # Three Truths
+            # Five Truths
             "from_reality": [],
             "from_intent": [],
-            "from_best_practice": [],
+            "from_configuration": [],
+            "from_reference": [],
+            "from_regulatory": [],
+            "from_compliance": [],
             
             # Core results
             "conflicts": [],
@@ -1934,13 +1937,19 @@ async def unified_chat(request: UnifiedChatRequest):
             "success": True
         }
         
-        # Serialize truths
+        # Serialize truths (Five Truths)
         for truth in answer.from_reality:
             response["from_reality"].append(_serialize_truth(truth, data_model))
         for truth in answer.from_intent:
             response["from_intent"].append(_serialize_truth(truth, data_model))
-        for truth in answer.from_best_practice:
-            response["from_best_practice"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_configuration:
+            response["from_configuration"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_reference:
+            response["from_reference"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_regulatory:
+            response["from_regulatory"].append(_serialize_truth(truth, data_model))
+        for truth in answer.from_compliance:
+            response["from_compliance"].append(_serialize_truth(truth, data_model))
         
         # Serialize conflicts
         for conflict in answer.conflicts:
@@ -2321,7 +2330,7 @@ async def unified_chat(request: UnifiedChatRequest):
             
             # Fallback if expert guidance didn't work
             if response["answer"] is None:
-                if answer and (answer.from_reality or answer.from_intent or answer.from_best_practice):
+                if answer and (answer.from_reality or answer.from_intent or answer.from_reference):
                     response["answer"] = "I found some related information but couldn't generate a complete answer. Please try rephrasing your question."
                 else:
                     response["answer"] = "I couldn't find any data matching your query. Please check that data has been uploaded for this project."
@@ -2386,9 +2395,9 @@ async def unified_chat(request: UnifiedChatRequest):
                         )
                         sources_tracked += 1
             
-            # Track Best Practice sources
-            if answer and answer.from_best_practice:
-                for truth in answer.from_best_practice:
+            # Track Reference sources
+            if answer and answer.from_reference:
+                for truth in answer.from_reference:
                     source_doc = truth.source_name if hasattr(truth, 'source_name') else None
                     if source_doc:
                         LineageModel.track(
@@ -2398,7 +2407,23 @@ async def unified_chat(request: UnifiedChatRequest):
                             target_id=response_id,
                             relationship=LineageModel.REL_CITED,
                             project_id=project_id,
-                            metadata={'query': message[:100], 'truth_type': 'best_practice'}
+                            metadata={'query': message[:100], 'truth_type': 'reference'}
+                        )
+                        sources_tracked += 1
+            
+            # Track Regulatory sources
+            if answer and answer.from_regulatory:
+                for truth in answer.from_regulatory:
+                    source_doc = truth.source_name if hasattr(truth, 'source_name') else None
+                    if source_doc:
+                        LineageModel.track(
+                            source_type=LineageModel.NODE_CHUNK,
+                            source_id=f"{source_doc}:chunks",
+                            target_type=LineageModel.NODE_RESPONSE,
+                            target_id=response_id,
+                            relationship=LineageModel.REL_CITED,
+                            project_id=project_id,
+                            metadata={'query': message[:100], 'truth_type': 'regulatory'}
                         )
                         sources_tracked += 1
             
@@ -3169,8 +3194,8 @@ async def get_diagnostics(project: str = None):
                         }
                         for s in samples
                     ]
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
                 
                 # Get detected domains for project
                 if project and DOMAIN_INFERENCE_AVAILABLE:
@@ -3246,8 +3271,8 @@ async def get_stats():
             learning = get_learning_module()
             if hasattr(learning, 'get_stats'):
                 stats["learning_stats"] = learning.get_stats()
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
     
     return stats
 
