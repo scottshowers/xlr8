@@ -1261,8 +1261,8 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                     logger.debug(f"[ENTITIES] DuckDB query error: {e}")
                     try:
                         conn.close()
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
         except Exception:
             pass
     
