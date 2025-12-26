@@ -1,5 +1,5 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.19.0 - COLUMN VALUE MATCHING
+XLR8 INTELLIGENCE ENGINE v5.20.0 - CONSULTATIVE SYNTHESIS
 ============================================================
 
 Deploy to: backend/utils/intelligence_engine.py
@@ -16,7 +16,24 @@ Reference Library Truths (global-scoped):
   5. REGULATORY - Laws, IRS rules, state/federal mandates
   (+ COMPLIANCE - Audit requirements, SOC 2, internal controls)
 
+CONSULTATIVE SYNTHESIS LAYER:
+-----------------------------
+The synthesis layer transforms raw data retrieval into world-class consultative
+answers. It triangulates across all Five Truths, detecting alignments/conflicts,
+and uses LLM to generate responses that:
+  - Lead with the direct answer
+  - Note where sources agree or conflict
+  - Provide "so-what" context (implications, risks)
+  - Signal confidence levels
+  - End with actionable next steps
+
 UPDATES:
+- v5.20.0: CONSULTATIVE SYNTHESIS - LLM-powered response generation:
+           * Added ConsultativeSynthesizer integration
+           * Triangulates across Five Truths before answering
+           * Uses Mistral (local) with Claude fallback
+           * Adds "so-what" context and confidence signaling
+           * Falls back to template formatting if LLM unavailable
 - v5.19.0: COLUMN VALUE MATCHING - Table selection checks column VALUES:
            * Queries _column_profiles.top_values_json during table scoring
            * "show me SUI rates" matches tables where type_of_tax contains "SUI"
@@ -114,7 +131,21 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.18.0 SQLCODER OPTIMIZATION ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.20.0 CONSULTATIVE SYNTHESIS ======")
+
+# CONSULTATIVE SYNTHESIS - Import the synthesizer
+try:
+    from backend.utils.consultative_synthesis import ConsultativeSynthesizer
+    SYNTHESIS_AVAILABLE = True
+    logger.info("[INTELLIGENCE_ENGINE] ConsultativeSynthesizer loaded successfully")
+except ImportError:
+    try:
+        from utils.consultative_synthesis import ConsultativeSynthesizer
+        SYNTHESIS_AVAILABLE = True
+        logger.info("[INTELLIGENCE_ENGINE] ConsultativeSynthesizer loaded (alt path)")
+    except ImportError:
+        SYNTHESIS_AVAILABLE = False
+        logger.warning("[INTELLIGENCE_ENGINE] ConsultativeSynthesizer not available - using template fallback")
 
 
 # =============================================================================
@@ -662,6 +693,26 @@ class IntelligenceEngine:
         self.conversation_context = {}
         self.last_executed_sql = None
         self.filter_candidates = {}  # Detected filter dimensions
+        
+        # Consultative synthesis - LLM-powered response generation
+        self._synthesizer = None
+        self._last_reality = []
+        self._last_intent = []
+        self._last_configuration = []
+        self._last_reference = []
+        self._last_regulatory = []
+        self._last_compliance = []
+        
+        if SYNTHESIS_AVAILABLE:
+            try:
+                self._synthesizer = ConsultativeSynthesizer(
+                    ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+                    claude_api_key=os.getenv("CLAUDE_API_KEY"),
+                    model_preference="auto"  # Mistral first, Claude fallback
+                )
+                logger.info("[INTELLIGENCE_ENGINE] ConsultativeSynthesizer initialized")
+            except Exception as e:
+                logger.warning(f"[INTELLIGENCE_ENGINE] Synthesizer init failed: {e}")
     
     def load_context(
         self, 
@@ -951,6 +1002,14 @@ class IntelligenceEngine:
         compliance_check = None
         if regulatory:
             compliance_check = self._check_compliance(reality, configuration, regulatory)
+        
+        # Store truths for synthesizer access
+        self._last_reality = reality
+        self._last_intent = intent
+        self._last_configuration = configuration
+        self._last_reference = reference
+        self._last_regulatory = regulatory
+        self._last_compliance = compliance
         
         answer = self._synthesize_answer(
             question=question,
@@ -5514,7 +5573,11 @@ SQL:"""
         conflicts: List[Conflict] = None,
         compliance_check: Optional[Dict] = None
     ) -> str:
-        """Generate a consultative response using the Five Truths.
+        """
+        Generate a CONSULTATIVE response using LLM synthesis.
+        
+        v5.20.0: Now uses ConsultativeSynthesizer for intelligent triangulation
+        across Five Truths. Falls back to template formatting if LLM fails.
         
         The Five Truths:
         1. REALITY - What the data actually shows (DuckDB)
@@ -5525,6 +5588,49 @@ SQL:"""
         
         A world-class consultant synthesizes all five, noting conflicts and providing actionable insights.
         """
+        
+        # =====================================================================
+        # TRY LLM SYNTHESIS FIRST (v5.20.0)
+        # =====================================================================
+        if self._synthesizer:
+            try:
+                # Build structured data for synthesizer
+                structured_data = {
+                    'rows': result_rows or [],
+                    'columns': result_columns or [],
+                    'query_type': query_type,
+                    'sql': getattr(self, 'last_executed_sql', ''),
+                }
+                
+                # Handle count/sum/avg values
+                if query_type in ['count', 'sum', 'average'] and result_value is not None:
+                    structured_data['rows'] = [{'result': result_value}]
+                    structured_data['columns'] = ['result']
+                
+                # Call synthesizer with all Five Truths
+                answer = self._synthesizer.synthesize(
+                    question=question,
+                    reality=self._last_reality,
+                    intent=self._last_intent,
+                    configuration=self._last_configuration,
+                    reference=self._last_reference,
+                    regulatory=self._last_regulatory,
+                    conflicts=conflicts,
+                    insights=insights,
+                    structured_data=structured_data
+                )
+                
+                logger.info(f"[CONSULTATIVE] Synthesis: method={answer.synthesis_method}, confidence={answer.confidence:.0%}")
+                return answer.answer
+                
+            except Exception as e:
+                logger.error(f"[CONSULTATIVE] Synthesis failed: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
+        
+        # =====================================================================
+        # FALLBACK: TEMPLATE-BASED RESPONSE
+        # =====================================================================
         parts = []
         
         # Get filter context
