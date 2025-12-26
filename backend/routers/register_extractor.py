@@ -1540,8 +1540,8 @@ Return the JSON array now:"""
         try:
             obj = json.loads(obj_str)
             return self._normalize_employee(obj)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Regex fallback for corrupt JSON
         try:
@@ -1558,8 +1558,8 @@ Return the JSON array now:"""
                     "taxes": [],
                     "deductions": []
                 }
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         return None
     
@@ -1755,8 +1755,8 @@ def process_extraction_job(
                 parent = os.path.dirname(file_path)
                 if os.path.isdir(parent):
                     shutil.rmtree(parent, ignore_errors=True)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
 
 
 # =============================================================================
