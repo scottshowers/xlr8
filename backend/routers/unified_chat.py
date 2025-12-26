@@ -564,8 +564,8 @@ class DataModelService:
                         count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                         if count <= 500:  # Small table might be a lookup
                             is_reference = True
-                    except:
-                        pass
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
                 
                 if is_reference:
                     self._load_lookup_table(handler, table_name)
@@ -1361,8 +1361,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                             """, [table_name]).fetchone()
                             if file_result:
                                 source_file = file_result[0]
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                         
                         if not source_file:
                             try:
@@ -1371,8 +1371,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                                 """, [table_name]).fetchone()
                                 if file_result:
                                     source_file = file_result[0]
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Suppressed: {e}")
                         
                         if source_file and source_file.lower() not in valid_files:
                             logger.debug(f"[SCHEMA] Skipping {table_name} - file '{source_file}' not in registry")
@@ -1476,14 +1476,14 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                         if prow[3]:  # distinct_values
                             try:
                                 profile['distinct_values'] = json.loads(prow[3])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Suppressed: {e}")
                         
                         if prow[4]:  # value_distribution
                             try:
                                 profile['value_distribution'] = json.loads(prow[4])
-                            except:
-                                pass
+                            except Exception as e:
+                                logger.debug(f"Suppressed: {e}")
                         
                         if prow[1] == 'numeric':
                             profile['min_value'] = prow[6]
@@ -1514,8 +1514,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}' (registry_filtered={registry_available})")
         
@@ -1817,8 +1817,8 @@ async def unified_chat(request: UnifiedChatRequest):
         if request.mode:
             try:
                 mode = IntelligenceMode(request.mode)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # Check learning for similar queries
         learned_sql = None
@@ -3169,8 +3169,8 @@ async def get_diagnostics(project: str = None):
                         }
                         for s in samples
                     ]
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
                 
                 # Get detected domains for project
                 if project and DOMAIN_INFERENCE_AVAILABLE:
@@ -3246,8 +3246,8 @@ async def get_stats():
             learning = get_learning_module()
             if hasattr(learning, 'get_stats'):
                 stats["learning_stats"] = learning.get_stats()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     return stats
 
