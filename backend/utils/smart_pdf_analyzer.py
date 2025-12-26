@@ -651,6 +651,159 @@ JSON OUTPUT:"""
     return all_rows
 
 
+def clean_column_name(col: str) -> str:
+    """
+    Clean a column name extracted from PDF.
+    Domain-agnostic - removes common extraction artifacts.
+    """
+    if not col or not isinstance(col, str):
+        return ''
+    
+    # Replace newlines with spaces
+    col = col.replace('\n', ' ').replace('\r', ' ')
+    
+    # Collapse multiple spaces
+    col = ' '.join(col.split())
+    
+    # Lowercase
+    col = col.lower().strip()
+    
+    # Replace spaces with underscores for SQL compatibility
+    col = col.replace(' ', '_')
+    
+    # Remove duplicate consecutive parts (common with repeated headers)
+    # e.g., "page_npage_n" -> "page"
+    parts = col.split('_')
+    cleaned_parts = []
+    for part in parts:
+        # Skip empty parts and 'n' artifacts from newlines
+        if not part or part == 'n':
+            continue
+        # Skip if same as previous (dedup)
+        if cleaned_parts and part == cleaned_parts[-1]:
+            continue
+        cleaned_parts.append(part)
+    col = '_'.join(cleaned_parts)
+    
+    # If still absurdly long (>50 chars), extract the meaningful end portion
+    if len(col) > 50:
+        parts = col.split('_')
+        # Keep last 4 parts which are usually the actual column name
+        if len(parts) > 4:
+            col = '_'.join(parts[-4:])
+    
+    return col
+
+
+def consolidate_table_columns(all_dataframes: List) -> List[Dict[str, str]]:
+    """
+    Consolidate columns across multiple DataFrames from different pages.
+    
+    When gmft extracts a multi-page PDF, each page becomes a separate table
+    with slightly different column names (due to page headers, line breaks).
+    This function normalizes them to a common structure.
+    
+    Strategy:
+    1. Clean all column names
+    2. Find columns that appear most frequently (canonical columns)
+    3. Map similar columns to canonical names
+    4. Combine all rows with normalized column names
+    """
+    if not all_dataframes:
+        return []
+    
+    # Step 1: Clean column names in all dataframes
+    cleaned_dfs = []
+    column_frequency = {}  # Track how often each cleaned column appears
+    
+    for df in all_dataframes:
+        # Clean column names
+        new_columns = []
+        for col in df.columns:
+            cleaned = clean_column_name(str(col) if col else '')
+            if not cleaned:
+                cleaned = f'col_{len(new_columns)}'
+            new_columns.append(cleaned)
+        
+        df_copy = df.copy()
+        df_copy.columns = new_columns
+        cleaned_dfs.append(df_copy)
+        
+        # Track frequency
+        for col in new_columns:
+            if col and not col.startswith('col_'):
+                column_frequency[col] = column_frequency.get(col, 0) + 1
+    
+    # Step 2: Find canonical columns (appear in multiple tables)
+    # Sort by frequency to prioritize common columns
+    canonical_cols = sorted(column_frequency.keys(), 
+                           key=lambda x: column_frequency[x], 
+                           reverse=True)
+    
+    # Step 3: Build similarity mapping for columns
+    # Map similar column names to the most frequent variant
+    column_mapping = {}
+    
+    for df in cleaned_dfs:
+        for col in df.columns:
+            if col in column_mapping:
+                continue
+            
+            # Check if this column is similar to a canonical one
+            best_match = None
+            best_score = 0
+            
+            for canonical in canonical_cols:
+                # Simple similarity: shared words
+                col_words = set(col.split('_'))
+                canon_words = set(canonical.split('_'))
+                
+                if not col_words or not canon_words:
+                    continue
+                
+                # Jaccard similarity
+                intersection = len(col_words & canon_words)
+                union = len(col_words | canon_words)
+                score = intersection / union if union > 0 else 0
+                
+                # High threshold to avoid false matches
+                if score > 0.6 and score > best_score:
+                    best_match = canonical
+                    best_score = score
+            
+            if best_match and best_match != col:
+                column_mapping[col] = best_match
+            else:
+                column_mapping[col] = col
+    
+    # Step 4: Combine all rows with normalized columns
+    all_rows = []
+    
+    for df in cleaned_dfs:
+        # Rename columns using mapping
+        renamed_cols = [column_mapping.get(c, c) for c in df.columns]
+        df_renamed = df.copy()
+        df_renamed.columns = renamed_cols
+        
+        # Convert to records
+        for record in df_renamed.to_dict('records'):
+            # Filter out empty records
+            has_data = any(
+                str(v).strip() 
+                for v in record.values() 
+                if v is not None
+            )
+            if has_data:
+                all_rows.append(record)
+    
+    # Log consolidation results
+    unique_cols_before = sum(len(df.columns) for df in all_dataframes)
+    unique_cols_after = len(set(column_mapping.values()))
+    logger.warning(f"[GMFT] Column consolidation: {unique_cols_before} raw -> {unique_cols_after} normalized columns")
+    
+    return all_rows
+
+
 def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
     """
     Extract tables from PDF using gmft (ML-based Table Transformer).
@@ -663,7 +816,9 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
       - formatter.extract(cropped_table) → FormattedTable (TATRFormattedTable)
       - formatted_table.df() → pandas DataFrame
     
-    This is domain-agnostic - no hardcoding of report formats.
+    Column consolidation: Multi-page PDFs often have repeated headers with
+    slight variations (page numbers, line breaks). We collect all DataFrames
+    first, then consolidate columns across pages for clean output.
     """
     if not GMFT_AVAILABLE:
         logger.warning("[GMFT] gmft not available")
@@ -673,7 +828,7 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
         logger.warning("[GMFT] pandas not available")
         return []
     
-    all_rows = []
+    all_dataframes = []  # Collect DataFrames, consolidate at end
     doc = None
     
     try:
@@ -687,12 +842,10 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
         logger.warning(f"[GMFT] Processing {num_pages} pages with ML table detection...")
         
         tables_found = 0
-        rows_extracted = 0
         
         for page_num, page in enumerate(doc):
             try:
                 # Step 1: Detect tables on this page using ML model
-                # Returns list of CroppedTable objects
                 cropped_tables = detector.extract(page)
                 
                 if not cropped_tables:
@@ -704,56 +857,23 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
                 for table_idx, cropped_table in enumerate(cropped_tables):
                     try:
                         # Step 2: Format the cropped table
-                        # Returns TATRFormattedTable object
                         formatted_table = formatter.extract(cropped_table)
                         
                         if formatted_table is None:
-                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: formatter returned None")
                             continue
                         
-                        # Step 3: Get pandas DataFrame from formatted table
-                        # The .df() method returns the actual pandas DataFrame
+                        # Step 3: Get pandas DataFrame
                         df = formatted_table.df()
                         
-                        if df is None:
-                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: df() returned None")
+                        if df is None or df.empty:
                             continue
                         
-                        if df.empty:
-                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: DataFrame is empty")
-                            continue
-                        
-                        # Step 4: Clean up the DataFrame
-                        # Normalize column names
-                        cleaned_columns = []
-                        for i, col in enumerate(df.columns):
-                            col_str = str(col).strip() if col is not None else ''
-                            if not col_str:
-                                col_str = f'column_{i}'
-                            cleaned_columns.append(col_str)
-                        df.columns = cleaned_columns
-                        
-                        # Remove rows that are completely empty
+                        # Remove completely empty rows
                         df = df.dropna(how='all')
                         
-                        # Step 5: Convert to list of dicts
-                        records = df.to_dict('records')
-                        
-                        # Filter out records where all values are empty/whitespace
-                        valid_records = []
-                        for record in records:
-                            has_data = any(
-                                str(v).strip() 
-                                for v in record.values() 
-                                if v is not None
-                            )
-                            if has_data:
-                                valid_records.append(record)
-                        
-                        if valid_records:
-                            all_rows.extend(valid_records)
-                            rows_extracted += len(valid_records)
-                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: extracted {len(valid_records)} rows")
+                        if not df.empty:
+                            all_dataframes.append(df)
+                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: {len(df)} rows, {len(df.columns)} cols")
                         
                     except Exception as table_error:
                         logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1} error: {table_error}")
@@ -763,7 +883,7 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
                 logger.warning(f"[GMFT] Page {page_num + 1} error: {page_error}")
                 continue
         
-        logger.warning(f"[GMFT] Complete: {tables_found} tables detected, {rows_extracted} total rows extracted")
+        logger.warning(f"[GMFT] Detection complete: {tables_found} tables from {num_pages} pages")
         
     except Exception as e:
         logger.error(f"[GMFT] PDF processing failed: {e}")
@@ -771,14 +891,19 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
         logger.error(traceback.format_exc())
     
     finally:
-        # Always close the document to free resources
         if doc is not None:
             try:
                 doc.close()
             except Exception:
                 pass
     
-    return all_rows
+    # Step 4: Consolidate columns across all extracted DataFrames
+    if all_dataframes:
+        all_rows = consolidate_table_columns(all_dataframes)
+        logger.warning(f"[GMFT] Final output: {len(all_rows)} rows")
+        return all_rows
+    
+    return []
 
 
 def parse_tabular_pdf_with_pdfplumber(file_path: str, columns: List[str]) -> List[Dict[str, str]]:
