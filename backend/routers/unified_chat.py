@@ -2106,13 +2106,18 @@ async def unified_chat(request: UnifiedChatRequest):
             if is_validation_response:
                 # Engine already did the consultant analysis - use it directly
                 logger.warning(f"[UNIFIED] Using engine's validation analysis directly (has consultant formatting)")
+                # Limit answer size to prevent browser choking
+                safe_answer = engine_answer[:15000] if engine_answer else ""
                 if auto_applied_note:
-                    response["answer"] = auto_applied_note + "\n\n" + engine_answer
+                    response["answer"] = auto_applied_note + "\n\n" + safe_answer
                 else:
-                    response["answer"] = engine_answer
+                    response["answer"] = safe_answer
                 # Clear clarification flag - we have a real answer now
                 response["needs_clarification"] = False
                 response["clarification_questions"] = []
+                # Clear heavy data - we have the answer already
+                response["from_reality"] = []
+                response["structured_output"] = None
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
