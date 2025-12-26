@@ -489,9 +489,9 @@ def extract_columns_with_vision(
         logger.error("[PDF-VISION] Anthropic SDK required for vision analysis")
         return {'columns': [], 'error': 'Anthropic SDK not available'}
     
-    api_key = os.environ.get('ANTHROPIC_API_KEY')
+    api_key = os.environ.get('CLAUDE_KEY') or os.environ.get('ANTHROPIC_API_KEY')
     if not api_key:
-        logger.error("[PDF-VISION] ANTHROPIC_API_KEY not configured")
+        logger.error("[PDF-VISION] CLAUDE_KEY not configured")
         return {'columns': [], 'error': 'API key not configured'}
     
     if not images:
