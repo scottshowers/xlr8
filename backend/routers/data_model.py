@@ -532,8 +532,8 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                         try:
                             col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                             columns = [row[1] for row in col_result]
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
                     
                     # Get row count
                     try:
