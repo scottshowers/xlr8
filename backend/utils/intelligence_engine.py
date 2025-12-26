@@ -1,5 +1,5 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.18.0 - SQLCODER OPTIMIZATION
+XLR8 INTELLIGENCE ENGINE v5.19.0 - COLUMN VALUE MATCHING
 ============================================================
 
 Deploy to: backend/utils/intelligence_engine.py
@@ -17,6 +17,11 @@ Reference Library Truths (global-scoped):
   (+ COMPLIANCE - Audit requirements, SOC 2, internal controls)
 
 UPDATES:
+- v5.19.0: COLUMN VALUE MATCHING - Table selection checks column VALUES:
+           * Queries _column_profiles.top_values_json during table scoring
+           * "show me SUI rates" matches tables where type_of_tax contains "SUI"
+           * +80 score boost when query word matches a stored column value
+           * Connects config validation valid_values to query routing
 - v5.18.0: SQLCODER OPTIMIZATION - Major SQL generation overhaul:
            * Added _build_create_table_schema() - SQLCoder's training format
            * Added _is_simple_query() - detect single-table queries
@@ -3397,6 +3402,44 @@ class IntelligenceEngine:
                 if any(loc_col in ' '.join(col_names) for loc_col in LOCATION_COLUMNS):
                     score += 40  # Big boost for tables with actual location data
                     logger.warning(f"[SQL-GEN] Boosting table {table_name[-40:]} - has location columns")
+            
+            # =================================================================
+            # CRITICAL: Check column VALUES, not just column NAMES
+            # This is what allows "show me SUI rates" to find the tax table
+            # even though "SUI" is a VALUE in type_of_tax, not a column name
+            # =================================================================
+            try:
+                if self.structured_handler and self.structured_handler.conn:
+                    # Get top values from column profiles for this table
+                    value_profiles = self.structured_handler.conn.execute("""
+                        SELECT column_name, top_values_json
+                        FROM _column_profiles 
+                        WHERE LOWER(table_name) = LOWER(?)
+                        AND top_values_json IS NOT NULL
+                        AND top_values_json != '[]'
+                    """, [table.get('table_name', '')]).fetchall()
+                    
+                    for col_name, top_values_json in value_profiles:
+                        if not top_values_json:
+                            continue
+                        try:
+                            top_values = json.loads(top_values_json)
+                            # Check if any query word matches a column value
+                            for val_info in top_values:
+                                val = str(val_info.get('value', '')).lower() if isinstance(val_info, dict) else str(val_info).lower()
+                                if not val or len(val) < 2:
+                                    continue
+                                # Check if this value appears in the query
+                                for word in words:
+                                    if len(word) >= 2 and word not in skip_words:
+                                        if word == val or word in val or val in word:
+                                            score += 80  # MAJOR boost - query matches a column value
+                                            logger.warning(f"[SQL-GEN] VALUE MATCH: '{word}' matches value '{val}' in {table_name[-40:]}.{col_name} (+80)")
+                                            break
+                        except (json.JSONDecodeError, TypeError):
+                            pass
+            except Exception as e:
+                logger.debug(f"[SQL-GEN] Column value check failed for {table_name}: {e}")
             
             scored_tables.append((score, table))
             logger.debug(f"[SQL-GEN] Table {table_name[-30:]} score={score} (rows={row_count}, cols={len(columns)}, lookup={is_lookup})")
