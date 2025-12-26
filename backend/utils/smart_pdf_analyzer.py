@@ -34,6 +34,16 @@ try:
 except ImportError:
     PANDAS_AVAILABLE = False
 
+# Try to import gmft for ML-based table detection (handles borderless tables)
+try:
+    from gmft.auto import AutoTableDetector, AutoTableFormatter
+    from gmft.pdf_bindings import PyPDFium2Document
+    GMFT_AVAILABLE = True
+    logger.info("[SMART-PDF] gmft available - ML table detection enabled")
+except ImportError:
+    GMFT_AVAILABLE = False
+    logger.warning("[SMART-PDF] gmft not available - using pdfplumber fallback")
+
 # =============================================================================
 # SHARED UTILITIES - Import from pdf_utils for consistency
 # =============================================================================
@@ -626,10 +636,98 @@ JSON OUTPUT:"""
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
     
-    # If LLM failed and we have file path, try pdfplumber extraction
-    if len(all_rows) == 0 and file_path and PDFPLUMBER_AVAILABLE:
-        logger.warning("[LLM] LLM parsing failed, trying pdfplumber table extraction...")
-        all_rows = parse_tabular_pdf_with_pdfplumber(file_path, columns)
+    # If LLM failed and we have file path, try ML-based extraction (gmft) then pdfplumber
+    if len(all_rows) == 0 and file_path:
+        # Try gmft first (ML-based, handles borderless tables)
+        if GMFT_AVAILABLE:
+            logger.warning("[LLM] LLM parsing failed, trying gmft ML table extraction...")
+            all_rows = extract_tables_with_gmft(file_path)
+        
+        # Fall back to pdfplumber if gmft failed or unavailable
+        if len(all_rows) == 0 and PDFPLUMBER_AVAILABLE:
+            logger.warning("[LLM] Trying pdfplumber table extraction...")
+            all_rows = parse_tabular_pdf_with_pdfplumber(file_path, columns)
+    
+    return all_rows
+
+
+def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
+    """
+    Extract tables from PDF using gmft (ML-based Table Transformer).
+    
+    gmft uses Microsoft's Table Transformer trained on 1M+ tables,
+    which handles borderless/implicit tables that pdfplumber misses.
+    
+    This is domain-agnostic - no hardcoding of report formats.
+    """
+    if not GMFT_AVAILABLE:
+        logger.warning("[GMFT] gmft not available")
+        return []
+    
+    all_rows = []
+    
+    try:
+        # Initialize detector and formatter (lazy load models)
+        detector = AutoTableDetector()
+        formatter = AutoTableFormatter()
+        
+        # Open PDF with gmft's binding
+        doc = PyPDFium2Document(file_path)
+        logger.warning(f"[GMFT] Processing {len(doc)} pages with ML table detection...")
+        
+        tables_found = 0
+        for page_num, page in enumerate(doc):
+            try:
+                # Detect tables on this page using ML model
+                tables = detector.extract(page)
+                
+                if not tables:
+                    continue
+                
+                logger.warning(f"[GMFT] Page {page_num + 1}: found {len(tables)} tables")
+                tables_found += len(tables)
+                
+                for table in tables:
+                    try:
+                        # Convert table to pandas DataFrame
+                        df = formatter.extract(table)
+                        
+                        if df is None or df.empty:
+                            continue
+                        
+                        # Convert DataFrame to list of dicts
+                        # Clean up column names
+                        df.columns = [str(c).strip() if c else f'col_{i}' 
+                                     for i, c in enumerate(df.columns)]
+                        
+                        # Remove empty rows
+                        df = df.dropna(how='all')
+                        
+                        # Convert to records
+                        records = df.to_dict('records')
+                        
+                        # Filter out rows that are all empty strings
+                        for record in records:
+                            if any(str(v).strip() for v in record.values()):
+                                all_rows.append(record)
+                        
+                        logger.warning(f"[GMFT] Extracted {len(records)} rows from table")
+                        
+                    except Exception as table_e:
+                        logger.warning(f"[GMFT] Table extraction error: {table_e}")
+                        continue
+                        
+            except Exception as page_e:
+                logger.warning(f"[GMFT] Page {page_num + 1} error: {page_e}")
+                continue
+        
+        doc.close()
+        logger.warning(f"[GMFT] Total: {tables_found} tables, {len(all_rows)} rows extracted")
+        
+    except Exception as e:
+        logger.error(f"[GMFT] Table extraction failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
     
     return all_rows
 
@@ -943,14 +1041,13 @@ def process_pdf_intelligently(
     status_callback=None
 ) -> Dict[str, Any]:
     """
-    Smart PDF processing using LLM for analysis and parsing.
+    Smart PDF processing with ML-based table detection.
     
     Flow:
-    1. Extract text from PDF
-    2. Redact PII
-    3. Ask LLM: Is this tabular?
-    4. If yes: LLM parses to rows → DuckDB
-    5. Return text for ChromaDB either way
+    1. Extract text from PDF (for ChromaDB)
+    2. Try gmft ML table detection first (handles borderless tables)
+    3. If gmft fails, fall back to LLM analysis
+    4. Store tables to DuckDB, text to ChromaDB
     """
     
     result = {
@@ -968,7 +1065,7 @@ def process_pdf_intelligently(
         logger.warning(f"[SMART-PDF] {msg}")
     
     try:
-        # Step 1: Extract text
+        # Step 1: Extract text (for ChromaDB and fallback analysis)
         update_status("Extracting text from PDF...", 10)
         text = extract_pdf_text(file_path)
         
@@ -982,33 +1079,50 @@ def process_pdf_intelligently(
         update_status(f"Extracted {len(text):,} characters", 20)
         result['chromadb_result'] = {'text_content': text, 'text_length': len(text)}
         
-        # Step 2: Analyze with LLM (PII is redacted inside the function)
-        update_status("Analyzing PDF structure with AI...", 30)
-        analysis = analyze_pdf_with_llm(text)
-        result['analysis'] = analysis
+        rows = []
+        analysis = {'is_tabular': False}
         
-        # Step 3: If tabular, parse and store to DuckDB
-        if analysis.get('is_tabular') and analysis.get('columns'):
-            columns = analysis['columns']
-            update_status(f"Detected tabular data with {len(columns)} columns, parsing...", 50)
-            
-            # Parse with LLM (falls back to pdfplumber if LLM unavailable)
-            rows = parse_tabular_pdf_with_llm(text, columns, file_path=file_path)
+        # Step 2: Try gmft ML-based table detection FIRST (handles borderless tables)
+        if GMFT_AVAILABLE:
+            update_status("Detecting tables with ML model...", 30)
+            rows = extract_tables_with_gmft(file_path)
             
             if rows:
-                update_status(f"Parsed {len(rows)} rows, storing to DuckDB...", 70)
+                update_status(f"✓ ML detected {len(rows)} rows", 50)
+                analysis = {
+                    'is_tabular': True,
+                    'method': 'gmft',
+                    'columns': list(rows[0].keys()) if rows else []
+                }
+        
+        # Step 3: If gmft didn't find tables, fall back to LLM analysis
+        if not rows:
+            update_status("Analyzing PDF structure with AI...", 40)
+            analysis = analyze_pdf_with_llm(text)
+            result['analysis'] = analysis
+            
+            if analysis.get('is_tabular') and analysis.get('columns'):
+                columns = analysis['columns']
+                update_status(f"Detected tabular data with {len(columns)} columns, parsing...", 50)
                 
-                # Store to DuckDB
-                duckdb_result = store_to_duckdb(rows, project, filename, project_id)
-                result['duckdb_result'] = duckdb_result
-                
-                if duckdb_result.get('success'):
-                    result['storage_used'].append('duckdb')
-                    update_status(f"✓ Stored {duckdb_result['row_count']} rows to DuckDB", 85)
-                else:
-                    update_status(f"⚠ DuckDB storage failed: {duckdb_result.get('error')}", 85)
+                # Parse with LLM (falls back to gmft/pdfplumber if LLM unavailable)
+                rows = parse_tabular_pdf_with_llm(text, columns, file_path=file_path)
+        
+        result['analysis'] = analysis
+        
+        # Step 4: Store to DuckDB if we have rows
+        if rows:
+            update_status(f"Parsed {len(rows)} rows, storing to DuckDB...", 70)
+            
+            # Store to DuckDB
+            duckdb_result = store_to_duckdb(rows, project, filename, project_id)
+            result['duckdb_result'] = duckdb_result
+            
+            if duckdb_result.get('success'):
+                result['storage_used'].append('duckdb')
+                update_status(f"✓ Stored {duckdb_result['row_count']} rows to DuckDB", 85)
             else:
-                update_status("No rows could be parsed from tabular data", 85)
+                update_status(f"⚠ DuckDB storage failed: {duckdb_result.get('error')}", 85)
         else:
             update_status("PDF classified as narrative text (not tabular)", 50)
         
