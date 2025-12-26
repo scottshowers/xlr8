@@ -2110,6 +2110,9 @@ async def unified_chat(request: UnifiedChatRequest):
                     response["answer"] = auto_applied_note + "\n\n" + engine_answer
                 else:
                     response["answer"] = engine_answer
+                # Clear clarification flag - we have a real answer now
+                response["needs_clarification"] = False
+                response["clarification_questions"] = []
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
