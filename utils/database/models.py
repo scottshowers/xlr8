@@ -348,12 +348,79 @@ class DocumentRegistryModel:
             return cls.USAGE_RAG_KNOWLEDGE
     
     # ==========================================================================
+    # DISPLAY NAME GENERATION
+    # ==========================================================================
+    
+    @staticmethod
+    def generate_display_name(filename: str) -> str:
+        """
+        Generate a human-friendly display name from a filename.
+        
+        Examples:
+            Team_Earnings_Codes.xlsx → "Team Earnings Codes"
+            Q4_2024_Payroll_Data.csv → "Q4 2024 Payroll Data"
+            employee-master-export.pdf → "Employee Master Export"
+        
+        Args:
+            filename: Original filename as uploaded
+        
+        Returns:
+            Human-friendly display name
+        """
+        if not filename:
+            return "Untitled"
+        
+        # Start with filename
+        base = filename
+        
+        # Remove file extension
+        extensions = ['.xlsx', '.xls', '.csv', '.pdf', '.docx', '.doc', '.txt', '.json']
+        for ext in extensions:
+            if base.lower().endswith(ext):
+                base = base[:-len(ext)]
+                break
+        
+        # Remove timestamp patterns (YYYYMMDD_HHMMSS or similar)
+        base = re.sub(r'_?\d{8}_\d{6}$', '', base)  # 20241225_143022
+        base = re.sub(r'_?\d{8}$', '', base)         # 20241225
+        base = re.sub(r'_?\d{14}$', '', base)        # 20241225143022
+        base = re.sub(r'_?\(\d+\)$', '', base)       # (1), (2) etc
+        
+        # Replace separators with spaces
+        base = base.replace('_', ' ').replace('-', ' ')
+        
+        # Title case, but preserve acronyms
+        words = base.split()
+        result_words = []
+        for word in words:
+            # If all uppercase and short, keep as acronym (e.g., "PTO", "SSN", "EE", "Q4")
+            if word.isupper() and len(word) <= 4:
+                result_words.append(word)
+            # If starts with uppercase and rest lowercase, keep (already proper)
+            elif word and word[0].isupper() and word[1:].islower():
+                result_words.append(word)
+            else:
+                result_words.append(word.title())
+        
+        display = ' '.join(result_words).strip()
+        
+        # Clean up extra whitespace
+        display = re.sub(r'\s+', ' ', display)
+        
+        # If empty after all that, fall back to original filename
+        if not display:
+            display = filename
+        
+        return display
+    
+    # ==========================================================================
     # REGISTRATION
     # ==========================================================================
     
     @staticmethod
     def register(
         filename: str,
+        display_name: str = None,  # NEW: Human-friendly name (auto-generated if not provided)
         truth_type: str = None,
         classification_method: str = None,
         file_type: str = None,
@@ -430,9 +497,14 @@ class DocumentRegistryModel:
         if classification_confidence < 0.4:
             readiness_blockers.append('low_classification_confidence')
         
+        # Generate display_name if not provided
+        if not display_name:
+            display_name = DocumentRegistryModel.generate_display_name(filename)
+        
         try:
             data = {
                 'filename': filename,
+                'display_name': display_name,  # NEW: Human-friendly name
                 'file_type': file_type,
                 'truth_type': truth_type,
                 'classification_method': classification_method,
