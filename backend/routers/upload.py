@@ -2,6 +2,19 @@
 Async Upload Router for XLR8
 ============================
 
+v23 CHANGES (December 2025 - GET HEALTHY Week 2):
+- CONSOLIDATED: /upload endpoint moved to smart_router.py
+- CONSOLIDATED: /standards/upload endpoint moved to smart_router.py
+- This file now contains SUPPORTING endpoints only:
+  - /upload/queue-status
+  - /upload/status/{job_id}
+  - /upload/debug
+  - /standards/health
+  - /standards/rules
+  - /standards/documents
+  - /standards/compliance/check/{project_id}
+- process_file_background() still exported for smart_router to use
+
 v22 CHANGES:
 - Added MetricsService integration for analytics tracking
 - Background jobs now record upload metrics (duration, rows, success/fail)
@@ -1793,320 +1806,24 @@ def process_file_background(
 # API ENDPOINTS
 # =============================================================================
 
-@router.post("/upload")
-async def upload_file(
-    request: Request,
-    file: UploadFile = File(...),
-    project: str = Form(...),
-    functional_area: Optional[str] = Form(None),
-    standards_mode: Optional[str] = Form(None),
-    domain: Optional[str] = Form(None),
-    truth_type: Optional[str] = Form(None),  # NEW: User-specified classification
-    content_domain: Optional[str] = Form(None)  # NEW: Comma-separated domain tags
-):
-    """
-    Upload a file for async processing
-    
-    Universal Classification Architecture:
-    - truth_type: 'reality', 'intent', 'reference', 'configuration' (optional, auto-detected if not provided)
-    - content_domain: Comma-separated tags like 'payroll,benefits' (optional)
-    
-    If standards_mode=true, extracts compliance rules instead of normal processing.
-    Returns immediately with job_id for status polling (or rules for standards mode)
-    """
-    
-    # =================================================================
-    # EXTRACT USER INFO FROM REQUEST
-    # =================================================================
-    uploaded_by_id = None
-    uploaded_by_email = None
-    
-    try:
-        # Try to get user from Authorization header (Supabase JWT)
-        auth_header = request.headers.get('Authorization', '')
-        if auth_header.startswith('Bearer '):
-            token = auth_header[7:]
-            try:
-                # Decode JWT to get user info (without verification for now)
-                import base64
-                # JWT has 3 parts: header.payload.signature
-                payload = token.split('.')[1]
-                # Add padding if needed
-                payload += '=' * (4 - len(payload) % 4)
-                decoded = json.loads(base64.urlsafe_b64decode(payload))
-                uploaded_by_id = decoded.get('sub')  # User UUID
-                uploaded_by_email = decoded.get('email')
-                logger.info(f"[UPLOAD] User from JWT: {uploaded_by_email} ({uploaded_by_id})")
-            except Exception as jwt_e:
-                logger.warning(f"[UPLOAD] Could not decode JWT: {jwt_e}")
-        
-        # Fallback: check for user info in headers (set by frontend)
-        if not uploaded_by_id:
-            uploaded_by_id = request.headers.get('X-User-Id')
-            uploaded_by_email = request.headers.get('X-User-Email')
-            if uploaded_by_id:
-                logger.info(f"[UPLOAD] User from headers: {uploaded_by_email} ({uploaded_by_id})")
-    except Exception as user_e:
-        logger.warning(f"[UPLOAD] Could not extract user info: {user_e}")
-    
-    # STANDARDS MODE - Extract rules from compliance documents
-    if standards_mode == "true" or project.lower() == "__standards__":
-        try:
-            if not file.filename:
-                raise HTTPException(status_code=400, detail="No filename provided")
-            
-            filename = file.filename
-            ext = filename.split('.')[-1].lower()
-            
-            if ext not in ['pdf', 'docx', 'doc', 'txt', 'md', 'xlsx', 'xls', 'csv']:
-                raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported for standards")
-            
-            logger.info(f"[STANDARDS] Upload: {filename}, domain={domain or 'general'}")
-            
-            content = await file.read()
-            logger.info(f"[STANDARDS] Size: {len(content)} bytes")
-            
-            if not STANDARDS_AVAILABLE:
-                raise HTTPException(status_code=503, detail="Standards processor not available")
-            
-            file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-            with open(file_path, 'wb') as f:
-                f.write(content)
-            
-            try:
-                if ext == 'pdf':
-                    doc = standards_process_pdf(file_path, domain or 'general')
-                elif ext in ['xlsx', 'xls']:
-                    # Convert Excel to text for processing
-                    import pandas as pd
-                    try:
-                        dfs = pd.read_excel(file_path, sheet_name=None)
-                        text_parts = []
-                        for sheet_name, df in dfs.items():
-                            text_parts.append(f"=== {sheet_name} ===\n")
-                            text_parts.append(df.to_string(index=False))
-                            text_parts.append("\n\n")
-                        text = "\n".join(text_parts)
-                    except Exception as e:
-                        logger.warning(f"[STANDARDS] Excel parse error: {e}")
-                        raise HTTPException(status_code=400, detail=f"Failed to parse Excel file: {str(e)}")
-                    doc = standards_process_text(text, filename, domain or 'general')
-                elif ext == 'csv':
-                    # Read CSV as text
-                    import pandas as pd
-                    try:
-                        df = pd.read_csv(file_path)
-                        text = df.to_string(index=False)
-                    except Exception as e:
-                        logger.warning(f"[STANDARDS] CSV parse error: {e}")
-                        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                            text = f.read()
-                    doc = standards_process_text(text, filename, domain or 'general')
-                else:
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        text = f.read()
-                    doc = standards_process_text(text, filename, domain or 'general')
-                
-                registry = get_rule_registry()
-                registry.add_document(doc)
-                
-                logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
-                
-                # Register in unified registration service
-                if REGISTRATION_SERVICE_AVAILABLE:
-                    try:
-                        reg_result = RegistrationService.register_standards(
-                            filename=filename,
-                            domain=domain or 'general',
-                            rules_extracted=len(doc.rules),
-                            document_id=doc.document_id,
-                            title=doc.title,
-                            page_count=doc.page_count,
-                            file_content=content,
-                            file_type=ext,
-                            metadata={
-                                'source': 'standards_upload',
-                                'rule_types': list(set(r.rule_type for r in doc.rules[:50]))
-                            }
-                        )
-                        if reg_result.success:
-                            logger.info(f"[STANDARDS] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
-                        else:
-                            logger.warning(f"[STANDARDS] Registration warning: {reg_result.error}")
-                    except Exception as reg_e:
-                        logger.warning(f"[STANDARDS] Could not register: {reg_e}")
-                
-                # ALSO chunk to ChromaDB for RAG search (Five Truths: regulatory docs need both rules AND RAG)
-                chunks_created = 0
-                try:
-                    rag_handler = RAGHandler()
-                    
-                    # Get text content for chunking
-                    if ext == 'pdf':
-                        # Re-read PDF for text extraction
-                        import PyPDF2
-                        with open(file_path, 'rb') as pdf_file:
-                            pdf_reader = PyPDF2.PdfReader(pdf_file)
-                            text_for_rag = ""
-                            for page in pdf_reader.pages:
-                                text_for_rag += page.extract_text() or ""
-                    else:
-                        text_for_rag = text  # Already have text from earlier
-                    
-                    if text_for_rag and len(text_for_rag.strip()) > 100:
-                        # Prepare metadata for RAG
-                        rag_metadata = {
-                            "filename": filename,
-                            "project": "Global/Universal",
-                            "is_global": True,
-                            "truth_type": "regulatory",
-                            "domain": domain or "regulatory",
-                            "rules_extracted": len(doc.rules)
-                        }
-                        
-                        chunks = rag_handler.add_document(
-                            text=text_for_rag,
-                            filename=filename,
-                            metadata=rag_metadata
-                        )
-                        chunks_created = chunks if isinstance(chunks, int) else len(chunks) if chunks else 0
-                        logger.info(f"[STANDARDS] Also chunked to ChromaDB: {chunks_created} chunks")
-                except Exception as rag_e:
-                    logger.warning(f"[STANDARDS] RAG chunking failed (rules still extracted): {rag_e}")
-                
-                return {
-                    "success": True,
-                    "document_id": doc.document_id,
-                    "filename": doc.filename,
-                    "title": doc.title,
-                    "domain": doc.domain,
-                    "rules_extracted": len(doc.rules),
-                    "chunks_created": chunks_created,
-                    "page_count": doc.page_count,
-                    "rules": [r.to_dict() for r in doc.rules[:10]]
-                }
-            finally:
-                if os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                    except:
-                        pass
-                        
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.error(f"[STANDARDS] Upload failed: {e}")
-            logger.error(traceback.format_exc())
-            raise HTTPException(status_code=500, detail=str(e))
-    
-    # NORMAL MODE - Regular file processing
-    try:
-        # Validate file
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No filename provided")
-        
-        # Check file extension
-        allowed_extensions = ['pdf', 'docx', 'doc', 'txt', 'md', 'xlsx', 'xls', 'csv']
-        ext = file.filename.split('.')[-1].lower()
-        if ext not in allowed_extensions:
-            raise HTTPException(
-                status_code=400, 
-                detail=f"File type '{ext}' not supported. Allowed: {', '.join(allowed_extensions)}"
-            )
-        
-        # Look up project to get UUID
-        project_id = None
-        try:
-            # Handle global/reference library project
-            global_names = ['global', '__global__', 'global/universal', 'reference library', 'reference_library', '__standards__']
-            if project.lower() in global_names:
-                project_id = None
-                logger.info(f"[UPLOAD] Using GLOBAL/Reference Library project (no project_id)")
-            else:
-                # Check if project is already a UUID (frontend might send ID directly)
-                import re
-                uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
-                if re.match(uuid_pattern, project.lower()):
-                    # It's a UUID - verify it exists and use it directly
-                    project_record = ProjectModel.get_by_id(project)
-                    if project_record:
-                        project_id = project
-                        logger.info(f"[UPLOAD] Using project UUID directly: {project_id}")
-                    else:
-                        logger.warning(f"[UPLOAD] Project UUID '{project}' not found in database")
-                else:
-                    # It's a name - look up by name
-                    project_record = ProjectModel.get_by_name(project)
-                    if project_record:
-                        project_id = project_record.get('id')
-                        logger.info(f"[UPLOAD] Found project '{project}' with id: {project_id}")
-                    else:
-                        logger.warning(f"[UPLOAD] Project '{project}' not found in database")
-        except Exception as e:
-            logger.warning(f"[UPLOAD] Could not look up project: {e}")
-        
-        # Save file temporarily
-        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{file.filename}"
-        
-        # Read file content
-        content = await file.read()
-        file_size = len(content)
-        
-        # Calculate file hash for integrity and deduplication
-        file_hash = hashlib.sha256(content).hexdigest()
-        logger.info(f"[UPLOAD] File hash: {file_hash[:16]}...")
-        
-        # Write to temp file
-        with open(file_path, 'wb') as f:
-            f.write(content)
-        
-        logger.info(f"[UPLOAD] Saved {file.filename} ({file_size} bytes) to {file_path}")
-        
-        # Create job record
-        job_result = ProcessingJobModel.create(
-            job_type='upload',
-            project_id=project_id,
-            input_data={
-                'filename': file.filename, 
-                'functional_area': functional_area, 
-                'project_name': project,
-                'file_hash': file_hash,
-                'uploaded_by_id': uploaded_by_id,
-                'uploaded_by_email': uploaded_by_email
-            }
-        )
-        
-        if not job_result:
-            raise HTTPException(status_code=500, detail="Failed to create processing job")
-        
-        job_id = job_result['id']
-        
-        logger.info(f"[UPLOAD] Created job {job_id} for project_id={project_id}, truth_type={truth_type}, user={uploaded_by_email}")
-        
-        # Queue for background processing (sequential!)
-        queue_info = job_queue.enqueue(
-            job_id,
-            process_file_background,
-            (job_id, file_path, file.filename, project, project_id, functional_area, file_size, truth_type, content_domain, file_hash, uploaded_by_id, uploaded_by_email)
-        )
-        
-        return {
-            "job_id": job_id,
-            "status": "queued",
-            "queue_position": queue_info.get('position', 1),
-            "queue_size": queue_info.get('queue_size', 1),
-            "message": f"File '{file.filename}' queued for processing",
-            "project": project,
-            "project_id": project_id,
-            "truth_type": truth_type or "auto"
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[UPLOAD] Upload failed: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+# =============================================================================
+# NOTE: /upload endpoint MOVED to smart_router.py (December 2025)
+# =============================================================================
+# The unified upload endpoint is now handled by smart_router.py which provides:
+# - Single entry point for all file types
+# - Automatic routing based on content/truth_type
+# - Backward compatibility aliases for /standards/upload, /register/upload
+# - Consistent metrics tracking across all upload paths
+#
+# See: backend/routers/smart_router.py
+# =============================================================================
+
+# REMOVED: @router.post("/upload") - now in smart_router.py
+# The following function is kept for reference but the endpoint is disabled.
+# Smart router calls process_file_background directly for async processing.
+
+# _upload_file_DEPRECATED - Function body removed, logic now in smart_router.py
+# See smart_router.smart_upload() for the unified upload endpoint
 
 
 @router.get("/upload/queue-status")
@@ -2181,131 +1898,13 @@ async def standards_health():
     return status
 
 
-@router.post("/standards/upload")
-async def upload_standards(
-    file: UploadFile = File(...),
-    domain: str = Form(default="general"),
-    title: Optional[str] = Form(default=None)
-):
-    """Upload standards document for rule extraction AND semantic search."""
-    try:
-        if not file.filename:
-            raise HTTPException(status_code=400, detail="No filename provided")
-        
-        filename = file.filename
-        ext = filename.split('.')[-1].lower()
-        
-        if ext not in ['pdf', 'docx', 'doc', 'txt', 'md']:
-            raise HTTPException(status_code=400, detail=f"File type '{ext}' not supported")
-        
-        logger.info(f"[STANDARDS] Upload: {filename}, domain={domain}")
-        
-        content = await file.read()
-        file_size = len(content)
-        logger.info(f"[STANDARDS] Size: {file_size} bytes")
-        
-        if not STANDARDS_AVAILABLE:
-            raise HTTPException(status_code=503, detail="Standards processor not available")
-        
-        file_path = f"/tmp/{datetime.now().strftime('%Y%m%d_%H%M%S')}_{filename}"
-        with open(file_path, 'wb') as f:
-            f.write(content)
-        
-        chunks_added = 0
-        
-        try:
-            # Extract text for both rule extraction AND chunking
-            if ext == 'pdf':
-                doc = standards_process_pdf(file_path, domain)
-                # Get raw text for chunking
-                raw_text = getattr(doc, 'raw_text', '') or ''
-                if not raw_text:
-                    # Re-extract text if not available
-                    raw_text = extract_text(file_path)
-            else:
-                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                    raw_text = f.read()
-                doc = standards_process_text(raw_text, filename, domain)
-            
-            if title:
-                doc.title = title
-            
-            registry = get_rule_registry()
-            registry.add_document(doc)
-            
-            logger.info(f"[STANDARDS] Extracted {len(doc.rules)} rules")
-            
-            # ALSO chunk and embed for semantic search
-            if raw_text and len(raw_text.strip()) > 100:
-                try:
-                    rag = RAGHandler()
-                    metadata = {
-                        'source': filename,
-                        'filename': filename,
-                        'project': '__STANDARDS__',
-                        'truth_type': 'reference',
-                        'domain': domain,
-                        'is_global': True,
-                        'document_id': doc.document_id,
-                        'rules_extracted': len(doc.rules)
-                    }
-                    chunks_added = rag.add_document(
-                        collection_name="documents",
-                        text=raw_text,
-                        metadata=metadata
-                    )
-                    logger.info(f"[STANDARDS] Added {chunks_added} chunks to ChromaDB for semantic search")
-                except Exception as chunk_e:
-                    logger.warning(f"[STANDARDS] ChromaDB chunking failed (rules still saved): {chunk_e}")
-            
-            # Register in document_registry for unified tracking
-            if REGISTRATION_SERVICE_AVAILABLE:
-                try:
-                    reg_result = RegistrationService.register_standards(
-                        filename=filename,
-                        document_id=doc.document_id,
-                        domain=domain,
-                        rules_extracted=len(doc.rules),
-                        file_size=file_size,
-                        file_type=ext,
-                        title=doc.title,
-                        page_count=doc.page_count,
-                        metadata={
-                            'upload_source': 'standards_upload',
-                            'chunks_added': chunks_added
-                        }
-                    )
-                    if reg_result.success:
-                        logger.info(f"[STANDARDS] Registered in document_registry: {filename}")
-                    else:
-                        logger.warning(f"[STANDARDS] Registration warning: {reg_result.error}")
-                except Exception as reg_e:
-                    logger.warning(f"[STANDARDS] Could not register: {reg_e}")
-            
-            return {
-                "success": True,
-                "document_id": doc.document_id,
-                "filename": doc.filename,
-                "title": doc.title,
-                "domain": doc.domain,
-                "rules_extracted": len(doc.rules),
-                "chunks_added": chunks_added,
-                "page_count": doc.page_count,
-                "rules": [r.to_dict() for r in doc.rules[:10]]
-            }
-        finally:
-            if os.path.exists(file_path):
-                try:
-                    os.remove(file_path)
-                except:
-                    pass
-                    
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"[STANDARDS] Upload failed: {e}")
-        logger.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e))
+# =============================================================================
+# NOTE: /standards/upload endpoint MOVED to smart_router.py (December 2025)
+# =============================================================================
+# The unified upload endpoint handles standards via processing_type=standards
+# See: backend/routers/smart_router.py
+# Backward compatibility alias at /api/standards/upload still works via smart_router
+# =============================================================================
 
 
 @router.get("/standards/rules")
