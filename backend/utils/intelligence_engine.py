@@ -4876,32 +4876,87 @@ SQL:"""
         Auto-check compliance by comparing regulatory rules against reality and configuration.
         
         This is the $500/hr Deloitte work - automated.
+        Uses the Gap Detection Engine to compare across all five truths.
         
         Returns:
             Dict with compliance status, gaps identified, and recommendations
         """
-        if not regulatory:
-            return None
+        try:
+            from backend.utils.gap_detection_engine import detect_conflicts_and_compliance
+        except ImportError:
+            try:
+                from utils.gap_detection_engine import detect_conflicts_and_compliance
+            except ImportError:
+                logger.warning("[INTEL] Gap detection engine not available")
+                return {
+                    'checked': False,
+                    'error': 'Gap detection engine not available',
+                    'findings': [],
+                    'gaps': [],
+                    'status': 'review_required'
+                }
         
-        # TODO: Implement rule extraction from regulatory docs
-        # For now, return a placeholder structure
-        return {
-            'checked': True,
-            'rules_evaluated': len(regulatory),
-            'findings': [],
-            'gaps': [],
-            'recommendations': [],
-            'status': 'review_required'  # compliant, non_compliant, review_required
-        }
+        try:
+            # Use the gap detection engine
+            _, compliance_check = detect_conflicts_and_compliance(
+                reality=reality,
+                configuration=configuration,
+                regulatory=regulatory,
+                question=self.conversation_history[-1].get('question', '') if self.conversation_history else '',
+                structured_handler=self.structured_handler,
+                rag_handler=self.rag_handler,
+            )
+            
+            logger.info(f"[INTEL] Compliance check: {compliance_check.get('status')} - {compliance_check.get('gap_count', 0)} gaps found")
+            return compliance_check
+            
+        except Exception as e:
+            logger.error(f"[INTEL] Compliance check failed: {e}")
+            return {
+                'checked': True,
+                'error': str(e),
+                'findings': [],
+                'gaps': [],
+                'status': 'review_required'
+            }
     
     def _detect_conflicts(self, reality, intent, configuration, reference, regulatory, compliance) -> List[Conflict]:
-        """Detect conflicts across all truth sources."""
-        # TODO: Implement intelligent conflict detection
-        # Examples:
-        # - Configuration says code X is active, but Reality shows no usage
-        # - Intent says implement feature Y, but Configuration is missing
-        # - Regulatory requires Z, but Configuration doesn't support it
-        return []
+        """
+        Detect conflicts across all truth sources using the Gap Detection Engine.
+        
+        This is the brain that finds the "in betweens":
+        - Reality vs Intent (What you have vs what you wanted)
+        - Reality vs Regulatory (What you have vs what the law requires)
+        - Configuration vs Reference (How you set it up vs best practice)
+        """
+        try:
+            from backend.utils.gap_detection_engine import detect_conflicts_and_compliance
+        except ImportError:
+            try:
+                from utils.gap_detection_engine import detect_conflicts_and_compliance
+            except ImportError:
+                logger.warning("[INTEL] Gap detection engine not available")
+                return []
+        
+        try:
+            conflicts, _ = detect_conflicts_and_compliance(
+                reality=reality,
+                intent=intent,
+                configuration=configuration,
+                reference=reference,
+                regulatory=regulatory,
+                compliance=compliance,
+                question=self.conversation_history[-1].get('question', '') if self.conversation_history else '',
+                structured_handler=self.structured_handler,
+                rag_handler=self.rag_handler,
+            )
+            
+            logger.info(f"[INTEL] Detected {len(conflicts)} conflicts across truth sources")
+            return conflicts
+            
+        except Exception as e:
+            logger.error(f"[INTEL] Conflict detection failed: {e}")
+            return []
     
     def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
         insights = []
@@ -5042,6 +5097,7 @@ SQL:"""
             reflib_context=reflib_context,
             filters_applied=filters_applied,
             insights=insights,
+            conflicts=conflicts,
             compliance_check=compliance_check
         )
         
@@ -5090,6 +5146,7 @@ SQL:"""
         reflib_context: List[str],
         filters_applied: List[str],
         insights: List[Insight],
+        conflicts: List[Conflict] = None,
         compliance_check: Optional[Dict] = None
     ) -> str:
         """Generate a consultative response using the Five Truths.
@@ -5317,6 +5374,15 @@ SQL:"""
             for insight in insights[:3]:
                 icon = '🔴' if insight.severity == 'high' else '🟡' if insight.severity == 'medium' else '💡'
                 parts.append(f"\n{icon} **{insight.title}**: {insight.description}")
+        
+        # Display conflicts from gap detection
+        if conflicts:
+            parts.append("\n\n---\n⚖️ **Cross-Truth Analysis:**")
+            for conflict in conflicts[:5]:
+                severity_icon = '🔴' if conflict.severity == 'critical' or conflict.severity == 'high' else '🟡' if conflict.severity == 'medium' else '💡'
+                parts.append(f"\n{severity_icon} {conflict.description}")
+                if conflict.recommendation:
+                    parts.append(f"   → *{conflict.recommendation}*")
         
         # =================================================================
         # FOLLOW-UP SUGGESTIONS (Data-Driven from actual schema)
