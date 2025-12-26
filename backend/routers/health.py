@@ -88,8 +88,8 @@ def check_duckdb_health() -> Dict[str, Any]:
                 table_sizes.append({"table": table, "rows": count})
                 if count == 0:
                     empty_tables.append(table)
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         result["details"]["total_rows"] = total_rows
         result["details"]["empty_tables"] = len(empty_tables)
@@ -378,8 +378,8 @@ def check_jobs_health() -> Dict[str, Any]:
                             job_time = datetime.fromisoformat(created.replace('Z', '+00:00').replace('+00:00', ''))
                             if job_time < cutoff:
                                 stuck += 1
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
             result["details"]["stuck"] = stuck
         except:
             result["details"]["processing"] = "unknown"
@@ -465,8 +465,8 @@ def check_data_integrity() -> Dict[str, Any]:
                 try:
                     count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
                     duckdb_table_rows[table] = count
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
         except Exception as duck_e:
             result["issues"].append(f"DuckDB scan failed: {duck_e}")
         
