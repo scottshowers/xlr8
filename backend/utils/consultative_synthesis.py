@@ -1,5 +1,5 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v1.0.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v1.1.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
@@ -18,15 +18,15 @@ ARCHITECTURE:
                           4. Signal confidence
                           5. Recommend next steps
 
-LLM PRIORITY:
-    1. Mistral (local) - Fast, private, no cost
+LLM PRIORITY (via LLMOrchestrator):
+    1. Mistral:7b (local) - Fast, private, no cost
     2. Claude API - Fallback for complex cases
     3. Template - Graceful degradation if all LLMs fail
 
 USAGE:
     from consultative_synthesis import ConsultativeSynthesizer
     
-    synthesizer = ConsultativeSynthesizer(ollama_host="http://localhost:11434")
+    synthesizer = ConsultativeSynthesizer()  # Uses LLMOrchestrator internally
     answer = synthesizer.synthesize(
         question="Are my SUI rates correct?",
         reality=[...],
@@ -38,10 +38,8 @@ USAGE:
 import os
 import json
 import logging
-import requests
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
-from enum import Enum
 
 logger = logging.getLogger(__name__)
 
@@ -82,61 +80,6 @@ class ConsultativeAnswer:
 
 
 # =============================================================================
-# PROMPT TEMPLATES
-# =============================================================================
-
-SYNTHESIS_PROMPT = """You are a senior HCM implementation consultant with 20 years of experience at firms like Deloitte and Accenture. Your client has asked you a question, and you have gathered information from multiple authoritative sources.
-
-Your job is to synthesize this information into a clear, actionable answer that:
-1. Directly answers their question first
-2. Triangulates across sources - noting agreements and conflicts
-3. Provides the "so-what" - context, implications, and risks they should know
-4. Is honest about confidence levels
-5. Ends with specific next steps
-
-QUESTION: {question}
-
-=== REALITY (What the data actually shows) ===
-{reality}
-
-=== CUSTOMER INTENT (What they documented they want) ===
-{intent}
-
-=== CONFIGURATION (How the system is currently set up) ===
-{configuration}
-
-=== REFERENCE (Best practices and implementation standards) ===
-{reference}
-
-=== REGULATORY (Legal requirements and mandates) ===
-{regulatory}
-
-=== DETECTED CONFLICTS ===
-{conflicts}
-
-INSTRUCTIONS:
-- Lead with the direct answer. Don't bury the lede.
-- If sources conflict, say so clearly: "Your data shows X, but the regulatory guidance says Y"
-- If you're uncertain, say "Based on the available data..." or "I couldn't find documentation on..."
-- Keep it to 3-5 paragraphs. Executives don't read walls of text.
-- Use natural prose. No bullet points unless showing a short list.
-- End with 1-2 specific actions: "I'd recommend checking..." or "Next step would be..."
-- If there's a compliance risk, lead with that.
-
-Write your response now:"""
-
-
-SIMPLE_ANSWER_PROMPT = """You are a helpful HCM consultant. Answer this question based on the data provided.
-
-QUESTION: {question}
-
-DATA FOUND:
-{data}
-
-Give a clear, direct answer in 2-3 sentences. If the data answers the question, say what it shows. If the data is incomplete, say what's missing."""
-
-
-# =============================================================================
 # MAIN SYNTHESIZER CLASS
 # =============================================================================
 
@@ -147,20 +90,26 @@ class ConsultativeSynthesizer:
     This is what separates XLR8 from "fancy BI tool" - the ability to
     triangulate across sources and provide the "so-what" that clients
     actually pay consultants for.
+    
+    Uses LLMOrchestrator for all LLM calls - Mistral first, Claude fallback.
     """
     
-    def __init__(
-        self,
-        ollama_host: str = None,
-        claude_api_key: str = None,
-        model_preference: str = "mistral"  # 'mistral', 'claude', 'auto'
-    ):
-        self.ollama_host = ollama_host or os.getenv("OLLAMA_HOST", "http://localhost:11434")
-        self.claude_api_key = claude_api_key or os.getenv("CLAUDE_API_KEY")
-        self.model_preference = model_preference
-        
-        # Track which synthesis method was used
+    def __init__(self):
+        # Use existing LLMOrchestrator - it handles all config (LLM_ENDPOINT, auth, etc.)
+        self._orchestrator = None
         self.last_method = None
+        
+        try:
+            from utils.llm_orchestrator import LLMOrchestrator
+            self._orchestrator = LLMOrchestrator()
+            logger.info("[CONSULTATIVE] Initialized with LLMOrchestrator")
+        except ImportError:
+            try:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+                self._orchestrator = LLMOrchestrator()
+                logger.info("[CONSULTATIVE] Initialized with LLMOrchestrator (backend path)")
+            except ImportError:
+                logger.warning("[CONSULTATIVE] LLMOrchestrator not available - template only")
         
     def synthesize(
         self,
@@ -574,144 +523,76 @@ class ConsultativeSynthesizer:
         conflicts: List[Any]
     ) -> Tuple[str, str]:
         """
-        Use LLM to synthesize a consultative answer.
+        Use LLM to synthesize a consultative answer via LLMOrchestrator.
+        
+        Flow: Mistral (local) → Claude (fallback) → Template (final fallback)
         
         Returns: (answer_text, method_used)
         """
-        # Build the prompt
-        prompt = self._build_synthesis_prompt(question, summaries, triangulation, conflicts)
+        if not self._orchestrator:
+            logger.warning("[CONSULTATIVE] No orchestrator - using template")
+            return self._template_fallback(question, summaries, triangulation), 'template'
         
-        # Try Mistral first (local, fast, private)
-        if self.model_preference in ['mistral', 'auto']:
-            try:
-                answer = self._call_mistral(prompt)
-                if answer and len(answer) > 50:
-                    logger.info("[SYNTHESIS] Used Mistral successfully")
-                    return answer, 'mistral'
-            except Exception as e:
-                logger.warning(f"[SYNTHESIS] Mistral failed: {e}")
+        # Build context from summaries
+        context_parts = []
+        for summary in summaries:
+            if summary.has_data:
+                context_parts.append(f"=== {summary.source_type.upper()} ===")
+                context_parts.append(summary.summary)
+                for fact in summary.key_facts[:5]:
+                    context_parts.append(f"  • {fact}")
         
-        # Fallback to Claude
-        if self.model_preference in ['claude', 'auto'] and self.claude_api_key:
-            try:
-                answer = self._call_claude(prompt)
-                if answer and len(answer) > 50:
-                    logger.info("[SYNTHESIS] Used Claude as fallback")
-                    return answer, 'claude'
-            except Exception as e:
-                logger.warning(f"[SYNTHESIS] Claude failed: {e}")
+        # Add conflicts
+        if triangulation.conflicts:
+            context_parts.append("\n=== CONFLICTS DETECTED ===")
+            for c in triangulation.conflicts[:5]:
+                context_parts.append(f"  ⚠ {c}")
+        
+        # Add gaps
+        if triangulation.gaps:
+            context_parts.append("\n=== INFORMATION GAPS ===")
+            for g in triangulation.gaps[:3]:
+                context_parts.append(f"  • {g}")
+        
+        context = "\n".join(context_parts)
+        
+        # Expert prompt for consultative synthesis
+        expert_prompt = """You are a senior HCM implementation consultant with 20 years of experience.
+
+Your job is to synthesize information into a clear, actionable answer that:
+1. Directly answers the question first - don't bury the lede
+2. Triangulates across sources - note agreements and conflicts
+3. Provides the "so-what" - context, implications, and risks
+4. Is honest about confidence levels
+5. Ends with 1-2 specific next steps
+
+Keep it to 3-5 paragraphs. Use natural prose, not bullet points.
+If sources conflict, say so clearly. If uncertain, say "Based on the available data..."
+If there's a compliance risk, lead with that."""
+
+        # Use orchestrator - handles Mistral first, Claude fallback
+        result = self._orchestrator.synthesize_answer(
+            question=question,
+            context=context,
+            expert_prompt=expert_prompt,
+            use_claude_fallback=True
+        )
+        
+        if result.get('success') and result.get('response'):
+            model = result.get('model_used', 'unknown')
+            # Normalize model name for reporting
+            if 'mistral' in model.lower():
+                method = 'mistral'
+            elif 'claude' in model.lower():
+                method = 'claude'
+            else:
+                method = model
+            logger.info(f"[CONSULTATIVE] Synthesis succeeded: {model}")
+            return result['response'], method
         
         # Final fallback - template-based
-        logger.warning("[SYNTHESIS] All LLMs failed, using template fallback")
-        answer = self._template_fallback(question, summaries, triangulation)
-        return answer, 'template'
-    
-    def _build_synthesis_prompt(
-        self,
-        question: str,
-        summaries: List[TruthSummary],
-        triangulation: TriangulationResult,
-        conflicts: List[Any]
-    ) -> str:
-        """Build the full synthesis prompt for the LLM."""
-        
-        # Format each truth section
-        reality_text = self._format_truth_for_prompt(summaries, 'reality')
-        intent_text = self._format_truth_for_prompt(summaries, 'intent')
-        config_text = self._format_truth_for_prompt(summaries, 'configuration')
-        reference_text = self._format_truth_for_prompt(summaries, 'reference')
-        regulatory_text = self._format_truth_for_prompt(summaries, 'regulatory')
-        
-        # Format conflicts
-        if conflicts:
-            conflict_lines = []
-            for c in conflicts[:5]:
-                if hasattr(c, 'description'):
-                    conflict_lines.append(f"- {c.description}")
-                else:
-                    conflict_lines.append(f"- {str(c)}")
-            conflicts_text = "\n".join(conflict_lines)
-        elif triangulation.conflicts:
-            conflicts_text = "\n".join(f"- {c}" for c in triangulation.conflicts[:5])
-        else:
-            conflicts_text = "No conflicts detected between sources."
-        
-        # Add gap warnings
-        if triangulation.gaps:
-            conflicts_text += "\n\nINFORMATION GAPS:\n"
-            conflicts_text += "\n".join(f"- {g}" for g in triangulation.gaps[:3])
-        
-        return SYNTHESIS_PROMPT.format(
-            question=question,
-            reality=reality_text,
-            intent=intent_text,
-            configuration=config_text,
-            reference=reference_text,
-            regulatory=regulatory_text,
-            conflicts=conflicts_text
-        )
-    
-    def _format_truth_for_prompt(self, summaries: List[TruthSummary], source_type: str) -> str:
-        """Format a specific truth type for the prompt."""
-        matching = [s for s in summaries if s.source_type == source_type]
-        
-        if not matching or not matching[0].has_data:
-            return f"No {source_type} information available."
-        
-        summary = matching[0]
-        lines = [summary.summary]
-        
-        for fact in summary.key_facts[:5]:
-            lines.append(f"  • {fact}")
-        
-        if summary.sources:
-            lines.append(f"  Sources: {', '.join(summary.sources[:3])}")
-        
-        return "\n".join(lines)
-    
-    def _call_mistral(self, prompt: str) -> str:
-        """Call Mistral via Ollama."""
-        url = f"{self.ollama_host}/api/generate"
-        
-        payload = {
-            "model": "mistral",
-            "prompt": prompt,
-            "stream": False,
-            "options": {
-                "temperature": 0.3,  # Lower for more consistent output
-                "num_predict": 1000,  # Limit response length
-            }
-        }
-        
-        response = requests.post(url, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result.get('response', '').strip()
-    
-    def _call_claude(self, prompt: str) -> str:
-        """Call Claude API as fallback."""
-        url = "https://api.anthropic.com/v1/messages"
-        
-        headers = {
-            "x-api-key": self.claude_api_key,
-            "content-type": "application/json",
-            "anthropic-version": "2023-06-01"
-        }
-        
-        payload = {
-            "model": "claude-3-haiku-20240307",  # Use Haiku for cost efficiency
-            "max_tokens": 1000,
-            "messages": [
-                {"role": "user", "content": prompt}
-            ]
-        }
-        
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()
-        
-        result = response.json()
-        return result.get('content', [{}])[0].get('text', '').strip()
+        logger.warning(f"[CONSULTATIVE] LLM synthesis failed: {result.get('error')}, using template")
+        return self._template_fallback(question, summaries, triangulation), 'template'
     
     def _template_fallback(
         self,
