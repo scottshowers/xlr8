@@ -34,15 +34,19 @@ try:
 except ImportError:
     PANDAS_AVAILABLE = False
 
-# Try to import gmft for ML-based table detection (handles borderless tables)
+# PDF table extraction via Claude Vision (replaces gmft)
 try:
-    from gmft.auto import AutoTableDetector, AutoTableFormatter
-    from gmft.pdf_bindings import PyPDFium2Document
-    GMFT_AVAILABLE = True
-    logger.info("[SMART-PDF] gmft available - ML table detection enabled")
+    from utils.pdf_vision_analyzer import extract_all_tables_with_vision
+    VISION_AVAILABLE = True
+    logger.info("[SMART-PDF] Vision analyzer available - Claude Vision enabled")
 except ImportError:
-    GMFT_AVAILABLE = False
-    logger.warning("[SMART-PDF] gmft not available - using pdfplumber fallback")
+    try:
+        from backend.utils.pdf_vision_analyzer import extract_all_tables_with_vision
+        VISION_AVAILABLE = True
+        logger.info("[SMART-PDF] Vision analyzer available (backend path)")
+    except ImportError:
+        VISION_AVAILABLE = False
+        logger.warning("[SMART-PDF] Vision analyzer not available - PDF table extraction disabled")
 
 # =============================================================================
 # SHARED UTILITIES - Import from pdf_utils for consistency
@@ -636,274 +640,14 @@ JSON OUTPUT:"""
     
     logger.warning(f"[LLM] Total rows parsed: {len(all_rows)}")
     
-    # If LLM failed and we have file path, try ML-based extraction (gmft) then pdfplumber
+    # If LLM failed and we have file path, try pdfplumber as fallback
     if len(all_rows) == 0 and file_path:
-        # Try gmft first (ML-based, handles borderless tables)
-        if GMFT_AVAILABLE:
-            logger.warning("[LLM] LLM parsing failed, trying gmft ML table extraction...")
-            all_rows = extract_tables_with_gmft(file_path)
-        
-        # Fall back to pdfplumber if gmft failed or unavailable
-        if len(all_rows) == 0 and PDFPLUMBER_AVAILABLE:
-            logger.warning("[LLM] Trying pdfplumber table extraction...")
+        if PDFPLUMBER_AVAILABLE:
+            logger.warning("[LLM] LLM parsing failed, trying pdfplumber table extraction...")
             all_rows = parse_tabular_pdf_with_pdfplumber(file_path, columns)
     
     return all_rows
 
-
-def clean_column_name(col: str) -> str:
-    """
-    Clean a column name extracted from PDF.
-    Domain-agnostic - removes common extraction artifacts.
-    """
-    if not col or not isinstance(col, str):
-        return ''
-    
-    # Replace newlines with spaces
-    col = col.replace('\n', ' ').replace('\r', ' ')
-    
-    # Collapse multiple spaces
-    col = ' '.join(col.split())
-    
-    # Lowercase
-    col = col.lower().strip()
-    
-    # Replace spaces with underscores for SQL compatibility
-    col = col.replace(' ', '_')
-    
-    # Remove duplicate consecutive parts (common with repeated headers)
-    # e.g., "page_npage_n" -> "page"
-    parts = col.split('_')
-    cleaned_parts = []
-    for part in parts:
-        # Skip empty parts and 'n' artifacts from newlines
-        if not part or part == 'n':
-            continue
-        # Skip if same as previous (dedup)
-        if cleaned_parts and part == cleaned_parts[-1]:
-            continue
-        cleaned_parts.append(part)
-    col = '_'.join(cleaned_parts)
-    
-    # If still absurdly long (>50 chars), extract the meaningful end portion
-    if len(col) > 50:
-        parts = col.split('_')
-        # Keep last 4 parts which are usually the actual column name
-        if len(parts) > 4:
-            col = '_'.join(parts[-4:])
-    
-    return col
-
-
-def consolidate_table_columns(all_dataframes: List) -> List[Dict[str, str]]:
-    """
-    Consolidate columns across multiple DataFrames from different pages.
-    
-    When gmft extracts a multi-page PDF, each page becomes a separate table
-    with slightly different column names (due to page headers, line breaks).
-    This function normalizes them to a common structure.
-    
-    Strategy:
-    1. Clean all column names
-    2. Find columns that appear most frequently (canonical columns)
-    3. Map similar columns to canonical names
-    4. Combine all rows with normalized column names
-    """
-    if not all_dataframes:
-        return []
-    
-    # Step 1: Clean column names in all dataframes
-    cleaned_dfs = []
-    column_frequency = {}  # Track how often each cleaned column appears
-    
-    for df in all_dataframes:
-        # Clean column names
-        new_columns = []
-        for col in df.columns:
-            cleaned = clean_column_name(str(col) if col else '')
-            if not cleaned:
-                cleaned = f'col_{len(new_columns)}'
-            new_columns.append(cleaned)
-        
-        df_copy = df.copy()
-        df_copy.columns = new_columns
-        cleaned_dfs.append(df_copy)
-        
-        # Track frequency
-        for col in new_columns:
-            if col and not col.startswith('col_'):
-                column_frequency[col] = column_frequency.get(col, 0) + 1
-    
-    # Step 2: Find canonical columns (appear in multiple tables)
-    # Sort by frequency to prioritize common columns
-    canonical_cols = sorted(column_frequency.keys(), 
-                           key=lambda x: column_frequency[x], 
-                           reverse=True)
-    
-    # Step 3: Build similarity mapping for columns
-    # Map similar column names to the most frequent variant
-    column_mapping = {}
-    
-    for df in cleaned_dfs:
-        for col in df.columns:
-            if col in column_mapping:
-                continue
-            
-            # Check if this column is similar to a canonical one
-            best_match = None
-            best_score = 0
-            
-            for canonical in canonical_cols:
-                # Simple similarity: shared words
-                col_words = set(col.split('_'))
-                canon_words = set(canonical.split('_'))
-                
-                if not col_words or not canon_words:
-                    continue
-                
-                # Jaccard similarity
-                intersection = len(col_words & canon_words)
-                union = len(col_words | canon_words)
-                score = intersection / union if union > 0 else 0
-                
-                # High threshold to avoid false matches
-                if score > 0.6 and score > best_score:
-                    best_match = canonical
-                    best_score = score
-            
-            if best_match and best_match != col:
-                column_mapping[col] = best_match
-            else:
-                column_mapping[col] = col
-    
-    # Step 4: Combine all rows with normalized columns
-    all_rows = []
-    
-    for df in cleaned_dfs:
-        # Rename columns using mapping
-        renamed_cols = [column_mapping.get(c, c) for c in df.columns]
-        df_renamed = df.copy()
-        df_renamed.columns = renamed_cols
-        
-        # Convert to records
-        for record in df_renamed.to_dict('records'):
-            # Filter out empty records
-            has_data = any(
-                str(v).strip() 
-                for v in record.values() 
-                if v is not None
-            )
-            if has_data:
-                all_rows.append(record)
-    
-    # Log consolidation results
-    unique_cols_before = sum(len(df.columns) for df in all_dataframes)
-    unique_cols_after = len(set(column_mapping.values()))
-    logger.warning(f"[GMFT] Column consolidation: {unique_cols_before} raw -> {unique_cols_after} normalized columns")
-    
-    return all_rows
-
-
-def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
-    """
-    Extract tables from PDF using gmft (ML-based Table Transformer).
-    
-    gmft uses Microsoft's Table Transformer trained on 1M+ tables,
-    which handles borderless/implicit tables that pdfplumber misses.
-    
-    API (from gmft docs):
-      - detector.extract(page) → list[CroppedTable]
-      - formatter.extract(cropped_table) → FormattedTable (TATRFormattedTable)
-      - formatted_table.df() → pandas DataFrame
-    
-    Column consolidation: Multi-page PDFs often have repeated headers with
-    slight variations (page numbers, line breaks). We collect all DataFrames
-    first, then consolidate columns across pages for clean output.
-    """
-    if not GMFT_AVAILABLE:
-        logger.warning("[GMFT] gmft not available")
-        return []
-    
-    if not PANDAS_AVAILABLE:
-        logger.warning("[GMFT] pandas not available")
-        return []
-    
-    all_dataframes = []  # Collect DataFrames, consolidate at end
-    doc = None
-    
-    try:
-        # Initialize detector and formatter (lazy loads ML models on first use)
-        detector = AutoTableDetector()
-        formatter = AutoTableFormatter()
-        
-        # Open PDF with gmft's PyPDFium2 binding
-        doc = PyPDFium2Document(file_path)
-        num_pages = len(doc)
-        logger.warning(f"[GMFT] Processing {num_pages} pages with ML table detection...")
-        
-        tables_found = 0
-        
-        for page_num, page in enumerate(doc):
-            try:
-                # Step 1: Detect tables on this page using ML model
-                cropped_tables = detector.extract(page)
-                
-                if not cropped_tables:
-                    continue
-                
-                logger.warning(f"[GMFT] Page {page_num + 1}: detected {len(cropped_tables)} table(s)")
-                tables_found += len(cropped_tables)
-                
-                for table_idx, cropped_table in enumerate(cropped_tables):
-                    try:
-                        # Step 2: Format the cropped table
-                        formatted_table = formatter.extract(cropped_table)
-                        
-                        if formatted_table is None:
-                            continue
-                        
-                        # Step 3: Get pandas DataFrame
-                        df = formatted_table.df()
-                        
-                        if df is None or df.empty:
-                            continue
-                        
-                        # Remove completely empty rows
-                        df = df.dropna(how='all')
-                        
-                        if not df.empty:
-                            all_dataframes.append(df)
-                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: {len(df)} rows, {len(df.columns)} cols")
-                        
-                    except Exception as table_error:
-                        logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1} error: {table_error}")
-                        continue
-                        
-            except Exception as page_error:
-                logger.warning(f"[GMFT] Page {page_num + 1} error: {page_error}")
-                continue
-        
-        logger.warning(f"[GMFT] Detection complete: {tables_found} tables from {num_pages} pages")
-        
-    except Exception as e:
-        logger.error(f"[GMFT] PDF processing failed: {e}")
-        import traceback
-        logger.error(traceback.format_exc())
-    
-    finally:
-        if doc is not None:
-            try:
-                doc.close()
-            except Exception:
-                pass
-    
-    # Step 4: Consolidate columns across all extracted DataFrames
-    if all_dataframes:
-        all_rows = consolidate_table_columns(all_dataframes)
-        logger.warning(f"[GMFT] Final output: {len(all_rows)} rows")
-        return all_rows
-    
-    return []
 
 
 def parse_tabular_pdf_with_pdfplumber(file_path: str, columns: List[str]) -> List[Dict[str, str]]:
@@ -1215,13 +959,14 @@ def process_pdf_intelligently(
     status_callback=None
 ) -> Dict[str, Any]:
     """
-    Smart PDF processing with ML-based table detection.
+    Smart PDF processing with Claude Vision table extraction.
     
     Flow:
-    1. Extract text from PDF (for ChromaDB)
-    2. Try gmft ML table detection first (handles borderless tables)
-    3. If gmft fails, fall back to LLM analysis
-    4. Store tables to DuckDB, text to ChromaDB
+    1. Extract text from PDF (for ChromaDB semantic search)
+    2. Use Claude Vision to extract table data (structure + data)
+    3. Store tables to DuckDB, text to ChromaDB
+    
+    Vision handles everything - no gmft, no pdfplumber tables.
     """
     
     result = {
@@ -1239,13 +984,13 @@ def process_pdf_intelligently(
         logger.warning(f"[SMART-PDF] {msg}")
     
     try:
-        # Step 1: Extract text (for ChromaDB and fallback analysis)
+        # Step 1: Extract text (for ChromaDB semantic search)
         update_status("Extracting text from PDF...", 10)
         text = extract_pdf_text(file_path)
         
         if not text or len(text.strip()) < 50:
             result['error'] = "Could not extract text from PDF"
-            result['success'] = True  # Still allow ChromaDB with whatever we got
+            result['success'] = True
             result['chromadb_result'] = {'text_content': text or '', 'text_length': len(text or '')}
             result['storage_used'].append('chromadb')
             return result
@@ -1256,39 +1001,58 @@ def process_pdf_intelligently(
         rows = []
         analysis = {'is_tabular': False}
         
-        # Step 2: Try gmft ML-based table detection FIRST (handles borderless tables)
-        if GMFT_AVAILABLE:
-            update_status("Detecting tables with ML model...", 30)
-            rows = extract_tables_with_gmft(file_path)
+        # Step 2: Use Claude Vision to extract tables
+        if VISION_AVAILABLE:
+            update_status("Extracting tables with Vision AI...", 30)
             
-            if rows:
-                update_status(f"✓ ML detected {len(rows)} rows", 50)
-                analysis = {
-                    'is_tabular': True,
-                    'method': 'gmft',
-                    'columns': list(rows[0].keys()) if rows else []
-                }
+            try:
+                vision_result = extract_all_tables_with_vision(
+                    file_path=file_path,
+                    dpi=150,
+                    redact_pii=True,
+                    status_callback=lambda msg: update_status(msg)
+                )
+                
+                if vision_result.get('success') and vision_result.get('rows'):
+                    rows = vision_result['rows']
+                    columns = vision_result.get('columns', [])
+                    page_count = vision_result.get('page_count', 0)
+                    
+                    update_status(f"✓ Vision extracted {len(rows)} rows, {len(columns)} columns from {page_count} pages", 60)
+                    
+                    analysis = {
+                        'is_tabular': True,
+                        'method': 'vision',
+                        'columns': columns,
+                        'row_count': len(rows),
+                        'page_count': page_count
+                    }
+                elif vision_result.get('error'):
+                    logger.warning(f"[SMART-PDF] Vision extraction failed: {vision_result.get('error')}")
+                    update_status(f"Vision extraction issue: {vision_result.get('error')}", 40)
+                else:
+                    update_status("No tables detected by Vision", 40)
+                    
+            except Exception as vision_error:
+                logger.error(f"[SMART-PDF] Vision error: {vision_error}")
+                update_status(f"Vision error: {vision_error}", 40)
         
-        # Step 3: If gmft didn't find tables, fall back to LLM analysis
+        # Step 3: Fallback to LLM text analysis if Vision unavailable or found nothing
         if not rows:
-            update_status("Analyzing PDF structure with AI...", 40)
+            update_status("Analyzing PDF structure with text AI...", 50)
             analysis = analyze_pdf_with_llm(text)
-            result['analysis'] = analysis
             
             if analysis.get('is_tabular') and analysis.get('columns'):
                 columns = analysis['columns']
-                update_status(f"Detected tabular data with {len(columns)} columns, parsing...", 50)
-                
-                # Parse with LLM (falls back to gmft/pdfplumber if LLM unavailable)
+                update_status(f"Detected tabular structure with {len(columns)} columns, parsing...", 55)
                 rows = parse_tabular_pdf_with_llm(text, columns, file_path=file_path)
         
         result['analysis'] = analysis
         
         # Step 4: Store to DuckDB if we have rows
         if rows:
-            update_status(f"Parsed {len(rows)} rows, storing to DuckDB...", 70)
+            update_status(f"Storing {len(rows)} rows to DuckDB...", 70)
             
-            # Store to DuckDB
             duckdb_result = store_to_duckdb(rows, project, filename, project_id)
             result['duckdb_result'] = duckdb_result
             
@@ -1298,7 +1062,7 @@ def process_pdf_intelligently(
             else:
                 update_status(f"⚠ DuckDB storage failed: {duckdb_result.get('error')}", 85)
         else:
-            update_status("PDF classified as narrative text (not tabular)", 50)
+            update_status("PDF classified as narrative text (no tables detected)", 60)
         
         # ChromaDB decision: Skip for large tabular PDFs that went to DuckDB
         text_length = len(text) if text else 0
