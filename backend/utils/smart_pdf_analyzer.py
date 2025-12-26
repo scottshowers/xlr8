@@ -658,76 +658,125 @@ def extract_tables_with_gmft(file_path: str) -> List[Dict[str, str]]:
     gmft uses Microsoft's Table Transformer trained on 1M+ tables,
     which handles borderless/implicit tables that pdfplumber misses.
     
+    API (from gmft docs):
+      - detector.extract(page) → list[CroppedTable]
+      - formatter.extract(cropped_table) → FormattedTable (TATRFormattedTable)
+      - formatted_table.df() → pandas DataFrame
+    
     This is domain-agnostic - no hardcoding of report formats.
     """
     if not GMFT_AVAILABLE:
         logger.warning("[GMFT] gmft not available")
         return []
     
+    if not PANDAS_AVAILABLE:
+        logger.warning("[GMFT] pandas not available")
+        return []
+    
     all_rows = []
+    doc = None
     
     try:
-        # Initialize detector and formatter (lazy load models)
+        # Initialize detector and formatter (lazy loads ML models on first use)
         detector = AutoTableDetector()
         formatter = AutoTableFormatter()
         
-        # Open PDF with gmft's binding
+        # Open PDF with gmft's PyPDFium2 binding
         doc = PyPDFium2Document(file_path)
-        logger.warning(f"[GMFT] Processing {len(doc)} pages with ML table detection...")
+        num_pages = len(doc)
+        logger.warning(f"[GMFT] Processing {num_pages} pages with ML table detection...")
         
         tables_found = 0
+        rows_extracted = 0
+        
         for page_num, page in enumerate(doc):
             try:
-                # Detect tables on this page using ML model
-                tables = detector.extract(page)
+                # Step 1: Detect tables on this page using ML model
+                # Returns list of CroppedTable objects
+                cropped_tables = detector.extract(page)
                 
-                if not tables:
+                if not cropped_tables:
                     continue
                 
-                logger.warning(f"[GMFT] Page {page_num + 1}: found {len(tables)} tables")
-                tables_found += len(tables)
+                logger.warning(f"[GMFT] Page {page_num + 1}: detected {len(cropped_tables)} table(s)")
+                tables_found += len(cropped_tables)
                 
-                for table in tables:
+                for table_idx, cropped_table in enumerate(cropped_tables):
                     try:
-                        # Convert table to pandas DataFrame
-                        df = formatter.extract(table)
+                        # Step 2: Format the cropped table
+                        # Returns TATRFormattedTable object
+                        formatted_table = formatter.extract(cropped_table)
                         
-                        if df is None or df.empty:
+                        if formatted_table is None:
+                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: formatter returned None")
                             continue
                         
-                        # Convert DataFrame to list of dicts
-                        # Clean up column names
-                        df.columns = [str(c).strip() if c else f'col_{i}' 
-                                     for i, c in enumerate(df.columns)]
+                        # Step 3: Get pandas DataFrame from formatted table
+                        # The .df() method returns the actual pandas DataFrame
+                        df = formatted_table.df()
                         
-                        # Remove empty rows
+                        if df is None:
+                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: df() returned None")
+                            continue
+                        
+                        if df.empty:
+                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: DataFrame is empty")
+                            continue
+                        
+                        # Step 4: Clean up the DataFrame
+                        # Normalize column names
+                        cleaned_columns = []
+                        for i, col in enumerate(df.columns):
+                            col_str = str(col).strip() if col is not None else ''
+                            if not col_str:
+                                col_str = f'column_{i}'
+                            cleaned_columns.append(col_str)
+                        df.columns = cleaned_columns
+                        
+                        # Remove rows that are completely empty
                         df = df.dropna(how='all')
                         
-                        # Convert to records
+                        # Step 5: Convert to list of dicts
                         records = df.to_dict('records')
                         
-                        # Filter out rows that are all empty strings
+                        # Filter out records where all values are empty/whitespace
+                        valid_records = []
                         for record in records:
-                            if any(str(v).strip() for v in record.values()):
-                                all_rows.append(record)
+                            has_data = any(
+                                str(v).strip() 
+                                for v in record.values() 
+                                if v is not None
+                            )
+                            if has_data:
+                                valid_records.append(record)
                         
-                        logger.warning(f"[GMFT] Extracted {len(records)} rows from table")
+                        if valid_records:
+                            all_rows.extend(valid_records)
+                            rows_extracted += len(valid_records)
+                            logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1}: extracted {len(valid_records)} rows")
                         
-                    except Exception as table_e:
-                        logger.warning(f"[GMFT] Table extraction error: {table_e}")
+                    except Exception as table_error:
+                        logger.warning(f"[GMFT] Page {page_num + 1}, table {table_idx + 1} error: {table_error}")
                         continue
                         
-            except Exception as page_e:
-                logger.warning(f"[GMFT] Page {page_num + 1} error: {page_e}")
+            except Exception as page_error:
+                logger.warning(f"[GMFT] Page {page_num + 1} error: {page_error}")
                 continue
         
-        doc.close()
-        logger.warning(f"[GMFT] Total: {tables_found} tables, {len(all_rows)} rows extracted")
+        logger.warning(f"[GMFT] Complete: {tables_found} tables detected, {rows_extracted} total rows extracted")
         
     except Exception as e:
-        logger.error(f"[GMFT] Table extraction failed: {e}")
+        logger.error(f"[GMFT] PDF processing failed: {e}")
         import traceback
         logger.error(traceback.format_exc())
+    
+    finally:
+        # Always close the document to free resources
+        if doc is not None:
+            try:
+                doc.close()
+            except Exception:
+                pass
     
     return all_rows
 
