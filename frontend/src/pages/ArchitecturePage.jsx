@@ -2,9 +2,10 @@ import React, { useState, useRef, useEffect } from 'react';
 
 /**
  * XLR8 Platform Architecture - Level 5 DFD
- * Version: 2.1 | Updated: December 26, 2025
+ * Version: 2.2 | Updated: December 26, 2025
  * 
  * CHANGELOG:
+ * - v2.2: Added Consultative Synthesis Layer (4.X) and Flow 5
  * - v2.1: Added layman-friendly explanations throughout
  * - v2.0: Five Truths, Learning Module, Project Intelligence, PDF Vision
  * - v1.0: Initial Level 5 DFD
@@ -40,6 +41,8 @@ const ArchitecturePage = () => {
     wip: '#9aa5b5', wipLight: 'rgba(154,165,181,0.15)',
     purple: '#8b7aa0', purpleLight: 'rgba(139,122,160,0.12)',
     explain: '#f0f4f8', explainBorder: '#c5d1de',
+    // New color for synthesis
+    synth: '#5d8aa8', synthLight: 'rgba(93,138,168,0.12)',
   };
 
   const W = 4200;
@@ -50,7 +53,7 @@ const ArchitecturePage = () => {
       <div style={{ background: c.card, borderBottom: `1px solid ${c.border}`, padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 700, color: c.text, margin: 0 }}>Platform Architecture</h1>
-          <p style={{ fontSize: 14, color: c.muted, margin: '4px 0 0' }}>Level 5 DFD • Function-Level Detail • v2.1 Dec 2025</p>
+          <p style={{ fontSize: 14, color: c.muted, margin: '4px 0 0' }}>Level 5 DFD • Function-Level Detail • v2.2 Dec 2025</p>
         </div>
         <div style={{ display: 'flex', gap: 12 }}>
           {['+ Zoom', '- Zoom', 'Reset'].map((label, i) => (
@@ -63,7 +66,7 @@ const ArchitecturePage = () => {
 
       <div style={{ position: 'absolute', bottom: 24, left: 24, background: c.card, borderRadius: 12, padding: 16, zIndex: 10, border: `1px solid ${c.border}`, boxShadow: '0 4px 12px rgba(0,0,0,0.08)' }}>
         <h4 style={{ fontWeight: 600, color: c.text, marginBottom: 12, fontSize: 13 }}>Legend</h4>
-        {[[c.dustyBlue,'API'],[c.primary,'Router'],[c.sage,'Processor'],[c.taupe,'Intelligence'],[c.purple,'Learning'],[c.slate,'Storage'],[c.warning,'External'],[c.error,'PII/Security']].map(([col,lbl],i)=>(
+        {[[c.dustyBlue,'API'],[c.primary,'Router'],[c.sage,'Processor'],[c.taupe,'Intelligence'],[c.synth,'Synthesis'],[c.purple,'Learning'],[c.slate,'Storage'],[c.warning,'External'],[c.error,'PII/Security']].map(([col,lbl],i)=>(
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6, fontSize: 11 }}>
             <div style={{ width: 14, height: 14, borderRadius: 3, background: col }}/><span style={{ color: c.muted }}>{lbl}</span>
           </div>
@@ -78,9 +81,9 @@ const ArchitecturePage = () => {
 
       <div ref={containerRef} style={{ flex: 1, overflow: 'hidden', cursor: isDragging ? 'grabbing' : 'grab' }}
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}>
-        <svg viewBox="0 0 4200 4400" style={{ transform: `translate(${translate.x}px,${translate.y}px) scale(${scale})`, transformOrigin: '0 0', width: 4200, height: 4400 }}>
+        <svg viewBox="0 0 4200 4000" style={{ transform: `translate(${translate.x}px,${translate.y}px) scale(${scale})`, transformOrigin: '0 0', width: 4200, height: 4000 }}>
           <defs><pattern id="grid" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0L0 0 0 50" fill="none" stroke={c.border} strokeWidth="0.5"/></pattern></defs>
-          <rect width="4200" height="4400" fill={c.bg}/><rect width="4200" height="4400" fill="url(#grid)"/>
+          <rect width="4200" height="4000" fill={c.bg}/><rect width="4200" height="4000" fill="url(#grid)"/>
 
           {/* ========== TIER 1: API (y=50) ========== */}
           {/* Explanation box */}
@@ -207,15 +210,15 @@ const ArchitecturePage = () => {
           <text x={PAD+20} y={1405} fill={c.text} fontSize="13" fontWeight="bold">🧠 TIER 4: The Brain — Where Questions Get Answered</text>
           <text x={PAD+20} y={1425} fill={c.muted} fontSize="11">This is the AI brain of XLR8. When you ask "show me SUI rates", the Intelligence Engine searches FIVE different sources of truth:</text>
           <text x={PAD+20} y={1443} fill={c.muted} fontSize="11">Reality (actual data), Intent (what customer wanted), Configuration (how it's set up), Reference (best practices), and Regulatory (legal requirements).</text>
-          <text x={PAD+20} y={1461} fill={c.muted} fontSize="11">The Learning Module remembers what worked before, so similar questions get answered faster. Project Intelligence automatically detects patterns after each upload.</text>
+          <text x={PAD+20} y={1461} fill={c.muted} fontSize="11">The Consultative Synthesizer then triangulates these truths, finds conflicts, and generates world-class answers — not just data dumps.</text>
 
           <text x={W/2} y={1510} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">TIER 4: INTELLIGENCE LAYER</text>
 
           {/* Intelligence Engine - Five Truths */}
           <rect x={PAD} y={1540} width={2500} height={520} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
           <rect x={PAD} y={1540} width={2500} height={42} rx="12" fill={c.taupe}/>
-          <text x={PAD+1250} y={1568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="18">4.1 INTELLIGENCE ENGINE v5.19.0 — "Five Truths"</text>
-          <text x={PAD+20} y={1602} fill={c.muted} fontSize="10" fontFamily="monospace">intelligence_engine.py (5,831 lines) — The core AI orchestrator that answers all your questions</text>
+          <text x={PAD+1250} y={1568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="18">4.1 INTELLIGENCE ENGINE v5.20.0 — "Five Truths"</text>
+          <text x={PAD+20} y={1602} fill={c.muted} fontSize="10" fontFamily="monospace">intelligence_engine.py (5,937 lines) — The core AI orchestrator that answers all your questions</text>
 
           {/* Five Truths boxes - Row 1 */}
           <rect x={PAD+20} y={1620} width={480} height={140} rx="10" fill={c.slateLight} stroke={c.slate} strokeWidth="2"/>
@@ -286,220 +289,218 @@ const ArchitecturePage = () => {
             </g>
           ))}
 
-          {/* Project Intelligence + Learning */}
-          <rect x={2650} y={1540} width={1450} height={250} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
-          <rect x={2650} y={1540} width={1450} height={42} rx="12" fill={c.purple}/>
-          <text x={3375} y={1568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">4.2 PROJECT INTELLIGENCE — Auto-Discovery</text>
-          <text x={2670} y={1602} fill={c.muted} fontSize="10" fontFamily="monospace">project_intelligence.py (2,197 lines) — Runs automatically after every upload</text>
+          {/* ========== NEW: CONSULTATIVE SYNTHESIS (4.X) ========== */}
+          <rect x={2650} y={1540} width={1450} height={250} rx="12" fill={c.synthLight} stroke={c.synth} strokeWidth="2"/>
+          <rect x={2650} y={1540} width={1450} height={42} rx="12" fill={c.synth}/>
+          <text x={3375} y={1568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">4.X CONSULTATIVE SYNTHESIS ★ NEW</text>
+          <text x={2670} y={1602} fill={c.muted} fontSize="10" fontFamily="monospace">consultative_synthesis.py (650 lines) — The "Consultant Brain"</text>
+
+          {[['synthesize()','Main entry',['• Orchestrates all steps','• Returns ConsultativeAnswer']],['_triangulate()','Compare truths',['• Find alignments','• Find conflicts','• Identify gaps']],['_synthesize_with_llm()','LLM synthesis',['• Mistral (local) first','• Claude fallback','• Template fallback']],['_calculate_confidence()','Confidence',['• Source coverage','• Conflict penalty','• Gap penalty']]].map(([nm,desc,items],i)=>(
+            <g key={i}>
+              <rect x={2670+i*355} y={1620} width={340} height={95} rx="6" fill={c.card} stroke={c.synth}/>
+              <text x={2670+i*355+170} y={1643} textAnchor="middle" fill={c.synth} fontWeight="bold" fontSize="10">{nm}</text>
+              <text x={2670+i*355+170} y={1661} textAnchor="middle" fill={c.muted} fontSize="9">{desc}</text>
+              {items.map((it,ii)=><text key={ii} x={2685+i*355} y={1680+ii*14} fill={c.muted} fontSize="8">{it}</text>)}
+            </g>
+          ))}
+
+          <rect x={2670} y={1730} width={1410} height={45} rx="6" fill={c.card} stroke={c.synth}/>
+          <text x={3375} y={1750} textAnchor="middle" fill={c.synth} fontWeight="bold" fontSize="10">This is what separates XLR8 from "fancy BI tool" — consultative answers, not data dumps</text>
+          <text x={3375} y={1768} textAnchor="middle" fill={c.muted} fontSize="9">Triangulates → Finds conflicts → Provides "so-what" context → Signals confidence → Recommends actions</text>
+
+          {/* Project Intelligence + Learning - y=2150 to clear Intelligence Engine (ends 2060) */}
+          <rect x={PAD} y={2150} width={2000} height={170} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
+          <rect x={PAD} y={2150} width={2000} height={40} rx="12" fill={c.purple}/>
+          <text x={PAD+1000} y={2176} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="14">4.2 PROJECT INTELLIGENCE — Auto-Discovery</text>
+          <text x={PAD+20} y={2208} fill={c.muted} fontSize="10" fontFamily="monospace">project_intelligence.py (2,197 lines)</text>
 
           {[['analyze()','Tiered analysis'],['_detect_profile_based_lookups()','Uses top_values_json'],['_detect_relationships()','FK detection'],['_find_code_desc_pair()','Code→Description']].map(([nm,desc],i)=>(
             <g key={i}>
-              <rect x={2670+i*355} y={1620} width={340} height={55} rx="6" fill={c.card} stroke={c.purple}/>
-              <text x={2670+i*355+170} y={1643} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{nm}</text>
-              <text x={2670+i*355+170} y={1661} textAnchor="middle" fill={c.muted} fontSize="9">{desc}</text>
+              <rect x={PAD+20+i*490} y={2225} width={470} height={40} rx="6" fill={c.card} stroke={c.purple}/>
+              <text x={PAD+20+i*490+235} y={2250} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{nm}</text>
             </g>
           ))}
 
-          <rect x={2670} y={1690} width={1410} height={75} rx="6" fill={c.card} stroke={c.purple}/>
-          <text x={3375} y={1715} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">Output: _intelligence_lookups • _intelligence_relationships • FK mappings</text>
-          <text x={3375} y={1735} textAnchor="middle" fill={c.muted} fontSize="9">Automatically discovers: "status_code" maps to "status_description", Table A joins to Table B on employee_id</text>
+          <rect x={PAD+20} y={2275} width={1960} height={30} rx="6" fill={c.card} stroke={c.purple}/>
+          <text x={PAD+1000} y={2295} textAnchor="middle" fill={c.muted} fontSize="9">Output: _intelligence_lookups • _intelligence_relationships • FK mappings</text>
 
           {/* Learning Module */}
-          <rect x={2650} y={1810} width={1450} height={230} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
-          <rect x={2650} y={1810} width={1450} height={42} rx="12" fill={c.purple}/>
-          <text x={3375} y={1838} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">4.3 LEARNING MODULE — Gets Smarter Over Time</text>
-          <text x={2670} y={1872} fill={c.muted} fontSize="10" fontFamily="monospace">learning.py (596 lines) + learning_engine.py (800+ lines)</text>
+          <rect x={2050} y={2150} width={2050} height={170} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
+          <rect x={2050} y={2150} width={2050} height={40} rx="12" fill={c.purple}/>
+          <text x={3075} y={2176} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="14">4.3 LEARNING MODULE — Gets Smarter Over Time</text>
+          <text x={2070} y={2208} fill={c.muted} fontSize="10" fontFamily="monospace">learning.py (596 lines)</text>
 
-          {[['find_similar_query()','Pattern reuse'],['learn_query()','Store patterns'],['record_feedback()','Playbook feedback'],['get_cached_analysis()','Claude cache']].map(([nm,desc],i)=>(
+          {[['find_similar_query()','Pattern reuse'],['learn_query()','Store patterns'],['record_feedback()','Feedback'],['get_cached_analysis()','Cache']].map(([nm,desc],i)=>(
             <g key={i}>
-              <rect x={2670+i*355} y={1890} width={340} height={55} rx="6" fill={c.card} stroke={c.purple}/>
-              <text x={2670+i*355+170} y={1913} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{nm}</text>
-              <text x={2670+i*355+170} y={1931} textAnchor="middle" fill={c.muted} fontSize="9">{desc}</text>
+              <rect x={2070+i*500} y={2225} width={480} height={40} rx="6" fill={c.card} stroke={c.purple}/>
+              <text x={2070+i*500+240} y={2250} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{nm}</text>
             </g>
           ))}
 
-          <rect x={2670} y={1960} width={1410} height={55} rx="6" fill={c.card} stroke={c.purple}/>
-          <text x={3375} y={1983} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">Self-improving: Every query teaches the system • Pattern memory • Feedback loops</text>
-          <text x={3375} y={2001} textAnchor="middle" fill={c.muted} fontSize="9">Asked about "departments" before? Next time we skip the clarification question — we already know you mean org_level_2</text>
+          <rect x={2070} y={2275} width={2010} height={30} rx="6" fill={c.card} stroke={c.purple}/>
+          <text x={3075} y={2295} textAnchor="middle" fill={c.muted} fontSize="9">Self-improving: Pattern memory • Feedback loops • Skip learned clarifications</text>
 
-          {/* Chat, BI, Playbooks row */}
-          <rect x={PAD} y={2060} width={1050} height={100} rx="12" fill={c.dustyBlueLight} stroke={c.dustyBlue} strokeWidth="2"/>
-          <rect x={PAD} y={2060} width={1050} height={35} rx="12" fill={c.dustyBlue}/>
-          <text x={PAD+525} y={2083} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="13">4.4 CHAT — Natural Language Interface</text>
-          {['send_message()','_route_query()','_inject_filters()'].map((fn,i)=>(
-            <g key={i}><rect x={PAD+20+i*340} y={2108} width={320} height={35} rx="6" fill={c.card} stroke={c.dustyBlue}/>
-            <text x={PAD+20+i*340+160} y={2130} textAnchor="middle" fill={c.dustyBlue} fontWeight="bold" fontSize="10">{fn}</text></g>
-          ))}
-
-          <rect x={1200} y={2060} width={1050} height={100} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
-          <rect x={1200} y={2060} width={1050} height={35} rx="12" fill={c.taupe}/>
-          <text x={1725} y={2083} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="13">4.5 BI BUILDER — Visual Query Builder</text>
-          {['create_query()','execute_query()','export_results()'].map((fn,i)=>(
-            <g key={i}><rect x={1220+i*340} y={2108} width={320} height={35} rx="6" fill={c.card} stroke={c.taupe}/>
-            <text x={1220+i*340+160} y={2130} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="10">{fn}</text></g>
-          ))}
-
-          <rect x={2300} y={2060} width={800} height={100} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
-          <rect x={2300} y={2060} width={800} height={35} rx="12" fill={c.taupe}/>
-          <text x={2700} y={2083} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="13">4.6 GAP DETECTION — Find What's Wrong</text>
-          {['detect_gaps()','compare_configs()'].map((fn,i)=>(
-            <g key={i}><rect x={2320+i*390} y={2108} width={370} height={35} rx="6" fill={c.card} stroke={c.taupe}/>
-            <text x={2320+i*390+185} y={2130} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="10">{fn}</text></g>
-          ))}
-
-          <rect x={3150} y={2060} width={950} height={100} rx="12" fill={c.primaryLight} stroke={c.primary} strokeWidth="2"/>
-          <rect x={3150} y={2060} width={950} height={35} rx="12" fill={c.primary}/>
-          <text x={3625} y={2083} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="13">4.7 PLAYBOOKS — Guided Workflows</text>
-          {['execute()','get_applicable()'].map((fn,i)=>(
-            <g key={i}><rect x={3170+i*465} y={2108} width={445} height={35} rx="6" fill={c.card} stroke={c.primary}/>
-            <text x={3170+i*465+222} y={2130} textAnchor="middle" fill={c.primary} fontWeight="bold" fontSize="10">{fn}</text></g>
-          ))}
-
-          {/* ========== TIER 5: STORAGE (y=2220) ========== */}
+          {/* ========== TIER 5: STORAGE (y=2400) ========== */}
           {/* Explanation box */}
-          <rect x={PAD} y={2220} width={W-2*PAD} height={65} rx="8" fill={c.explain} stroke={c.explainBorder} strokeWidth="1"/>
-          <text x={PAD+20} y={2245} fill={c.text} fontSize="13" fontWeight="bold">💾 TIER 5: Where Everything Lives — Three Specialized Databases</text>
-          <text x={PAD+20} y={2265} fill={c.muted} fontSize="11">DuckDB stores spreadsheet data you can query. ChromaDB stores document text for AI search. Supabase tracks what files exist and who uploaded them. Each excels at its job.</text>
+          <rect x={PAD} y={2400} width={W-2*PAD} height={65} rx="8" fill={c.explain} stroke={c.explainBorder} strokeWidth="1"/>
+          <text x={PAD+20} y={2425} fill={c.text} fontSize="13" fontWeight="bold">💾 TIER 5: Where Everything Lives — Three Specialized Databases</text>
+          <text x={PAD+20} y={2445} fill={c.muted} fontSize="11">DuckDB stores spreadsheet data you can query. ChromaDB stores document text for AI search. Supabase tracks what files exist and who uploaded them. Each excels at its job.</text>
 
-          <text x={W/2} y={2320} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">TIER 5: STORAGE LAYER</text>
+          <text x={W/2} y={2500} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">TIER 5: STORAGE LAYER</text>
 
           {/* DuckDB */}
-          <rect x={PAD} y={2360} width={1100} height={300} rx="12" fill={c.slateLight} stroke={c.slate} strokeWidth="2"/>
-          <rect x={PAD} y={2360} width={1100} height={42} rx="12" fill={c.slate}/>
-          <text x={PAD+550} y={2388} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D1: DuckDB (Reality) — Your Structured Data</text>
-          <text x={PAD+20} y={2422} fill={c.muted} fontSize="10" fontFamily="monospace">/data/project_{'{id}'}.duckdb — Fast SQL queries on your Excel/CSV data</text>
+          <rect x={PAD} y={2540} width={1100} height={300} rx="12" fill={c.slateLight} stroke={c.slate} strokeWidth="2"/>
+          <rect x={PAD} y={2540} width={1100} height={42} rx="12" fill={c.slate}/>
+          <text x={PAD+550} y={2568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D1: DuckDB (Reality) — Your Structured Data</text>
+          <text x={PAD+20} y={2602} fill={c.muted} fontSize="10" fontFamily="monospace">/data/project_{'{id}'}.duckdb — Fast SQL queries on your Excel/CSV data</text>
 
-          <rect x={PAD+20} y={2440} width={520} height={200} rx="6" fill={c.card} stroke={c.slate}/>
-          <text x={PAD+280} y={2465} textAnchor="middle" fill={c.slate} fontWeight="bold" fontSize="11">System Tables (★ = Critical)</text>
+          <rect x={PAD+20} y={2620} width={520} height={200} rx="6" fill={c.card} stroke={c.slate}/>
+          <text x={PAD+280} y={2645} textAnchor="middle" fill={c.slate} fontWeight="bold" fontSize="11">System Tables (★ = Critical)</text>
           {[
             '• _schema_metadata — What tables exist',
             '★ _column_profiles — Values in each column',
             '• _intelligence_lookups — Code translations',
             '• _intelligence_relationships — Table links',
             '• {project}_{filename} — Your actual data',
-          ].map((t,i)=><text key={i} x={PAD+35} y={2490+i*22} fill={i===1 ? c.primary : c.muted} fontSize="10" fontWeight={i===1 ? 'bold' : 'normal'}>{t}</text>)}
-          <text x={PAD+35} y={2610} fill={c.light} fontSize="9">★ _column_profiles.top_values_json is HOW we find the right table</text>
+          ].map((t,i)=><text key={i} x={PAD+35} y={2670+i*22} fill={i===1 ? c.primary : c.muted} fontSize="10" fontWeight={i===1 ? 'bold' : 'normal'}>{t}</text>)}
+          <text x={PAD+35} y={2790} fill={c.light} fontSize="9">★ _column_profiles.top_values_json is HOW we find the right table</text>
 
-          <rect x={PAD+560} y={2440} width={520} height={200} rx="6" fill={c.card} stroke={c.slate}/>
-          <text x={PAD+820} y={2465} textAnchor="middle" fill={c.slate} fontWeight="bold" fontSize="11">Access Pattern</text>
-          {['• threading.Lock for safety','• safe_fetchall() with commit','• Per-project isolation','• AES-GCM field encryption','• DUCKDB_ENCRYPTION_KEY env'].map((t,i)=><text key={i} x={PAD+575} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <rect x={PAD+560} y={2620} width={520} height={200} rx="6" fill={c.card} stroke={c.slate}/>
+          <text x={PAD+820} y={2645} textAnchor="middle" fill={c.slate} fontWeight="bold" fontSize="11">Access Pattern</text>
+          {['• threading.Lock for safety','• safe_fetchall() with commit','• Per-project isolation','• AES-GCM field encryption','• DUCKDB_ENCRYPTION_KEY env'].map((t,i)=><text key={i} x={PAD+575} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
 
           {/* ChromaDB */}
-          <rect x={1250} y={2360} width={1100} height={300} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
-          <rect x={1250} y={2360} width={1100} height={42} rx="12" fill={c.taupe}/>
-          <text x={1800} y={2388} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D2: ChromaDB — AI-Searchable Documents</text>
-          <text x={1270} y={2422} fill={c.muted} fontSize="10" fontFamily="monospace">/chromadb — Semantic search: "Find docs about tax compliance" actually works</text>
+          <rect x={1250} y={2540} width={1100} height={300} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
+          <rect x={1250} y={2540} width={1100} height={42} rx="12" fill={c.taupe}/>
+          <text x={1800} y={2568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D2: ChromaDB — AI-Searchable Documents</text>
+          <text x={1270} y={2602} fill={c.muted} fontSize="10" fontFamily="monospace">/chromadb — Semantic search: "Find docs about tax compliance" actually works</text>
 
-          <rect x={1270} y={2440} width={520} height={200} rx="6" fill={c.card} stroke={c.taupe}/>
-          <text x={1530} y={2465} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="11">Collections by Truth Type</text>
-          {['• project_{id}_documents','  └ truth_type: intent | config','• __STANDARDS__','  └ truth_type: reference | regulatory','• 768-dim vectors for similarity'].map((t,i)=><text key={i} x={1285} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <rect x={1270} y={2620} width={520} height={200} rx="6" fill={c.card} stroke={c.taupe}/>
+          <text x={1530} y={2645} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="11">Collections by Truth Type</text>
+          {['• project_{id}_documents','  └ truth_type: intent | config','• __STANDARDS__','  └ truth_type: reference | regulatory','• 768-dim vectors for similarity'].map((t,i)=><text key={i} x={1285} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
 
-          <rect x={1810} y={2440} width={520} height={200} rx="6" fill={c.card} stroke={c.taupe}/>
-          <text x={2070} y={2465} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="11">Operations</text>
-          {['• add() — Store doc chunks','• query() — Find similar text','• Filter by project/type','• nomic-embed-text (local)'].map((t,i)=><text key={i} x={1825} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <rect x={1810} y={2620} width={520} height={200} rx="6" fill={c.card} stroke={c.taupe}/>
+          <text x={2070} y={2645} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="11">Operations</text>
+          {['• add() — Store doc chunks','• query() — Find similar text','• Filter by project/type','• nomic-embed-text (local)'].map((t,i)=><text key={i} x={1825} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
 
           {/* Supabase */}
-          <rect x={2400} y={2360} width={900} height={300} rx="12" fill={c.warningLight} stroke={c.warning} strokeWidth="2"/>
-          <rect x={2400} y={2360} width={900} height={42} rx="12" fill={c.warning}/>
-          <text x={2850} y={2388} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D3: Supabase — The Registry</text>
-          <text x={2420} y={2422} fill={c.muted} fontSize="10" fontFamily="monospace">PostgreSQL cloud — Tracks WHAT exists, not the data itself</text>
+          <rect x={2400} y={2540} width={900} height={300} rx="12" fill={c.warningLight} stroke={c.warning} strokeWidth="2"/>
+          <rect x={2400} y={2540} width={900} height={42} rx="12" fill={c.warning}/>
+          <text x={2850} y={2568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">D3: Supabase — The Registry</text>
+          <text x={2420} y={2602} fill={c.muted} fontSize="10" fontFamily="monospace">PostgreSQL cloud — Tracks WHAT exists, not the data itself</text>
 
-          <rect x={2420} y={2440} width={860} height={200} rx="6" fill={c.card} stroke={c.warning}/>
-          <text x={2850} y={2465} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Registry Tables</text>
-          {['• projects — Your projects','• documents — File metadata','• document_registry — Classifications','• lineage_edges — What came from what','• platform_metrics — Usage stats'].map((t,i)=><text key={i} x={2435} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
-          <text x={2435} y={2610} fill={c.light} fontSize="9">Note: Actual DATA lives in DuckDB/ChromaDB</text>
+          <rect x={2420} y={2620} width={860} height={200} rx="6" fill={c.card} stroke={c.warning}/>
+          <text x={2850} y={2645} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Registry Tables</text>
+          {['• projects — Your projects','• documents — File metadata','• document_registry — Classifications','• lineage_edges — What came from what','• platform_metrics — Usage stats'].map((t,i)=><text key={i} x={2435} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <text x={2435} y={2790} fill={c.light} fontSize="9">Note: Actual DATA lives in DuckDB/ChromaDB</text>
 
           {/* LLM Services */}
-          <rect x={3350} y={2360} width={750} height={300} rx="12" fill={c.warningLight} stroke={c.warning} strokeWidth="2"/>
-          <rect x={3350} y={2360} width={750} height={42} rx="12" fill={c.warning}/>
-          <text x={3725} y={2388} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">E1: LLM Services — AI Brains</text>
-          <text x={3370} y={2422} fill={c.muted} fontSize="10">Local First = Privacy + Speed + Cost savings</text>
+          <rect x={3350} y={2540} width={750} height={300} rx="12" fill={c.warningLight} stroke={c.warning} strokeWidth="2"/>
+          <rect x={3350} y={2540} width={750} height={42} rx="12" fill={c.warning}/>
+          <text x={3725} y={2568} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="16">E1: LLM Services — AI Brains</text>
+          <text x={3370} y={2602} fill={c.muted} fontSize="10">Local First = Privacy + Speed + Cost savings</text>
 
-          <rect x={3370} y={2440} width={350} height={200} rx="6" fill={c.card} stroke={c.warning}/>
-          <text x={3545} y={2465} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Local (Primary)</text>
-          {['• Ollama self-hosted','• DeepSeek = SQL expert','• Mistral = Synthesis','• nomic = Embeddings'].map((t,i)=><text key={i} x={3385} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
-          <text x={3385} y={2590} fill={c.light} fontSize="9">Your data never leaves</text>
+          <rect x={3370} y={2620} width={350} height={200} rx="6" fill={c.card} stroke={c.warning}/>
+          <text x={3545} y={2645} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Local (Primary)</text>
+          {['• Ollama self-hosted','• DeepSeek = SQL expert','• Mistral = Synthesis','• nomic = Embeddings'].map((t,i)=><text key={i} x={3385} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <text x={3385} y={2770} fill={c.light} fontSize="9">Your data never leaves</text>
 
-          <rect x={3740} y={2440} width={340} height={200} rx="6" fill={c.card} stroke={c.warning}/>
-          <text x={3910} y={2465} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Cloud (Fallback)</text>
-          {['• Claude API','• Groq (registers)','• Rate limiting','• Cost tracking'].map((t,i)=><text key={i} x={3755} y={2490+i*22} fill={c.muted} fontSize="10">{t}</text>)}
-          <text x={3755} y={2590} fill={c.light} fontSize="9">Only when local can't handle it</text>
+          <rect x={3740} y={2620} width={340} height={200} rx="6" fill={c.card} stroke={c.warning}/>
+          <text x={3910} y={2645} textAnchor="middle" fill={c.warning} fontWeight="bold" fontSize="11">Cloud (Fallback)</text>
+          {['• Claude API','• Groq (registers)','• Rate limiting','• Cost tracking'].map((t,i)=><text key={i} x={3755} y={2670+i*22} fill={c.muted} fontSize="10">{t}</text>)}
+          <text x={3755} y={2770} fill={c.light} fontSize="9">Only when local can't handle it</text>
 
-          {/* ========== CRITICAL DATA FLOWS (y=2720) ========== */}
+          {/* ========== CRITICAL DATA FLOWS (y=2900) ========== */}
           {/* Explanation box */}
-          <rect x={PAD} y={2720} width={W-2*PAD} height={65} rx="8" fill={c.explain} stroke={c.explainBorder} strokeWidth="1"/>
-          <text x={PAD+20} y={2745} fill={c.text} fontSize="13" fontWeight="bold">🔄 CRITICAL DATA FLOWS — How Everything Connects</text>
-          <text x={PAD+20} y={2765} fill={c.muted} fontSize="11">These four flows are the "magic" of XLR8. They're why you can ask natural questions and get accurate answers. If any flow breaks, the whole system suffers.</text>
+          <rect x={PAD} y={2900} width={W-2*PAD} height={65} rx="8" fill={c.explain} stroke={c.explainBorder} strokeWidth="1"/>
+          <text x={PAD+20} y={2925} fill={c.text} fontSize="13" fontWeight="bold">🔄 CRITICAL DATA FLOWS — How Everything Connects</text>
+          <text x={PAD+20} y={2945} fill={c.muted} fontSize="11">These five flows are the "magic" of XLR8. They're why you can ask natural questions and get accurate, consultative answers. If any flow breaks, the whole system suffers.</text>
 
-          <text x={W/2} y={2820} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">CRITICAL DATA FLOWS</text>
+          <text x={W/2} y={3000} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">CRITICAL DATA FLOWS</text>
 
           {/* Flow 1 */}
-          <rect x={PAD} y={2860} width={2000} height={160} rx="12" fill={c.primaryLight} stroke={c.primary} strokeWidth="2"/>
-          <rect x={PAD} y={2860} width={2000} height={30} rx="12" fill={c.primary}/>
-          <text x={PAD+1000} y={2880} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 1: Config Validation → Query Routing (★ MOST CRITICAL)</text>
+          <rect x={PAD} y={3040} width={2000} height={160} rx="12" fill={c.primaryLight} stroke={c.primary} strokeWidth="2"/>
+          <rect x={PAD} y={3040} width={2000} height={30} rx="12" fill={c.primary}/>
+          <text x={PAD+1000} y={3060} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 1: Config Validation → Query Routing (★ MOST CRITICAL)</text>
           
           {['Config upload','store_dataframe()','_profile_columns()','top_values_json','_select_tables()','VALUE +80'].map((step,i)=>(
             <g key={i}>
-              <rect x={PAD+20+i*325} y={2905} width={305} height={40} rx="6" fill={c.card} stroke={c.primary}/>
-              <text x={PAD+20+i*325+152} y={2930} textAnchor="middle" fill={c.primary} fontWeight="bold" fontSize="10">{step}</text>
-              {i < 5 && <text x={PAD+335+i*325} y={2925} fill={c.primary} fontSize="14">→</text>}
-            </g>
-          ))}
-          <text x={PAD+40} y={2970} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
-          <text x={PAD+40} y={2988} fill={c.muted} fontSize="9">When you upload a config file, we scan EVERY column and remember what values are in it. So when you ask "show me SUI rates",</text>
-          <text x={PAD+40} y={3004} fill={c.muted} fontSize="9">we know that "SUI" is a VALUE in the type_of_tax column — even though "SUI" isn't a column NAME. This is how we find the right table.</text>
-
-          {/* Flow 2 */}
-          <rect x={2100} y={2860} width={2000} height={160} rx="12" fill={c.sageLight} stroke={c.sage} strokeWidth="2"/>
-          <rect x={2100} y={2860} width={2000} height={30} rx="12" fill={c.sage}/>
-          <text x={3100} y={2880} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 2: PDF Vision Learning (Cost Optimization)</text>
-          
-          {['PDF upload','get_fingerprint()','Cache check','Vision 1-2','store_learned()','Next: $0'].map((step,i)=>(
-            <g key={i}>
-              <rect x={2120+i*325} y={2905} width={305} height={40} rx="6" fill={c.card} stroke={c.sage}/>
-              <text x={2120+i*325+152} y={2930} textAnchor="middle" fill={c.sage} fontWeight="bold" fontSize="10">{step}</text>
-              {i < 5 && <text x={2435+i*325} y={2925} fill={c.sage} fontSize="14">→</text>}
-            </g>
-          ))}
-          <text x={2120} y={2970} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
-          <text x={2120} y={2988} fill={c.muted} fontSize="9">First time we see a PDF type, Claude Vision reads pages 1-2 to understand the columns (~$0.04). We remember this by "fingerprint".</text>
-          <text x={2120} y={3004} fill={c.muted} fontSize="9">Next time a similar PDF comes in? We recognize it and reuse the learned columns. $0.00 Vision cost. Scales beautifully.</text>
-
-          {/* Flow 3 */}
-          <rect x={PAD} y={3040} width={2000} height={160} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
-          <rect x={PAD} y={3040} width={2000} height={30} rx="12" fill={c.purple}/>
-          <text x={PAD+1000} y={3060} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 3: Learning Loop (Self-Improvement)</text>
-          
-          {['User query','find_similar()','Cache hit?','learn_query()','record_feedback()','Next faster'].map((step,i)=>(
-            <g key={i}>
-              <rect x={PAD+20+i*325} y={3085} width={305} height={40} rx="6" fill={c.card} stroke={c.purple}/>
-              <text x={PAD+20+i*325+152} y={3110} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{step}</text>
-              {i < 5 && <text x={PAD+335+i*325} y={3105} fill={c.purple} fontSize="14">→</text>}
+              <rect x={PAD+20+i*325} y={3085} width={305} height={40} rx="6" fill={c.card} stroke={c.primary}/>
+              <text x={PAD+20+i*325+152} y={3110} textAnchor="middle" fill={c.primary} fontWeight="bold" fontSize="10">{step}</text>
+              {i < 5 && <text x={PAD+335+i*325} y={3105} fill={c.primary} fontSize="14">→</text>}
             </g>
           ))}
           <text x={PAD+40} y={3150} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
-          <text x={PAD+40} y={3168} fill={c.muted} fontSize="9">Every successful query gets remembered. Asked "show employees by department" and we figured out you meant org_level_2?</text>
-          <text x={PAD+40} y={3184} fill={c.muted} fontSize="9">Next time anyone asks a similar question, we skip the clarification. The system literally gets smarter with use.</text>
+          <text x={PAD+40} y={3168} fill={c.muted} fontSize="9">When you upload a config file, we scan EVERY column and remember what values are in it. So when you ask "show me SUI rates",</text>
+          <text x={PAD+40} y={3184} fill={c.muted} fontSize="9">we know that "SUI" is a VALUE in the type_of_tax column — even though "SUI" isn't a column NAME. This is how we find the right table.</text>
 
-          {/* Flow 4 */}
-          <rect x={2100} y={3040} width={2000} height={160} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
-          <rect x={2100} y={3040} width={2000} height={30} rx="12" fill={c.taupe}/>
-          <text x={3100} y={3060} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 4: Five Truths Query Resolution</text>
+          {/* Flow 2 */}
+          <rect x={2100} y={3040} width={2000} height={160} rx="12" fill={c.sageLight} stroke={c.sage} strokeWidth="2"/>
+          <rect x={2100} y={3040} width={2000} height={30} rx="12" fill={c.sage}/>
+          <text x={3100} y={3060} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 2: PDF Vision Learning (Cost Optimization)</text>
           
-          {['Question','Reality','Intent','Config','Reference','Answer'].map((step,i)=>(
+          {['PDF upload','get_fingerprint()','Cache check','Vision 1-2','store_learned()','Next: $0'].map((step,i)=>(
             <g key={i}>
-              <rect x={2120+i*325} y={3085} width={305} height={40} rx="6" fill={c.card} stroke={c.taupe}/>
-              <text x={2120+i*325+152} y={3110} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="10">{step}</text>
-              {i < 5 && <text x={2435+i*325} y={3105} fill={c.taupe} fontSize="14">→</text>}
+              <rect x={2120+i*325} y={3085} width={305} height={40} rx="6" fill={c.card} stroke={c.sage}/>
+              <text x={2120+i*325+152} y={3110} textAnchor="middle" fill={c.sage} fontWeight="bold" fontSize="10">{step}</text>
+              {i < 5 && <text x={2435+i*325} y={3105} fill={c.sage} fontSize="14">→</text>}
             </g>
           ))}
           <text x={2120} y={3150} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
-          <text x={2120} y={3168} fill={c.muted} fontSize="9">"Is our SUI rate correct?" → We check Reality (your current rate: 2.7%), Reference (valid range: 0.1%-12%), Regulatory (Texas rules).</text>
-          <text x={2120} y={3184} fill={c.muted} fontSize="9">If Reality doesn't match Reference, we found a gap. This is how XLR8 catches configuration errors automatically.</text>
+          <text x={2120} y={3168} fill={c.muted} fontSize="9">First time we see a PDF type, Claude Vision reads pages 1-2 to understand the columns (~$0.04). We remember this by "fingerprint".</text>
+          <text x={2120} y={3184} fill={c.muted} fontSize="9">Next time a similar PDF comes in? We recognize it and reuse the learned columns. $0.00 Vision cost. Scales beautifully.</text>
 
-          {/* ========== WIP (y=3260) ========== */}
-          <text x={W/2} y={3280} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">WORK IN PROGRESS</text>
-          <text x={W/2} y={3305} textAnchor="middle" fill={c.muted} fontSize="11">Features being built • Exit blockers for product launch</text>
+          {/* Flow 3 */}
+          <rect x={PAD} y={3220} width={2000} height={160} rx="12" fill={c.purpleLight} stroke={c.purple} strokeWidth="2"/>
+          <rect x={PAD} y={3220} width={2000} height={30} rx="12" fill={c.purple}/>
+          <text x={PAD+1000} y={3240} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 3: Learning Loop (Self-Improvement)</text>
+          
+          {['User query','find_similar()','Cache hit?','learn_query()','record_feedback()','Next faster'].map((step,i)=>(
+            <g key={i}>
+              <rect x={PAD+20+i*325} y={3265} width={305} height={40} rx="6" fill={c.card} stroke={c.purple}/>
+              <text x={PAD+20+i*325+152} y={3290} textAnchor="middle" fill={c.purple} fontWeight="bold" fontSize="10">{step}</text>
+              {i < 5 && <text x={PAD+335+i*325} y={3285} fill={c.purple} fontSize="14">→</text>}
+            </g>
+          ))}
+          <text x={PAD+40} y={3330} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
+          <text x={PAD+40} y={3348} fill={c.muted} fontSize="9">Every successful query gets remembered. Asked "show employees by department" and we figured out you meant org_level_2?</text>
+          <text x={PAD+40} y={3364} fill={c.muted} fontSize="9">Next time anyone asks a similar question, we skip the clarification. The system literally gets smarter with use.</text>
+
+          {/* Flow 4 */}
+          <rect x={2100} y={3220} width={2000} height={160} rx="12" fill={c.taupeLight} stroke={c.taupe} strokeWidth="2"/>
+          <rect x={2100} y={3220} width={2000} height={30} rx="12" fill={c.taupe}/>
+          <text x={3100} y={3240} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 4: Five Truths Query Resolution</text>
+          
+          {['Question','Reality','Intent','Config','Reference','Regulatory'].map((step,i)=>(
+            <g key={i}>
+              <rect x={2120+i*325} y={3265} width={305} height={40} rx="6" fill={c.card} stroke={c.taupe}/>
+              <text x={2120+i*325+152} y={3290} textAnchor="middle" fill={c.taupe} fontWeight="bold" fontSize="10">{step}</text>
+              {i < 5 && <text x={2435+i*325} y={3285} fill={c.taupe} fontSize="14">→</text>}
+            </g>
+          ))}
+          <text x={2120} y={3330} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
+          <text x={2120} y={3348} fill={c.muted} fontSize="9">"Is our SUI rate correct?" → We check Reality (your current rate: 2.7%), Reference (valid range: 0.1%-12%), Regulatory (Texas rules).</text>
+          <text x={2120} y={3364} fill={c.muted} fontSize="9">If Reality doesn't match Reference, we found a gap. This is how XLR8 catches configuration errors automatically.</text>
+
+          {/* Flow 5 - NEW: Consultative Synthesis */}
+          <rect x={PAD} y={3400} width={W-2*PAD} height={160} rx="12" fill={c.synthLight} stroke={c.synth} strokeWidth="2"/>
+          <rect x={PAD} y={3400} width={W-2*PAD} height={30} rx="12" fill={c.synth}/>
+          <text x={W/2} y={3420} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="12">FLOW 5: Consultative Synthesis — From Data to Wisdom (★ NEW)</text>
+          
+          {['Five Truths','Summarize','Triangulate','Conflicts?','LLM Synthesis','Confidence','Answer'].map((step,i)=>(
+            <g key={i}>
+              <rect x={PAD+20+i*570} y={3445} width={550} height={40} rx="6" fill={c.card} stroke={c.synth}/>
+              <text x={PAD+20+i*570+275} y={3470} textAnchor="middle" fill={c.synth} fontWeight="bold" fontSize="10">{step}</text>
+              {i < 6 && <text x={PAD+580+i*570} y={3465} fill={c.synth} fontSize="14">→</text>}
+            </g>
+          ))}
+          <text x={PAD+40} y={3510} fill={c.text} fontSize="10" fontWeight="bold">Why this matters:</text>
+          <text x={PAD+40} y={3528} fill={c.muted} fontSize="9">Raw data isn't enough. A world-class consultant triangulates sources, notes conflicts, provides "so-what" context, and recommends next steps.</text>
+          <text x={PAD+40} y={3544} fill={c.muted} fontSize="9">That's exactly what the Consultative Synthesizer does: Mistral (local) → Claude (fallback) → Template (graceful degradation). Always delivers.</text>
+
+          {/* ========== WIP (y=3620) ========== */}
+          <text x={W/2} y={3640} textAnchor="middle" fill={c.text} fontWeight="bold" fontSize="20">WORK IN PROGRESS</text>
+          <text x={W/2} y={3665} textAnchor="middle" fill={c.muted} fontSize="11">Features being built • Exit blockers for product launch</text>
 
           {[
             {x:100,title:'🚧 PLAYBOOK BUILDER UI (12h)',status:'Exit Blocker #5 — Visual workflow editor'},
@@ -508,16 +509,16 @@ const ArchitecturePage = () => {
             {x:3100,title:'🚧 ENHANCEMENTS',status:'Future — Table names, compliance, GitHub CI/CD'}
           ].map((sec,si)=>(
             <g key={si}>
-              <rect x={sec.x} y={3330} width={980} height={90} rx="12" fill={c.wipLight} stroke={c.wip} strokeWidth="2" strokeDasharray="8 4"/>
-              <rect x={sec.x} y={3330} width={980} height={35} rx="12" fill={c.wip}/>
-              <text x={sec.x+490} y={3352} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="11">{sec.title}</text>
-              <text x={sec.x+490} y={3395} textAnchor="middle" fill={c.muted} fontSize="10">{sec.status}</text>
+              <rect x={sec.x} y={3690} width={980} height={90} rx="12" fill={c.wipLight} stroke={c.wip} strokeWidth="2" strokeDasharray="8 4"/>
+              <rect x={sec.x} y={3690} width={980} height={35} rx="12" fill={c.wip}/>
+              <text x={sec.x+490} y={3712} textAnchor="middle" fill={c.card} fontWeight="bold" fontSize="11">{sec.title}</text>
+              <text x={sec.x+490} y={3755} textAnchor="middle" fill={c.muted} fontSize="10">{sec.status}</text>
             </g>
           ))}
 
           {/* Version footer */}
-          <text x={W-100} y={3500} textAnchor="end" fill={c.light} fontSize="10">XLR8 Platform v2.1 | Level 5 DFD | December 26, 2025</text>
-          <text x={W-100} y={3520} textAnchor="end" fill={c.light} fontSize="10">intelligence_engine.py v5.19.0 | Five Truths Architecture</text>
+          <text x={W-100} y={3860} textAnchor="end" fill={c.light} fontSize="10">XLR8 Platform v2.2 | Level 5 DFD | December 26, 2025</text>
+          <text x={W-100} y={3880} textAnchor="end" fill={c.light} fontSize="10">intelligence_engine.py v5.20.0 | Five Truths + Consultative Synthesis</text>
         </svg>
       </div>
     </div>
