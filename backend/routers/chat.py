@@ -714,8 +714,8 @@ Table numbers:"""
                                         idx = int(part.strip('[]()'))
                                         if idx in table_lookup:
                                             selected_indices.append(idx)
-                                    except:
-                                        pass
+                                    except Exception as e:
+                                        logger.debug(f"Suppressed: {e}")
                                 
                                 if not selected_indices:
                                     numbers = re.findall(r'\b(\d{1,2})\b', selection_text)
@@ -1428,8 +1428,8 @@ async def get_chat_stats():
         try:
             learning = get_learning_system()
             stats["learning_stats"] = learning.get_stats()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     if LOCAL_LLM_AVAILABLE:
         try:
