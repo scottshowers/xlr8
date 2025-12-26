@@ -3,6 +3,11 @@ Smart Router - Unified Upload Endpoint
 ======================================
 Consolidates all upload paths into a single intelligent router.
 
+v1.2 (December 2025 - GET HEALTHY Week 2):
+- Now the CANONICAL upload endpoint - duplicate endpoints removed from upload.py and register_extractor.py
+- upload.py and register_extractor.py now contain only supporting endpoints
+- All upload traffic routes through this file
+
 BEFORE (3 endpoints):
 - /api/upload         → general file upload
 - /api/standards/upload → reference documents  
@@ -18,6 +23,11 @@ ROUTING LOGIC:
    - Filename patterns (register, payroll → register extractor)
    - truth_type parameter (reference → standards)
    - Content analysis for PDFs (tabular vs narrative)
+
+BACKWARD COMPATIBILITY:
+- /api/standards/upload → routes to smart_upload with processing_type=standards
+- /api/register/upload  → routes to smart_upload with processing_type=register
+- /api/vacuum/upload    → routes to smart_upload with processing_type=register
 
 v1.1 - Added MetricsService integration for platform analytics
 
