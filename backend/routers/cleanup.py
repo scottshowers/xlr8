@@ -381,8 +381,8 @@ async def delete_document(filename: str):
                 collection.delete(ids=matching_ids)
                 logger.info(f"[CLEANUP] Deleted {len(matching_ids)} chunks by ID match for {filename}")
                 return {"success": True, "deleted_chunks": len(matching_ids), "filename": filename}
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         return {"success": True, "message": "Document not found or already deleted", "filename": filename}
         
@@ -457,8 +457,8 @@ async def delete_all_project_data(project_id: str):
                 if results and results['ids']:
                     collection.delete(ids=results['ids'])
                     deleted["documents"] = len(results['ids'])
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
     
     # 3. Jobs
     supabase = _get_supabase()
@@ -466,8 +466,8 @@ async def delete_all_project_data(project_id: str):
         try:
             result = supabase.table("jobs").delete().eq("project_id", project_id).execute()
             deleted["jobs"] = len(result.data) if result.data else 0
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
     
     logger.info(f"[CLEANUP] Deleted for {project_id}: {deleted}")
     return {"success": True, "deleted": deleted, "project_id": project_id}
