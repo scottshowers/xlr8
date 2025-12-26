@@ -3,6 +3,22 @@ Register Extractor - Intelligent Pay Register Extraction
 =========================================================
 Formerly "Vacuum" - Rebranded for production use.
 
+v1.3.0 CHANGES (December 2025 - GET HEALTHY Week 2):
+- CONSOLIDATED: /register/upload endpoint moved to smart_router.py
+- CONSOLIDATED: /vacuum/upload endpoint moved to smart_router.py
+- This file now contains SUPPORTING endpoints only:
+  - /register/status
+  - /register/job/{job_id}
+  - /register/extract
+  - /register/extracts
+  - /register/extract/{extract_id}
+  - /register/health
+  - Plus /vacuum/* backward compatibility aliases
+- EXPORTS for smart_router to use:
+  - get_extractor(): Returns PayRegisterExtractor instance
+  - create_job(filename): Creates job entry
+  - process_extraction_job(...): Background extraction task
+
 ARCHITECTURE:
 - PyMuPDF for local text extraction (default)
 - PII redaction BEFORE any LLM processing
@@ -16,7 +32,7 @@ Deploy to: backend/routers/register_extractor.py
 Requirements: pip install pymupdf anthropic boto3
 
 Author: XLR8 Team
-Version: 1.2.0 - PARALLEL LLM processing for 10x speed improvement on large PDFs
+Version: 1.3.0 - Smart Router consolidation
 """
 
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, BackgroundTasks
@@ -1761,80 +1777,18 @@ async def status():
     }
 
 
-@router.post("/register/upload")
-async def upload(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    max_pages: int = Form(0),
-    project_id: Optional[str] = Form(None),
-    use_textract: bool = Form(False),
-    async_mode: bool = Form(True),
-    vendor_type: str = Form("unknown"),
-    customer_id: Optional[str] = Form(None)
-):
-    """
-    Upload and extract pay register.
-    
-    NEW: Uses local LLM first, stores to DuckDB for chat integration.
-    """
-    ext = get_extractor()
-    
-    if not ext.is_available:
-        return {"success": False, "error": "No LLM configured", "employees": [], "employee_count": 0}
-    
-    if not file.filename.lower().endswith('.pdf'):
-        return {"success": False, "error": "Only PDF files supported", "employees": [], "employee_count": 0}
-    
-    temp_dir = tempfile.mkdtemp()
-    temp_path = os.path.join(temp_dir, file.filename)
-    
-    with open(temp_path, 'wb') as f:
-        shutil.copyfileobj(file.file, f)
-    
-    if async_mode:
-        job_id = create_job(file.filename)
-        background_tasks.add_task(
-            process_extraction_job,
-            job_id, temp_path, max_pages, use_textract, project_id,
-            vendor_type, customer_id
-        )
-        
-        return {
-            "success": True,
-            "job_id": job_id,
-            "status": "processing",
-            "message": f"Processing started. Poll /register/job/{job_id} for status.",
-            "extraction_method": "textract" if use_textract else "pymupdf",
-            "vendor_type": vendor_type
-        }
-    else:
-        try:
-            result = ext.extract(temp_path, max_pages=max_pages, use_textract=use_textract, project_id=project_id)
-            
-            for emp in result.get('employees', []):
-                emp['id'] = emp.get('employee_id', '')
-            
-            if result.get('success'):
-                saved = save_extraction_job(
-                    project_id=project_id,
-                    source_file=result['source_file'],
-                    employee_count=result['employee_count'],
-                    confidence=result['confidence'],
-                    validation_passed=result['validation_passed'],
-                    validation_errors=result['validation_errors'],
-                    pages_processed=result['pages_processed'],
-                    cost_usd=result['cost_usd'],
-                    processing_time_ms=result['processing_time_ms'],
-                    extraction_method=result.get('llm_used', 'unknown'),
-                    duckdb_table=result.get('duckdb_table')
-                )
-                result['extract_id'] = saved.get('id') if saved else None
-                result['saved_to_db'] = saved is not None
-            
-            return result
-            
-        finally:
-            shutil.rmtree(temp_dir, ignore_errors=True)
+# =============================================================================
+# NOTE: /register/upload endpoint MOVED to smart_router.py (December 2025)
+# =============================================================================
+# The unified upload endpoint handles registers via processing_type=register
+# See: backend/routers/smart_router.py
+# Backward compatibility alias at /api/register/upload still works via smart_router
+#
+# The following functions are exported for smart_router to use:
+#   - get_extractor(): Returns the PayRegisterExtractor instance
+#   - create_job(filename): Creates a job entry and returns job_id
+#   - process_extraction_job(...): Background task for extraction
+# =============================================================================
 
 
 @router.get("/register/job/{job_id}")
@@ -1941,25 +1895,15 @@ async def health():
 # =============================================================================
 # BACKWARD COMPATIBILITY - Keep /vacuum routes working
 # =============================================================================
+# NOTE: /vacuum/upload is now handled by smart_router.py
+# The other vacuum/* endpoints delegate to the register/* equivalents
 
 @router.get("/vacuum/status")
 async def vacuum_status():
     """Backward compatibility for /vacuum/status"""
     return await status()
 
-@router.post("/vacuum/upload")
-async def vacuum_upload(
-    background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    max_pages: int = Form(0),
-    project_id: Optional[str] = Form(None),
-    use_textract: bool = Form(False),
-    async_mode: bool = Form(True),
-    vendor_type: str = Form("unknown"),
-    customer_id: Optional[str] = Form(None)
-):
-    """Backward compatibility for /vacuum/upload"""
-    return await upload(background_tasks, file, max_pages, project_id, use_textract, async_mode, vendor_type, customer_id)
+# NOTE: /vacuum/upload removed - handled by smart_router.py
 
 @router.get("/vacuum/job/{job_id}")
 async def vacuum_job_status(job_id: str):
