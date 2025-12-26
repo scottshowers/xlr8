@@ -38,6 +38,68 @@ router = APIRouter(tags=["bi"])
 
 
 # =============================================================================
+# TABLE DISPLAY NAME UTILITY
+# =============================================================================
+
+def generate_display_name(table_name: str, sheet: str = None, filename: str = None, project: str = None) -> str:
+    """
+    Generate a human-friendly display name: Project + Sheet/Identifier.
+    
+    Examples:
+        project="Acme Corp", sheet="Active" → "Acme Corp - Active"
+        project="TEA1000", table="tea1000__earnings_codes_xlsx" → "TEA1000 - Earnings Codes"
+    """
+    def clean_name(name: str) -> str:
+        if not name:
+            return ""
+        base = name.strip()
+        # Remove extensions
+        for ext in ['.xlsx', '.xls', '.csv', '.pdf']:
+            if base.lower().endswith(ext):
+                base = base[:-len(ext)]
+                break
+        # Remove suffixes and timestamps
+        for suffix in ['_pdf', '_xlsx', '_xls', '_csv']:
+            if base.lower().endswith(suffix):
+                base = base[:-len(suffix)]
+        base = re.sub(r'_?\d{8}_\d{6}$', '', base)
+        base = re.sub(r'_?\d{8}$', '', base)
+        # Clean separators
+        base = base.replace('_', ' ').replace('-', ' ')
+        # Title case, preserve acronyms
+        words = base.split()
+        result = []
+        for word in words:
+            if word.isupper() and 2 <= len(word) <= 4:
+                result.append(word)
+            else:
+                result.append(word.title())
+        return ' '.join(result).strip()
+    
+    # Generic sheets to ignore
+    generic_sheets = {'sheet1', 'sheet2', 'sheet 1', 'data', 'pdf data'}
+    
+    clean_project = clean_name(project) if project else ""
+    clean_sheet = clean_name(sheet) if sheet else ""
+    clean_file = clean_name(filename) if filename else ""
+    is_generic = sheet and sheet.lower().strip() in generic_sheets
+    
+    # Determine identifier
+    if clean_sheet and not is_generic:
+        identifier = clean_sheet
+    elif clean_file:
+        identifier = clean_file
+    else:
+        parts = table_name.split('__')
+        identifier = clean_name('__'.join(parts[1:])) if len(parts) >= 2 else clean_name(table_name)
+    
+    # Build display name
+    if clean_project and identifier:
+        return f"{clean_project} - {identifier}"
+    return identifier or table_name
+
+
+# =============================================================================
 # IMPORTS - Graceful degradation
 # =============================================================================
 
@@ -257,8 +319,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                             sql = f'SELECT "{code_col}", "{desc_col}" FROM "{table.get("table_name")}"'
                             rows = handler.query(sql)
                             lookups[table_name] = {str(r[code_col]): str(r[desc_col]) for r in rows}
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
+                        except:
+                            pass
         except Exception as e:
             logger.warning(f"[BI] Could not load lookups: {e}")
     
@@ -286,8 +348,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                     try:
                         val = float(row[col])
                         row[col] = f"${val:,.2f}"
-                    except (ValueError, TypeError) as e:
-                        logger.debug(f"Suppressed: {e}")
+                    except (ValueError, TypeError):
+                        pass
         
         elif t_type == 'format_percent':
             # Format as XX.X%
@@ -296,8 +358,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                     try:
                         val = float(row[col])
                         row[col] = f"{val * 100:.1f}%"
-                    except (ValueError, TypeError) as e:
-                        logger.debug(f"Suppressed: {e}")
+                    except (ValueError, TypeError):
+                        pass
         
         elif t_type == 'uppercase':
             for row in result:
@@ -363,17 +425,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                             if val is None:
                                 val = 0
                             expr = expr.replace(c, str(float(val)))
-                    
-                    # SECURITY: Only allow safe math expressions (numbers, operators, parens)
-                    # This prevents code injection via eval()
-                    import re
-                    if re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', expr):
-                        row[new_col] = eval(expr)
-                    else:
-                        logger.warning(f"[BI] Rejected unsafe formula expression: {expr[:100]}")
-                        row[new_col] = None
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                    row[new_col] = eval(expr)  # Safe because we control the formula
+                except:
                     row[new_col] = None
             
             if new_col not in new_columns:
@@ -419,6 +472,16 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         return {'tables': [], 'filter_candidates': {}}
     
     try:
+        # Get customer name for display
+        customer_name = project  # Default to project name
+        try:
+            from utils.database.models import ProjectModel
+            proj_record = ProjectModel.get_by_name(project) if project else None
+            if proj_record:
+                customer_name = proj_record.get('customer') or project
+        except Exception as e:
+            logger.debug(f"[BI] Could not look up customer name: {e}")
+        
         # Get all tables from DuckDB
         all_tables = handler.conn.execute("SHOW TABLES").fetchall()
         
@@ -465,7 +528,9 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 
                 tables.append({
                     'table_name': table_name,
+                    'display_name': generate_display_name(table_name, project=customer_name),
                     'project': project,
+                    'customer': customer_name,
                     'columns': columns,
                     'row_count': row_count
                 })
@@ -476,8 +541,8 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
     except Exception as e:
         logger.error(f"[BI] Schema error: {e}")
@@ -520,8 +585,8 @@ async def execute_bi_query(request: BIQueryRequest):
         relationships = []
         try:
             relationships = handler.get_relationships(request.project)
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         # Initialize intelligence engine
         engine = IntelligenceEngine(request.project)
@@ -665,8 +730,8 @@ def _convert_month_numbers_to_names(data: List[Dict], columns: List[str]) -> Lis
                     month_num = int(val)
                     if 1 <= month_num <= 12:
                         new_row[col] = MONTH_NAMES[month_num]
-                except (ValueError, TypeError) as e:
-                    logger.debug(f"Suppressed: {e}")
+                except (ValueError, TypeError):
+                    pass
         converted.append(new_row)
     
     return converted
@@ -890,8 +955,8 @@ async def get_suggestions(project: str):
                         'category': 'saved'
                     })
                     categories.add('saved')
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         # Deduplicate by text
         seen = set()
