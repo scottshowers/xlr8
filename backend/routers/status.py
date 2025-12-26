@@ -62,6 +62,108 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ==================== TABLE DISPLAY NAME UTILITIES ====================
+
+def generate_display_name(table_name: str, sheet: str = None, filename: str = None, project: str = None) -> str:
+    """
+    Generate a human-friendly display name: Project/Client + Sheet.
+    
+    Examples:
+        project="Acme Corp", sheet="Active" → "Acme Corp - Active"
+        project="Acme Corp", sheet="Sheet1", file="Earnings.xlsx" → "Acme Corp - Earnings"
+        project="TEA1000", sheet="Deductions" → "TEA1000 - Deductions"
+    
+    Args:
+        table_name: The raw DuckDB table name (fallback parsing)
+        sheet: Sheet name (primary identifier)
+        filename: Source filename (used when sheet is generic)
+        project: Project/client name (prefix)
+    
+    Returns:
+        Human-friendly display name: "Project - Identifier"
+    """
+    def clean_name(name: str) -> str:
+        """Clean a name component (remove extensions, timestamps, etc.)"""
+        if not name:
+            return ""
+        
+        base = name.strip()
+        
+        # Remove file extensions
+        extensions = ['.xlsx', '.xls', '.csv', '.pdf', '.docx', '.doc', '.txt']
+        for ext in extensions:
+            if base.lower().endswith(ext):
+                base = base[:-len(ext)]
+                break
+        
+        # Remove common suffixes
+        suffixes = ['_pdf', '_xlsx', '_xls', '_csv', '_excel', '_sheet', '_data']
+        for suffix in suffixes:
+            if base.lower().endswith(suffix):
+                base = base[:-len(suffix)]
+        
+        # Remove timestamp patterns
+        base = re.sub(r'_?\d{8}_\d{6}$', '', base)
+        base = re.sub(r'_?\d{8}$', '', base)
+        base = re.sub(r'_?\d{14}$', '', base)
+        base = re.sub(r'_?\(\d+\)$', '', base)
+        
+        # Replace separators with spaces
+        base = base.replace('_', ' ').replace('-', ' ')
+        
+        # Title case, preserve acronyms (2-4 chars all caps)
+        words = base.split()
+        result_words = []
+        for word in words:
+            if word.isupper() and 2 <= len(word) <= 4:
+                result_words.append(word)
+            else:
+                result_words.append(word.title())
+        
+        return ' '.join(result_words).strip()
+    
+    # Generic sheet names - use filename instead
+    generic_sheets = {'sheet1', 'sheet2', 'sheet3', 'sheet 1', 'sheet 2', 'sheet 3', 
+                      'data', 'pdf data', 'table1', 'table 1', 'page 1', 'page1'}
+    
+    # Clean project name
+    clean_project = clean_name(project) if project else ""
+    
+    # Determine the identifier (sheet or filename)
+    clean_sheet = clean_name(sheet) if sheet else ""
+    clean_file = clean_name(filename) if filename else ""
+    is_generic_sheet = sheet and sheet.lower().strip() in generic_sheets
+    
+    if clean_sheet and not is_generic_sheet:
+        identifier = clean_sheet
+    elif clean_file:
+        identifier = clean_file
+    else:
+        # Parse from table_name as last resort
+        parts = table_name.split('__')
+        if len(parts) >= 2:
+            identifier = clean_name('__'.join(parts[1:]))
+        else:
+            identifier = clean_name(table_name)
+    
+    # Build display name
+    if clean_project and identifier:
+        display = f"{clean_project} - {identifier}"
+    elif clean_project:
+        display = clean_project
+    elif identifier:
+        display = identifier
+    else:
+        display = table_name
+    
+    # Clean up whitespace
+    display = re.sub(r'\s+', ' ', display).strip()
+    
+    return display if display else table_name
+    
+    return display
+
+
 # ==================== STRUCTURED DATA STATUS ====================
 
 @router.get("/status/structured")
@@ -94,11 +196,22 @@ async def get_structured_data_status(project: Optional[str] = None):
         # STEP 1: Get valid files from REGISTRY (source of truth)
         # =================================================================
         valid_files = set()
+        registry_lookup = {}  # filename -> {uploaded_by, uploaded_at, truth_type}
+        customer_lookup = {}  # project_code -> customer_name
+        
         try:
+            # Build customer name lookup from all projects
+            from utils.database.models import ProjectModel
+            all_projects = ProjectModel.get_all()
+            for p in all_projects:
+                proj_name = p.get('name', '')
+                customer = p.get('customer', '')
+                if proj_name:
+                    customer_lookup[proj_name.lower()] = customer or proj_name
+            logger.info(f"[STATUS/STRUCTURED] Built customer lookup for {len(customer_lookup)} projects")
+            
             # Get registry entries for DuckDB files
             if project:
-                # Try to get project_id from project name
-                from utils.database.models import ProjectModel
                 proj_record = ProjectModel.get_by_name(project)
                 project_id = proj_record.get('id') if proj_record else None
                 
@@ -106,11 +219,18 @@ async def get_structured_data_status(project: Optional[str] = None):
             else:
                 registry_entries = DocumentRegistryModel.get_all()
             
-            # Filter to only DuckDB files
+            # Filter to only DuckDB files and build lookup
             for entry in registry_entries:
                 storage = entry.get('storage_type', '')
                 if storage in ('duckdb', 'both'):
-                    valid_files.add(entry.get('filename', '').lower())
+                    filename = entry.get('filename', '')
+                    valid_files.add(filename.lower())
+                    # Build lookup for provenance data (file-level, not table-level)
+                    registry_lookup[filename.lower()] = {
+                        'uploaded_by': entry.get('uploaded_by_email', ''),
+                        'uploaded_at': entry.get('created_at', ''),
+                        'truth_type': entry.get('truth_type', 'reality')
+                    }
             
             logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
             
@@ -183,14 +303,26 @@ async def get_structured_data_status(project: Optional[str] = None):
                 except:
                     columns = []
                 
+                # Get provenance from registry lookup
+                provenance = registry_lookup.get(filename.lower(), {})
+                
+                # Get customer name from project lookup (or fall back to project code)
+                customer_name = customer_lookup.get(proj.lower(), proj) if proj else ''
+                
                 tables.append({
                     'table_name': table_name,
+                    # Display: Customer Name + Sheet (source file stored in metadata)
+                    'display_name': generate_display_name(table_name, sheet=sheet, filename=filename, project=customer_name),
                     'project': proj,
+                    'customer': customer_name,
                     'file': filename,
                     'sheet': sheet,
                     'columns': columns,
                     'row_count': row_count or 0,
                     'loaded_at': str(created_at) if created_at else None,
+                    'uploaded_by': provenance.get('uploaded_by', ''),
+                    'uploaded_at': provenance.get('uploaded_at', ''),
+                    'truth_type': provenance.get('truth_type', 'reality'),
                     'source_type': 'excel'
                 })
             
@@ -242,14 +374,26 @@ async def get_structured_data_status(project: Optional[str] = None):
                 except:
                     columns = []
                 
+                # Get provenance from registry lookup
+                provenance = registry_lookup.get(source_file.lower(), {})
+                
+                # Get customer name from project lookup
+                customer_name = customer_lookup.get((proj or '').lower(), proj or 'Unknown')
+                
                 tables.append({
                     'table_name': table_name,
+                    # PDF Data is generic, will use filename; customer provides prefix
+                    'display_name': generate_display_name(table_name, sheet='PDF Data', filename=source_file, project=customer_name),
                     'project': proj or 'Unknown',
+                    'customer': customer_name,
                     'file': source_file,
                     'sheet': 'PDF Data',
                     'columns': columns,
                     'row_count': row_count or 0,
                     'loaded_at': str(created_at) if created_at else None,
+                    'uploaded_by': provenance.get('uploaded_by', ''),
+                    'uploaded_at': provenance.get('uploaded_at', ''),
+                    'truth_type': provenance.get('truth_type', 'reality'),
                     'source_type': 'pdf'
                 })
                 pdf_count += 1
@@ -298,14 +442,25 @@ async def get_structured_data_status(project: Optional[str] = None):
                         if valid_files is not None and filename and filename.lower() not in valid_files:
                             continue
                         
+                        # Get provenance from registry lookup
+                        provenance = registry_lookup.get(filename.lower(), {})
+                        
+                        # Get customer name from project lookup
+                        customer_name = customer_lookup.get(proj.lower(), proj) if proj else 'Unknown'
+                        
                         tables.append({
                             'table_name': table_name,
+                            'display_name': generate_display_name(table_name, sheet=sheet, filename=filename, project=customer_name),
                             'project': proj,
+                            'customer': customer_name,
                             'file': filename,
                             'sheet': sheet,
                             'columns': columns,
                             'row_count': row_count,
                             'loaded_at': None,
+                            'uploaded_by': provenance.get('uploaded_by', ''),
+                            'uploaded_at': provenance.get('uploaded_at', ''),
+                            'truth_type': provenance.get('truth_type', 'reality'),
                             'source_type': 'unknown'
                         })
                     except Exception as te:
@@ -553,12 +708,12 @@ async def delete_structured_file(project: str, filename: str):
                             # Also clean metadata for this table
                             try:
                                 conn.execute("DELETE FROM _schema_metadata WHERE table_name = ?", [tbl])
-                            except Exception as e:
-                                logger.debug(f"Suppressed: {e}")
+                            except:
+                                pass
                             try:
                                 conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [tbl])
-                            except Exception as e:
-                                logger.debug(f"Suppressed: {e}")
+                            except:
+                                pass
                                 
                         except Exception as drop_e:
                             logger.warning(f"[DELETE] Could not drop {tbl}: {drop_e}")
@@ -597,8 +752,8 @@ async def delete_structured_file(project: str, filename: str):
                         chromadb_cleaned = len(results['ids'])
                         logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (field: {field})")
                         break
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
             
             # Also try case-insensitive if nothing found
             if chromadb_cleaned == 0:
@@ -614,8 +769,8 @@ async def delete_structured_file(project: str, filename: str):
                         collection.delete(ids=ids_to_delete)
                         chromadb_cleaned = len(ids_to_delete)
                         logger.info(f"[DELETE] Deleted {chromadb_cleaned} ChromaDB chunks (case-insensitive)")
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
         except Exception as chroma_e:
             logger.warning(f"[DELETE] ChromaDB cleanup failed: {chroma_e}")
         
@@ -773,8 +928,8 @@ async def verify_delete(project: str, filename: str):
             if pdf:
                 result["fully_deleted"] = False
                 result["remnants"]["_pdf_tables"] = [p[0] for p in pdf]
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")  # Table might not exist
+        except:
+            pass  # Table might not exist
         
         # Check _column_profiles
         try:
@@ -788,8 +943,8 @@ async def verify_delete(project: str, filename: str):
             if matching:
                 result["fully_deleted"] = False
                 result["remnants"]["_column_profiles"] = matching
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         # Check _column_mappings
         try:
@@ -801,8 +956,8 @@ async def verify_delete(project: str, filename: str):
             if mappings and mappings[0] > 0:
                 result["fully_deleted"] = False
                 result["remnants"]["_column_mappings"] = mappings[0]
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         # Check _mapping_jobs
         try:
@@ -814,8 +969,8 @@ async def verify_delete(project: str, filename: str):
             if jobs:
                 result["fully_deleted"] = False
                 result["remnants"]["_mapping_jobs"] = [{"id": j[0], "status": j[1]} for j in jobs]
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         # Check ChromaDB
         try:
@@ -832,8 +987,8 @@ async def verify_delete(project: str, filename: str):
                             "count": len(results['ids'])
                         }
                         break
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
         except Exception as e:
             result["remnants"]["chromadb_error"] = str(e)
         
@@ -958,8 +1113,8 @@ async def clean_orphaned_metadata(project: Optional[str] = None):
         # Checkpoint
         try:
             conn.execute("CHECKPOINT")
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         logger.info(f"[CLEANUP] Orphan cleanup complete: {orphaned}")
         return {
@@ -2031,8 +2186,8 @@ async def sync_document_registry():
                             proj = ProjectModel.get_by_name(file_info['project_name'])
                             if proj:
                                 project_id = proj.get('id')
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
+                        except:
+                            pass
                     
                     DocumentRegistryModel.register(
                         filename=filename,
@@ -2794,10 +2949,18 @@ async def check_data_integrity(project: Optional[str] = None):
         # STEP 1: Get valid files from REGISTRY (source of truth)
         # =================================================================
         valid_files = set()
+        customer_lookup = {}  # project_code -> customer_name
         try:
+            # Build customer name lookup from all projects
+            from utils.database.models import ProjectModel
+            all_projects = ProjectModel.get_all()
+            for p in all_projects:
+                proj_name = p.get('name', '')
+                customer = p.get('customer', '')
+                if proj_name:
+                    customer_lookup[proj_name.lower()] = customer or proj_name
+            
             if project:
-                # Try to get project_id from project name
-                from utils.database.models import ProjectModel
                 proj_record = ProjectModel.get_by_name(project)
                 project_id = proj_record.get('id') if proj_record else None
                 
@@ -2872,8 +3035,8 @@ async def check_data_integrity(project: Optional[str] = None):
                             else:
                                 if table_name not in tables_to_check:
                                     tables_to_check.append(table_name)
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
                 
             logger.info(f"[INTEGRITY] Found {len(tables_to_check)} tables for registered files")
             
@@ -2999,8 +3162,8 @@ async def check_data_integrity(project: Optional[str] = None):
                         SELECT COUNT(*) FROM "{table_name}" WHERE "{first_col}" IS NULL
                     ''')[0]
                     fill_rate = round(((row_count - null_count) / row_count) * 100)
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
             
             total_issues += len(table_issues)
             total_insights += len(table_insights)
@@ -3013,6 +3176,14 @@ async def check_data_integrity(project: Optional[str] = None):
             
             all_tables.append({
                 "table_name": table_name,
+                # Parse project from table_name, then look up customer name
+                "display_name": generate_display_name(
+                    table_name, 
+                    project=customer_lookup.get(
+                        table_name.split('__')[0].lower(), 
+                        table_name.split('__')[0]
+                    ) if '__' in table_name else None
+                ),
                 "column_count": len(column_names),
                 "row_count": row_count,
                 "fill_rate": fill_rate,
@@ -3435,8 +3606,8 @@ async def comprehensive_health_check(
                     WHERE is_current = TRUE AND file_name IS NOT NULL
                 """)
                 duckdb_files = {r[0] for r in duckdb_result if r[0]}
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         chroma_files = set()
         try:
@@ -3448,8 +3619,8 @@ async def comprehensive_health_check(
                     filename = metadata.get("source") or metadata.get("filename")
                     if filename:
                         chroma_files.add(filename)
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         all_actual_files = duckdb_files | chroma_files
         
@@ -3927,8 +4098,8 @@ async def verify_file_deleted(filename: str, project: Optional[str] = None):
                 results = collection.get(where={field: filename})
                 if results and results['ids']:
                     chunk_count += len(results['ids'])
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         # Case-insensitive fallback
         if chunk_count == 0:
@@ -3938,8 +4109,8 @@ async def verify_file_deleted(filename: str, project: Optional[str] = None):
                     doc_filename = metadata.get("source") or metadata.get("filename") or ""
                     if doc_filename.lower() == filename_lower:
                         chunk_count += 1
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         if chunk_count > 0:
             remnants["chromadb_chunks"] = chunk_count
@@ -4058,8 +4229,8 @@ async def get_relationships():
             try:
                 cols = handler.conn.execute(f"DESCRIBE {table}").fetchall()
                 table_columns[table] = [c[0].lower() for c in cols]
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            except:
+                pass
         
         # Find relationships based on common column patterns
         key_patterns = ['_id', '_code', '_key', '_num', '_no']
@@ -4279,8 +4450,8 @@ async def test_sql_query(request: dict):
         columns = []
         try:
             columns = [desc[0] for desc in handler.conn.description]
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         # Get sample (first 5 rows)
         sample = []
@@ -4374,8 +4545,8 @@ async def generate_sql_for_rule(rule_id: str, request: dict = None):
                         "table": table_name,
                         "columns": col_names
                     })
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+                except:
+                    pass
         except Exception as e:
             logger.warning(f"Could not get schema: {e}")
         
@@ -4480,8 +4651,8 @@ Output ONLY the SQL query, no explanation. If the rule cannot be checked with av
         try:
             if hasattr(rule, 'suggested_sql_pattern'):
                 rule.suggested_sql_pattern = sql_result
-        except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+        except:
+            pass
         
         return {
             "success": True,
