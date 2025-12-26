@@ -14,12 +14,24 @@ Deploy to: backend/routers/admin.py
 Add to main.py:
     from routers import admin
     app.include_router(admin.router, prefix="/api", tags=["admin"])
+
+Security: All endpoints require OPS_CENTER permission (admin role).
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from typing import List, Optional
 import logging
 import json
+
+# Auth imports - all admin endpoints require authentication
+try:
+    from backend.utils.auth_middleware import (
+        User, require_permission, Permissions
+    )
+except ImportError:
+    from utils.auth_middleware import (
+        User, require_permission, Permissions
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +57,7 @@ def get_supabase():
 # =============================================================================
 
 @router.get("/learning/queries")
-async def get_learned_queries(limit: int = 100, offset: int = 0):
+async def get_learned_queries(limit: int = 100, offset: int = 0, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get all learned query patterns."""
     try:
         supabase = get_supabase()
@@ -61,7 +73,7 @@ async def get_learned_queries(limit: int = 100, offset: int = 0):
 
 
 @router.delete("/learning/queries/{query_id}")
-async def delete_learned_query(query_id: str):
+async def delete_learned_query(query_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Delete a learned query pattern."""
     try:
         supabase = get_supabase()
@@ -77,7 +89,7 @@ async def delete_learned_query(query_id: str):
 # =============================================================================
 
 @router.get("/learning/feedback")
-async def get_feedback(limit: int = 100, offset: int = 0, feedback_type: str = None):
+async def get_feedback(limit: int = 100, offset: int = 0, feedback_type: str = None, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get feedback records."""
     try:
         supabase = get_supabase()
@@ -96,7 +108,7 @@ async def get_feedback(limit: int = 100, offset: int = 0, feedback_type: str = N
 
 
 @router.delete("/learning/feedback/{feedback_id}")
-async def delete_feedback(feedback_id: str):
+async def delete_feedback(feedback_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Delete a feedback record."""
     try:
         supabase = get_supabase()
@@ -112,7 +124,7 @@ async def delete_feedback(feedback_id: str):
 # =============================================================================
 
 @router.get("/learning/preferences")
-async def get_preferences(user_id: str = None, limit: int = 100):
+async def get_preferences(user_id: str = None, limit: int = 100, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get user preferences."""
     try:
         supabase = get_supabase()
@@ -131,7 +143,7 @@ async def get_preferences(user_id: str = None, limit: int = 100):
 
 
 @router.delete("/learning/preferences/{pref_id}")
-async def delete_preference(pref_id: str):
+async def delete_preference(pref_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Delete a user preference."""
     try:
         supabase = get_supabase()
@@ -147,7 +159,7 @@ async def delete_preference(pref_id: str):
 # =============================================================================
 
 @router.get("/learning/clarifications")
-async def get_clarification_patterns(limit: int = 100):
+async def get_clarification_patterns(limit: int = 100, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get clarification patterns."""
     try:
         supabase = get_supabase()
@@ -163,7 +175,7 @@ async def get_clarification_patterns(limit: int = 100):
 
 
 @router.delete("/learning/clarifications/{pattern_id}")
-async def delete_clarification(pattern_id: str):
+async def delete_clarification(pattern_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Delete a clarification pattern."""
     try:
         supabase = get_supabase()
@@ -179,7 +191,7 @@ async def delete_clarification(pattern_id: str):
 # =============================================================================
 
 @router.get("/learning/mappings")
-async def get_global_mappings(limit: int = 200):
+async def get_global_mappings(limit: int = 200, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get global column mappings."""
     try:
         supabase = get_supabase()
@@ -195,7 +207,7 @@ async def get_global_mappings(limit: int = 200):
 
 
 @router.delete("/learning/mappings/{mapping_id}")
-async def delete_mapping(mapping_id: str):
+async def delete_mapping(mapping_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Delete a global column mapping."""
     try:
         supabase = get_supabase()
@@ -212,7 +224,7 @@ async def add_mapping(
     column_pattern_2: str,
     semantic_type: str = None,
     canonical_name: str = None
-):
+, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Add a new global column mapping."""
     try:
         supabase = get_supabase()
@@ -245,7 +257,7 @@ async def add_mapping(
 # =============================================================================
 
 @router.get("/learning/export/{data_type}")
-async def export_learning_data(data_type: str):
+async def export_learning_data(data_type: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Export learning data as JSON."""
     try:
         supabase = get_supabase()
@@ -283,7 +295,7 @@ async def export_learning_data(data_type: str):
 # =============================================================================
 
 @router.get("/learning/stats/detailed")
-async def get_detailed_stats():
+async def get_detailed_stats(user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Get detailed learning statistics."""
     try:
         supabase = get_supabase()
@@ -338,7 +350,7 @@ async def get_detailed_stats():
 # =============================================================================
 
 @router.delete("/learning/clear/{data_type}")
-async def clear_learning_data(data_type: str, confirm: bool = False):
+async def clear_learning_data(data_type: str, confirm: bool = False, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """Clear all data of a specific type. Requires confirm=true."""
     if not confirm:
         raise HTTPException(400, "Must set confirm=true to clear data")
@@ -374,7 +386,7 @@ async def clear_learning_data(data_type: str, confirm: bool = False):
 # =============================================================================
 
 @router.get("/references")
-async def list_references():
+async def list_references(user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """
     List all reference/standards files.
     
@@ -417,7 +429,7 @@ async def list_references():
 
 
 @router.delete("/references/{filename:path}")
-async def delete_reference(filename: str, confirm: bool = False):
+async def delete_reference(filename: str, confirm: bool = False, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """
     Delete a specific reference/standards file.
     
@@ -521,7 +533,7 @@ async def delete_reference(filename: str, confirm: bool = False):
 
 
 @router.delete("/references/clear/all")
-async def clear_all_references(confirm: bool = False):
+async def clear_all_references(confirm: bool = False, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """
     Clear ALL reference/standards files.
     
@@ -576,8 +588,8 @@ async def clear_all_references(confirm: bool = False):
                     if results and results.get('ids'):
                         collection.delete(ids=results['ids'])
                         deleted['chromadb'] += len(results['ids'])
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
         except Exception as e:
             logger.warning(f"[ADMIN] ChromaDB clear failed: {e}")
         
@@ -620,7 +632,7 @@ async def clear_all_references(confirm: bool = False):
 
 
 @router.get("/rules")
-async def list_rules():
+async def list_rules(user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """
     List all rules in the standards rule registry.
     """
@@ -662,7 +674,7 @@ async def list_rules():
 
 
 @router.delete("/rules/clear")
-async def clear_rules(confirm: bool = False):
+async def clear_rules(confirm: bool = False, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
     """
     Clear all rules from the standards rule registry.
     
