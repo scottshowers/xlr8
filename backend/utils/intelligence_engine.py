@@ -4619,32 +4619,77 @@ SQL:"""
         if not bad_col:
             return None
         
-        valid_cols_lower = {c.lower() for c in all_columns}
+        logger.info(f"[SQL-FIX] Bad column from error: {bad_col}")
         
-        known_fixes = {
-            'rate': 'hourly_pay_rate',
-            'hourly_rate': 'hourly_pay_rate',
-            'pay_rate': 'hourly_pay_rate',
-            'employee_id': 'employee_number',
-            'emp_id': 'employee_number',
-        }
+        # NEW: Parse DuckDB's candidate bindings from error message
+        # e.g., Candidate bindings: "tax_group_country_code", "tax_group_code", ...
+        candidates = []
+        candidate_match = re.search(r'Candidate bindings:\s*([^\n]+)', error_msg)
+        if candidate_match:
+            candidate_str = candidate_match.group(1)
+            # Extract quoted column names
+            candidates = re.findall(r'"([^"]+)"', candidate_str)
+            logger.info(f"[SQL-FIX] DuckDB suggests: {candidates[:5]}")
         
-        fix = known_fixes.get(bad_col.lower())
-        if fix and fix.lower() in valid_cols_lower:
-            logger.info(f"[SQL-FIX] {bad_col} → {fix}")
-            return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
+        # Build a mapping of ALL potentially bad columns in the SQL
+        # by scanning for column-like tokens not in candidates
+        fixed_sql = sql
+        made_fixes = False
         
-        # Fuzzy match
-        if '_' in bad_col:
-            best_score = 0.6
-            for col in all_columns:
-                score = SequenceMatcher(None, bad_col.lower(), col.lower()).ratio()
+        # Extract all potential column references from SQL
+        # Look for word_word patterns that might be column names
+        potential_cols = re.findall(r'\b([a-z][a-z0-9_]*(?:_[a-z0-9]+)+)\b', sql.lower())
+        potential_cols = list(set(potential_cols))  # unique
+        
+        # Valid columns (from candidates or all_columns)
+        valid_cols = set(c.lower() for c in candidates) | set(c.lower() for c in all_columns)
+        
+        for pot_col in potential_cols:
+            if pot_col in valid_cols:
+                continue  # Already valid
+            
+            # Try to find a match
+            best_score = 0.5  # Threshold
+            best_match = None
+            
+            # First check candidates (higher priority)
+            for candidate in candidates:
+                score = SequenceMatcher(None, pot_col, candidate.lower()).ratio()
                 if score > best_score:
                     best_score = score
-                    fix = col
-            if fix:
-                logger.info(f"[SQL-FIX] Fuzzy: {bad_col} → {fix}")
-                return re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{fix}"', sql, flags=re.IGNORECASE)
+                    best_match = candidate
+            
+            # Then check all_columns
+            if not best_match:
+                for col in all_columns:
+                    score = SequenceMatcher(None, pot_col, col.lower()).ratio()
+                    if score > best_score:
+                        best_score = score
+                        best_match = col
+            
+            if best_match:
+                logger.info(f"[SQL-FIX] {pot_col} → {best_match} (score: {best_score:.2f})")
+                fixed_sql = re.sub(r'\b' + re.escape(pot_col) + r'\b', f'"{best_match}"', fixed_sql, flags=re.IGNORECASE)
+                made_fixes = True
+        
+        # Also fix the specific bad_col from the error if not already fixed
+        if bad_col.lower() not in valid_cols:
+            best_score = 0.4
+            best_match = None
+            
+            for candidate in candidates:
+                score = SequenceMatcher(None, bad_col.lower(), candidate.lower()).ratio()
+                if score > best_score:
+                    best_score = score
+                    best_match = candidate
+            
+            if best_match:
+                logger.info(f"[SQL-FIX] Error column: {bad_col} → {best_match} (score: {best_score:.2f})")
+                fixed_sql = re.sub(r'\b' + re.escape(bad_col) + r'\b', f'"{best_match}"', fixed_sql, flags=re.IGNORECASE)
+                made_fixes = True
+        
+        if made_fixes:
+            return fixed_sql
         
         return None
     
