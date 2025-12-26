@@ -330,8 +330,8 @@ async def test_connection(connection_id: str):
                 'status': 'error',
                 'last_error': str(e)
             }).eq('id', connection_id).execute()
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         raise HTTPException(500, str(e))
 
