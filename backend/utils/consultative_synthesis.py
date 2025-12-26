@@ -94,10 +94,20 @@ class ConsultativeSynthesizer:
     Uses LLMOrchestrator for all LLM calls - Mistral first, Claude fallback.
     """
     
-    def __init__(self):
+    def __init__(self, **kwargs):
+        """
+        Initialize synthesizer with LLMOrchestrator.
+        
+        Accepts legacy kwargs (ollama_host, claude_api_key, model_preference) 
+        for backwards compatibility but ignores them - LLMOrchestrator handles config.
+        """
         # Use existing LLMOrchestrator - it handles all config (LLM_ENDPOINT, auth, etc.)
         self._orchestrator = None
         self.last_method = None
+        
+        # Log if legacy params passed (for debugging)
+        if kwargs:
+            logger.debug(f"[CONSULTATIVE] Ignoring legacy kwargs: {list(kwargs.keys())}")
         
         try:
             from utils.llm_orchestrator import LLMOrchestrator
