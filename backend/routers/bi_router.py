@@ -257,8 +257,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                             sql = f'SELECT "{code_col}", "{desc_col}" FROM "{table.get("table_name")}"'
                             rows = handler.query(sql)
                             lookups[table_name] = {str(r[code_col]): str(r[desc_col]) for r in rows}
-                        except:
-                            pass
+                        except Exception as e:
+                            logger.debug(f"Suppressed: {e}")
         except Exception as e:
             logger.warning(f"[BI] Could not load lookups: {e}")
     
@@ -286,8 +286,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                     try:
                         val = float(row[col])
                         row[col] = f"${val:,.2f}"
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Suppressed: {e}")
         
         elif t_type == 'format_percent':
             # Format as XX.X%
@@ -296,8 +296,8 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                     try:
                         val = float(row[col])
                         row[col] = f"{val * 100:.1f}%"
-                    except (ValueError, TypeError):
-                        pass
+                    except (ValueError, TypeError) as e:
+                        logger.debug(f"Suppressed: {e}")
         
         elif t_type == 'uppercase':
             for row in result:
@@ -363,8 +363,17 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                             if val is None:
                                 val = 0
                             expr = expr.replace(c, str(float(val)))
-                    row[new_col] = eval(expr)  # Safe because we control the formula
-                except:
+                    
+                    # SECURITY: Only allow safe math expressions (numbers, operators, parens)
+                    # This prevents code injection via eval()
+                    import re
+                    if re.match(r'^[\d\s\+\-\*\/\.\(\)]+$', expr):
+                        row[new_col] = eval(expr)
+                    else:
+                        logger.warning(f"[BI] Rejected unsafe formula expression: {expr[:100]}")
+                        row[new_col] = None
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
                     row[new_col] = None
             
             if new_col not in new_columns:
@@ -467,8 +476,8 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
     except Exception as e:
         logger.error(f"[BI] Schema error: {e}")
@@ -511,8 +520,8 @@ async def execute_bi_query(request: BIQueryRequest):
         relationships = []
         try:
             relationships = handler.get_relationships(request.project)
-        except:
-            pass
+        except Exception as e:
+            logger.debug(f"Suppressed: {e}")
         
         # Initialize intelligence engine
         engine = IntelligenceEngine(request.project)
@@ -656,8 +665,8 @@ def _convert_month_numbers_to_names(data: List[Dict], columns: List[str]) -> Lis
                     month_num = int(val)
                     if 1 <= month_num <= 12:
                         new_row[col] = MONTH_NAMES[month_num]
-                except (ValueError, TypeError):
-                    pass
+                except (ValueError, TypeError) as e:
+                    logger.debug(f"Suppressed: {e}")
         converted.append(new_row)
     
     return converted
@@ -881,8 +890,8 @@ async def get_suggestions(project: str):
                         'category': 'saved'
                     })
                     categories.add('saved')
-            except:
-                pass
+            except Exception as e:
+                logger.debug(f"Suppressed: {e}")
         
         # Deduplicate by text
         seen = set()
