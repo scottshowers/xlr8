@@ -436,10 +436,14 @@ export default function DataExplorer() {
             <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
               {tables.map((table, i) => {
                 const health = getTableHealth(table.table_name);
+                const displayName = table.display_name || table.table_name;
+                const uploadedAt = table.created_at ? new Date(table.created_at).toLocaleDateString() : null;
+                const uploadedBy = table.uploaded_by;
                 return (
                   <div
                     key={i}
                     onClick={() => setSelectedTable(table.table_name)}
+                    title={table.table_name}
                     style={{
                       padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
                       background: selectedTable === table.table_name ? `${c.primary}15` : 'transparent',
@@ -458,11 +462,13 @@ export default function DataExplorer() {
                         whiteSpace: 'nowrap',
                         maxWidth: '200px'
                       }}>
-                        {table.table_name}
+                        {displayName}
                       </span>
                     </div>
                     <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.25rem' }}>
-                      {(table.row_count || 0).toLocaleString()} rows • {table.columns?.length || 0} columns
+                      {(table.row_count || 0).toLocaleString()} rows • {table.column_count || table.columns?.length || 0} columns
+                      {uploadedAt && ` • ${uploadedAt}`}
+                      {uploadedBy && ` • by ${uploadedBy}`}
                     </div>
                   </div>
                 );
@@ -479,8 +485,15 @@ export default function DataExplorer() {
             ) : tableDetails ? (
               <>
                 <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600, fontSize: '1.1rem', color: c.text }}>
-                    🗄️ {tableDetails.table_name}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600, fontSize: '1.1rem', color: c.text }}>
+                      🗄️ {tableDetails.display_name || tableDetails.table_name}
+                    </div>
+                    {tableDetails.display_name && tableDetails.display_name !== tableDetails.table_name && (
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted, fontFamily: 'monospace' }}>
+                        {tableDetails.table_name}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
                     {/* NEW: View Classification button */}
@@ -567,21 +580,32 @@ export default function DataExplorer() {
               Select Table
             </div>
             <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              {tables.map((table, i) => (
-                <div
-                  key={i}
-                  onClick={() => setSelectedTable(table.table_name)}
-                  style={{
-                    padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
-                    background: selectedTable === table.table_name ? `${c.royalPurple}15` : 'transparent',
-                    borderLeft: selectedTable === table.table_name ? `3px solid ${c.royalPurple}` : '3px solid transparent',
-                  }}
-                >
-                  <div style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {table.table_name}
+              {tables.map((table, i) => {
+                const displayName = table.display_name || table.table_name;
+                const uploadedAt = table.created_at ? new Date(table.created_at).toLocaleDateString() : null;
+                const uploadedBy = table.uploaded_by;
+                return (
+                  <div
+                    key={i}
+                    onClick={() => setSelectedTable(table.table_name)}
+                    title={table.table_name}
+                    style={{
+                      padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
+                      background: selectedTable === table.table_name ? `${c.royalPurple}15` : 'transparent',
+                      borderLeft: selectedTable === table.table_name ? `3px solid ${c.royalPurple}` : '3px solid transparent',
+                    }}
+                  >
+                    <div style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {displayName}
+                    </div>
+                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.15rem' }}>
+                      {(table.row_count || 0).toLocaleString()} rows
+                      {uploadedAt && ` • ${uploadedAt}`}
+                      {uploadedBy && ` • by ${uploadedBy}`}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
