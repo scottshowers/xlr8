@@ -970,7 +970,7 @@ class ProjectIntelligenceService:
         try:
             # Check if column profiles exist
             profile_exists = self.handler.conn.execute("""
-                SELECT COUNT(*) FROM _column_profiles WHERE project_name = ?
+                SELECT COUNT(*) FROM _column_profiles WHERE project = ?
             """, [self.project]).fetchone()
             
             if not profile_exists or profile_exists[0] == 0:
@@ -978,18 +978,19 @@ class ProjectIntelligenceService:
                 return
             
             # Get categorical columns with few unique values (potential lookups)
+            # NOTE: Column is 'distinct_values' not 'top_values_json'
             profiles = self.handler.conn.execute("""
-                SELECT table_name, column_name, distinct_count, top_values_json
+                SELECT table_name, column_name, distinct_count, distinct_values
                 FROM _column_profiles 
-                WHERE project_name = ?
+                WHERE project = ?
                 AND inferred_type = 'categorical'
                 AND distinct_count <= 50
                 AND distinct_count > 1
-                AND top_values_json IS NOT NULL
+                AND distinct_values IS NOT NULL
             """, [self.project]).fetchall()
             
             for row in profiles:
-                table_name, col_name, distinct_count, top_values_json = row
+                table_name, col_name, distinct_count, distinct_values_json = row
                 
                 # Check if we already have a lookup for this column type
                 col_lower = col_name.lower()
@@ -1000,15 +1001,15 @@ class ProjectIntelligenceService:
                 if already_have:
                     continue
                 
-                # Parse top values
+                # Parse distinct values - stored as simple array ['A', 'B', 'C']
                 try:
-                    top_values = json.loads(top_values_json) if top_values_json else []
-                    if not top_values:
+                    distinct_values = json.loads(distinct_values_json) if distinct_values_json else []
+                    if not distinct_values:
                         continue
                     
                     # Build simple code->code lookup (values map to themselves)
                     # This is useful for enrichment/filtering even without descriptions
-                    lookup_data = {str(v['value']): str(v['value']) for v in top_values if v.get('value')}
+                    lookup_data = {str(v): str(v) for v in distinct_values if v}
                     
                     if lookup_data:
                         # Determine lookup type
