@@ -51,6 +51,8 @@ import AdminDashboard from './pages/AdminDashboard';
 import DataHealthPage from './pages/DataHealthPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
 import AnalyticsPage from './pages/AnalyticsPage';
+import DataCleanup from './pages/DataCleanup';
+import AdminEndpoints from './pages/AdminEndpoints';
 
 // Sales/Onboarding Pages
 import WelcomePage from './pages/WelcomePage';
@@ -168,6 +170,16 @@ function AppRoutes() {
         {/* Data Health (renamed from Data Model) */}
         <Route path="/data-health" element={
           <ProtectedRoute><Layout><DataHealthPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Data Cleanup - Delete tables/files */}
+        <Route path="/data-cleanup" element={
+          <ProtectedRoute><Layout><DataCleanup /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Admin Endpoints - API testing */}
+        <Route path="/admin-endpoints" element={
+          <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
         } />
         
         {/* ====== LEGACY REDIRECTS ====== */}
