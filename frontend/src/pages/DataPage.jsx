@@ -688,37 +688,11 @@ function FilesPanel({ c, project, targetScope }) {
                   <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
-                    <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <span>{file.sheets?.length || file.table_count || 1} table(s)</span>
-                      <span>•</span>
-                      <span>{(file.row_count || file.total_rows || 0).toLocaleString()} rows</span>
-                      {file.relationships_count > 0 && (
-                        <>
-                          <span>•</span>
-                          <span>{file.relationships_count} relationships</span>
-                        </>
-                      )}
-                      {file.truth_type && (
-                        <>
-                          <span>•</span>
-                          <span>{getTruthLabel(file.truth_type)}</span>
-                        </>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.25rem', display: 'flex', gap: '0.75rem' }}>
-                      {file.created_at && (
-                        <span title={new Date(file.created_at).toLocaleString()}>
-                          📅 {new Date(file.created_at).toLocaleDateString()}
-                        </span>
-                      )}
-                      {file.uploaded_by_email && (
-                        <span title={file.uploaded_by_email}>
-                          👤 {file.uploaded_by_email.split('@')[0]}
-                        </span>
-                      )}
-                      {file.processing_time_ms && (
-                        <span>⚡ {(file.processing_time_ms / 1000).toFixed(1)}s</span>
-                      )}
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                      {file.sheets?.length || 1} table(s) • {(file.total_rows || 0).toLocaleString()} rows
+                      {file.truth_type && ` • ${getTruthLabel(file.truth_type)}`}
+                      {file.uploaded_by && ` • by ${file.uploaded_by.split('@')[0]}`}
+                      {file.loaded_at && ` • ${new Date(file.loaded_at).toLocaleDateString()}`}
                     </div>
                   </div>
                 </div>
@@ -760,35 +734,10 @@ function FilesPanel({ c, project, targetScope }) {
                   <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(doc.truth_type)}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
-                    <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-                      <span>{doc.chunk_count || doc.chunks || 0} chunks</span>
-                      {doc.page_count > 0 && (
-                        <>
-                          <span>•</span>
-                          <span>{doc.page_count} pages</span>
-                        </>
-                      )}
-                      {doc.truth_type && (
-                        <>
-                          <span>•</span>
-                          <span>{getTruthLabel(doc.truth_type)}</span>
-                        </>
-                      )}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.25rem', display: 'flex', gap: '0.75rem' }}>
-                      {doc.created_at && (
-                        <span title={new Date(doc.created_at).toLocaleString()}>
-                          📅 {new Date(doc.created_at).toLocaleDateString()}
-                        </span>
-                      )}
-                      {doc.uploaded_by_email && (
-                        <span title={doc.uploaded_by_email}>
-                          👤 {doc.uploaded_by_email.split('@')[0]}
-                        </span>
-                      )}
-                      {doc.content_domain?.length > 0 && (
-                        <span>🏷️ {doc.content_domain.slice(0, 2).join(', ')}</span>
-                      )}
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                      {doc.chunk_count || doc.chunks || 0} chunks
+                      {doc.truth_type && ` • ${getTruthLabel(doc.truth_type)}`}
+                      {doc.upload_date && ` • ${new Date(doc.upload_date).toLocaleDateString()}`}
                     </div>
                   </div>
                 </div>
@@ -841,44 +790,13 @@ function FilesPanel({ c, project, targetScope }) {
                         <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {file.filename}
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.15rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', gap: '0.75rem', marginTop: '0.15rem' }}>
                           <span>{getTruthLabel(file.truth_type)}</span>
-                          {(file.table_count > 0 || file.row_count > 0) && (
-                            <>
-                              <span>•</span>
-                              <span>{file.table_count || 1} table(s)</span>
-                              <span>•</span>
-                              <span>{(file.row_count || 0).toLocaleString()} rows</span>
-                            </>
-                          )}
-                          {file.chunk_count > 0 && (
-                            <>
-                              <span>•</span>
-                              <span>{file.chunk_count} chunks</span>
-                            </>
-                          )}
+                          {file.chunk_count && <span>{file.chunk_count} chunks</span>}
                           {fileRules.length > 0 && (
-                            <>
-                              <span>•</span>
-                              <span style={{ color: c.royalPurple, fontWeight: 500 }}>
-                                {fileRules.length} rules
-                              </span>
-                            </>
-                          )}
-                        </div>
-                        <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.25rem', display: 'flex', gap: '0.75rem' }}>
-                          {file.created_at && (
-                            <span title={new Date(file.created_at).toLocaleString()}>
-                              📅 {new Date(file.created_at).toLocaleDateString()}
+                            <span style={{ color: c.royalPurple, fontWeight: 500 }}>
+                              {fileRules.length} rules extracted
                             </span>
-                          )}
-                          {file.uploaded_by_email && (
-                            <span title={file.uploaded_by_email}>
-                              👤 {file.uploaded_by_email.split('@')[0]}
-                            </span>
-                          )}
-                          {file.content_domain?.length > 0 && (
-                            <span>🏷️ {file.content_domain.join(', ')}</span>
                           )}
                         </div>
                       </div>
