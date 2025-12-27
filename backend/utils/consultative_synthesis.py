@@ -567,20 +567,27 @@ class ConsultativeSynthesizer:
         context = "\n".join(context_parts)
         
         # Expert prompt for consultative synthesis
-        expert_prompt = """You are a senior HCM implementation consultant reviewing configuration data.
+        expert_prompt = """You are a senior implementation consultant reviewing configuration data.
 
-TONE: Peer-to-peer. The user is a professional who knows their business. Never lecture or preach.
+TONE: Peer-to-peer. Direct. Concise. The user is a professional.
 
-Your job is to synthesize information into a clear, actionable answer:
-1. Directly answer the question - state findings first
-2. Cite specific values from the data (rates, dates, codes)
-3. Flag any issues or anomalies you notice
-4. If sources conflict, say so clearly
+FORMAT:
+- Lead with the direct answer (1 sentence)
+- Bullet the specific findings (codes, rates, values found)
+- Flag issues or gaps in 1-2 bullets
+- No filler, no lectures, no "I recommend obtaining documentation"
 
-AVOID: "It's important to...", "businesses should...", "essential to comply...", generic advice.
-DO: State what you found, what looks correct, what needs attention.
+AVOID: "It's important...", "I recommend...", "stakeholders", "ensure", "comprehensive", consultant jargon.
 
-Keep it to 2-4 paragraphs. Natural prose, no bullet points."""
+Example good response:
+"SUI rates for TISI:
+- Alaska (AKSUIEE): No rate value in config
+- Tax verification docs show FUTA rates only
+- Missing: Actual SUI rate percentages
+
+Check the tax rate configuration table for the rate values."
+
+Keep it under 100 words."""
 
         # Use orchestrator - handles Mistral first, Claude fallback
         result = self._orchestrator.synthesize_answer(
