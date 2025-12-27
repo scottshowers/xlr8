@@ -526,14 +526,20 @@ function FilesPanel({ c, project, targetScope }) {
       return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library';
     }
     return !project || f.project === project.id || f.project === project.name;
-  });
+  }).filter((file, index, self) => 
+    // Deduplicate by filename - keep first occurrence
+    index === self.findIndex(f => f.filename === file.filename)
+  );
   
   const docs = (documents?.documents || []).filter(d => {
     if (isGlobalScope) {
       return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library';
     }
     return !project || d.project === project.id || d.project === project.name;
-  });
+  }).filter((doc, index, self) => 
+    // Deduplicate by filename - keep first occurrence
+    index === self.findIndex(d => d.filename === doc.filename)
+  );
   
   // Reference library files (always global)
   const refFiles = referenceFiles?.files || [];
@@ -683,26 +689,18 @@ function FilesPanel({ c, project, targetScope }) {
                 <p style={{ margin: 0 }}>No structured data yet</p>
               </div>
             ) : (
-              structuredFiles.map((file, i) => {
-                const uploadedAt = file.created_at ? new Date(file.created_at).toLocaleDateString() : null;
-                const uploadedBy = file.uploaded_by;
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
-                    <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {file.display_name || file.filename}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                        {file.sheets?.length || 1} table(s) • {(file.row_count || 0).toLocaleString()} rows
-                        {file.truth_type && ` • ${getTruthLabel(file.truth_type)}`}
-                        {uploadedAt && ` • ${uploadedAt}`}
-                        {uploadedBy && ` • by ${uploadedBy}`}
-                      </div>
+              structuredFiles.map((file, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
+                  <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                      {file.sheets?.length || 1} table(s) • {(file.row_count || 0).toLocaleString()} rows
+                      {file.truth_type && ` • ${getTruthLabel(file.truth_type)}`}
                     </div>
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
         )}
@@ -735,26 +733,18 @@ function FilesPanel({ c, project, targetScope }) {
                 <p style={{ margin: 0 }}>No documents yet</p>
               </div>
             ) : (
-              docs.map((doc, i) => {
-                const uploadedAt = doc.created_at ? new Date(doc.created_at).toLocaleDateString() : null;
-                const uploadedBy = doc.uploaded_by;
-                return (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
-                    <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(doc.truth_type)}</span>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {doc.display_name || doc.filename}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                        {doc.chunk_count || doc.chunks || 0} chunks
-                        {doc.truth_type && ` • ${getTruthLabel(doc.truth_type)}`}
-                        {uploadedAt && ` • ${uploadedAt}`}
-                        {uploadedBy && ` • by ${uploadedBy}`}
-                      </div>
+              docs.map((doc, i) => (
+                <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
+                  <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(doc.truth_type)}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                      {doc.chunk_count || doc.chunks || 0} chunks
+                      {doc.truth_type && ` • ${getTruthLabel(doc.truth_type)}`}
                     </div>
                   </div>
-                );
-              })
+                </div>
+              ))
             )}
           </div>
         )}
@@ -791,8 +781,6 @@ function FilesPanel({ c, project, targetScope }) {
               ) : (
                 refFiles.map((file, i) => {
                   const fileRules = extractedRules.filter(r => r.source_document === file.filename);
-                  const uploadedAt = file.created_at ? new Date(file.created_at).toLocaleDateString() : null;
-                  const uploadedBy = file.uploaded_by;
                   return (
                     <div key={i} style={{ 
                       display: 'flex', alignItems: 'center', gap: '0.75rem', 
@@ -803,9 +791,9 @@ function FilesPanel({ c, project, targetScope }) {
                       <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {file.display_name || file.filename}
+                          {file.filename}
                         </div>
-                        <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', gap: '0.75rem', marginTop: '0.15rem', flexWrap: 'wrap' }}>
+                        <div style={{ fontSize: '0.75rem', color: c.textMuted, display: 'flex', gap: '0.75rem', marginTop: '0.15rem' }}>
                           <span>{getTruthLabel(file.truth_type)}</span>
                           {file.chunk_count && <span>{file.chunk_count} chunks</span>}
                           {fileRules.length > 0 && (
@@ -813,8 +801,6 @@ function FilesPanel({ c, project, targetScope }) {
                               {fileRules.length} rules extracted
                             </span>
                           )}
-                          {uploadedAt && <span>{uploadedAt}</span>}
-                          {uploadedBy && <span>by {uploadedBy}</span>}
                         </div>
                       </div>
                       <button
