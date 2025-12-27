@@ -252,18 +252,21 @@ export default function CustomerGenome({ isOpen, onClose }) {
       const docs = registry.documents || [];
       const files = structured.files || [];
       
-      // Calculate traits from real data
-      const totalDocs = docs.length || 1;
-      const totalFiles = files.length || 1;
+      // Calculate traits from real data - show actual zeros when empty
+      const totalDocs = docs.length;
+      const totalFiles = files.length;
+      const totalRows = files.reduce((sum, f) => sum + (f.total_rows || 0), 0);
       const patterns = learning.patterns_count || learning.cached_queries || 0;
       const queries = learning.total_queries || 0;
       
-      // Generate genome based on actual usage
-      const dataComplexity = Math.min(95, Math.round(40 + (totalFiles * 5) + Math.random() * 20));
-      const relationships = structured.relationships_count || Math.round(20 + Math.random() * 40);
-      const querySophistication = Math.min(95, Math.round(30 + (queries * 0.5) + Math.random() * 30));
-      const standardsCoverage = Math.min(98, Math.round(50 + (patterns * 2) + Math.random() * 20));
-      const activityLevel = Math.min(95, Math.round(40 + (totalDocs * 3) + Math.random() * 25));
+      // Only show real metrics, not inflated random values
+      const hasData = totalDocs > 0 || totalFiles > 0;
+      
+      const dataComplexity = hasData ? Math.min(95, Math.round(20 + (totalFiles * 8) + (totalRows / 10000))) : 0;
+      const relationships = structured.relationships_count || 0;
+      const querySophistication = queries > 0 ? Math.min(95, Math.round(20 + (queries * 2) + (patterns * 5))) : 0;
+      const standardsCoverage = hasData ? Math.min(98, Math.round(30 + (patterns * 3) + (totalDocs * 2))) : 0;
+      const activityLevel = hasData ? Math.min(95, Math.round(30 + (totalDocs * 5) + (totalFiles * 3))) : 0;
       
       // Generate unique signature based on project
       const signatureSeed = activeProject?.id || 'default';
@@ -294,7 +297,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
         ],
         stats: {
           since: activeProject?.created_at ? new Date(activeProject.created_at).toLocaleDateString('en-US', { month: 'short', year: 'numeric' }) : 'Today',
-          datapoints: `${((totalDocs * 1000) + (totalFiles * 5000)).toLocaleString()}`,
+          datapoints: totalRows > 0 ? totalRows.toLocaleString() : '0',
           files: totalFiles.toString(),
           queries: queries.toString(),
           patterns: patterns.toString(),
@@ -385,7 +388,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
               margin: 0,
               color: colors.text,
             }}>
-              Customer Genome
+              {genomeData?.name || activeProject?.name || 'Customer'} Genome
             </h2>
             <p style={{ fontSize: '0.75rem', color: colors.textMuted, margin: '0.25rem 0 0 0' }}>
               Unique intelligence fingerprint
