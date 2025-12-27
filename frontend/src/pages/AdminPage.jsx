@@ -8,12 +8,14 @@
  * - Users: User management
  * - Permissions: Role permission grid
  * - Integrations: UKG Connections
+ * - Data Cleanup: Mass delete functionality
+ * - Endpoints: API testing tool
  * 
  * REMOVED: Global Data (use Reference Library), Settings (was empty)
  */
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import PersonaManagement from '../components/PersonaManagement';
 import SecurityTab from '../components/SecurityTab';
 import RolePermissions from '../components/RolePermissions';
@@ -96,6 +98,146 @@ function IntegrationsTab() {
   );
 }
 
+// ==================== DATA CLEANUP TAB ====================
+function CleanupTab() {
+  return (
+    <div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🗑️ Data Cleanup</h3>
+        <p style={{ margin: '0.25rem 0 0', color: COLORS.textLight, fontSize: '0.9rem' }}>
+          Delete tables, documents, and orphaned data. Use Force Wipe to reset all backend storage.
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{
+          background: '#fef2f2',
+          border: '2px solid #fecaca',
+          borderRadius: '12px',
+          padding: '1.5rem',
+        }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>💾</div>
+          <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Selective Delete</div>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '1rem' }}>
+            Choose specific tables or documents to remove
+          </div>
+        </div>
+        
+        <div style={{
+          background: '#fef2f2',
+          border: '2px solid #fecaca',
+          borderRadius: '12px',
+          padding: '1.5rem',
+        }}>
+          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚡</div>
+          <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Force Full Wipe</div>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '1rem' }}>
+            Clear ALL data: DuckDB, ChromaDB, Supabase
+          </div>
+        </div>
+      </div>
+
+      <Link to="/admin/data-cleanup" style={{ textDecoration: 'none' }}>
+        <button style={{
+          padding: '0.75rem 1.5rem',
+          background: '#dc2626',
+          border: 'none',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: 600,
+          fontSize: '0.9rem',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}>
+          🗑️ Open Data Cleanup Tool
+        </button>
+      </Link>
+    </div>
+  );
+}
+
+// ==================== ENDPOINTS TAB ====================
+function EndpointsTab() {
+  return (
+    <div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🔧 API Endpoints</h3>
+        <p style={{ margin: '0.25rem 0 0', color: COLORS.textLight, fontSize: '0.9rem' }}>
+          Test and explore API endpoints. View responses, debug issues, and verify functionality.
+        </p>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{
+          background: '#f0fdf4',
+          border: '2px solid #86efac',
+          borderRadius: '12px',
+          padding: '1rem',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>GET</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Read data</div>
+        </div>
+        <div style={{
+          background: '#eff6ff',
+          border: '2px solid #93c5fd',
+          borderRadius: '12px',
+          padding: '1rem',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>POST</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Create/Update</div>
+        </div>
+        <div style={{
+          background: '#fef2f2',
+          border: '2px solid #fecaca',
+          borderRadius: '12px',
+          padding: '1rem',
+          textAlign: 'center',
+        }}>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>DELETE</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Remove data</div>
+        </div>
+      </div>
+
+      <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem' }}>
+        <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '0.5rem' }}>Quick Endpoints:</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+          {['/api/status', '/api/status/health', '/api/status/structured', '/api/status/documents', '/api/metrics/summary'].map(ep => (
+            <code key={ep} style={{
+              padding: '0.25rem 0.5rem',
+              background: '#e2e8f0',
+              borderRadius: '4px',
+              fontSize: '0.75rem',
+              color: COLORS.text,
+            }}>{ep}</code>
+          ))}
+        </div>
+      </div>
+
+      <Link to="/admin/endpoints" style={{ textDecoration: 'none' }}>
+        <button style={{
+          padding: '0.75rem 1.5rem',
+          background: COLORS.grassGreen,
+          border: 'none',
+          borderRadius: '8px',
+          color: 'white',
+          fontWeight: 600,
+          fontSize: '0.9rem',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+        }}>
+          🔧 Open Endpoints Tool
+        </button>
+      </Link>
+    </div>
+  );
+}
+
 // ==================== MAIN COMPONENT ====================
 export default function AdminPage() {
   const [activeTab, setActiveTab] = useState('system');
@@ -108,6 +250,8 @@ export default function AdminPage() {
     { id: 'users', label: 'Users', icon: '👥', permission: Permissions.USER_MANAGEMENT },
     { id: 'permissions', label: 'Permissions', icon: '🛡️', permission: Permissions.ROLE_PERMISSIONS },
     { id: 'integrations', label: 'Integrations', icon: '🔌', permission: Permissions.OPS_CENTER },
+    { id: 'cleanup', label: 'Data Cleanup', icon: '🗑️', permission: Permissions.OPS_CENTER },
+    { id: 'endpoints', label: 'Endpoints', icon: '🔧', permission: Permissions.OPS_CENTER },
   ];
 
   const visibleTabs = ALL_TABS.filter(tab => {
@@ -143,6 +287,10 @@ export default function AdminPage() {
         return <RolePermissions />;
       case 'integrations':
         return <IntegrationsTab />;
+      case 'cleanup':
+        return <CleanupTab />;
+      case 'endpoints':
+        return <EndpointsTab />;
       default:
         return <SystemMonitor />;
     }
