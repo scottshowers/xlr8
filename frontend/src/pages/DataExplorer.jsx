@@ -887,22 +887,6 @@ export default function DataExplorer() {
             <Trash2 size={16} /> Data Cleanup
           </button>
         </Link>
-        <Link to="/admin-endpoints" style={{ textDecoration: 'none' }}>
-          <button style={{
-            padding: '0.5rem 1rem',
-            background: `${c.accent}15`,
-            color: c.accent,
-            border: `1px solid ${c.accent}40`,
-            borderRadius: 6,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontWeight: 500
-          }}>
-            <Code size={16} /> Admin Endpoints
-          </button>
-        </Link>
       </div>
       
       <style>{`
