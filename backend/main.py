@@ -9,6 +9,7 @@ Updated: December 17, 2025 - Added cleanup router (data deletion endpoints)
 Updated: December 17, 2025 - Replaced vacuum with register_extractor (local LLM + DuckDB)
 Updated: December 23, 2025 - Added smart_router (unified upload endpoint)
 Updated: December 23, 2025 - Added metrics_router (platform analytics)
+Updated: December 27, 2025 - Added classification_router (FIVE TRUTHS transparency layer)
 """
 
 from fastapi import FastAPI
@@ -166,6 +167,14 @@ try:
 except ImportError as e:
     METRICS_AVAILABLE = False
     logging.warning(f"Metrics router import failed: {e}")
+
+# Import classification router (FIVE TRUTHS transparency layer)
+try:
+    from backend.routers import classification_router
+    CLASSIFICATION_AVAILABLE = True
+except ImportError as e:
+    CLASSIFICATION_AVAILABLE = False
+    logging.warning(f"Classification router import failed: {e}")
 
 # Standards endpoints are now in upload.py (no separate router needed)
 
@@ -397,6 +406,13 @@ if METRICS_AVAILABLE:
 else:
     logger.warning("Metrics router not available")
 
+# Register classification router if available (FIVE TRUTHS transparency)
+if CLASSIFICATION_AVAILABLE:
+    app.include_router(classification_router.router, prefix="/api", tags=["classification"])
+    logger.info("Classification router registered at /api/classification")
+else:
+    logger.warning("Classification router not available")
+
 
 @app.get("/api/debug/imports")
 async def debug_imports():
@@ -437,6 +453,13 @@ async def debug_imports():
         results['cleanup_router'] = 'OK'
     except Exception as e:
         results['cleanup_router'] = f'ERROR: {e}'
+    
+    # Check classification service
+    try:
+        from backend.utils.classification_service import ClassificationService
+        results['classification_service'] = 'OK'
+    except Exception as e:
+        results['classification_service'] = f'ERROR: {e}'
     
     return results
 
