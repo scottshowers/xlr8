@@ -91,7 +91,6 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
         "duckdb_metadata": {"cleaned": 0, "errors": []},
         "chromadb": {"cleaned": 0, "errors": []},
         "playbook_cache": {"cleaned": 0, "errors": []},
-        "rule_registry": {"cleaned": 0, "errors": []},
     }
     
     # =========================================================================
@@ -332,21 +331,6 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 collection.delete(ids=batch)
             results["chromadb"]["cleaned"] = len(ids_to_delete)
             logger.info(f"[DEEP-CLEAN] Removed {len(ids_to_delete)} ChromaDB chunks")
-        
-        # Also clear the standards_rules collection (from standards_processor)
-        if wipe_all:
-            try:
-                rules_collection = rag.client.get_or_create_collection(name="standards_rules")
-                all_rules = rules_collection.get(include=["metadatas"], limit=10000)
-                rule_ids = all_rules.get("ids", [])
-                if rule_ids:
-                    for i in range(0, len(rule_ids), 100):
-                        batch = rule_ids[i:i+100]
-                        rules_collection.delete(ids=batch)
-                    results["chromadb"]["cleaned"] += len(rule_ids)
-                    logger.info(f"[DEEP-CLEAN] Removed {len(rule_ids)} standards_rules chunks")
-            except Exception as e:
-                logger.warning(f"[DEEP-CLEAN] standards_rules collection cleanup: {e}")
             
     except Exception as e:
         logger.error(f"[DEEP-CLEAN] ChromaDB cleanup failed: {e}")
@@ -384,8 +368,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                     "playbook_suppressions",   # Suppressed findings
                     "intelligence_findings",   # Analysis findings
                     "intelligence_tasks",      # Task assignments
-                    "extracted_rules",         # Rules from standards processor
-                    "rule_documents",          # Standards documents with rules
+                    # NOTE: project_relationships, standards_rules, standards_documents 
+                    # handled separately below (different key columns)
                 ]
                 
                 for table in tables_to_wipe:
@@ -404,6 +388,24 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                         if "does not exist" not in str(e).lower():
                             results["supabase"]["errors"].append(f"{table}: {str(e)}")
                             logger.warning(f"[DEEP-CLEAN] {table} wipe: {e}")
+                
+                # Handle tables with non-standard keys
+                special_tables = [
+                    ("project_relationships", "project_name"),  # Uses project_name not project_id
+                    ("standards_rules", "rule_id"),             # Uses rule_id
+                    ("standards_documents", "id"),              # Standard id
+                ]
+                for table, key_col in special_tables:
+                    try:
+                        # Always delete all for these tables (they're global or use different keys)
+                        result = supabase.table(table).delete().neq(key_col, "").execute()
+                        count = len(result.data) if result.data else 0
+                        if count > 0:
+                            results["supabase"]["cleaned"] += count
+                            logger.info(f"[DEEP-CLEAN] Wiped {count} {table} entries")
+                    except Exception as e:
+                        if "does not exist" not in str(e).lower():
+                            logger.debug(f"[DEEP-CLEAN] {table}: {e}")
                 
                 # Reset platform_metrics (don't delete, just zero out)
                 try:
@@ -443,23 +445,6 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
     except Exception as e:
         # Cache might not exist, that's fine
         logger.debug(f"[DEEP-CLEAN] Playbook cache clear: {e}")
-    
-    # =========================================================================
-    # STEP 6: CLEAR RULE REGISTRY (in-memory singleton)
-    # =========================================================================
-    if wipe_all:
-        try:
-            from utils.standards_processor import get_rule_registry
-            registry = get_rule_registry()
-            rule_count = len(registry.rules)
-            doc_count = len(registry.documents)
-            registry.rules.clear()
-            registry.documents.clear()
-            results["rule_registry"] = {"cleaned": rule_count + doc_count, "errors": []}
-            logger.info(f"[DEEP-CLEAN] Cleared rule registry: {rule_count} rules, {doc_count} documents")
-        except Exception as e:
-            logger.warning(f"[DEEP-CLEAN] Rule registry clear failed: {e}")
-            results["rule_registry"] = {"cleaned": 0, "errors": [str(e)]}
     
     # =========================================================================
     # SUMMARY
