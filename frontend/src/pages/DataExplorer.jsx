@@ -860,35 +860,6 @@ export default function DataExplorer() {
         </div>
       )}
 
-      {/* Quick Actions Bar */}
-      <div style={{ 
-        marginTop: '1.5rem', 
-        padding: '1rem', 
-        background: c.cardBg, 
-        border: `1px solid ${c.border}`, 
-        borderRadius: 10,
-        display: 'flex',
-        gap: '1rem',
-        justifyContent: 'flex-end'
-      }}>
-        <Link to="/data-cleanup" style={{ textDecoration: 'none' }}>
-          <button style={{
-            padding: '0.5rem 1rem',
-            background: `${c.scarletSage}15`,
-            color: c.scarletSage,
-            border: `1px solid ${c.scarletSage}40`,
-            borderRadius: 6,
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontWeight: 500
-          }}>
-            <Trash2 size={16} /> Data Cleanup
-          </button>
-        </Link>
-      </div>
-      
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
         .spin { animation: spin 1s linear infinite; }
