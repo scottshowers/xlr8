@@ -87,6 +87,7 @@ import logging
 import threading
 import pandas as pd
 import duckdb
+import time
 from typing import Dict, List, Any, Optional, Tuple, Callable
 from datetime import datetime
 import hashlib
@@ -366,8 +367,8 @@ class StructuredDataHandler:
         # Ensure directory exists
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         
-        # Connect to DuckDB
-        self.conn = duckdb.connect(db_path)
+        # Connect to DuckDB with WAL corruption recovery
+        self.conn = self._connect_with_recovery(db_path)
         
         # Initialize encryption
         self.encryptor = FieldEncryptor()
@@ -376,6 +377,53 @@ class StructuredDataHandler:
         self._init_metadata_table()
         
         logger.info(f"StructuredDataHandler initialized with DuckDB at {db_path}")
+    
+    def _connect_with_recovery(self, db_path: str):
+        """
+        Connect to DuckDB with automatic WAL corruption recovery.
+        
+        If the WAL file is corrupted (common after migrations/crashes),
+        we backup and remove it, then retry the connection.
+        """
+        wal_path = f"{db_path}.wal"
+        
+        try:
+            return duckdb.connect(db_path)
+        except Exception as e:
+            error_str = str(e)
+            
+            # Check for WAL replay failure
+            if "replaying WAL" in error_str or "WAL file" in error_str:
+                logger.warning(f"[RECOVERY] WAL corruption detected: {error_str[:200]}")
+                
+                # Backup the corrupted WAL
+                if os.path.exists(wal_path):
+                    backup_path = f"{wal_path}.corrupted.{int(time.time())}"
+                    try:
+                        os.rename(wal_path, backup_path)
+                        logger.warning(f"[RECOVERY] Backed up corrupted WAL to {backup_path}")
+                    except Exception as backup_e:
+                        logger.warning(f"[RECOVERY] Could not backup WAL: {backup_e}")
+                        # Try to just delete it
+                        try:
+                            os.remove(wal_path)
+                            logger.warning(f"[RECOVERY] Deleted corrupted WAL file")
+                        except Exception as del_e:
+                            logger.error(f"[RECOVERY] Could not delete WAL: {del_e}")
+                            raise e  # Re-raise original error
+                
+                # Retry connection
+                logger.warning("[RECOVERY] Retrying DuckDB connection without WAL...")
+                try:
+                    conn = duckdb.connect(db_path)
+                    logger.warning("[RECOVERY] ✓ DuckDB connection recovered successfully!")
+                    return conn
+                except Exception as retry_e:
+                    logger.error(f"[RECOVERY] Retry failed: {retry_e}")
+                    raise retry_e
+            else:
+                # Not a WAL error, re-raise
+                raise e
     
     def _init_metadata_table(self):
         """Create metadata tables if they don't exist"""
@@ -871,7 +919,8 @@ class StructuredDataHandler:
         version: int,
         encrypt_pii: bool,
         all_encrypted_cols: list,
-        results: dict
+        results: dict,
+        uploaded_by: str = None
     ) -> bool:
         """
         Store a single dataframe as a DuckDB table.
@@ -938,8 +987,8 @@ class StructuredDataHandler:
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project,
                 file_name,
@@ -952,6 +1001,7 @@ class StructuredDataHandler:
                 json.dumps(likely_keys),
                 json.dumps(encrypted_cols),
                 None,  # truth_type - set by smart_router if provided
+                uploaded_by,
                 version
             ])
             
@@ -2213,13 +2263,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         file_name: str,
         encrypt_pii: bool = False,  # Disabled - security at perimeter (Railway, API auth, HTTPS)
         keep_previous_version: bool = True,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        uploaded_by: str = None
     ) -> Dict[str, Any]:
         """
         Store Excel file in DuckDB with encryption and versioning.
         Each sheet becomes a table.
         
         v5.0: Added progress_callback for real-time progress updates.
+        v5.21: Added uploaded_by for user tracking.
         
         Args:
             file_path: Path to Excel file
@@ -2228,6 +2280,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             encrypt_pii: Whether to encrypt PII columns
             keep_previous_version: Whether to keep previous version for comparison
             progress_callback: Optional callback function(percent: int, message: str)
+            uploaded_by: Email of user who uploaded the file
         
         Returns schema info for Claude to use in queries.
         """
@@ -2393,7 +2446,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 self._store_single_table(
                                     sub_df, project, file_name, 
                                     f"{sheet_name} - {sub_table_name}",
-                                    version, encrypt_pii, all_encrypted_cols, results
+                                    version, encrypt_pii, all_encrypted_cols, results,
+                                    uploaded_by=uploaded_by
                                 )
                             elapsed = (datetime.now() - sheet_start_time).total_seconds()
                             logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(horizontal_tables)} horizontal tables ({elapsed:.1f}s)")
@@ -2406,7 +2460,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                                 self._store_single_table(
                                     sub_df, project, file_name,
                                     f"{sheet_name} - {sub_table_name}",
-                                    version, encrypt_pii, all_encrypted_cols, results
+                                    version, encrypt_pii, all_encrypted_cols, results,
+                                    uploaded_by=uploaded_by
                                 )
                             elapsed = (datetime.now() - sheet_start_time).total_seconds()
                             logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(vertical_tables)} vertical tables ({elapsed:.1f}s)")
@@ -2417,7 +2472,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     # ---------------------------------------------------------
                     self._store_single_table(
                         df, project, file_name, sheet_name,
-                        version, encrypt_pii, all_encrypted_cols, results
+                        version, encrypt_pii, all_encrypted_cols, results,
+                        uploaded_by=uploaded_by
                     )
                     
                     elapsed = (datetime.now() - sheet_start_time).total_seconds()
@@ -2638,18 +2694,21 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         file_path: str,
         project: str,
         file_name: str,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        uploaded_by: str = None
     ) -> Dict[str, Any]:
         """
         Store CSV file in DuckDB.
         
         v5.0: Added progress_callback for real-time progress updates.
+        v5.21: Added uploaded_by for user tracking.
         
         Args:
             file_path: Path to CSV file
             project: Project name
             file_name: Original filename
             progress_callback: Optional callback function(percent: int, message: str)
+            uploaded_by: Email of user who uploaded the file
             
         Returns:
             Dict with storage results
@@ -2714,12 +2773,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, truth_type, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project, file_name, 'data', table_name, display_name,
                 json.dumps(columns_info), len(df.columns), len(df), json.dumps(likely_keys),
-                None  # truth_type - set by smart_router if provided
+                None,  # truth_type - set by smart_router if provided
+                uploaded_by
             ])
             
             self.conn.commit()
@@ -2763,7 +2823,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         project: str,
         file_name: str,
         sheet_name: str = 'data',
-        source_type: str = 'pdf'
+        source_type: str = 'pdf',
+        uploaded_by: str = None
     ) -> Dict[str, Any]:
         """
         Store a DataFrame in DuckDB with proper metadata.
@@ -2771,12 +2832,15 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         Used by smart_pdf_analyzer and other sources that produce DataFrames
         directly instead of files.
         
+        v5.21: Added uploaded_by for user tracking.
+        
         Args:
             df: DataFrame to store
             project: Project name
             file_name: Original source filename
             sheet_name: Sheet/section name (default 'data')
             source_type: Source type for metadata (default 'pdf')
+            uploaded_by: Email of user who uploaded the file
             
         Returns:
             Dict with storage results including table_name, row_count, etc.
@@ -2868,8 +2932,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             with self._db_lock:
                 self.conn.execute("""
                     INSERT INTO _schema_metadata 
-                    (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, version, is_current)
-                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                 """, [
                     project,
                     file_name,
@@ -2882,6 +2946,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     json.dumps([]),  # likely_keys
                     json.dumps([]),  # encrypted_columns
                     None,  # truth_type - set by smart_router if provided
+                    uploaded_by,
                     version
                 ])
                 logger.warning("[STORE_DF] INSERT executed")
