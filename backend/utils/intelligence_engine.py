@@ -35,7 +35,7 @@ UPDATES:
            * Adds "so-what" context and confidence signaling
            * Falls back to template formatting if LLM unavailable
 - v5.19.0: COLUMN VALUE MATCHING - Table selection checks column VALUES:
-           * Queries _column_profiles.top_values_json during table scoring
+           * Queries _column_profiles.distinct_values during table scoring
            * "show me SUI rates" matches tables where type_of_tax contains "SUI"
            * +80 score boost when query word matches a stored column value
            * Connects config validation valid_values to query routing
@@ -3484,22 +3484,23 @@ class IntelligenceEngine:
             # =================================================================
             try:
                 if self.structured_handler and self.structured_handler.conn:
-                    # Get top values from column profiles for this table
+                    # Get distinct values from column profiles for this table
+                    # NOTE: Column is 'distinct_values' not 'top_values_json'
                     value_profiles = self.structured_handler.conn.execute("""
-                        SELECT column_name, top_values_json
+                        SELECT column_name, distinct_values
                         FROM _column_profiles 
                         WHERE LOWER(table_name) = LOWER(?)
-                        AND top_values_json IS NOT NULL
-                        AND top_values_json != '[]'
+                        AND distinct_values IS NOT NULL
+                        AND distinct_values != '[]'
                     """, [table.get('table_name', '')]).fetchall()
                     
-                    for col_name, top_values_json in value_profiles:
-                        if not top_values_json:
+                    for col_name, distinct_values_json in value_profiles:
+                        if not distinct_values_json:
                             continue
                         try:
-                            top_values = json.loads(top_values_json)
+                            distinct_values = json.loads(distinct_values_json)
                             # Check if any query word matches a column value
-                            for val_info in top_values:
+                            for val_info in distinct_values:
                                 val = str(val_info.get('value', '')).lower() if isinstance(val_info, dict) else str(val_info).lower()
                                 if not val or len(val) < 2:
                                     continue
