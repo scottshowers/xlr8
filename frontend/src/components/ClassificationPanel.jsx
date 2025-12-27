@@ -92,13 +92,62 @@ export default function ClassificationPanel({ tableName, onClose }) {
     setLoading(true);
     setError(null);
     try {
+      // Try classification endpoint first
       const res = await api.get(`/classification/table/${encodeURIComponent(tableName)}`);
-      setClassification(res.data?.classification);
+      let classData = res.data?.classification;
+      
+      // If columns are empty, fall back to table-profile endpoint which has the data
+      if (!classData?.columns || classData.columns.length === 0) {
+        try {
+          const profileRes = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
+          const profile = profileRes.data;
+          
+          // Build columns from profile data
+          const columns = (profile.columns || []).map(col => ({
+            column_name: col.name,
+            data_type: col.type || 'VARCHAR',
+            inferred_type: inferType(col),
+            total_count: profile.total_rows || profile.row_count || 0,
+            null_count: col.null_count || 0,
+            fill_rate: col.fill_rate || 100,
+            distinct_count: col.distinct_values || 0,
+            is_categorical: (col.distinct_values || 0) < 50 && (col.distinct_values || 0) > 0,
+            is_likely_key: col.name?.toLowerCase().includes('_id') || col.name?.toLowerCase().includes('_code'),
+            distinct_values: [],
+            value_distribution: {},
+            sample_values: col.top_values || [],
+            filter_category: null,
+            filter_priority: 0,
+            classification_reason: 'Inferred from profile data',
+          }));
+          
+          classData = {
+            ...classData,
+            columns,
+            column_count: columns.length,
+            row_count: profile.total_rows || profile.row_count || classData?.row_count || 0,
+          };
+        } catch (profileErr) {
+          console.warn('Profile fallback failed:', profileErr);
+        }
+      }
+      
+      setClassification(classData);
     } catch (err) {
       setError(err.response?.data?.detail || err.message);
     } finally {
       setLoading(false);
     }
+  };
+  
+  // Helper to infer column type
+  const inferType = (col) => {
+    const name = (col.name || '').toLowerCase();
+    if (name.includes('date') || name.includes('_at') || name.includes('time')) return 'date';
+    if (name.includes('amount') || name.includes('rate') || name.includes('total') || name.includes('count')) return 'numeric';
+    if (name.includes('is_') || name.includes('has_') || name.includes('flag')) return 'boolean';
+    if ((col.distinct_values || 0) < 20) return 'categorical';
+    return 'text';
   };
   
   const toggleColumn = (colName) => {
