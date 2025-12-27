@@ -165,6 +165,16 @@ function AppRoutes() {
           <ProtectedRoute><Layout><AdminDashboard /></Layout></ProtectedRoute>
         } />
         
+        {/* Data Cleanup - Admin tool for mass delete */}
+        <Route path="/admin/data-cleanup" element={
+          <ProtectedRoute><Layout><DataCleanup /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Admin Endpoints - API testing */}
+        <Route path="/admin/endpoints" element={
+          <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
+        } />
+        
         {/* ====== UTILITY ROUTES ====== */}
         
         {/* Data Health (renamed from Data Model) */}
@@ -172,17 +182,11 @@ function AppRoutes() {
           <ProtectedRoute><Layout><DataHealthPage /></Layout></ProtectedRoute>
         } />
         
-        {/* Data Cleanup - Delete tables/files */}
-        <Route path="/data-cleanup" element={
-          <ProtectedRoute><Layout><DataCleanup /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Admin Endpoints - API testing */}
-        <Route path="/admin-endpoints" element={
-          <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
-        } />
-        
         {/* ====== LEGACY REDIRECTS ====== */}
+        
+        {/* Old admin tool paths redirect to new locations */}
+        <Route path="/data-cleanup" element={<Navigate to="/admin/data-cleanup" replace />} />
+        <Route path="/admin-endpoints" element={<Navigate to="/admin/endpoints" replace />} />
         
         <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
         <Route path="/standards" element={<Navigate to="/reference-library" replace />} />
