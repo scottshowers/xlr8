@@ -65,14 +65,30 @@ export default function DataCleanup() {
         for (const file of data.files) {
           if (file.sheets && Array.isArray(file.sheets)) {
             for (const sheet of file.sheets) {
+              // Generate friendly display name
+              // Priority: explicit display_name > file.filename > sheet.sheet_name > table_name
+              let displayName = sheet.display_name;
+              if (!displayName) {
+                // Use filename without extension, cleaned up
+                const baseName = (file.filename || '').replace(/\.[^/.]+$/, '');
+                if (file.sheets.length > 1 && sheet.sheet_name && sheet.sheet_name !== 'data') {
+                  // Multi-sheet file: "Filename - Sheet"
+                  displayName = `${baseName} - ${sheet.sheet_name}`;
+                } else {
+                  displayName = baseName || sheet.sheet_name || sheet.table_name;
+                }
+              }
+              
               allTables.push({
                 table_name: sheet.table_name,
-                display_name: sheet.display_name || sheet.sheet_name || file.filename,
+                display_name: displayName,
                 row_count: sheet.row_count || 0,
                 column_count: sheet.column_count || sheet.columns?.length || 0,
                 file_name: file.filename,
                 sheet_name: sheet.sheet_name,
-                project: file.project
+                project: file.project,
+                created_at: sheet.created_at || file.loaded_at,
+                uploaded_by: sheet.uploaded_by
               });
             }
           }
