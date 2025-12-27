@@ -1520,6 +1520,7 @@ async def reset_all_documents():
         # Reset standards rules and documents
         standards_rules_count = 0
         standards_docs_count = 0
+        project_rels_count = 0
         try:
             from utils.database.supabase_client import get_supabase
             supabase = get_supabase()
@@ -1539,6 +1540,14 @@ async def reset_all_documents():
                     logger.warning(f"⚠️ Deleted {standards_docs_count} standards documents")
                 except Exception as e:
                     logger.debug(f"standards_documents cleanup: {e}")
+                
+                # Clear project_relationships
+                try:
+                    rels_result = supabase.table('project_relationships').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+                    project_rels_count = len(rels_result.data or [])
+                    logger.warning(f"⚠️ Deleted {project_rels_count} project relationships")
+                except Exception as e:
+                    logger.debug(f"project_relationships cleanup: {e}")
         except Exception as std_e:
             logger.error(f"Standards reset error: {std_e}")
         
@@ -1550,7 +1559,8 @@ async def reset_all_documents():
                 "supabase_documents": doc_count,
                 "registry_entries": registry_count,
                 "standards_rules": standards_rules_count,
-                "standards_documents": standards_docs_count
+                "standards_documents": standards_docs_count,
+                "project_relationships": project_rels_count
             }
         }
     except Exception as e:
