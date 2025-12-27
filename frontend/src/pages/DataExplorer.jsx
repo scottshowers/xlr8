@@ -793,28 +793,24 @@ export default function DataExplorer() {
             <div style={{ display: 'grid', gap: '0.5rem' }}>
               {[
                 { 
-                  name: 'Orphaned Tables', 
-                  desc: 'DuckDB tables without registry entry',
-                  passed: healthIssues.filter(i => i.type === 'orphaned_table').length === 0,
-                  count: healthIssues.filter(i => i.type === 'orphaned_table').length,
-                },
-                { 
-                  name: 'Registry Sync', 
-                  desc: 'Document registry matches stored data',
-                  passed: healthIssues.filter(i => i.type === 'registry_mismatch').length === 0,
-                  count: healthIssues.filter(i => i.type === 'registry_mismatch').length,
-                },
-                { 
-                  name: 'ChromaDB Orphans', 
-                  desc: 'Embedded chunks with valid sources',
-                  passed: healthIssues.filter(i => i.type === 'orphaned_chunk').length === 0,
-                  count: healthIssues.filter(i => i.type === 'orphaned_chunk').length,
+                  name: 'Table Registration', 
+                  desc: 'All DuckDB tables have registry entries',
+                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('orphan')),
                 },
                 { 
                   name: 'Row Count Integrity', 
-                  desc: 'Stored row counts match actual data',
-                  passed: healthIssues.filter(i => i.type === 'count_mismatch').length === 0,
-                  count: healthIssues.filter(i => i.type === 'count_mismatch').length,
+                  desc: 'Stored counts match actual data',
+                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('mismatch')),
+                },
+                { 
+                  name: 'Fill Rate Check', 
+                  desc: 'Columns have acceptable data coverage',
+                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('fill')),
+                },
+                { 
+                  name: 'Cross-System Sync', 
+                  desc: 'DuckDB, ChromaDB, and Registry aligned',
+                  passed: (healthIssues || []).length === 0,
                 },
               ].map((check, i) => (
                 <div key={i} style={{
@@ -841,7 +837,7 @@ export default function DataExplorer() {
                     color: check.passed ? c.success : c.scarletSage,
                     borderRadius: 4,
                   }}>
-                    {check.passed ? 'PASS' : `${check.count} issue${check.count !== 1 ? 's' : ''}`}
+                    {check.passed ? 'PASS' : 'ISSUE'}
                   </div>
                 </div>
               ))}
@@ -849,7 +845,7 @@ export default function DataExplorer() {
           </div>
           
           {/* Issues section */}
-          {healthIssues.length === 0 ? (
+          {(!healthIssues || healthIssues.length === 0) ? (
             <div style={{ 
               textAlign: 'center', padding: '2rem', 
               background: `${c.success}08`, borderRadius: 8,
@@ -860,7 +856,7 @@ export default function DataExplorer() {
                 All checks passed!
               </p>
               <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: 0 }}>
-                No data integrity issues detected across {tables.length} table(s).
+                No data integrity issues detected across {(tables || []).length} table(s).
               </p>
             </div>
           ) : (
@@ -908,7 +904,6 @@ export default function DataExplorer() {
           }}>
             <strong>How health is determined:</strong> XLR8 checks that all stored tables are registered, 
             row counts match between registry and actual data, and no orphaned embeddings exist in ChromaDB.
-            Run playbooks to check business rule compliance.
           </div>
         </div>
       )}
