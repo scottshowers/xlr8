@@ -487,6 +487,9 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'sheets': [],
                     'total_rows': 0,
                     'loaded_at': None,
+                    'uploaded_by': table.get('uploaded_by', ''),
+                    'uploaded_at': table.get('uploaded_at', ''),
+                    'truth_type': table.get('truth_type', ''),
                     'source_type': source_type
                 }
             
