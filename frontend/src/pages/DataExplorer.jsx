@@ -315,7 +315,7 @@ export default function DataExplorer() {
 
   const totalTables = tables.length;
   const totalColumns = tables.reduce((sum, t) => sum + (t.columns?.length || 0), 0);
-  const totalIssues = healthIssues.length;
+  const totalIssues = healthIssues?.length || 0;
 
   if (loading) {
     return (
@@ -404,7 +404,7 @@ export default function DataExplorer() {
           <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
             <span style={{ fontSize: '1.5rem' }}>🔗</span>
             <div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{relationships.length}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{relationships?.length || 0}</div>
               <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Relationships</div>
             </div>
           </div>
@@ -632,25 +632,11 @@ export default function DataExplorer() {
       {/* Relationships Tab */}
       {activeTab === 'relationships' && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
-              <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-              Detected Relationships ({relationships.length})
-            </h3>
-            <button
-              onClick={() => alert('Relationship editor coming soon - will allow adding/editing/removing relationships')}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.4rem 0.75rem', background: `${c.primary}15`,
-                border: `1px solid ${c.primary}40`, borderRadius: 6,
-                fontSize: '0.75rem', color: c.primary, cursor: 'pointer',
-              }}
-            >
-              <Edit3 size={12} /> Edit Mappings
-            </button>
-          </div>
-          
-          {relationships.length === 0 ? (
+          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
+            <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Detected Relationships ({relationships?.length || 0})
+          </h3>
+          {(!relationships || relationships.length === 0) ? (
             <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
               <Link2 size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
               <p>No relationships detected yet.</p>
@@ -659,252 +645,104 @@ export default function DataExplorer() {
           ) : (
             <div style={{ display: 'grid', gap: '0.75rem' }}>
               {relationships.map((rel, i) => {
-                // NORMALIZE: Handle all field name formats
-                // Backend may return: source_table/target_table OR from_table/to_table
-                // Column may be: source_column/target_column OR from_column/to_column OR just 'column'
+                // Handle both field name formats
                 const fromTable = rel.from_table || rel.source_table || '?';
                 const toTable = rel.to_table || rel.target_table || '?';
                 const fromCol = rel.from_column || rel.source_column || rel.column || '?';
                 const toCol = rel.to_column || rel.target_column || rel.column || '?';
                 const confidence = rel.confidence || rel.type || 'detected';
-                const needsReview = rel.needs_review || confidence === 'low';
                 
                 return (
                   <div key={i} style={{ 
                     display: 'flex', 
                     alignItems: 'center', 
-                    gap: '0.75rem',
+                    gap: '1rem',
                     padding: '0.75rem 1rem',
-                    background: needsReview ? `${c.warning}08` : c.background,
+                    background: c.background,
                     borderRadius: 8,
-                    border: `1px solid ${needsReview ? c.warning + '40' : c.border}`
+                    border: `1px solid ${c.border}`
                   }}>
-                    {/* From side */}
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted, marginBottom: '0.15rem' }}>From</div>
-                      <code style={{ 
-                        fontSize: '0.8rem', color: c.primary,
-                        display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                      }}>
-                        {fromTable}
-                      </code>
-                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                        .{fromCol}
-                      </code>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>From</div>
+                      <code style={{ fontSize: '0.8rem', color: c.primary }}>{fromTable}</code>
+                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{fromCol}</code>
                     </div>
-                    
-                    {/* Arrow */}
-                    <div style={{ color: c.textMuted, fontSize: '1.2rem' }}>→</div>
-                    
-                    {/* To side */}
+                    <div style={{ color: c.textMuted }}>→</div>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted, marginBottom: '0.15rem' }}>To</div>
-                      <code style={{ 
-                        fontSize: '0.8rem', color: c.accent,
-                        display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                      }}>
-                        {toTable}
-                      </code>
-                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                        .{toCol}
-                      </code>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>To</div>
+                      <code style={{ fontSize: '0.8rem', color: c.accent }}>{toTable}</code>
+                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{toCol}</code>
                     </div>
-                    
-                    {/* Confidence badge */}
                     <div style={{ 
                       fontSize: '0.7rem', 
                       padding: '0.25rem 0.5rem', 
-                      background: needsReview ? `${c.warning}15` : `${c.success}15`, 
-                      color: needsReview ? c.warning : c.success, 
-                      borderRadius: 4,
-                      whiteSpace: 'nowrap',
+                      background: `${c.success}15`, 
+                      color: c.success, 
+                      borderRadius: 4 
                     }}>
-                      {needsReview && '⚠ '}{confidence}
-                    </div>
-                    
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: '0.25rem' }}>
-                      <button
-                        onClick={() => alert(`Confirm relationship: ${fromTable}.${fromCol} → ${toTable}.${toCol}`)}
-                        title="Confirm this relationship"
-                        style={{
-                          padding: '0.25rem 0.4rem', background: `${c.success}15`,
-                          border: `1px solid ${c.success}30`, borderRadius: 4,
-                          cursor: 'pointer', color: c.success, fontSize: '0.7rem',
-                        }}
-                      >
-                        ✓
-                      </button>
-                      <button
-                        onClick={() => alert(`Remove relationship: ${fromTable}.${fromCol} → ${toTable}.${toCol}`)}
-                        title="Remove this relationship"
-                        style={{
-                          padding: '0.25rem 0.4rem', background: `${c.scarletSage}15`,
-                          border: `1px solid ${c.scarletSage}30`, borderRadius: 4,
-                          cursor: 'pointer', color: c.scarletSage, fontSize: '0.7rem',
-                        }}
-                      >
-                        ✗
-                      </button>
+                      {confidence}
                     </div>
                   </div>
                 );
               })}
             </div>
           )}
-          
-          {/* Legend */}
-          <div style={{ 
-            marginTop: '1rem', paddingTop: '1rem', borderTop: `1px solid ${c.border}`,
-            display: 'flex', gap: '1.5rem', fontSize: '0.75rem', color: c.textMuted
-          }}>
-            <span>🔗 Detected via column name matching</span>
-            <span>⚠ Low confidence = needs manual review</span>
-          </div>
         </div>
       )}
 
       {/* Data Health Tab */}
       {activeTab === 'health' && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
-              <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-              Data Health
-            </h3>
-            <button
-              onClick={loadData}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.4rem 0.75rem', background: c.background,
-                border: `1px solid ${c.border}`, borderRadius: 6,
-                fontSize: '0.75rem', color: c.textMuted, cursor: 'pointer',
-              }}
-            >
-              <RefreshCw size={12} /> Re-check
-            </button>
-          </div>
-          
-          {/* Health checks performed - always show */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, marginBottom: '0.75rem' }}>
-              Checks Performed
+          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
+            <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Data Health
+          </h3>
+          {(!healthIssues || healthIssues.length === 0) ? (
+            <div style={{ textAlign: 'center', padding: '2rem', color: c.success }}>
+              <CheckCircle size={48} style={{ marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600, margin: '0 0 0.5rem' }}>All data looks healthy!</p>
+              <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0 0 1rem' }}>
+                No integrity issues detected across {tables?.length || 0} table(s).
+              </p>
+              <div style={{ 
+                textAlign: 'left', 
+                background: c.background, 
+                borderRadius: 8, 
+                padding: '1rem',
+                fontSize: '0.8rem',
+                color: c.textMuted 
+              }}>
+                <strong style={{ color: c.text }}>Checks performed:</strong>
+                <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
+                  <li>Registry entries exist for all DuckDB tables</li>
+                  <li>Row counts match between registry and actual data</li>
+                  <li>No orphaned embeddings in ChromaDB</li>
+                  <li>File metadata is complete</li>
+                </ul>
+              </div>
             </div>
-            <div style={{ display: 'grid', gap: '0.5rem' }}>
-              {[
-                { 
-                  name: 'Table Registration', 
-                  desc: 'All DuckDB tables have registry entries',
-                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('orphan')),
-                },
-                { 
-                  name: 'Row Count Integrity', 
-                  desc: 'Stored counts match actual data',
-                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('mismatch')),
-                },
-                { 
-                  name: 'Fill Rate Check', 
-                  desc: 'Columns have acceptable data coverage',
-                  passed: (healthIssues || []).length === 0 || !(healthIssues || []).some(i => (i.type || '').includes('fill')),
-                },
-                { 
-                  name: 'Cross-System Sync', 
-                  desc: 'DuckDB, ChromaDB, and Registry aligned',
-                  passed: (healthIssues || []).length === 0,
-                },
-              ].map((check, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: '0.75rem',
-                  padding: '0.6rem 0.75rem', background: c.background,
-                  borderRadius: 6, border: `1px solid ${c.border}`,
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {healthIssues.map((issue, i) => (
+                <div key={i} style={{ 
+                  padding: '0.75rem 1rem',
+                  background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`,
+                  borderRadius: 8,
+                  border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}40`
                 }}>
-                  {check.passed ? (
-                    <CheckCircle size={16} style={{ color: c.success, flexShrink: 0 }} />
-                  ) : (
-                    <XCircle size={16} style={{ color: c.scarletSage, flexShrink: 0 }} />
-                  )}
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text }}>
-                      {check.name}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                      {check.desc}
-                    </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    {issue.severity === 'error' ? 
+                      <XCircle size={16} style={{ color: c.scarletSage }} /> : 
+                      <AlertTriangle size={16} style={{ color: c.warning }} />
+                    }
+                    <span style={{ fontWeight: 600, color: c.text }}>{issue.type || 'Issue'}</span>
                   </div>
-                  <div style={{
-                    fontSize: '0.7rem', padding: '0.2rem 0.5rem',
-                    background: check.passed ? `${c.success}15` : `${c.scarletSage}15`,
-                    color: check.passed ? c.success : c.scarletSage,
-                    borderRadius: 4,
-                  }}>
-                    {check.passed ? 'PASS' : 'ISSUE'}
-                  </div>
+                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>{issue.message}</div>
+                  {issue.table && <code style={{ fontSize: '0.75rem', color: c.primary }}>{issue.table}</code>}
                 </div>
               ))}
             </div>
-          </div>
-          
-          {/* Issues section */}
-          {(!healthIssues || healthIssues.length === 0) ? (
-            <div style={{ 
-              textAlign: 'center', padding: '2rem', 
-              background: `${c.success}08`, borderRadius: 8,
-              border: `1px solid ${c.success}30`
-            }}>
-              <CheckCircle size={36} style={{ color: c.success, marginBottom: '0.75rem' }} />
-              <p style={{ fontWeight: 600, color: c.success, margin: '0 0 0.25rem' }}>
-                All checks passed!
-              </p>
-              <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: 0 }}>
-                No data integrity issues detected across {(tables || []).length} table(s).
-              </p>
-            </div>
-          ) : (
-            <div>
-              <div style={{ 
-                fontSize: '0.8rem', fontWeight: 600, color: c.scarletSage, marginBottom: '0.75rem',
-                display: 'flex', alignItems: 'center', gap: '0.5rem'
-              }}>
-                <AlertTriangle size={14} />
-                {healthIssues.length} Issue{healthIssues.length !== 1 ? 's' : ''} Found
-              </div>
-              <div style={{ display: 'grid', gap: '0.75rem' }}>
-                {healthIssues.map((issue, i) => (
-                  <div key={i} style={{ 
-                    padding: '0.75rem 1rem',
-                    background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`,
-                    borderRadius: 8,
-                    border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}40`
-                  }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                      {issue.severity === 'error' ? 
-                        <XCircle size={16} style={{ color: c.scarletSage }} /> : 
-                        <AlertTriangle size={16} style={{ color: c.warning }} />
-                      }
-                      <span style={{ fontWeight: 600, color: c.text }}>{issue.type || 'Issue'}</span>
-                    </div>
-                    <div style={{ fontSize: '0.85rem', color: c.textMuted }}>{issue.message}</div>
-                    {issue.table && (
-                      <code style={{ 
-                        fontSize: '0.75rem', color: c.primary, marginTop: '0.25rem', display: 'block' 
-                      }}>
-                        {issue.table}
-                      </code>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </div>
           )}
-          
-          {/* Health criteria legend */}
-          <div style={{ 
-            marginTop: '1.5rem', paddingTop: '1rem', borderTop: `1px solid ${c.border}`,
-            fontSize: '0.75rem', color: c.textMuted
-          }}>
-            <strong>How health is determined:</strong> XLR8 checks that all stored tables are registered, 
-            row counts match between registry and actual data, and no orphaned embeddings exist in ChromaDB.
-          </div>
         </div>
       )}
 
@@ -990,7 +828,7 @@ export default function DataExplorer() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
               <BookOpen size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-              Extracted Rules ({rules.length})
+              Extracted Rules ({rules?.length || 0})
             </h3>
             <button
               onClick={async () => {
@@ -1022,7 +860,7 @@ export default function DataExplorer() {
             </button>
           </div>
           
-          {rules.length === 0 ? (
+          {(!rules || rules.length === 0) ? (
             <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
               <BookOpen size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
               <p>No rules extracted yet.</p>
@@ -1030,7 +868,7 @@ export default function DataExplorer() {
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {rules.map((rule, i) => (
+              {(rules || []).map((rule, i) => (
                 <div key={i} style={{ 
                   padding: '0.75rem 1rem',
                   background: c.background,
