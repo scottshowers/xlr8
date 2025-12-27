@@ -59,6 +59,7 @@ import WelcomePage from './pages/WelcomePage';
 import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
 import HypeVideo from './pages/HypeVideo';
+import BeatLabWelcome_Jeremy from './components/BeatLabWelcome_Jeremy';
 import IntelligenceDemo from './pages/IntelligenceDemo';
 import ArchitecturePage from './pages/ArchitecturePage';
 
@@ -87,6 +88,7 @@ function AppRoutes() {
         
         {/* Hype Video - Cinematic brand film */}
         <Route path="/hype" element={<HypeVideo />} />
+        <Route path="/beat-lab/jeremy" element={<BeatLabWelcome_Jeremy />} />
         
         {/* Intelligence Demo - Watch XLR8 Think */}
         <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
