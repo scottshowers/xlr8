@@ -392,10 +392,14 @@ class StructuredDataHandler:
                     file_name VARCHAR NOT NULL,
                     sheet_name VARCHAR NOT NULL,
                     table_name VARCHAR NOT NULL,
+                    display_name VARCHAR,
                     columns JSON NOT NULL,
+                    column_count INTEGER,
                     row_count INTEGER,
                     likely_keys JSON,
                     encrypted_columns JSON,
+                    truth_type VARCHAR,
+                    uploaded_by VARCHAR,
                     version INTEGER DEFAULT 1,
                     is_current BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -536,7 +540,47 @@ class StructuredDataHandler:
                 
                 self.conn.commit()
             except Exception as mig_e:
-                logger.warning(f"[MIGRATION] Column check/add: {mig_e}")
+                logger.warning(f"[MIGRATION] Column check/add for _column_profiles: {mig_e}")
+            
+            # MIGRATION: Add display_name, truth_type, column_count to _schema_metadata
+            try:
+                schema_cols = self.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()
+                schema_col_names = [c[1] for c in schema_cols]
+                
+                if 'display_name' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding display_name column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN display_name VARCHAR")
+                
+                if 'truth_type' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding truth_type column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN truth_type VARCHAR")
+                
+                if 'column_count' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding column_count column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN column_count INTEGER")
+                
+                if 'uploaded_by' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding uploaded_by column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN uploaded_by VARCHAR")
+                
+                # Backfill display_name for existing records (use file_name without extension)
+                self.conn.execute("""
+                    UPDATE _schema_metadata 
+                    SET display_name = CASE 
+                        WHEN display_name IS NULL THEN 
+                            COALESCE(
+                                NULLIF(sheet_name, ''),
+                                REGEXP_REPLACE(file_name, '\\.[^.]+$', '')
+                            )
+                        ELSE display_name
+                    END
+                    WHERE display_name IS NULL
+                """)
+                
+                self.conn.commit()
+                logger.info("[MIGRATION] _schema_metadata columns updated successfully")
+            except Exception as mig_e:
+                logger.warning(f"[MIGRATION] Column check/add for _schema_metadata: {mig_e}")
             
             self.conn.commit()
             logger.info("Metadata tables initialized successfully")
@@ -876,8 +920,9 @@ class StructuredDataHandler:
                 df, encrypted_cols = self.encryptor.encrypt_dataframe(df)
                 all_encrypted_cols.extend(encrypted_cols)
             
-            # Generate table name
+            # Generate table name and display name
             table_name = self._generate_table_name(project, file_name, sheet_name)
+            display_name = self._generate_display_name(file_name, sheet_name)
             
             # Create table (thread-safe)
             self.safe_create_table_from_df(table_name, df)
@@ -893,17 +938,20 @@ class StructuredDataHandler:
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project,
                 file_name,
                 sheet_name,
                 table_name,
+                display_name,
                 json.dumps(columns_info),
+                len(df.columns),
                 len(df),
                 json.dumps(likely_keys),
                 json.dumps(encrypted_cols),
+                None,  # truth_type - set by smart_router if provided
                 version
             ])
             
@@ -911,7 +959,9 @@ class StructuredDataHandler:
             results['sheets'].append({
                 'sheet_name': sheet_name,
                 'table_name': table_name,
+                'display_name': display_name,
                 'columns': list(df.columns),
+                'column_count': len(df.columns),
                 'row_count': len(df),
                 'likely_keys': likely_keys,
                 'encrypted_columns': encrypted_cols
@@ -1213,7 +1263,7 @@ class StructuredDataHandler:
             return []
     
     def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
-        """Generate unique table name - preserves sheet name as it's the unique identifier"""
+        """Generate unique internal table name for DuckDB storage"""
         clean_project = self._sanitize_name(project)[:20]  # Limit project
         clean_file = self._sanitize_name(file_name.split('.')[0])[:40]  # Limit file
         clean_sheet = self._sanitize_name(sheet_name)  # Keep full sheet name - it's what makes tables unique!
@@ -1221,6 +1271,65 @@ class StructuredDataHandler:
         # DuckDB handles long names fine - don't truncate the sheet name
         table_name = f"{clean_project}_{clean_file}_{clean_sheet}"
         return table_name
+    
+    def _generate_display_name(self, file_name: str, sheet_name: str = None) -> str:
+        """
+        Generate a clean, human-readable display name for UI.
+        
+        Priority:
+        1. If sheet_name exists and is meaningful, use it
+        2. Otherwise use the file name without extension
+        
+        Rules:
+        - Remove file extension
+        - Replace underscores with spaces
+        - Title case
+        - Max 60 characters
+        """
+        # Start with sheet name if it's meaningful
+        if sheet_name and sheet_name.lower() not in ('data', 'sheet1', 'sheet 1', ''):
+            base_name = sheet_name
+        else:
+            # Use filename without extension
+            base_name = file_name.rsplit('.', 1)[0] if '.' in file_name else file_name
+        
+        # Clean up the name
+        # Remove common suffixes that don't add value
+        for suffix in ['_export', '_data', '_report', '_final', '_v1', '_v2', '_copy']:
+            if base_name.lower().endswith(suffix):
+                base_name = base_name[:-len(suffix)]
+        
+        # Replace underscores and hyphens with spaces
+        display = base_name.replace('_', ' ').replace('-', ' ')
+        
+        # Title case, but preserve acronyms (all caps words)
+        words = display.split()
+        titled_words = []
+        for word in words:
+            if word.isupper() and len(word) <= 5:  # Keep short acronyms like "TAX", "HR"
+                titled_words.append(word)
+            else:
+                titled_words.append(word.title())
+        
+        display = ' '.join(titled_words)
+        
+        # Truncate if too long
+        if len(display) > 60:
+            display = display[:57] + '...'
+        
+        return display.strip()
+    
+    def _generate_names(self, project: str, file_name: str, sheet_name: str) -> Dict[str, str]:
+        """
+        Generate both internal table_name and user-facing display_name.
+        
+        Returns:
+            Dict with 'table_name' (for DuckDB) and 'display_name' (for UI)
+        """
+        return {
+            'table_name': self._generate_table_name(project, file_name, sheet_name),
+            'display_name': self._generate_display_name(file_name, sheet_name)
+        }
     
     def _detect_key_columns(self, df: pd.DataFrame) -> List[str]:
         """Detect likely primary/foreign key columns based on naming and uniqueness"""
@@ -2587,6 +2696,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             report_progress(40, "Creating DuckDB table...")
             
             table_name = self._generate_table_name(project, file_name, 'data')
+            display_name = self._generate_display_name(file_name, 'data')
             
             # Create table (thread-safe)
             self.safe_create_table_from_df(table_name, df)
@@ -2604,11 +2714,12 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?)
+                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, truth_type, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
-                project, file_name, 'data', table_name,
-                json.dumps(columns_info), len(df), json.dumps(likely_keys)
+                project, file_name, 'data', table_name, display_name,
+                json.dumps(columns_info), len(df.columns), len(df), json.dumps(likely_keys),
+                None  # truth_type - set by smart_router if provided
             ])
             
             self.conn.commit()
@@ -2628,7 +2739,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 'project': project,
                 'file_name': file_name,
                 'table_name': table_name,
+                'display_name': display_name,
                 'columns': list(df.columns),
+                'column_count': len(df.columns),
                 'row_count': len(df),
                 'likely_keys': likely_keys,
                 'column_profiles': profile_result.get('profiles', {}),
@@ -2709,8 +2822,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 df[col] = df[col].fillna('').astype(str)
                 df[col] = df[col].replace({'nan': '', 'None': '', 'NaT': ''})
             
-            # Generate table name
+            # Generate table name and display name
             table_name = self._generate_table_name(project, file_name, sheet_name)
+            display_name = self._generate_display_name(file_name, sheet_name)
             
             # Clean up any existing data for this file
             try:
@@ -2754,17 +2868,20 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             with self._db_lock:
                 self.conn.execute("""
                     INSERT INTO _schema_metadata 
-                    (id, project, file_name, sheet_name, table_name, columns, row_count, likely_keys, encrypted_columns, version, is_current)
-                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, version, is_current)
+                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                 """, [
                     project,
                     file_name,
                     sheet_name,
                     table_name,
+                    display_name,
                     json.dumps(columns_info),
+                    len(df.columns),
                     len(df),
                     json.dumps([]),  # likely_keys
                     json.dumps([]),  # encrypted_columns
+                    None,  # truth_type - set by smart_router if provided
                     version
                 ])
                 logger.warning("[STORE_DF] INSERT executed")
@@ -2828,10 +2945,12 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             results['success'] = True
             results['table_name'] = table_name
+            results['display_name'] = display_name
             results['tables_created'] = [table_name]
             results['row_count'] = len(df)
             results['total_rows'] = len(df)
             results['columns'] = list(df.columns)
+            results['column_count'] = len(df.columns)
             results['version'] = version
             
             return results
@@ -3860,13 +3979,13 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             try:
                 if project:
                     result = self.conn.execute("""
-                        SELECT table_name, columns, row_count, likely_keys, encrypted_columns
+                        SELECT table_name, display_name, file_name, sheet_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, created_at
                         FROM _schema_metadata 
                         WHERE project = ? AND is_current = TRUE
                     """, [project]).fetchall()
                 else:
                     result = self.conn.execute("""
-                        SELECT project, table_name, columns, row_count, likely_keys
+                        SELECT project, table_name, display_name, file_name, sheet_name, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, created_at
                         FROM _schema_metadata 
                         WHERE is_current = TRUE
                     """).fetchall()
@@ -3874,21 +3993,45 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 schema = {}
                 for row in result:
                     if project:
-                        table_name, columns, row_count, keys, encrypted = row
+                        table_name, display_name, file_name, sheet_name, columns, column_count, row_count, keys, encrypted, truth_type, uploaded_by, created_at = row
+                        
+                        # Generate display_name if not set (migration fallback)
+                        if not display_name:
+                            display_name = self._generate_display_name(file_name, sheet_name)
+                        
                         schema[table_name] = {
+                            'display_name': display_name,
+                            'file_name': file_name,
+                            'sheet_name': sheet_name,
                             'columns': json.loads(columns) if columns else [],
+                            'column_count': column_count or (len(json.loads(columns)) if columns else 0),
                             'row_count': row_count,
                             'likely_keys': json.loads(keys) if keys else [],
-                            'encrypted_columns': json.loads(encrypted) if encrypted else []
+                            'encrypted_columns': json.loads(encrypted) if encrypted else [],
+                            'truth_type': truth_type,
+                            'uploaded_by': uploaded_by,
+                            'created_at': str(created_at) if created_at else None
                         }
                     else:
-                        proj, table_name, columns, row_count, keys = row
+                        proj, table_name, display_name, file_name, sheet_name, columns, column_count, row_count, keys, truth_type, uploaded_by, created_at = row
+                        
+                        # Generate display_name if not set (migration fallback)
+                        if not display_name:
+                            display_name = self._generate_display_name(file_name, sheet_name)
+                        
                         if proj not in schema:
                             schema[proj] = {}
                         schema[proj][table_name] = {
+                            'display_name': display_name,
+                            'file_name': file_name,
+                            'sheet_name': sheet_name,
                             'columns': json.loads(columns) if columns else [],
+                            'column_count': column_count or (len(json.loads(columns)) if columns else 0),
                             'row_count': row_count,
-                            'likely_keys': json.loads(keys) if keys else []
+                            'likely_keys': json.loads(keys) if keys else [],
+                            'truth_type': truth_type,
+                            'uploaded_by': uploaded_by,
+                            'created_at': str(created_at) if created_at else None
                         }
                 
                 return schema
@@ -3902,8 +4045,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         with self._db_lock:
             try:
                 result = self.conn.execute("""
-                    SELECT table_name, sheet_name, columns, row_count, likely_keys, 
-                           encrypted_columns, version, created_at
+                    SELECT table_name, display_name, sheet_name, file_name, columns, column_count, row_count, likely_keys, 
+                           encrypted_columns, truth_type, version, created_at, uploaded_by
                     FROM _schema_metadata 
                     WHERE project = ? AND is_current = TRUE
                     ORDER BY table_name
@@ -3911,15 +4054,27 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 
                 tables = []
                 for row in result:
+                    table_name = row[0]
+                    display_name = row[1]
+                    
+                    # Generate display_name if not set (migration fallback)
+                    if not display_name:
+                        display_name = self._generate_display_name(row[3], row[2])  # file_name, sheet_name
+                    
                     tables.append({
-                        'table_name': row[0],
-                        'sheet_name': row[1],
-                        'columns': json.loads(row[2]) if row[2] else [],
-                        'row_count': row[3],
-                        'likely_keys': json.loads(row[4]) if row[4] else [],
-                        'encrypted_columns': json.loads(row[5]) if row[5] else [],
-                        'version': row[6],
-                        'created_at': str(row[7]) if row[7] else None
+                        'table_name': table_name,
+                        'display_name': display_name,
+                        'sheet_name': row[2],
+                        'file_name': row[3],
+                        'columns': json.loads(row[4]) if row[4] else [],
+                        'column_count': row[5] or (len(json.loads(row[4])) if row[4] else 0),
+                        'row_count': row[6],
+                        'likely_keys': json.loads(row[7]) if row[7] else [],
+                        'encrypted_columns': json.loads(row[8]) if row[8] else [],
+                        'truth_type': row[9],
+                        'version': row[10],
+                        'created_at': str(row[11]) if row[11] else None,
+                        'uploaded_by': row[12]
                     })
                 
                 return tables
