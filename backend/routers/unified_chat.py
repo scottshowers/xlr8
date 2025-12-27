@@ -2116,9 +2116,10 @@ async def unified_chat(request: UnifiedChatRequest):
                 response["needs_clarification"] = False
                 response["clarification_questions"] = []
                 # Keep from_reality minimal (frontend may check it exists)
-                # but remove heavy structured_output
+                # but remove heavy structured_output and quality_alerts
                 response["from_reality"] = response["from_reality"][:1] if response["from_reality"] else []
                 response["structured_output"] = {"type": "validation_complete"}
+                response["quality_alerts"] = None  # Don't need 12k findings for validation
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
@@ -2282,7 +2283,12 @@ async def unified_chat(request: UnifiedChatRequest):
             # Run quality checks
             if request.include_quality_alerts and quality_service and schema['tables']:
                 quality_service.run_checks(handler, schema['tables'][:5])
-                response["quality_alerts"] = quality_service.get_summary()
+                summary = quality_service.get_summary()
+                # Limit findings to prevent frontend from choking
+                if summary and 'findings' in summary:
+                    summary['findings'] = summary['findings'][:50]  # Max 50 findings
+                    summary['total_findings'] = summary.get('total_findings', len(summary['findings']))
+                response["quality_alerts"] = summary
             
             # Generate follow-ups
             if request.include_follow_ups:
