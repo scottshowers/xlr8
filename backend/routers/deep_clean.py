@@ -14,6 +14,7 @@ Endpoint: POST /api/deep-clean
 from fastapi import APIRouter, HTTPException
 from typing import Optional, Set
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -342,9 +343,15 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
     
     if wipe_all:
         try:
-            from utils.database.client import get_supabase
+            from supabase import create_client
             
-            supabase = get_supabase()
+            url = os.getenv("SUPABASE_URL")
+            key = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
+            
+            supabase = None
+            if url and key:
+                supabase = create_client(url, key)
+            
             if supabase:
                 logger.warning("[DEEP-CLEAN] Wiping ALL Supabase data...")
                 
