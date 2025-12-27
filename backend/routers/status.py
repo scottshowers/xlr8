@@ -1,15 +1,6 @@
 """
-Status Router - Registry-Aware Version v21
+Status Router - Registry-Aware Version v20
 ===========================================
-
-v21 CHANGES (December 27, 2025 - Full Metadata Support):
-- /status/structured now returns ALL metadata fields from document_registry:
-  - uploaded_by_email, created_at (upload date/time)
-  - truth_type, content_domain
-  - processing_time_ms, relationships_count
-  - chunk_count, file_size_bytes
-- Fixed: metadata was captured at table level but dropped when aggregating to files
-- Added table_count, row_count aliases for frontend compatibility
 
 v20 CHANGES (December 23, 2025 - N+1 Performance Fix):
 - Fixed N+1 query issue in /status/structured endpoint
@@ -238,13 +229,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                     registry_lookup[filename.lower()] = {
                         'uploaded_by': entry.get('uploaded_by_email', ''),
                         'uploaded_at': entry.get('created_at', ''),
-                        'truth_type': entry.get('truth_type', 'reality'),
-                        'content_domain': entry.get('content_domain', []),
-                        'processing_time_ms': entry.get('processing_time_ms'),
-                        'relationships_count': entry.get('relationships_count', 0),
-                        'chunk_count': entry.get('chunk_count', 0),
-                        'row_count': entry.get('row_count', 0),
-                        'file_size_bytes': entry.get('file_size_bytes'),
+                        'truth_type': entry.get('truth_type', 'reality')
                     }
             
             logger.info(f"[STATUS/STRUCTURED] Registry has {len(valid_files)} valid DuckDB files")
@@ -338,13 +323,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'uploaded_by': provenance.get('uploaded_by', ''),
                     'uploaded_at': provenance.get('uploaded_at', ''),
                     'truth_type': provenance.get('truth_type', 'reality'),
-                    'source_type': 'excel',
-                    # Additional metadata
-                    'content_domain': provenance.get('content_domain', []),
-                    'processing_time_ms': provenance.get('processing_time_ms'),
-                    'relationships_count': provenance.get('relationships_count', 0),
-                    'chunk_count': provenance.get('chunk_count', 0),
-                    'file_size_bytes': provenance.get('file_size_bytes'),
+                    'source_type': 'excel'
                 })
             
             logger.info(f"[STATUS] Got {len(tables)} tables from _schema_metadata (Excel)")
@@ -415,13 +394,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'uploaded_by': provenance.get('uploaded_by', ''),
                     'uploaded_at': provenance.get('uploaded_at', ''),
                     'truth_type': provenance.get('truth_type', 'reality'),
-                    'source_type': 'pdf',
-                    # Additional metadata
-                    'content_domain': provenance.get('content_domain', []),
-                    'processing_time_ms': provenance.get('processing_time_ms'),
-                    'relationships_count': provenance.get('relationships_count', 0),
-                    'chunk_count': provenance.get('chunk_count', 0),
-                    'file_size_bytes': provenance.get('file_size_bytes'),
+                    'source_type': 'pdf'
                 })
                 pdf_count += 1
             
@@ -488,13 +461,7 @@ async def get_structured_data_status(project: Optional[str] = None):
                             'uploaded_by': provenance.get('uploaded_by', ''),
                             'uploaded_at': provenance.get('uploaded_at', ''),
                             'truth_type': provenance.get('truth_type', 'reality'),
-                            'source_type': 'unknown',
-                            # Additional metadata
-                            'content_domain': provenance.get('content_domain', []),
-                            'processing_time_ms': provenance.get('processing_time_ms'),
-                            'relationships_count': provenance.get('relationships_count', 0),
-                            'chunk_count': provenance.get('chunk_count', 0),
-                            'file_size_bytes': provenance.get('file_size_bytes'),
+                            'source_type': 'unknown'
                         })
                     except Exception as te:
                         logger.warning(f"Error getting info for table {table_name}: {te}")
@@ -519,21 +486,8 @@ async def get_structured_data_status(project: Optional[str] = None):
                     'project': project_name,
                     'sheets': [],
                     'total_rows': 0,
-                    'row_count': 0,  # Alias for frontend compatibility
-                    'table_count': 0,
                     'loaded_at': None,
-                    'source_type': source_type,
-                    # METADATA FROM REGISTRY
-                    'uploaded_by_email': table.get('uploaded_by', ''),
-                    'created_at': table.get('uploaded_at', ''),
-                    'truth_type': table.get('truth_type', 'reality'),
-                    'customer': table.get('customer', ''),
-                    # Additional metadata
-                    'content_domain': table.get('content_domain', []),
-                    'processing_time_ms': table.get('processing_time_ms'),
-                    'relationships_count': table.get('relationships_count', 0),
-                    'chunk_count': table.get('chunk_count', 0),
-                    'file_size_bytes': table.get('file_size_bytes'),
+                    'source_type': source_type
                 }
             
             row_count = table.get('row_count', 0)
@@ -549,8 +503,6 @@ async def get_structured_data_status(project: Optional[str] = None):
                 'encrypted_columns': []
             })
             files_dict[key]['total_rows'] += row_count
-            files_dict[key]['row_count'] += row_count  # Alias
-            files_dict[key]['table_count'] += 1
             total_rows += row_count
             
             if loaded_at and (files_dict[key]['loaded_at'] is None or loaded_at > files_dict[key]['loaded_at']):
@@ -4302,10 +4254,12 @@ async def get_relationships():
                         rel_type = "1:N" if "employee" in col1 or "emp" in col1 else "N:1"
                         relationships.append({
                             "from_table": table1,
+                            "from_column": col1,
                             "to_table": table2,
-                            "column": col1,
+                            "to_column": col1,  # Same column name in both tables
                             "type": rel_type,
-                            "confidence": "high" if "_id" in col1 else "medium"
+                            "confidence": "high" if "_id" in col1 else "medium",
+                            "needs_review": "_id" not in col1,  # Flag non-ID matches for review
                         })
         
         logger.info(f"[RELATIONSHIPS] Found {len(relationships)} relationships across {len(tables)} tables")
