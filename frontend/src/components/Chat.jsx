@@ -208,6 +208,8 @@ export default function Chat({ functionalAreas = [] }) {
         has_answer: !!data.answer,
         answer_length: data.answer?.length,
         answer_preview: data.answer?.substring(0, 200),
+        from_reality: data.from_reality?.length || 0,
+        from_intent: data.from_intent?.length || 0,
         timestamp: new Date().toISOString()
       }
       console.log('[CHAT DEBUG] Response:', debugData)
@@ -546,8 +548,10 @@ export default function Chat({ functionalAreas = [] }) {
         }}>
           <strong>🔧 DEBUG:</strong> needs_clarification={String(debugInfo.needs_clarification)} | 
           has_answer={String(debugInfo.has_answer)} | 
-          length={debugInfo.answer_length} | 
-          preview: "{debugInfo.answer_preview?.substring(0, 80)}..."
+          len={debugInfo.answer_length} | 
+          reality={debugInfo.from_reality} | 
+          intent={debugInfo.from_intent} |
+          preview: "{debugInfo.answer_preview?.substring(0, 60)}..."
           <button 
             onClick={() => setDebugInfo(null)} 
             style={{ marginLeft: '1rem', cursor: 'pointer' }}
