@@ -885,16 +885,14 @@ def process_file_background(
                 if file_ext == 'csv':
                     result = handler.store_csv(
                         file_path, project, filename,
-                        progress_callback=structured_progress_callback,
-                        uploaded_by=uploaded_by_email
+                        progress_callback=structured_progress_callback
                     )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
                 else:
                     result = handler.store_excel(
                         file_path, project, filename,
-                        progress_callback=structured_progress_callback,
-                        uploaded_by=uploaded_by_email
+                        progress_callback=structured_progress_callback
                     )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
@@ -918,6 +916,29 @@ def process_file_background(
                     job_id, 70, 
                     f"Created {tables_created} table(s) with {total_rows:,} rows"
                 )
+                
+                # =====================================================
+                # COLUMN PROFILING - Populate _column_profiles
+                # This enables Classification Panel to show columns
+                # =====================================================
+                try:
+                    ProcessingJobModel.update_progress(job_id, 72, "Profiling columns...")
+                    created_tables = result.get('tables_created', [])
+                    if not created_tables and file_ext == 'csv':
+                        # For CSV, table name is derived from filename
+                        table_name = f"{project.lower()}_{os.path.splitext(filename)[0].lower().replace(' ', '_').replace('-', '_')}"
+                        created_tables = [table_name]
+                    
+                    for table_name in created_tables:
+                        try:
+                            handler.profile_columns_fast(project, table_name)
+                            logger.info(f"[BACKGROUND] Profiled columns for: {table_name}")
+                        except Exception as prof_err:
+                            logger.warning(f"[BACKGROUND] Column profiling failed for {table_name}: {prof_err}")
+                    
+                    ProcessingJobModel.update_progress(job_id, 75, "Columns profiled")
+                except Exception as profile_e:
+                    logger.warning(f"[BACKGROUND] Column profiling error: {profile_e}")
                 
                 timing['parse_end'] = time.time()
                 timing['storage_start'] = time.time()
@@ -1163,6 +1184,21 @@ def process_file_background(
                     logger.warning(f"[BACKGROUND] duckdb_result keys: {duckdb_result.keys() if duckdb_result else 'None'}")
                     logger.warning(f"[BACKGROUND] tables_created: {duckdb_result.get('tables_created', [])}")
                     logger.warning(f"[BACKGROUND] total_rows: {duckdb_result.get('total_rows', 0)}")
+                    
+                    # Profile columns for classification panel
+                    try:
+                        pdf_tables = duckdb_result.get('tables_created', [])
+                        if pdf_tables and STRUCTURED_HANDLER_AVAILABLE:
+                            from utils.structured_data_handler import get_structured_handler
+                            handler = get_structured_handler()
+                            for table_name in pdf_tables:
+                                try:
+                                    handler.profile_columns_fast(project, table_name)
+                                    logger.info(f"[BACKGROUND] Profiled PDF columns for: {table_name}")
+                                except Exception as prof_err:
+                                    logger.warning(f"[BACKGROUND] PDF column profiling failed for {table_name}: {prof_err}")
+                    except Exception as prof_e:
+                        logger.warning(f"[BACKGROUND] PDF profiling error: {prof_e}")
                 
                 # Get text content for ChromaDB (either from analysis or re-extract)
                 chromadb_result = pdf_result.get('chromadb_result', {})
@@ -1374,7 +1410,7 @@ def process_file_background(
                                             temp_csv = f"/tmp/{job_id}_converted.csv"
                                             df.to_csv(temp_csv, index=False)
                                             
-                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", uploaded_by=uploaded_by_email)
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv")
                                             
                                             # Cleanup temp file
                                             try:
@@ -1492,7 +1528,7 @@ def process_file_background(
                                                 temp_csv = f"/tmp/{job_id}_docx_table.csv"
                                                 df.to_csv(temp_csv, index=False)
                                                 
-                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", uploaded_by=uploaded_by_email)
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv")
                                                 
                                                 try:
                                                     os.remove(temp_csv)
