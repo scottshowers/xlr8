@@ -2115,9 +2115,7 @@ async def unified_chat(request: UnifiedChatRequest):
                 # Clear clarification flag - we have a real answer now
                 response["needs_clarification"] = False
                 response["clarification_questions"] = []
-                # Keep from_reality minimal (frontend may check it exists)
-                # but remove heavy structured_output and quality_alerts
-                response["from_reality"] = response["from_reality"][:1] if response["from_reality"] else []
+                # Keep sources intact but mark to skip heavy quality_alerts
                 response["structured_output"] = {"type": "validation_complete"}
                 response["_skip_quality_alerts"] = True  # Flag to skip quality check population
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
