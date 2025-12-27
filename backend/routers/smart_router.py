@@ -3,6 +3,12 @@ Smart Router - Unified Upload Endpoint
 ======================================
 Consolidates all upload paths into a single intelligent router.
 
+v1.3 (December 2025):
+- FIXED: Reference Library Excel/CSV files now create DuckDB tables
+- Standards route now processes: rules extraction + DuckDB tables
+- Routing priority fixed: truth_type overrides extension-based routing
+- Added 'regulatory' and 'compliance' to standards routing triggers
+
 v1.2 (December 2025 - GET HEALTHY Week 2):
 - Now the CANONICAL upload endpoint - duplicate endpoints removed from upload.py and register_extractor.py
 - upload.py and register_extractor.py now contain only supporting endpoints
@@ -19,9 +25,9 @@ AFTER (1 endpoint):
 ROUTING LOGIC:
 1. User can specify processing_type explicitly
 2. If auto, Smart Router analyzes:
-   - File extension (xlsx/csv → structured, pdf → analyze content)
+   - truth_type parameter (reference → standards) - HIGHEST PRIORITY
    - Filename patterns (register, payroll → register extractor)
-   - truth_type parameter (reference → standards)
+   - File extension (xlsx/csv → structured, pdf → analyze content)
    - Content analysis for PDFs (tabular vs narrative)
 
 BACKWARD COMPATIBILITY:
@@ -219,29 +225,28 @@ def detect_processing_type(
     Detect the appropriate processing type based on file characteristics.
     
     Priority:
-    1. truth_type parameter (explicit user intent)
-    2. Extension-based routing (xlsx/csv → structured)
-    3. Filename pattern matching
+    1. truth_type parameter (explicit user intent) - HIGHEST PRIORITY
+    2. Filename pattern matching
+    3. Extension-based routing (xlsx/csv → structured) 
     4. Content analysis (for PDFs)
     5. Default to auto/semantic
+    
+    NOTE: truth_type takes precedence over extension. This allows Reference Library
+    uploads of Excel files to go through standards processing (with DuckDB added).
     """
     filename_lower = filename.lower()
     
-    # 1. Explicit truth_type
+    # 1. Explicit truth_type - HIGHEST PRIORITY
+    # User's explicit intent overrides extension-based routing
     if truth_type:
-        if truth_type.lower() in ['reference', 'standards', 'best_practice']:
+        if truth_type.lower() in ['reference', 'standards', 'best_practice', 'regulatory', 'compliance']:
             logger.info(f"[SMART-ROUTER] Routing to STANDARDS based on truth_type={truth_type}")
             return ProcessingType.STANDARDS
         elif truth_type.lower() in ['reality', 'configuration']:
             logger.info(f"[SMART-ROUTER] Routing to STRUCTURED based on truth_type={truth_type}")
             return ProcessingType.STRUCTURED
     
-    # 2. Extension-based routing
-    if extension in ['xlsx', 'xls', 'csv']:
-        logger.info(f"[SMART-ROUTER] Routing to STRUCTURED based on extension={extension}")
-        return ProcessingType.STRUCTURED
-    
-    # 3. Filename pattern matching
+    # 2. Filename pattern matching (before extension check)
     for pattern in REGISTER_PATTERNS:
         if re.search(pattern, filename_lower):
             logger.info(f"[SMART-ROUTER] Routing to REGISTER based on filename pattern: {pattern}")
@@ -251,6 +256,11 @@ def detect_processing_type(
         if re.search(pattern, filename_lower):
             logger.info(f"[SMART-ROUTER] Routing to STANDARDS based on filename pattern: {pattern}")
             return ProcessingType.STANDARDS
+    
+    # 3. Extension-based routing (only if no truth_type specified)
+    if extension in ['xlsx', 'xls', 'csv']:
+        logger.info(f"[SMART-ROUTER] Routing to STRUCTURED based on extension={extension}")
+        return ProcessingType.STRUCTURED
     
     # 4. PDF content analysis (if sample provided)
     if extension == 'pdf' and content_sample:
@@ -607,7 +617,13 @@ async def _route_to_standards(
     title: Optional[str],
     temp_dir: str
 ) -> Dict[str, Any]:
-    """Route to Standards Processor for reference documents."""
+    """Route to Standards Processor for reference documents.
+    
+    UPDATED: Now also processes Excel/CSV into DuckDB for queryability.
+    Reference files get BOTH:
+    - Rule extraction (for compliance checking)
+    - DuckDB tables (for SQL queries)
+    """
     
     if not STANDARDS_AVAILABLE:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -617,8 +633,36 @@ async def _route_to_standards(
     
     try:
         chunks_added = 0
+        tables_created = []
+        total_rows = 0
         
-        # Extract and process
+        # =====================================================
+        # STEP 1: Process Excel/CSV into DuckDB (if applicable)
+        # This makes Reference Library files queryable via SQL
+        # =====================================================
+        if extension in ['xlsx', 'xls', 'csv'] and STRUCTURED_AVAILABLE:
+            logger.info(f"[SMART-ROUTER] Standards route: Also processing {extension} into DuckDB")
+            try:
+                handler = get_structured_handler()
+                # Use 'Reference Library' as project name for global scope
+                ref_project = 'Reference Library'
+                
+                if extension == 'csv':
+                    struct_result = handler.store_csv(file_path, ref_project, filename)
+                    tables_created = [struct_result.get('table_name', filename)]
+                    total_rows = struct_result.get('row_count', 0)
+                else:
+                    struct_result = handler.store_excel(file_path, ref_project, filename)
+                    tables_created = struct_result.get('tables_created', [])
+                    total_rows = struct_result.get('total_rows', 0)
+                
+                logger.info(f"[SMART-ROUTER] DuckDB: {len(tables_created)} tables, {total_rows} rows")
+            except Exception as struct_e:
+                logger.warning(f"[SMART-ROUTER] DuckDB processing failed (continuing with rules): {struct_e}")
+        
+        # =====================================================
+        # STEP 2: Extract rules (existing logic)
+        # =====================================================
         if extension == 'pdf':
             doc = standards_process_pdf(file_path, domain)
             raw_text = getattr(doc, 'raw_text', '') or ''
@@ -673,7 +717,12 @@ async def _route_to_standards(
                     file_type=extension,
                     title=doc.title,
                     page_count=doc.page_count,
-                    metadata={'upload_source': 'smart_router', 'chunks_added': chunks_added}
+                    metadata={
+                        'upload_source': 'smart_router', 
+                        'chunks_added': chunks_added,
+                        'tables_created': tables_created,
+                        'total_rows': total_rows
+                    }
                 )
             except Exception as e:
                 logger.warning(f"[SMART-ROUTER] Registration failed: {e}")
@@ -685,7 +734,9 @@ async def _route_to_standards(
             "rules_extracted": len(doc.rules),
             "chunks_added": chunks_added,
             "document_id": doc.document_id,
-            "domain": domain
+            "domain": domain,
+            "tables_created": tables_created,
+            "total_rows": total_rows
         }
         
     finally:
