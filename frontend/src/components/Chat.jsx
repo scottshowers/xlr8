@@ -70,6 +70,9 @@ export default function Chat({ functionalAreas = [] }) {
   const [learningStats, setLearningStats] = useState(null)
   
   // Persona state
+  const [debugInfo, setDebugInfo] = useState(null)
+  
+  // Persona state
   const [currentPersona, setCurrentPersona] = useState({
     id: 'bessie',
     name: 'Bessie',
@@ -198,6 +201,17 @@ export default function Chat({ functionalAreas = [] }) {
       })
 
       const data = response.data
+      
+      // DEBUG - shows on screen
+      const debugData = {
+        needs_clarification: data.needs_clarification,
+        has_answer: !!data.answer,
+        answer_length: data.answer?.length,
+        answer_preview: data.answer?.substring(0, 200),
+        timestamp: new Date().toISOString()
+      }
+      console.log('[CHAT DEBUG] Response:', debugData)
+      setDebugInfo(debugData)
 
       if (data.export) {
         const { filename, data: base64Data, mime_type } = data.export
@@ -224,27 +238,33 @@ export default function Chat({ functionalAreas = [] }) {
           timestamp: new Date().toISOString()
         }])
       } else {
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          type: 'intelligent',
-          content: data.answer,
-          confidence: data.confidence,
-          from_reality: data.from_reality || [],
-          from_intent: data.from_intent || [],
-          from_best_practice: data.from_best_practice || [],
-          conflicts: data.conflicts || [],
-          insights: data.insights || [],
-          reasoning: data.reasoning || [],
-          structured_output: data.structured_output,
-          auto_applied_note: data.auto_applied_note || null,
-          auto_applied_facts: data.auto_applied_facts || null,
-          can_reset_preferences: data.can_reset_preferences || false,
-          quality_alerts: data.quality_alerts || null,
-          follow_up_suggestions: data.follow_up_suggestions || [],
-          citations: data.citations || null,
-          export: data.export || null,
-          timestamp: new Date().toISOString()
-        }])
+        // Remove any pending clarification messages when we get an answer
+        console.log('[CHAT DEBUG] Adding intelligent response, removing clarification')
+        setMessages(prev => {
+          // Filter out clarification messages for this question
+          const filtered = prev.filter(m => m.type !== 'clarification')
+          return [...filtered, {
+            role: 'assistant',
+            type: 'intelligent',
+            content: data.answer,
+            confidence: data.confidence,
+            from_reality: data.from_reality || [],
+            from_intent: data.from_intent || [],
+            from_best_practice: data.from_best_practice || [],
+            conflicts: data.conflicts || [],
+            insights: data.insights || [],
+            reasoning: data.reasoning || [],
+            structured_output: data.structured_output,
+            auto_applied_note: data.auto_applied_note || null,
+            auto_applied_facts: data.auto_applied_facts || null,
+            can_reset_preferences: data.can_reset_preferences || false,
+            quality_alerts: data.quality_alerts || null,
+            follow_up_suggestions: data.follow_up_suggestions || [],
+            citations: data.citations || null,
+            export: data.export || null,
+            timestamp: new Date().toISOString()
+          }]
+        })
       }
 
       if (data.session_id) {
@@ -512,6 +532,28 @@ export default function Chat({ functionalAreas = [] }) {
               <span title="Feedback records">👍 {learningStats.feedback_records || 0} feedback</span>
             </div>
           )}
+        </div>
+      )}
+
+      {/* DEBUG PANEL - Remove after fixing */}
+      {debugInfo && (
+        <div style={{
+          padding: '0.5rem 1rem',
+          background: '#ffe4e4',
+          borderBottom: '2px solid #ff6b6b',
+          fontSize: '0.75rem',
+          fontFamily: 'monospace',
+        }}>
+          <strong>🔧 DEBUG:</strong> needs_clarification={String(debugInfo.needs_clarification)} | 
+          has_answer={String(debugInfo.has_answer)} | 
+          length={debugInfo.answer_length} | 
+          preview: "{debugInfo.answer_preview?.substring(0, 80)}..."
+          <button 
+            onClick={() => setDebugInfo(null)} 
+            style={{ marginLeft: '1rem', cursor: 'pointer' }}
+          >
+            ✕ Close
+          </button>
         </div>
       )}
 
