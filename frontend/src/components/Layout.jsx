@@ -25,7 +25,6 @@ function SalesButtons() {
   const [hovered, setHovered] = useState(null);
   
   const buttons = [
-    { id: 'story', path: '/story', icon: '📖', title: 'The Story' },
     { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
     { id: 'architecture', path: '/architecture', icon: '🏗️', title: 'Architecture' },
   ];
