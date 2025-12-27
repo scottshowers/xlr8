@@ -195,14 +195,19 @@ export default function DataExplorer() {
         console.log('No health data available');
       }
       
-      // Load relationships (if endpoint exists)
+      // Load relationships from data-model endpoint (has IDs for CRUD)
       try {
-        const relRes = await api.get('/status/relationships');
+        const projectName = activeProject?.name || activeProject?.id || 'default';
+        const relRes = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
         setRelationships(relRes.data?.relationships || []);
       } catch (e) {
-        // Generate mock relationships from common columns
-        const mockRels = generateMockRelationships(allTables);
-        setRelationships(mockRels);
+        // Fallback to status endpoint
+        try {
+          const relRes = await api.get('/status/relationships');
+          setRelationships(relRes.data?.relationships || []);
+        } catch (e2) {
+          setRelationships([]);
+        }
       }
       
     } catch (err) {
@@ -246,6 +251,58 @@ export default function DataExplorer() {
       });
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  // Relationship handlers
+  const confirmRelationship = async (rel) => {
+    const projectName = activeProject?.name || activeProject?.id || 'default';
+    const sourceTable = rel.source_table || rel.from_table;
+    const sourceCol = rel.source_column || rel.from_column;
+    const targetTable = rel.target_table || rel.to_table;
+    const targetCol = rel.target_column || rel.to_column;
+    
+    try {
+      await api.post(`/data-model/relationships/${encodeURIComponent(projectName)}/confirm`, {
+        source_table: sourceTable,
+        source_column: sourceCol,
+        target_table: targetTable,
+        target_column: targetCol,
+        confirmed: true
+      });
+      // Reload relationships
+      const relRes = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
+      setRelationships(relRes.data?.relationships || []);
+    } catch (e) {
+      console.error('Failed to confirm relationship:', e);
+      alert('Failed to confirm relationship');
+    }
+  };
+
+  const deleteRelationship = async (rel) => {
+    const sourceTable = rel.source_table || rel.from_table;
+    const sourceCol = rel.source_column || rel.from_column;
+    const targetTable = rel.target_table || rel.to_table;
+    const targetCol = rel.target_column || rel.to_column;
+    
+    if (!confirm(`Delete relationship ${sourceTable}.${sourceCol} → ${targetTable}.${targetCol}?`)) return;
+    
+    const projectName = activeProject?.name || activeProject?.id || 'default';
+    try {
+      await api.delete(`/data-model/relationships/${encodeURIComponent(projectName)}`, {
+        params: {
+          source_table: sourceTable,
+          source_column: sourceCol,
+          target_table: targetTable,
+          target_column: targetCol
+        }
+      });
+      // Reload relationships
+      const relRes = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
+      setRelationships(relRes.data?.relationships || []);
+    } catch (e) {
+      console.error('Failed to delete relationship:', e);
+      alert('Failed to delete relationship');
     }
   };
 
@@ -651,16 +708,18 @@ export default function DataExplorer() {
                 const fromCol = rel.from_column || rel.source_column || rel.column || '?';
                 const toCol = rel.to_column || rel.target_column || rel.column || '?';
                 const confidence = rel.confidence || rel.type || 'detected';
+                const isConfirmed = rel.confirmed;
+                const needsReview = rel.needs_review;
                 
                 return (
-                  <div key={i} style={{ 
+                  <div key={rel.id || i} style={{ 
                     display: 'flex', 
                     alignItems: 'center', 
                     gap: '1rem',
                     padding: '0.75rem 1rem',
-                    background: c.background,
+                    background: needsReview ? `${c.warning}08` : c.background,
                     borderRadius: 8,
-                    border: `1px solid ${c.border}`
+                    border: `1px solid ${needsReview ? c.warning : c.border}`
                   }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ fontSize: '0.7rem', color: c.textMuted }}>From</div>
@@ -676,11 +735,46 @@ export default function DataExplorer() {
                     <div style={{ 
                       fontSize: '0.7rem', 
                       padding: '0.25rem 0.5rem', 
-                      background: `${c.success}15`, 
-                      color: c.success, 
+                      background: isConfirmed ? `${c.success}15` : `${c.textMuted}15`, 
+                      color: isConfirmed ? c.success : c.textMuted, 
                       borderRadius: 4 
                     }}>
-                      {confidence}
+                      {isConfirmed ? '✓ confirmed' : confidence}
+                    </div>
+                    {/* Action buttons */}
+                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                      {!isConfirmed && (
+                        <button
+                          onClick={() => confirmRelationship(rel)}
+                          style={{
+                            padding: '0.25rem 0.5rem',
+                            background: `${c.success}15`,
+                            border: `1px solid ${c.success}40`,
+                            borderRadius: 4,
+                            fontSize: '0.7rem',
+                            color: c.success,
+                            cursor: 'pointer'
+                          }}
+                          title="Confirm this relationship"
+                        >
+                          ✓
+                        </button>
+                      )}
+                      <button
+                        onClick={() => deleteRelationship(rel)}
+                        style={{
+                          padding: '0.25rem 0.5rem',
+                          background: `${c.scarletSage}15`,
+                          border: `1px solid ${c.scarletSage}40`,
+                          borderRadius: 4,
+                          fontSize: '0.7rem',
+                          color: c.scarletSage,
+                          cursor: 'pointer'
+                        }}
+                        title="Delete this relationship"
+                      >
+                        ✕
+                      </button>
                     </div>
                   </div>
                 );
