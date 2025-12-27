@@ -336,7 +336,70 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
         results["chromadb"]["errors"].append(str(e))
     
     # =========================================================================
-    # STEP 4: INVALIDATE PLAYBOOK CACHE
+    # STEP 4: CLEAN SUPABASE (only in force mode)
+    # =========================================================================
+    results["supabase"] = {"cleaned": 0, "errors": []}
+    
+    if wipe_all:
+        try:
+            from utils.database.client import get_supabase
+            
+            supabase = get_supabase()
+            if supabase:
+                logger.warning("[DEEP-CLEAN] Wiping ALL Supabase data...")
+                
+                # Tables to wipe (in order - handle foreign key constraints)
+                tables_to_wipe = [
+                    "jobs",                    # Processing jobs
+                    "document_registry",       # File registry (source of truth)
+                    "learning_queries",        # Learned query patterns
+                    "learning_feedback",       # User feedback
+                    "learning_mappings",       # Column mappings
+                    "learning_preferences",    # User preferences  
+                    "learning_clarifications", # Clarification patterns
+                    "playbook_results",        # Playbook scan results
+                    "playbook_suppressions",   # Suppressed findings
+                    "intelligence_findings",   # Analysis findings
+                    "intelligence_tasks",      # Task assignments
+                ]
+                
+                for table in tables_to_wipe:
+                    try:
+                        if project_id:
+                            result = supabase.table(table).delete().eq("project_id", project_id).execute()
+                        else:
+                            # Delete all - need a condition that matches everything
+                            result = supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                        count = len(result.data) if result.data else 0
+                        if count > 0:
+                            results["supabase"]["cleaned"] += count
+                            logger.info(f"[DEEP-CLEAN] Wiped {count} {table} entries")
+                    except Exception as e:
+                        # Table might not exist - that's fine
+                        if "does not exist" not in str(e).lower():
+                            results["supabase"]["errors"].append(f"{table}: {str(e)}")
+                            logger.warning(f"[DEEP-CLEAN] {table} wipe: {e}")
+                
+                # Reset platform_metrics (don't delete, just zero out)
+                try:
+                    supabase.table("platform_metrics").update({
+                        "value": 0
+                    }).neq("id", "00000000-0000-0000-0000-000000000000").execute()
+                    results["supabase"]["cleaned"] += 1
+                    logger.info(f"[DEEP-CLEAN] Reset platform_metrics to 0")
+                except Exception as e:
+                    logger.debug(f"[DEEP-CLEAN] platform_metrics reset: {e}")
+                
+                logger.warning(f"[DEEP-CLEAN] Supabase wipe complete: {results['supabase']['cleaned']} items")
+            else:
+                results["supabase"]["errors"].append("Supabase connection not available")
+                
+        except Exception as e:
+            logger.error(f"[DEEP-CLEAN] Supabase cleanup failed: {e}")
+            results["supabase"]["errors"].append(str(e))
+    
+    # =========================================================================
+    # STEP 5: INVALIDATE PLAYBOOK CACHE
     # =========================================================================
     try:
         from routers.playbooks import PLAYBOOK_PROGRESS, PLAYBOOK_CACHE
