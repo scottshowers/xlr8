@@ -351,10 +351,10 @@ async def analyze_project_relationships(
                 
                 if boosted_score >= THRESHOLD_DISCARD:
                     relationships.append({
-                        'source_table': table1,
-                        'source_column': col1,
-                        'target_table': table2,
-                        'target_column': col2,
+                        'from_table': table1,
+                        'from_column': col1,
+                        'to_table': table2,
+                        'to_column': col2,
                         'confidence': round(boosted_score, 2),
                         'semantic_type': sem_type,
                         'method': 'exact' if boosted_score == 1.0 else 'semantic',
@@ -371,7 +371,7 @@ async def analyze_project_relationships(
     pair_counts: Dict[Tuple[str, str], int] = {}
     
     for rel in relationships:
-        pair = tuple(sorted([rel['source_table'], rel['target_table']]))
+        pair = tuple(sorted([rel['from_table'], rel['to_table']]))
         count = pair_counts.get(pair, 0)
         
         if count < MAX_PER_TABLE_PAIR:
@@ -383,8 +383,8 @@ async def analyze_project_relationships(
     # Step 5: Find unmatched key columns
     matched_cols = set()
     for r in relationships:
-        matched_cols.add(f"{r['source_table']}.{r['source_column']}")
-        matched_cols.add(f"{r['target_table']}.{r['target_column']}")
+        matched_cols.add(f"{r['from_table']}.{r['from_column']}")
+        matched_cols.add(f"{r['to_table']}.{r['to_column']}")
     
     unmatched = []
     for st in semantic_types:
@@ -444,10 +444,10 @@ def find_column_matches(
             
             if score >= THRESHOLD_DISCARD:
                 matches.append({
-                    'source_table': table1_name,
-                    'source_column': col1,
-                    'target_table': table2_name,
-                    'target_column': col2,
+                    'from_table': table1_name,
+                    'from_column': col1,
+                    'to_table': table2_name,
+                    'to_column': col2,
                     'confidence': round(score, 2),
                     'method': 'exact' if score == 1.0 else 'semantic' if score >= 0.9 else 'fuzzy',
                     'needs_review': score < THRESHOLD_AUTO_ACCEPT,
@@ -468,8 +468,8 @@ def deduplicate_relationships(relationships: List[Dict]) -> List[Dict]:
     for r in relationships:
         # Create canonical pair key
         pair = tuple(sorted([
-            f"{r['source_table']}.{r['source_column']}",
-            f"{r['target_table']}.{r['target_column']}"
+            f"{r['from_table']}.{r['from_column']}",
+            f"{r['to_table']}.{r['to_column']}"
         ]))
         
         if pair not in seen:
