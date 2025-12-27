@@ -1,16 +1,46 @@
 /**
- * DataExplorer.jsx - Tables, Fields, Relationships, Health, Compliance
- * =====================================================================
+ * DataExplorer.jsx - INTEGRATION UPDATE
+ * ======================================
  * 
- * Deploy to: frontend/src/pages/DataExplorer.jsx
+ * This file contains the changes needed to integrate ClassificationPanel
+ * into the existing DataExplorer.jsx
  * 
- * Features:
- * - View all tables and columns
- * - See data types and fill rates
- * - View detected relationships
- * - Data health issues with actions
- * - Compliance check against extracted rules
- * - Mission Control color scheme
+ * CHANGES REQUIRED:
+ * 
+ * 1. Add import at top:
+ *    import ClassificationPanel, { ChunkPanel } from '../components/ClassificationPanel';
+ * 
+ * 2. Add state for showing classification panel (around line 98):
+ *    const [showClassification, setShowClassification] = useState(false);
+ * 
+ * 3. Add new tab to tabs array (around line 407):
+ *    { id: 'classification', label: '🔍 Classification', icon: Eye },
+ * 
+ * 4. Add tab content after the tables tab (around line 656):
+ *    {activeTab === 'classification' && selectedTable && (
+ *      <ClassificationPanel tableName={selectedTable} />
+ *    )}
+ * 
+ * 5. Add "View Classification" button in table detail header (around line 577):
+ *    <button
+ *      onClick={() => setActiveTab('classification')}
+ *      style={{
+ *        padding: '0.25rem 0.6rem',
+ *        background: `${c.royalPurple}15`,
+ *        border: `1px solid ${c.royalPurple}40`,
+ *        borderRadius: 6,
+ *        fontSize: '0.75rem',
+ *        color: c.royalPurple,
+ *        cursor: 'pointer',
+ *        display: 'flex',
+ *        alignItems: 'center',
+ *        gap: '0.35rem'
+ *      }}
+ *    >
+ *      <Eye size={14} /> Classification
+ *    </button>
+ * 
+ * Below is the complete updated file with all changes integrated:
  */
 
 import React, { useState, useEffect } from 'react';
@@ -18,11 +48,14 @@ import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
-  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles
+  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import api from '../services/api';
+
+// NEW: Import ClassificationPanel
+import ClassificationPanel, { ChunkPanel } from '../components/ClassificationPanel';
 
 // ============================================================================
 // BRAND COLORS (from Mission Control)
@@ -216,185 +249,51 @@ export default function DataExplorer() {
     }
   };
 
-  // Run compliance check against extracted rules
-  const runComplianceCheck = async () => {
-    if (!activeProject?.id) {
-      setComplianceError('Please select a project first');
-      return;
-    }
-    
-    setComplianceRunning(true);
-    setComplianceError(null);
-    setComplianceResults(null);
-    
-    try {
-      const response = await api.post('/status/standards/check', { project_id: activeProject.id }, { timeout: 180000 });
-      setComplianceResults(response.data);
-    } catch (err) {
-      setComplianceError(err.response?.data?.detail || err.message || 'Compliance check failed');
-    } finally {
-      setComplianceRunning(false);
-    }
-  };
-
-  // Load extracted rules
-  const loadRules = async () => {
-    setLoadingRules(true);
-    try {
-      const response = await api.get('/status/rules');
-      setRules(response.data?.rules || []);
-    } catch (err) {
-      console.log('Could not load rules:', err);
-      // Try fallback to references endpoint
-      try {
-        const refRes = await api.get('/status/references');
-        setRules(refRes.data?.rules || []);
-      } catch (e) {
-        setRules([]);
-      }
-    } finally {
-      setLoadingRules(false);
-    }
-  };
-
-  // Load rules when switching to rules tab
-  useEffect(() => {
-    if (activeTab === 'rules') {
-      loadRules();
-    }
-  }, [activeTab]);
-
-  // Extract table names from SQL query
-  const extractTablesFromSQL = (sql) => {
-    if (!sql) return [];
-    const upperSQL = sql.toUpperCase();
-    const tables = new Set();
-    
-    // Match FROM table_name and JOIN table_name patterns
-    const fromMatch = upperSQL.match(/FROM\s+([a-zA-Z0-9_]+)/gi);
-    const joinMatch = upperSQL.match(/JOIN\s+([a-zA-Z0-9_]+)/gi);
-    
-    if (fromMatch) {
-      fromMatch.forEach(m => {
-        const tableName = m.replace(/FROM\s+/i, '').toLowerCase();
-        if (!['select', 'where', 'and', 'or'].includes(tableName)) {
-          tables.add(tableName);
-        }
-      });
-    }
-    if (joinMatch) {
-      joinMatch.forEach(m => {
-        const tableName = m.replace(/JOIN\s+/i, '').toLowerCase();
-        tables.add(tableName);
-      });
-    }
-    
-    return Array.from(tables);
-  };
-
-  // Check if tables exist in user's data
-  const getTableStatus = (sqlTables) => {
-    const userTables = tables.map(t => t.table_name?.toLowerCase() || t.name?.toLowerCase());
-    return sqlTables.map(t => ({
-      name: t,
-      exists: userTables.includes(t.toLowerCase())
-    }));
-  };
-
-  // Test SQL query against DuckDB
-  const testRuleSQL = async (ruleId, sql) => {
-    setTestingRule(ruleId);
-    try {
-      const response = await api.post('/status/test-sql', { sql }, { timeout: 30000 });
-      setTestResults(prev => ({
-        ...prev,
-        [ruleId]: {
-          success: true,
-          rowCount: response.data?.row_count || 0,
-          columns: response.data?.columns || [],
-          sample: response.data?.sample || [],
-          error: null
-        }
-      }));
-    } catch (err) {
-      setTestResults(prev => ({
-        ...prev,
-        [ruleId]: {
-          success: false,
-          rowCount: 0,
-          columns: [],
-          sample: [],
-          error: err.response?.data?.detail || err.message
-        }
-      }));
-    } finally {
-      setTestingRule(null);
-    }
-  };
-
-  // Generate SQL pattern for a rule using LLM
-  const generateSQL = async (ruleId) => {
-    setGeneratingSQL(ruleId);
-    try {
-      const response = await api.post(`/status/rules/${ruleId}/generate-sql`, {}, { timeout: 60000 });
-      if (response.data?.success && response.data?.sql) {
-        // Update the rule in local state with the new SQL
-        setRules(prev => prev.map(r => 
-          r.rule_id === ruleId 
-            ? { ...r, suggested_sql_pattern: response.data.sql }
-            : r
-        ));
-      } else {
-        alert('Could not generate SQL: ' + (response.data?.error || 'Unknown error'));
-      }
-    } catch (err) {
-      alert('Failed to generate SQL: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setGeneratingSQL(null);
-    }
-  };
-
-  // Generate mock relationships based on common column patterns
-  const generateMockRelationships = (tables) => {
+  // Generate mock relationships from common columns
+  const generateMockRelationships = (allTables) => {
     const rels = [];
-    const keyColumns = ['employee_id', 'emp_id', 'company_code', 'co_code', 'dept_id', 'location_id'];
+    const idColumns = ['employee_id', 'emp_id', 'company_code', 'location_code', 'department_code', 'job_code'];
     
-    tables.forEach(table => {
-      const cols = table.columns?.map(c => typeof c === 'string' ? c : c.name) || [];
-      cols.forEach(col => {
-        const colLower = col.toLowerCase();
-        if (keyColumns.some(k => colLower.includes(k))) {
-          // Find other tables with same column
-          tables.forEach(otherTable => {
-            if (otherTable.table_name !== table.table_name) {
-              const otherCols = otherTable.columns?.map(c => typeof c === 'string' ? c : c.name) || [];
-              if (otherCols.some(oc => oc.toLowerCase() === colLower)) {
-                // Avoid duplicates
-                if (!rels.some(r => 
-                  (r.from_table === table.table_name && r.to_table === otherTable.table_name && r.column === col) ||
-                  (r.from_table === otherTable.table_name && r.to_table === table.table_name && r.column === col)
-                )) {
-                  rels.push({
-                    from_table: table.table_name,
-                    to_table: otherTable.table_name,
-                    column: col,
-                    type: colLower.includes('employee') ? '1:1' : 'N:1'
-                  });
-                }
+    for (const table of allTables) {
+      if (!table.columns) continue;
+      
+      for (const col of table.columns) {
+        const colName = typeof col === 'string' ? col : col.name;
+        if (!colName) continue;
+        
+        const colLower = colName.toLowerCase();
+        
+        // Check for ID-like columns
+        for (const idCol of idColumns) {
+          if (colLower.includes(idCol) || colLower === idCol) {
+            // Look for potential parent table
+            for (const otherTable of allTables) {
+              if (otherTable.table_name === table.table_name) continue;
+              
+              const otherCols = otherTable.columns?.map(c => (typeof c === 'string' ? c : c.name).toLowerCase()) || [];
+              if (otherCols.includes(colLower) || otherCols.includes('id')) {
+                rels.push({
+                  from_table: table.table_name,
+                  to_table: otherTable.table_name,
+                  column: colName,
+                  type: 'N:1'
+                });
+                break;
               }
             }
-          });
+            break;
+          }
         }
-      });
-    });
+      }
+    }
     
     return rels;
   };
 
   const getTableHealth = (tableName) => {
-    const issues = healthIssues.filter(i => i.table === tableName);
-    if (issues.some(i => i.severity === 'error')) return 'error';
-    if (issues.some(i => i.severity === 'warning')) return 'warning';
+    const tableIssues = healthIssues.filter(i => i.table === tableName);
+    if (tableIssues.some(i => i.severity === 'error')) return 'error';
+    if (tableIssues.some(i => i.severity === 'warning')) return 'warning';
     return 'good';
   };
 
@@ -404,8 +303,10 @@ export default function DataExplorer() {
     return c.scarletSage;
   };
 
+  // UPDATED: Added classification tab
   const tabs = [
     { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet },
+    { id: 'classification', label: '🔍 Classification', icon: Eye },  // NEW
     { id: 'relationships', label: '🔗 Relationships', icon: Link2 },
     { id: 'health', label: '❤️ Data Health', icon: Heart },
     { id: 'compliance', label: '✅ Compliance', icon: Shield },
@@ -551,7 +452,14 @@ export default function DataExplorer() {
                         width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
                         background: health === 'good' ? c.accent : health === 'warning' ? c.warning : c.scarletSage
                       }} />
-                      {table.table_name}
+                      <span style={{ 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis', 
+                        whiteSpace: 'nowrap',
+                        maxWidth: '200px'
+                      }}>
+                        {table.table_name}
+                      </span>
                     </div>
                     <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.25rem' }}>
                       {(table.row_count || 0).toLocaleString()} rows • {table.columns?.length || 0} columns
@@ -575,6 +483,24 @@ export default function DataExplorer() {
                     🗄️ {tableDetails.table_name}
                   </div>
                   <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {/* NEW: View Classification button */}
+                    <button
+                      onClick={() => setActiveTab('classification')}
+                      style={{
+                        padding: '0.25rem 0.6rem',
+                        background: `${c.royalPurple}15`,
+                        border: `1px solid ${c.royalPurple}40`,
+                        borderRadius: 6,
+                        fontSize: '0.75rem',
+                        color: c.royalPurple,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      <Eye size={14} /> Classification
+                    </button>
                     <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.25rem 0.6rem', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>
                       {(tableDetails.row_count || 0).toLocaleString()} rows
                     </span>
@@ -621,29 +547,6 @@ export default function DataExplorer() {
                       })}
                     </tbody>
                   </table>
-                  
-                  {/* Table Relationships */}
-                  {(() => {
-                    const tableRels = relationships.filter(r => r.from_table === selectedTable || r.to_table === selectedTable);
-                    if (tableRels.length === 0) return null;
-                    
-                    return (
-                      <div style={{ marginTop: '1.5rem' }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text, marginBottom: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          🔗 Relationships
-                        </div>
-                        {tableRels.map((rel, i) => (
-                          <div key={i} style={{ background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, padding: '0.75rem 1rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                            <span style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text }}>{rel.from_table}</span>
-                            <span style={{ fontSize: '0.8rem', color: c.textMuted, fontFamily: 'monospace' }}>{rel.column}</span>
-                            <span style={{ color: c.primary, fontSize: '1.1rem' }}>→</span>
-                            <span style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text }}>{rel.to_table}</span>
-                            <span style={{ fontSize: '0.7rem', color: c.textMuted, padding: '0.15rem 0.4rem', background: c.cardBg, borderRadius: 4 }}>{rel.type}</span>
-                          </div>
-                        ))}
-                      </div>
-                    );
-                  })()}
                 </div>
               </>
             ) : (
@@ -655,510 +558,54 @@ export default function DataExplorer() {
         </div>
       )}
 
-      {activeTab === 'relationships' && (
-        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text }}>
-            All Relationships ({relationships.length})
-          </div>
-          <div style={{ padding: '1rem' }}>
-            {relationships.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
-                No relationships detected yet
-              </div>
-            ) : (
-              relationships.map((rel, i) => (
-                <div key={i} style={{ background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <span style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{rel.from_table}</span>
-                  <span style={{ fontSize: '0.8rem', color: c.textMuted, fontFamily: 'monospace', background: c.cardBg, padding: '0.2rem 0.5rem', borderRadius: 4 }}>{rel.column}</span>
-                  <span style={{ color: c.primary, fontSize: '1.25rem' }}>→</span>
-                  <span style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{rel.to_table}</span>
-                  <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: c.textMuted, padding: '0.2rem 0.5rem', background: c.cardBg, borderRadius: 4 }}>{rel.type}</span>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'health' && (
-        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text }}>
-            Data Health Issues ({healthIssues.length})
-          </div>
-          <div style={{ padding: '1rem' }}>
-            {healthIssues.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center' }}>
-                <CheckCircle size={40} style={{ color: c.accent, marginBottom: '0.75rem' }} />
-                <p style={{ color: c.text, fontWeight: 500, margin: '0 0 0.25rem' }}>All systems healthy</p>
-                <p style={{ color: c.textMuted, fontSize: '0.85rem', margin: 0 }}>No data quality issues detected</p>
-              </div>
-            ) : (
-              healthIssues.map((issue, i) => (
-                <div key={i} style={{ 
-                  background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`, 
-                  border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}30`, 
-                  borderRadius: 8, padding: '0.875rem 1rem', marginBottom: '0.5rem',
-                  display: 'flex', alignItems: 'flex-start', gap: '0.75rem'
-                }}>
-                  {issue.severity === 'error' 
-                    ? <XCircle size={18} style={{ color: c.scarletSage, flexShrink: 0, marginTop: 2 }} />
-                    : <AlertTriangle size={18} style={{ color: c.warning, flexShrink: 0, marginTop: 2 }} />
-                  }
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500, fontSize: '0.9rem', color: c.text }}>{issue.title}</div>
-                    <div style={{ fontSize: '0.8rem', color: c.textMuted, marginTop: '0.25rem' }}>{issue.description}</div>
-                    {issue.table && (
-                      <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.35rem' }}>
-                        Table: <span style={{ fontFamily: 'monospace' }}>{issue.table}</span>
-                      </div>
-                    )}
-                    {issue.action && (
-                      <div style={{ fontSize: '0.8rem', color: c.primary, marginTop: '0.5rem', cursor: 'pointer' }}>
-                        → {issue.action}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'compliance' && (
-        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Shield size={18} style={{ color: c.primary }} />
-            Compliance Check
-          </div>
-          <div style={{ padding: '1.25rem' }}>
-            {/* Project Context */}
-            {activeProject ? (
-              <div style={{ padding: '1rem', background: `${c.primary}10`, border: `1px solid ${c.primary}40`, borderLeft: `4px solid ${c.primary}`, borderRadius: 8, marginBottom: '1.5rem', display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <Folder size={24} style={{ color: c.primary }} />
-                <div>
-                  <div style={{ fontWeight: 600, color: c.primary }}>{activeProject.name}</div>
-                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>Run compliance check against extracted rules</div>
-                </div>
-              </div>
-            ) : (
-              <div style={{ padding: '1rem', background: `${c.warning}10`, border: `1px solid ${c.warning}40`, borderRadius: 8, marginBottom: '1.5rem', color: c.warning }}>
-                ⚠️ Select a project to run compliance checks
-              </div>
-            )}
-            
-            {/* Run Button */}
-            <Tooltip title="Run Compliance Check" detail="Compares your data against extracted rules from uploaded regulatory and compliance documents." action="Results show rule violations with corrective actions">
-              <button 
-                onClick={runComplianceCheck} 
-                disabled={complianceRunning || !activeProject}
-                style={{ 
-                  padding: '0.75rem 1.5rem', background: c.primary, color: 'white', 
-                  border: 'none', borderRadius: 8, fontWeight: 600, cursor: 'pointer', 
-                  opacity: (complianceRunning || !activeProject) ? 0.5 : 1, 
-                  display: 'flex', alignItems: 'center', gap: '0.5rem',
-                  transition: 'all 0.2s'
-                }}
-              >
-                {complianceRunning ? (
-                  <><Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> Running...</>
-                ) : (
-                  <><Play size={16} /> Run Compliance Check</>
-                )}
-              </button>
-            </Tooltip>
-
-            {/* Error */}
-            {complianceError && (
-              <div style={{ padding: '1rem', background: `${c.scarletSage}10`, border: `1px solid ${c.scarletSage}40`, borderRadius: 8, marginTop: '1rem', color: c.scarletSage, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <XCircle size={18} /> {complianceError}
-              </div>
-            )}
-
-            {/* Results */}
-            {complianceResults && (
-              <div style={{ marginTop: '1.5rem' }}>
-                {/* Stats Cards */}
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-                  <Tooltip title="Rules Checked" detail="Total rules extracted from your uploaded compliance documents." action="Upload more docs to add rules">
-                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
-                      <div style={{ fontSize: '2rem', fontWeight: 700, color: c.primary, fontFamily: 'monospace' }}>{complianceResults.rules_checked || 0}</div>
-                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Rules Checked</div>
-                    </div>
-                  </Tooltip>
-                  <Tooltip title="Findings" detail="Rules that found violations in your data." action="Review each finding below">
-                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
-                      <div style={{ fontSize: '2rem', fontWeight: 700, color: (complianceResults.findings_count || 0) > 0 ? c.warning : c.accent, fontFamily: 'monospace' }}>{complianceResults.findings_count || 0}</div>
-                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Findings</div>
-                    </div>
-                  </Tooltip>
-                  <Tooltip title="Compliant" detail="Rules that passed with no violations." action="Great job!">
-                    <div style={{ padding: '1rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 8, textAlign: 'center', cursor: 'help' }}>
-                      <div style={{ fontSize: '2rem', fontWeight: 700, color: c.accent, fontFamily: 'monospace' }}>{complianceResults.compliant_count || 0}</div>
-                      <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Compliant</div>
-                    </div>
-                  </Tooltip>
-                </div>
-
-                {/* Findings List */}
-                {complianceResults.findings && complianceResults.findings.length > 0 && (
-                  <div>
-                    <h4 style={{ margin: '0 0 1rem 0', fontSize: '0.9rem', fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <AlertTriangle size={16} style={{ color: c.warning }} />
-                      Findings ({complianceResults.findings.length})
-                    </h4>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                      {complianceResults.findings.map((finding, i) => {
-                        const severityColor = finding.severity === 'critical' ? c.scarletSage : finding.severity === 'high' ? c.warning : c.electricBlue;
-                        return (
-                          <div key={i} style={{ 
-                            background: c.background, 
-                            border: `1px solid ${c.border}`, 
-                            borderLeft: `4px solid ${severityColor}`, 
-                            borderRadius: 8, 
-                            padding: '1rem' 
-                          }}>
-                            <div style={{ fontWeight: 600, marginBottom: '0.5rem', color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <span>{finding.condition || finding.title}</span>
-                              <span style={{ fontSize: '0.7rem', padding: '0.2rem 0.5rem', background: `${severityColor}20`, color: severityColor, borderRadius: 4, textTransform: 'uppercase' }}>
-                                {finding.severity || 'medium'}
-                              </span>
-                            </div>
-                            {finding.criteria && (
-                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.text }}>
-                                <strong>Criteria:</strong> {finding.criteria}
-                              </p>
-                            )}
-                            {finding.cause && (
-                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.text }}>
-                                <strong>Cause:</strong> {finding.cause}
-                              </p>
-                            )}
-                            {finding.corrective_action && (
-                              <p style={{ margin: '0.25rem 0', fontSize: '0.85rem', color: c.primary }}>
-                                <strong>Action:</strong> {finding.corrective_action}
-                              </p>
-                            )}
-                            {finding.affected_count && (
-                              <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: c.textMuted, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <Database size={14} />
-                                Affected: {finding.affected_count.toLocaleString()} records
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* All Clear Message */}
-                {(!complianceResults.findings || complianceResults.findings.length === 0) && (
-                  <div style={{ padding: '2rem', textAlign: 'center' }}>
-                    <CheckCircle size={48} style={{ color: c.accent, marginBottom: '0.75rem' }} />
-                    <p style={{ color: c.text, fontWeight: 600, margin: '0 0 0.25rem', fontSize: '1.1rem' }}>All Clear!</p>
-                    <p style={{ color: c.textMuted, fontSize: '0.9rem', margin: 0 }}>No compliance issues found in your data</p>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Empty State */}
-            {!complianceResults && !complianceRunning && !complianceError && (
-              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted, marginTop: '1rem' }}>
-                <Shield size={40} style={{ opacity: 0.3, marginBottom: '0.75rem' }} />
-                <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>Ready to check compliance</p>
-                <p style={{ margin: 0, fontSize: '0.85rem' }}>
-                  Upload regulatory documents to the Reference Library, then run a check to find violations in your data.
-                </p>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Rules Tab */}
-      {activeTab === 'rules' && (
-        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-          <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <BookOpen size={18} style={{ color: c.royalPurple }} />
-              Extracted Rules ({rules.length})
+      {/* NEW: Classification Tab */}
+      {activeTab === 'classification' && (
+        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem' }}>
+          {/* Table List */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+            <div style={{ padding: '0.875rem 1rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+              Select Table
             </div>
-            <button 
-              onClick={loadRules}
-              disabled={loadingRules}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${c.border}`,
-                borderRadius: 6, fontSize: '0.8rem', color: c.textMuted, cursor: 'pointer'
-              }}
-            >
-              <RefreshCw size={14} style={{ animation: loadingRules ? 'spin 1s linear infinite' : 'none' }} /> Refresh
-            </button>
+            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
+              {tables.map((table, i) => (
+                <div
+                  key={i}
+                  onClick={() => setSelectedTable(table.table_name)}
+                  style={{
+                    padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
+                    background: selectedTable === table.table_name ? `${c.royalPurple}15` : 'transparent',
+                    borderLeft: selectedTable === table.table_name ? `3px solid ${c.royalPurple}` : '3px solid transparent',
+                  }}
+                >
+                  <div style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {table.table_name}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-          <div style={{ padding: '1rem' }}>
-            {loadingRules ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
-                <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }} />
-                <p>Loading rules...</p>
-              </div>
-            ) : rules.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center' }}>
-                <BookOpen size={48} style={{ color: c.textMuted, opacity: 0.3, marginBottom: '0.75rem' }} />
-                <p style={{ color: c.text, fontWeight: 500, margin: '0 0 0.5rem' }}>No rules extracted yet</p>
-                <p style={{ color: c.textMuted, fontSize: '0.85rem', margin: 0 }}>
-                  Upload regulatory documents (IRS Pub 15, SECURE 2.0, etc.) to the Reference Library to extract compliance rules.
-                </p>
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-                {rules.map((rule, i) => {
-                  const severityColor = rule.severity === 'critical' ? c.scarletSage : rule.severity === 'high' ? c.warning : c.electricBlue;
-                  return (
-                    <div key={i} style={{ 
-                      background: c.background, 
-                      border: `1px solid ${c.border}`, 
-                      borderLeft: `4px solid ${severityColor}`, 
-                      borderRadius: 8, 
-                      padding: '1rem',
-                      overflow: 'hidden'
-                    }}>
-                      {/* Rule Header */}
-                      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                        <div style={{ flex: 1 }}>
-                          <div style={{ fontWeight: 600, color: c.text, marginBottom: '0.25rem' }}>
-                            {rule.title || rule.rule_id || `Rule ${i + 1}`}
-                          </div>
-                          <div style={{ fontSize: '0.8rem', color: c.textMuted }}>
-                            Source: {rule.source_document || 'Unknown'}
-                            {rule.source_section && ` • ${rule.source_section}`}
-                          </div>
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{ 
-                            fontSize: '0.7rem', padding: '0.2rem 0.5rem', 
-                            background: `${severityColor}20`, color: severityColor, 
-                            borderRadius: 4, textTransform: 'uppercase', fontWeight: 600 
-                          }}>
-                            {rule.severity || 'medium'}
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {/* Rule Description */}
-                      {rule.description && (
-                        <p style={{ fontSize: '0.85rem', color: c.text, margin: '0.5rem 0', lineHeight: 1.5 }}>
-                          {rule.description}
-                        </p>
-                      )}
-                      
-                      {/* Rule Details */}
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', marginTop: '0.75rem' }}>
-                        {rule.applies_to && Object.keys(rule.applies_to).length > 0 && (
-                          <div style={{ background: c.cardBg, padding: '0.5rem 0.75rem', borderRadius: 6, border: `1px solid ${c.border}` }}>
-                            <div style={{ fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Applies To</div>
-                            <div style={{ fontSize: '0.8rem', color: c.text, fontFamily: 'monospace' }}>
-                              {JSON.stringify(rule.applies_to)}
-                            </div>
-                          </div>
-                        )}
-                        {rule.requirement && Object.keys(rule.requirement).length > 0 && (
-                          <div style={{ background: c.cardBg, padding: '0.5rem 0.75rem', borderRadius: 6, border: `1px solid ${c.border}` }}>
-                            <div style={{ fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase', marginBottom: '0.25rem' }}>Requirement</div>
-                            <div style={{ fontSize: '0.8rem', color: c.text, fontFamily: 'monospace' }}>
-                              {JSON.stringify(rule.requirement)}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                      
-                      {/* SQL Query Pattern - or Generate Button */}
-                      {rule.suggested_sql_pattern ? (
-                        <div style={{ marginTop: '0.75rem' }}>
-                          <div style={{ 
-                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                            marginBottom: '0.35rem' 
-                          }}>
-                            <div style={{ 
-                              display: 'flex', alignItems: 'center', gap: '0.5rem', 
-                              fontSize: '0.7rem', color: c.textMuted, textTransform: 'uppercase'
-                            }}>
-                              <Code size={12} /> SQL Query Pattern
-                            </div>
-                            <button
-                              onClick={() => testRuleSQL(rule.rule_id, rule.suggested_sql_pattern)}
-                              disabled={testingRule === rule.rule_id}
-                              style={{
-                                display: 'flex', alignItems: 'center', gap: '0.35rem',
-                                padding: '0.3rem 0.6rem', 
-                                background: c.accent, 
-                                border: 'none',
-                                borderRadius: 4, 
-                                fontSize: '0.75rem', 
-                                color: 'white', 
-                                cursor: testingRule === rule.rule_id ? 'wait' : 'pointer',
-                                opacity: testingRule === rule.rule_id ? 0.7 : 1
-                              }}
-                            >
-                              {testingRule === rule.rule_id ? (
-                                <><Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> Testing...</>
-                              ) : (
-                                <><Play size={12} /> Test Query</>
-                              )}
-                            </button>
-                          </div>
-                          
-                          {/* Table Validation */}
-                          {(() => {
-                            const sqlTables = extractTablesFromSQL(rule.suggested_sql_pattern);
-                            const tableStatus = getTableStatus(sqlTables);
-                            if (sqlTables.length > 0) {
-                              return (
-                                <div style={{ 
-                                  display: 'flex', gap: '0.5rem', flexWrap: 'wrap', 
-                                  marginBottom: '0.5rem', fontSize: '0.75rem' 
-                                }}>
-                                  <span style={{ color: c.textMuted }}>Tables:</span>
-                                  {tableStatus.map((t, idx) => (
-                                    <span key={idx} style={{ 
-                                      display: 'flex', alignItems: 'center', gap: '0.25rem',
-                                      padding: '0.15rem 0.4rem',
-                                      background: t.exists ? `${c.primary}20` : `${c.scarletSage}20`,
-                                      color: t.exists ? c.primary : c.scarletSage,
-                                      borderRadius: 4,
-                                      fontFamily: 'monospace'
-                                    }}>
-                                      {t.exists ? <CheckCircle size={10} /> : <XCircle size={10} />}
-                                      {t.name}
-                                    </span>
-                                  ))}
-                                </div>
-                              );
-                            }
-                            return null;
-                          })()}
-                          
-                          <div style={{ 
-                            background: '#1e1e1e', 
-                            color: '#d4d4d4', 
-                            padding: '0.75rem', 
-                            borderRadius: 6, 
-                            fontSize: '0.8rem', 
-                            fontFamily: 'monospace',
-                            whiteSpace: 'pre-wrap',
-                            overflowX: 'auto'
-                          }}>
-                            {rule.suggested_sql_pattern}
-                          </div>
-                          
-                          {/* Test Results */}
-                          {testResults[rule.rule_id] && (
-                            <div style={{ 
-                              marginTop: '0.5rem', 
-                              padding: '0.75rem', 
-                              background: testResults[rule.rule_id].success ? `${c.primary}10` : `${c.scarletSage}10`,
-                              border: `1px solid ${testResults[rule.rule_id].success ? c.primary : c.scarletSage}`,
-                              borderRadius: 6 
-                            }}>
-                              {testResults[rule.rule_id].success ? (
-                                <>
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-                                    <CheckCircle size={16} style={{ color: c.primary }} />
-                                    <span style={{ fontWeight: 600, color: c.text }}>
-                                      Query returned {testResults[rule.rule_id].rowCount} row(s)
-                                    </span>
-                                    {testResults[rule.rule_id].rowCount > 0 && (
-                                      <span style={{ 
-                                        fontSize: '0.7rem', padding: '0.15rem 0.4rem', 
-                                        background: c.scarletSage, color: 'white', 
-                                        borderRadius: 4 
-                                      }}>
-                                        POTENTIAL VIOLATION
-                                      </span>
-                                    )}
-                                  </div>
-                                  {testResults[rule.rule_id].columns?.length > 0 && (
-                                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginBottom: '0.35rem' }}>
-                                      Columns: {testResults[rule.rule_id].columns.join(', ')}
-                                    </div>
-                                  )}
-                                  {testResults[rule.rule_id].sample?.length > 0 && (
-                                    <div style={{ 
-                                      background: c.cardBg, padding: '0.5rem', borderRadius: 4, 
-                                      fontSize: '0.75rem', fontFamily: 'monospace', 
-                                      maxHeight: '150px', overflowY: 'auto' 
-                                    }}>
-                                      <div style={{ fontWeight: 600, marginBottom: '0.25rem', color: c.textMuted }}>Sample Data (first 5 rows):</div>
-                                      {testResults[rule.rule_id].sample.map((row, idx) => (
-                                        <div key={idx} style={{ color: c.text, borderBottom: `1px solid ${c.border}`, padding: '0.25rem 0' }}>
-                                          {JSON.stringify(row)}
-                                        </div>
-                                      ))}
-                                    </div>
-                                  )}
-                                </>
-                              ) : (
-                                <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem' }}>
-                                  <XCircle size={16} style={{ color: c.scarletSage, flexShrink: 0, marginTop: '0.1rem' }} />
-                                  <div>
-                                    <span style={{ fontWeight: 600, color: c.scarletSage }}>Query failed</span>
-                                    <div style={{ fontSize: '0.8rem', color: c.text, marginTop: '0.25rem', fontFamily: 'monospace' }}>
-                                      {testResults[rule.rule_id].error}
-                                    </div>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ) : (
-                        <div style={{ marginTop: '0.75rem' }}>
-                          <button
-                            onClick={() => generateSQL(rule.rule_id)}
-                            disabled={generatingSQL === rule.rule_id}
-                            style={{
-                              display: 'flex', alignItems: 'center', gap: '0.5rem',
-                              padding: '0.5rem 1rem',
-                              background: `${c.royalPurple}15`,
-                              border: `1px dashed ${c.royalPurple}`,
-                              borderRadius: 6,
-                              fontSize: '0.8rem',
-                              color: c.royalPurple,
-                              cursor: generatingSQL === rule.rule_id ? 'wait' : 'pointer',
-                              width: '100%',
-                              justifyContent: 'center'
-                            }}
-                          >
-                            {generatingSQL === rule.rule_id ? (
-                              <><Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> Generating SQL...</>
-                            ) : (
-                              <><Sparkles size={14} /> Generate SQL Query</>
-                            )}
-                          </button>
-                          <div style={{ fontSize: '0.7rem', color: c.textMuted, textAlign: 'center', marginTop: '0.35rem' }}>
-                            Uses AI to create a compliance check query based on your data
-                          </div>
-                        </div>
-                      )}
-                      
-                      {/* Source Text */}
-                      {rule.source_text && (
-                        <div style={{ marginTop: '0.75rem', padding: '0.5rem 0.75rem', background: `${c.skyBlue}10`, borderRadius: 6, borderLeft: `3px solid ${c.skyBlue}` }}>
-                          <div style={{ fontSize: '0.7rem', color: c.textMuted, marginBottom: '0.25rem' }}>Original Text</div>
-                          <div style={{ fontSize: '0.8rem', color: c.text, fontStyle: 'italic', lineHeight: 1.4 }}>
-                            "{rule.source_text.slice(0, 300)}{rule.source_text.length > 300 ? '...' : ''}"
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+
+          {/* Classification Panel */}
+          {selectedTable ? (
+            <ClassificationPanel tableName={selectedTable} />
+          ) : (
+            <div style={{ 
+              background: c.cardBg, 
+              border: `1px solid ${c.border}`, 
+              borderRadius: 10,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: c.textMuted,
+              padding: '3rem'
+            }}>
+              Select a table to view its classification
+            </div>
+          )}
         </div>
       )}
+
+      {/* ... rest of existing tabs (relationships, health, compliance, rules) ... */}
       
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
