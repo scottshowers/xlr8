@@ -222,9 +222,9 @@ class ClassificationService:
         try:
             conn = self.structured_handler.conn
             
-            # Get table metadata
+            # Get table metadata - include display_name
             metadata = conn.execute("""
-                SELECT table_name, project, file_name, row_count, column_count, created_at, truth_type
+                SELECT table_name, display_name, project, file_name, row_count, column_count, created_at, truth_type
                 FROM _schema_metadata
                 WHERE table_name = ?
             """, [table_name]).fetchone()
@@ -233,7 +233,7 @@ class ClassificationService:
                 logger.warning(f"[CLASSIFICATION] Table {table_name} not found in metadata")
                 return None
             
-            table_name_db, project, filename, row_count, col_count, created_at, truth_type = metadata
+            table_name_db, display_name, project, filename, row_count, col_count, created_at, truth_type = metadata
             
             # Get column profiles
             columns = self._get_column_classifications(conn, table_name)
@@ -250,8 +250,9 @@ class ClassificationService:
             # Build routing boost reasons
             routing_reasons = self._get_routing_boost_reasons(columns)
             
-            # Create display name (shortened)
-            display_name = self._create_display_name(table_name, filename)
+            # Use display_name from DB, or generate if not set
+            if not display_name:
+                display_name = self._create_display_name(table_name, filename)
             
             return TableClassification(
                 table_name=table_name,
