@@ -1,20 +1,30 @@
 /**
- * UploadContext.jsx - Background Upload Manager
+ * UploadContext.jsx - Background Upload Manager with Job Polling
+ * ==============================================================
  * 
- * Allows uploads to continue when navigating away.
- * Shows status indicator in header.
+ * v2.0 - December 2025
+ * 
+ * FIXES:
+ * - Polls job status for async processing (register extractor, smart_pdf)
+ * - Shows real-time processing stages
+ * - Files remain visible until processing completes
+ * - Displays actual metrics when done (rows, tables, chunks)
+ * 
+ * CANONICAL JOB STATUS FORMAT:
+ * - job_id: string
+ * - status: 'uploading' | 'processing' | 'completed' | 'failed'
+ * - progress: 0-100
+ * - message: current stage description
+ * - result: final result object when completed
  * 
  * Five Truths Support:
- * - Passes truth_type to backend for proper routing
  * - reality → DuckDB
  * - intent → ChromaDB (project-scoped)
  * - configuration → DuckDB + ChromaDB
- * - reference → ChromaDB (global)
- * - regulatory → ChromaDB (global)
- * - compliance → ChromaDB (global)
+ * - reference/regulatory/compliance → ChromaDB (global)
  */
 
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import api from '../services/api';
 
 const UploadContext = createContext(null);
@@ -27,13 +37,93 @@ export function useUpload() {
   return context;
 }
 
+// Processing stage messages for display
+const STAGE_MESSAGES = {
+  uploading: 'Uploading file...',
+  queued: 'Queued for processing...',
+  extracting: 'Extracting content...',
+  analyzing: 'Analyzing structure...',
+  storing: 'Storing to database...',
+  profiling: 'Profiling columns...',
+  indexing: 'Building search index...',
+  completed: 'Complete',
+  failed: 'Failed',
+};
+
 export function UploadProvider({ children }) {
   const [uploads, setUploads] = useState([]);
+  const pollIntervals = useRef({});
+
+  // Cleanup polling on unmount
+  useEffect(() => {
+    return () => {
+      Object.values(pollIntervals.current).forEach(clearInterval);
+    };
+  }, []);
+
+  // Poll job status for async jobs
+  const pollJobStatus = useCallback((uploadId, jobId) => {
+    // Clear any existing poll for this upload
+    if (pollIntervals.current[uploadId]) {
+      clearInterval(pollIntervals.current[uploadId]);
+    }
+
+    const poll = async () => {
+      try {
+        const res = await api.get(`/register/job/${jobId}`);
+        const job = res.data;
+
+        setUploads(prev => prev.map(u => {
+          if (u.id !== uploadId) return u;
+
+          // Determine display status and message
+          let displayStatus = job.status || 'processing';
+          let displayMessage = job.message || STAGE_MESSAGES[displayStatus] || 'Processing...';
+
+          // Map backend status to our canonical format
+          if (job.status === 'completed') {
+            displayStatus = 'completed';
+            displayMessage = `Done: ${job.result?.employees_found || job.result?.row_count || 0} rows`;
+          } else if (job.status === 'failed' || job.status === 'error') {
+            displayStatus = 'failed';
+            displayMessage = job.error || job.message || 'Processing failed';
+          }
+
+          return {
+            ...u,
+            status: displayStatus,
+            progress: job.progress || u.progress,
+            message: displayMessage,
+            result: job.result,
+          };
+        }));
+
+        // Stop polling if done
+        if (job.status === 'completed' || job.status === 'failed' || job.status === 'error') {
+          clearInterval(pollIntervals.current[uploadId]);
+          delete pollIntervals.current[uploadId];
+
+          // Auto-remove completed uploads after delay
+          if (job.status === 'completed') {
+            setTimeout(() => {
+              setUploads(prev => prev.filter(u => u.id !== uploadId));
+            }, 15000);
+          }
+        }
+      } catch (err) {
+        // Job endpoint might not exist for non-async uploads - that's okay
+        console.debug('Job poll error (may be normal):', err.message);
+      }
+    };
+
+    // Poll immediately, then every 2 seconds
+    poll();
+    pollIntervals.current[uploadId] = setInterval(poll, 2000);
+  }, []);
 
   const addUpload = useCallback((file, project, projectName, options = {}) => {
     const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    // Extract project name and ID properly from the project object
     const projName = projectName || project?.name || 'Unknown';
     const projId = project?.id || null;
     
@@ -44,8 +134,10 @@ export function UploadProvider({ children }) {
       projectName: projName,
       progress: 0,
       status: 'uploading',
+      message: STAGE_MESSAGES.uploading,
       error: null,
       startedAt: new Date(),
+      result: null,
     };
 
     setUploads(prev => [...prev, uploadEntry]);
@@ -62,7 +154,6 @@ export function UploadProvider({ children }) {
       formData.append('domain', options.domain || 'general');
     }
     
-    // Five Truths: Pass truth_type for proper routing
     if (options.truth_type) {
       formData.append('truth_type', options.truth_type);
     }
@@ -73,32 +164,72 @@ export function UploadProvider({ children }) {
       onUploadProgress: (progressEvent) => {
         const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total);
         setUploads(prev => prev.map(u => 
-          u.id === id ? { ...u, progress, status: progress < 100 ? 'uploading' : 'processing' } : u
+          u.id === id ? { 
+            ...u, 
+            progress: Math.min(progress, 50), // Cap at 50% for upload phase
+            status: progress < 100 ? 'uploading' : 'processing',
+            message: progress < 100 ? STAGE_MESSAGES.uploading : STAGE_MESSAGES.queued,
+          } : u
         ));
       },
     })
     .then((response) => {
-      setUploads(prev => prev.map(u => 
-        u.id === id ? { ...u, status: 'completed', progress: 100, result: response.data } : u
-      ));
-      setTimeout(() => {
-        setUploads(prev => prev.filter(u => u.id !== id));
-      }, 10000);
+      const data = response.data;
+      
+      // Check if this is an async job that needs polling
+      if (data.job_id) {
+        setUploads(prev => prev.map(u => 
+          u.id === id ? { 
+            ...u, 
+            status: 'processing', 
+            progress: 50,
+            message: data.message || STAGE_MESSAGES.extracting,
+            jobId: data.job_id,
+          } : u
+        ));
+        // Start polling for job status
+        pollJobStatus(id, data.job_id);
+      } else {
+        // Synchronous completion
+        const rowCount = data.row_count || data.total_rows || data.rows || 0;
+        const tableCount = data.tables_created?.length || data.table_count || 1;
+        
+        setUploads(prev => prev.map(u => 
+          u.id === id ? { 
+            ...u, 
+            status: 'completed', 
+            progress: 100,
+            message: `Done: ${rowCount.toLocaleString()} rows in ${tableCount} table(s)`,
+            result: data,
+          } : u
+        ));
+        
+        // Auto-remove after delay
+        setTimeout(() => {
+          setUploads(prev => prev.filter(u => u.id !== id));
+        }, 10000);
+      }
     })
     .catch((error) => {
       setUploads(prev => prev.map(u => 
         u.id === id ? { 
           ...u, 
-          status: 'failed', 
-          error: error.response?.data?.detail || error.message || 'Upload failed' 
+          status: 'failed',
+          message: error.response?.data?.detail || error.message || 'Upload failed',
+          error: error.response?.data?.detail || error.message || 'Upload failed',
         } : u
       ));
     });
 
     return id;
-  }, []);
+  }, [pollJobStatus]);
 
   const removeUpload = useCallback((id) => {
+    // Stop any polling for this upload
+    if (pollIntervals.current[id]) {
+      clearInterval(pollIntervals.current[id]);
+      delete pollIntervals.current[id];
+    }
     setUploads(prev => prev.filter(u => u.id !== id));
   }, []);
 
@@ -106,7 +237,9 @@ export function UploadProvider({ children }) {
     setUploads(prev => prev.filter(u => u.status !== 'completed'));
   }, []);
 
-  const activeCount = uploads.filter(u => u.status === 'uploading' || u.status === 'processing').length;
+  const activeCount = uploads.filter(u => 
+    u.status === 'uploading' || u.status === 'processing'
+  ).length;
   const hasActive = activeCount > 0;
   const failedCount = uploads.filter(u => u.status === 'failed').length;
 
@@ -135,17 +268,21 @@ export function UploadStatusIndicator() {
   if (uploads.length === 0) return null;
 
   const getStatusColor = (status) => {
-    if (status === 'completed') return '#10b981';
-    if (status === 'failed') return '#ef4444';
-    if (status === 'processing') return '#3b82f6';
-    return '#f59e0b';
+    switch (status) {
+      case 'completed': return '#10b981';
+      case 'failed': return '#ef4444';
+      case 'processing': return '#3b82f6';
+      default: return '#f59e0b';
+    }
   };
 
   const getStatusIcon = (status) => {
-    if (status === 'completed') return '✓';
-    if (status === 'failed') return '✗';
-    if (status === 'processing') return '⚙';
-    return '↑';
+    switch (status) {
+      case 'completed': return '✓';
+      case 'failed': return '✗';
+      case 'processing': return '⚙';
+      default: return '↑';
+    }
   };
 
   return (
@@ -169,12 +306,12 @@ export function UploadStatusIndicator() {
         {hasActive ? (
           <>
             <span style={{ display: 'inline-block', animation: 'spin 1s linear infinite' }}>↻</span>
-            {activeCount} uploading
+            {activeCount} processing
           </>
         ) : failedCount > 0 ? (
-          <><span>⚠</span>{failedCount} failed</>
+          <><span>⚠</span> {failedCount} failed</>
         ) : (
-          <><span>✓</span>Done</>
+          <><span>✓</span> Done</>
         )}
       </button>
 
@@ -188,7 +325,7 @@ export function UploadStatusIndicator() {
           border: '1px solid #e2e8f0',
           borderRadius: '8px',
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-          width: '320px',
+          width: '360px',
           maxHeight: '400px',
           overflow: 'auto',
           zIndex: 1000,
@@ -202,37 +339,129 @@ export function UploadStatusIndicator() {
           }}>
             <span style={{ fontWeight: 600, color: '#2a3441' }}>Uploads</span>
             {uploads.some(u => u.status === 'completed') && (
-              <button onClick={clearCompleted} style={{ background: 'none', border: 'none', color: '#5f6c7b', fontSize: '0.75rem', cursor: 'pointer' }}>
+              <button 
+                onClick={clearCompleted} 
+                style={{ 
+                  background: 'none', 
+                  border: 'none', 
+                  color: '#5f6c7b', 
+                  fontSize: '0.75rem', 
+                  cursor: 'pointer' 
+                }}
+              >
                 Clear completed
               </button>
             )}
           </div>
 
           {uploads.map(upload => (
-            <div key={upload.id} style={{ padding: '0.75rem 1rem', borderBottom: '1px solid #f0f0f0', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <span style={{ color: getStatusColor(upload.status), fontSize: '1rem' }}>{getStatusIcon(upload.status)}</span>
+            <div 
+              key={upload.id} 
+              style={{ 
+                padding: '0.75rem 1rem', 
+                borderBottom: '1px solid #f0f0f0', 
+                display: 'flex', 
+                alignItems: 'flex-start', 
+                gap: '0.75rem' 
+              }}
+            >
+              <span style={{ 
+                color: getStatusColor(upload.status), 
+                fontSize: '1rem',
+                marginTop: '2px',
+              }}>
+                {getStatusIcon(upload.status)}
+              </span>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 500, fontSize: '0.85rem', color: '#2a3441', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <div style={{ 
+                  fontWeight: 500, 
+                  fontSize: '0.85rem', 
+                  color: '#2a3441', 
+                  overflow: 'hidden', 
+                  textOverflow: 'ellipsis', 
+                  whiteSpace: 'nowrap' 
+                }}>
                   {upload.filename}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: '#5f6c7b' }}>{upload.projectName || 'Unknown'}</div>
-                {upload.status === 'uploading' && (
-                  <div style={{ marginTop: '0.25rem', height: '3px', background: '#e2e8f0', borderRadius: '2px', overflow: 'hidden' }}>
-                    <div style={{ width: `${upload.progress}%`, height: '100%', background: '#f59e0b', transition: 'width 0.3s ease' }} />
+                <div style={{ fontSize: '0.75rem', color: '#5f6c7b' }}>
+                  {upload.projectName}
+                </div>
+                
+                {/* Progress bar for active uploads */}
+                {(upload.status === 'uploading' || upload.status === 'processing') && (
+                  <div style={{ marginTop: '0.35rem' }}>
+                    <div style={{ 
+                      height: '4px', 
+                      background: '#e2e8f0', 
+                      borderRadius: '2px', 
+                      overflow: 'hidden' 
+                    }}>
+                      <div style={{ 
+                        width: `${upload.progress}%`, 
+                        height: '100%', 
+                        background: upload.status === 'processing' ? '#3b82f6' : '#f59e0b', 
+                        transition: 'width 0.3s ease' 
+                      }} />
+                    </div>
+                    <div style={{ 
+                      fontSize: '0.7rem', 
+                      color: upload.status === 'processing' ? '#3b82f6' : '#f59e0b', 
+                      marginTop: '0.25rem' 
+                    }}>
+                      {upload.message || 'Processing...'}
+                    </div>
                   </div>
                 )}
-                {upload.status === 'processing' && <div style={{ fontSize: '0.7rem', color: '#3b82f6', marginTop: '0.25rem' }}>Processing...</div>}
-                {upload.error && <div style={{ fontSize: '0.7rem', color: '#ef4444', marginTop: '0.25rem' }}>{upload.error}</div>}
+                
+                {/* Success message */}
+                {upload.status === 'completed' && (
+                  <div style={{ 
+                    fontSize: '0.7rem', 
+                    color: '#10b981', 
+                    marginTop: '0.25rem' 
+                  }}>
+                    {upload.message}
+                  </div>
+                )}
+                
+                {/* Error message */}
+                {upload.status === 'failed' && (
+                  <div style={{ 
+                    fontSize: '0.7rem', 
+                    color: '#ef4444', 
+                    marginTop: '0.25rem' 
+                  }}>
+                    {upload.error || upload.message}
+                  </div>
+                )}
               </div>
+              
               {(upload.status === 'completed' || upload.status === 'failed') && (
-                <button onClick={() => removeUpload(upload.id)} style={{ background: 'none', border: 'none', color: '#9ca3af', cursor: 'pointer', padding: '0.25rem' }}>✕</button>
+                <button 
+                  onClick={() => removeUpload(upload.id)} 
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: '#9ca3af', 
+                    cursor: 'pointer', 
+                    padding: '0.25rem',
+                    fontSize: '1rem',
+                  }}
+                >
+                  ✕
+                </button>
               )}
             </div>
           ))}
         </div>
       )}
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { 
+          from { transform: rotate(0deg); } 
+          to { transform: rotate(360deg); } 
+        }
+      `}</style>
     </div>
   );
 }
