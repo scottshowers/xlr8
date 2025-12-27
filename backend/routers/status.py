@@ -1517,13 +1517,40 @@ async def reset_all_documents():
         except Exception as reg_e:
             logger.error(f"Registry reset error: {reg_e}")
         
+        # Reset standards rules and documents
+        standards_rules_count = 0
+        standards_docs_count = 0
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                # Clear standards_rules
+                try:
+                    rules_result = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+                    standards_rules_count = len(rules_result.data or [])
+                    logger.warning(f"⚠️ Deleted {standards_rules_count} standards rules")
+                except Exception as e:
+                    logger.debug(f"standards_rules cleanup: {e}")
+                
+                # Clear standards_documents
+                try:
+                    docs_result = supabase.table('standards_documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+                    standards_docs_count = len(docs_result.data or [])
+                    logger.warning(f"⚠️ Deleted {standards_docs_count} standards documents")
+                except Exception as e:
+                    logger.debug(f"standards_documents cleanup: {e}")
+        except Exception as std_e:
+            logger.error(f"Standards reset error: {std_e}")
+        
         return {
             "success": True, 
             "message": f"Reset complete",
             "details": {
                 "chromadb_chunks": chroma_count,
                 "supabase_documents": doc_count,
-                "registry_entries": registry_count
+                "registry_entries": registry_count,
+                "standards_rules": standards_rules_count,
+                "standards_documents": standards_docs_count
             }
         }
     except Exception as e:
