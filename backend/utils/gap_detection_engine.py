@@ -654,84 +654,216 @@ class GapDetectionEngine:
     def compare_reality_vs_intent(
         self,
         reality: List[Any],
-        intent: List[Any]
+        intent: List[Any],
+        question: str = None
     ) -> List[Gap]:
         """
         Compare Reality against Intent (SOW/requirements).
+        
+        TOPIC-AWARE COMPARISON:
+        - Extract key topics from the question
+        - Only compare when both reality and intent have relevant data
+        - Don't hallucinate gaps from unrelated content
         
         Finds: "You said you wanted X, but you have Y"
         """
         gaps = []
         
-        if not intent:
+        if not intent or not reality:
             return gaps
         
-        # Extract intent requirements
-        intent_text = []
+        # Extract topics from question for filtering
+        topics = self._extract_comparison_topics(question) if question else []
+        logger.info(f"[GAP] Intent comparison topics: {topics}")
+        
+        # If no clear topics, skip comparison to avoid garbage
+        if not topics:
+            logger.info(f"[GAP] No clear topics for intent comparison - skipping to avoid false positives")
+            return gaps
+        
+        # Extract and filter intent content by topic
+        relevant_intent = []
         for item in intent:
+            content = item.content if hasattr(item, 'content') else str(item)
+            content_lower = content.lower() if isinstance(content, str) else str(content).lower()
+            
+            # Only include if content mentions any of our topics
+            if any(topic in content_lower for topic in topics):
+                relevant_intent.append({
+                    'content': content,
+                    'source': item.source_name if hasattr(item, 'source_name') else 'SOW'
+                })
+        
+        if not relevant_intent:
+            logger.info(f"[GAP] No intent content matches topics {topics} - no comparison needed")
+            return gaps
+        
+        # Extract and filter reality content by topic
+        relevant_reality = []
+        for item in reality:
             content = item.content if hasattr(item, 'content') else item
-            if isinstance(content, str):
-                intent_text.append(content)
+            source = item.source_name if hasattr(item, 'source_name') else 'Data'
+            
+            if isinstance(content, dict):
+                # Check if any keys/values match topics
+                content_str = json.dumps(content).lower()
+                if any(topic in content_str for topic in topics):
+                    relevant_reality.append({
+                        'content': content,
+                        'source': source
+                    })
+            elif isinstance(content, list) and content:
+                # Check first few rows
+                sample = content[:5]
+                sample_str = json.dumps(sample).lower()
+                if any(topic in sample_str for topic in topics):
+                    relevant_reality.append({
+                        'content': content[:10],  # Limit to 10 rows for comparison
+                        'source': source
+                    })
         
-        combined_intent = ' '.join(intent_text).lower()
+        if not relevant_reality:
+            logger.info(f"[GAP] No reality data matches topics {topics} - no comparison needed")
+            return gaps
         
-        # Extract reality metrics
-        reality_metrics = self._extract_reality_metrics(reality)
+        logger.info(f"[GAP] Comparing {len(relevant_intent)} intent chunks vs {len(relevant_reality)} reality items for topics {topics}")
         
-        # Use LLM to find mismatches
+        # Now do focused comparison with LLM
         llm = self._get_llm()
-        if llm and intent_text and reality_metrics:
-            prompt = f"""Compare what was promised vs what exists.
+        if not llm:
+            return gaps
+        
+        # Build focused context
+        intent_summary = "\n".join([
+            f"[{i['source']}]: {i['content'][:500]}" 
+            for i in relevant_intent[:3]  # Limit to 3 chunks
+        ])
+        
+        reality_summary = []
+        for r in relevant_reality[:3]:  # Limit to 3 items
+            if isinstance(r['content'], list):
+                # Summarize tabular data
+                if r['content']:
+                    cols = list(r['content'][0].keys()) if isinstance(r['content'][0], dict) else []
+                    row_count = len(r['content'])
+                    reality_summary.append(f"[{r['source']}]: {row_count} rows with columns: {', '.join(cols[:10])}")
+            else:
+                reality_summary.append(f"[{r['source']}]: {json.dumps(r['content'])[:300]}")
+        
+        reality_str = "\n".join(reality_summary)
+        
+        prompt = f"""You are comparing SOW/requirements against actual configured data.
+        
+QUESTION CONTEXT: {question or 'General comparison'}
+TOPICS: {', '.join(topics)}
 
-INTENT/SOW STATES:
-{combined_intent[:2000]}
+SOW/REQUIREMENTS SAY:
+{intent_summary}
 
-REALITY DATA SHOWS:
-{json.dumps(reality_metrics, indent=2)}
+ACTUAL DATA SHOWS:
+{reality_str}
 
-Identify any mismatches where reality doesn't match intent.
-For each mismatch, provide:
-1. What was promised
-2. What actually exists
-3. Severity (critical/high/medium/low)
-4. Recommendation
+Are there any SPECIFIC, VERIFIABLE mismatches between what was promised and what exists?
 
-Format as JSON array of objects with keys: promised, actual, severity, recommendation"""
+Rules:
+- Only report gaps where you can cite specific values from both sides
+- Do NOT invent or hallucinate information
+- If intent doesn't specify a value, that's not a gap
+- If you're uncertain, report nothing
 
-            try:
-                response, success = llm._call_ollama(
-                    model="mistral:7b",
-                    prompt=prompt,
-                    system_prompt="You are an implementation analyst comparing project scope to actual data."
-                )
-                
-                if success and response:
-                    # Try to parse as JSON
-                    json_match = re.search(r'\[[\s\S]*\]', response)
-                    if json_match:
+Format as JSON array (empty array [] if no gaps):
+[{{"topic": "specific topic", "promised": "specific value from SOW", "actual": "specific value from data", "severity": "high/medium/low", "recommendation": "specific action"}}]
+
+If no clear gaps exist, return: []"""
+
+        try:
+            response, success = llm._call_ollama(
+                model="mistral:7b",
+                prompt=prompt,
+                system_prompt="You are a precise analyst. Only report gaps you can verify. When uncertain, report nothing."
+            )
+            
+            if success and response:
+                # Try to parse as JSON
+                json_match = re.search(r'\[[\s\S]*?\]', response)
+                if json_match:
+                    try:
                         mismatches = json.loads(json_match.group())
+                        
+                        # Filter out low-confidence or vague mismatches
                         for i, mismatch in enumerate(mismatches):
+                            # Skip if promised or actual is vague
+                            promised = mismatch.get('promised', '')
+                            actual = mismatch.get('actual', '')
+                            
+                            if not promised or not actual:
+                                continue
+                            if 'unknown' in str(promised).lower() or 'unknown' in str(actual).lower():
+                                continue
+                            if 'not specified' in str(promised).lower() or 'not found' in str(actual).lower():
+                                continue
+                            
                             gap = Gap(
-                                gap_id=f"intent_mismatch_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                                gap_id=f"intent_{mismatch.get('topic', 'gap')}_{i}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
                                 gap_type='reality_vs_intent',
-                                domain='scope',
+                                domain=mismatch.get('topic', 'scope'),
                                 severity=mismatch.get('severity', 'medium'),
                                 truth_a_type='reality',
-                                truth_a_value=mismatch.get('actual', 'Unknown'),
+                                truth_a_value=actual,
                                 truth_a_source='Customer data',
                                 truth_b_type='intent',
-                                truth_b_value=mismatch.get('promised', 'Unknown'),
+                                truth_b_value=promised,
                                 truth_b_source='SOW/Requirements',
-                                title=f"📋 Scope Mismatch: {mismatch.get('promised', 'Requirement')[:50]}",
-                                description=f"Intent: {mismatch.get('promised', 'Unknown')}\n"
-                                           f"Reality: {mismatch.get('actual', 'Unknown')}",
+                                title=f"📋 {mismatch.get('topic', 'Scope')}: Requirement vs Reality",
+                                description=f"SOW specifies: {promised}\nData shows: {actual}",
                                 recommendation=mismatch.get('recommendation', 'Review and align'),
                             )
                             gaps.append(gap)
-            except Exception as e:
-                logger.warning(f"[GAP] Intent comparison failed: {e}")
+                    except json.JSONDecodeError:
+                        logger.warning(f"[GAP] Could not parse intent comparison response as JSON")
+        except Exception as e:
+            logger.warning(f"[GAP] Intent comparison failed: {e}")
         
+        logger.info(f"[GAP] Found {len(gaps)} intent gaps")
         return gaps
+    
+    def _extract_comparison_topics(self, question: str) -> List[str]:
+        """
+        Extract key topics from question for focused comparison.
+        
+        Returns list of lowercase topic keywords to filter content.
+        """
+        if not question:
+            return []
+        
+        q_lower = question.lower()
+        topics = []
+        
+        # Domain-specific topic extraction
+        topic_patterns = {
+            'sui': ['sui', 'suta', 'state unemployment'],
+            'futa': ['futa', 'federal unemployment'],
+            'tax': ['tax', 'withholding', 'fica', 'medicare', 'social security'],
+            'earnings': ['earning', 'pay code', 'wage type'],
+            'deductions': ['deduction', 'benefit', 'garnishment'],
+            'overtime': ['overtime', 'ot', 'flsa'],
+            'pto': ['pto', 'vacation', 'sick', 'accrual', 'time off'],
+            'gl': ['gl', 'general ledger', 'account', 'mapping'],
+            'workers_comp': ['workers comp', 'work comp', 'wc'],
+            'retirement': ['401k', '403b', 'retirement', 'pension'],
+            'aca': ['aca', 'affordable care', 'ale'],
+        }
+        
+        for domain, keywords in topic_patterns.items():
+            if any(kw in q_lower for kw in keywords):
+                topics.extend(keywords)
+        
+        # Also extract any quoted terms
+        quoted = re.findall(r'"([^"]+)"', question)
+        topics.extend([q.lower() for q in quoted])
+        
+        # Deduplicate
+        return list(set(topics))
     
     def _extract_reality_metrics(self, reality: List[Any]) -> Dict:
         """Extract key metrics from reality data for comparison."""
@@ -831,7 +963,8 @@ Format as JSON array of objects with keys: promised, actual, severity, recommend
         if reality and intent:
             intent_gaps = self.compare_reality_vs_intent(
                 reality=reality,
-                intent=intent
+                intent=intent,
+                question=question
             )
             all_gaps.extend(intent_gaps)
         
