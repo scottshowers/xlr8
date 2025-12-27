@@ -2119,7 +2119,7 @@ async def unified_chat(request: UnifiedChatRequest):
                 # but remove heavy structured_output and quality_alerts
                 response["from_reality"] = response["from_reality"][:1] if response["from_reality"] else []
                 response["structured_output"] = {"type": "validation_complete"}
-                response["quality_alerts"] = None  # Don't need 12k findings for validation
+                response["_skip_quality_alerts"] = True  # Flag to skip quality check population
             elif is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 logger.info(f"[UNIFIED] Analytical question detected - using expert context")
                 logger.info(f"[UNIFIED] from_reality count: {len(answer.from_reality) if answer.from_reality else 0}")
@@ -2280,8 +2280,8 @@ async def unified_chat(request: UnifiedChatRequest):
                         )
                 response["citations"] = citation_builder.build_audit_trail()
             
-            # Run quality checks
-            if request.include_quality_alerts and quality_service and schema['tables']:
+            # Run quality checks (skip if validation response already handled it)
+            if request.include_quality_alerts and quality_service and schema['tables'] and not response.get("_skip_quality_alerts"):
                 quality_service.run_checks(handler, schema['tables'][:5])
                 summary = quality_service.get_summary()
                 # Limit findings to prevent frontend from choking
@@ -2289,6 +2289,9 @@ async def unified_chat(request: UnifiedChatRequest):
                     summary['findings'] = summary['findings'][:50]  # Max 50 findings
                     summary['total_findings'] = summary.get('total_findings', len(summary['findings']))
                 response["quality_alerts"] = summary
+            
+            # Remove internal flag before returning
+            response.pop("_skip_quality_alerts", None)
             
             # Generate follow-ups
             if request.include_follow_ups:
