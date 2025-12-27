@@ -225,25 +225,6 @@ async def delete_jobs_in_range(
         raise HTTPException(500, f"Failed to delete jobs: {str(e)}")
 
 
-@router.delete("/jobs/{job_id}")
-async def delete_job(job_id: str):
-    """Delete a single job by ID."""
-    supabase = _get_supabase()
-    if not supabase:
-        raise HTTPException(503, "Database not available")
-    
-    try:
-        result = supabase.table("jobs").delete().eq("id", job_id).execute()
-        
-        if not result.data:
-            logger.warning(f"[CLEANUP] Job not found or already deleted: {job_id}")
-        
-        logger.info(f"[CLEANUP] Deleted job: {job_id}")
-        return {"success": True, "message": f"Job {job_id} deleted"}
-        
-    except Exception as e:
-        logger.error(f"[CLEANUP] Delete job failed: {e}")
-        raise HTTPException(500, f"Failed to delete job: {str(e)}")
 
 
 # =============================================================================
