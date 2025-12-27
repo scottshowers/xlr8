@@ -158,26 +158,8 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
 # JOB DELETION
 # =============================================================================
 
-@router.delete("/jobs/{job_id}")
-async def delete_job(job_id: str):
-    """Delete a single job by ID."""
-    supabase = _get_supabase()
-    if not supabase:
-        raise HTTPException(503, "Database not available")
-    
-    try:
-        result = supabase.table("jobs").delete().eq("id", job_id).execute()
-        
-        if not result.data:
-            logger.warning(f"[CLEANUP] Job not found or already deleted: {job_id}")
-        
-        logger.info(f"[CLEANUP] Deleted job: {job_id}")
-        return {"success": True, "message": f"Job {job_id} deleted"}
-        
-    except Exception as e:
-        logger.error(f"[CLEANUP] Delete job failed: {e}")
-        raise HTTPException(500, f"Failed to delete job: {str(e)}")
-
+# IMPORTANT: Static routes MUST come before parameterized routes
+# /jobs/all must be before /jobs/{job_id} or "all" gets treated as a job_id
 
 @router.delete("/jobs/all")
 async def delete_all_jobs(project_id: str = Query(None)):
@@ -192,6 +174,7 @@ async def delete_all_jobs(project_id: str = Query(None)):
         if project_id:
             query = query.eq("project_id", project_id)
         else:
+            # Delete all - need a condition that matches everything
             query = query.neq("id", "IMPOSSIBLE_ID_THAT_WILL_NEVER_EXIST")
         
         result = query.execute()
@@ -217,12 +200,14 @@ async def delete_jobs_in_range(
         raise HTTPException(503, "Database not available")
     
     try:
-        start = datetime.strptime(start_date, "%Y-%m-%d")
-        end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+        # Parse dates
+        from datetime import datetime
+        start = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        end = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
         
         query = supabase.table("jobs").delete()\
             .gte("created_at", start.isoformat())\
-            .lt("created_at", end.isoformat())
+            .lte("created_at", end.isoformat())
         
         if project_id:
             query = query.eq("project_id", project_id)
@@ -231,13 +216,34 @@ async def delete_jobs_in_range(
         count = len(result.data) if result.data else 0
         
         logger.info(f"[CLEANUP] Deleted {count} jobs in range {start_date} to {end_date}")
-        return {"success": True, "deleted": count}
+        return {"success": True, "deleted": count, "range": {"start": start_date, "end": end_date}}
         
     except ValueError as e:
-        raise HTTPException(400, f"Invalid date format: {e}")
+        raise HTTPException(400, f"Invalid date format: {str(e)}")
     except Exception as e:
-        logger.error(f"[CLEANUP] Delete range failed: {e}")
+        logger.error(f"[CLEANUP] Delete jobs in range failed: {e}")
         raise HTTPException(500, f"Failed to delete jobs: {str(e)}")
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """Delete a single job by ID."""
+    supabase = _get_supabase()
+    if not supabase:
+        raise HTTPException(503, "Database not available")
+    
+    try:
+        result = supabase.table("jobs").delete().eq("id", job_id).execute()
+        
+        if not result.data:
+            logger.warning(f"[CLEANUP] Job not found or already deleted: {job_id}")
+        
+        logger.info(f"[CLEANUP] Deleted job: {job_id}")
+        return {"success": True, "message": f"Job {job_id} deleted"}
+        
+    except Exception as e:
+        logger.error(f"[CLEANUP] Delete job failed: {e}")
+        raise HTTPException(500, f"Failed to delete job: {str(e)}")
 
 
 # =============================================================================
