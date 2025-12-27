@@ -442,20 +442,33 @@ export default function DashboardPage() {
     // Structured data
     const structured = await fetchJSON('/api/status/structured');
     if (structured) {
-      const tables = structured.tables || [];
-      const totalRows = tables.reduce((sum, t) => sum + (t.row_count || 0), 0);
-      setPipeline(prev => ({ ...prev, analyzed: { count: totalRows }, processed: { count: tables.length } }));
+      // API returns { files: [{ sheets: [...], total_rows: N }] }
+      const files = structured.files || [];
+      let totalTables = 0;
+      let totalRows = 0;
+      files.forEach(f => {
+        if (f.sheets) {
+          totalTables += f.sheets.length;
+          f.sheets.forEach(s => { totalRows += (s.row_count || 0); });
+        } else {
+          totalTables += 1;
+          totalRows += (f.total_rows || f.row_count || 0);
+        }
+      });
+      setPipeline(prev => ({ ...prev, analyzed: { count: totalRows }, processed: { count: totalTables } }));
     } else if (!apiSuccess) {
-      // Demo data
-      setPipeline(prev => ({ ...prev, analyzed: { count: 24750 }, processed: { count: 12 } }));
+      // No API = show zeros, not demo data
+      setPipeline(prev => ({ ...prev, analyzed: { count: 0 }, processed: { count: 0 } }));
     }
     
     // Documents
     const docs = await fetchJSON('/api/status/documents');
     if (docs) {
-      setPipeline(prev => ({ ...prev, ingested: { count: (docs.total || 0) + (prev.processed?.count || 0) } }));
+      const docCount = docs.total || (docs.documents?.length || 0);
+      setPipeline(prev => ({ ...prev, ingested: { count: docCount + (prev.processed?.count || 0) } }));
     } else if (!apiSuccess) {
-      setPipeline(prev => ({ ...prev, ingested: { count: 47 }, insights: { count: 156 } }));
+      // No API = show zeros, not demo data
+      setPipeline(prev => ({ ...prev, ingested: { count: 0 }, insights: { count: 0 } }));
     }
     
     // Jobs
@@ -486,11 +499,10 @@ export default function DashboardPage() {
       const hours = ['6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
       setThroughput(hours.map(hour => ({ hour, uploads: Math.floor(Math.random() * 10) + 1, queries: Math.floor(Math.random() * 50) + 5, llm: Math.floor(Math.random() * 60) + 10 })));
     } else if (!apiSuccess) {
-      // Demo metrics
-      setPerformance({ queryP50: 1.2, uploadAvg: 3, llmAvg: 2.5, errorRate: 0.5 });
-      setValue({ analysesCompleted: 127, hoursEquivalent: 32, dollarsSaved: 4800, accuracyRate: 94.7, avgTimeToInsight: 4.2 });
-      const hours = ['6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
-      setThroughput(hours.map(hour => ({ hour, uploads: Math.floor(Math.random() * 10) + 1, queries: Math.floor(Math.random() * 50) + 5, llm: Math.floor(Math.random() * 60) + 10 })));
+      // No API = show zeros, not demo data
+      setPerformance({ queryP50: 0, uploadAvg: 0, llmAvg: 0, errorRate: 0 });
+      setValue({ analysesCompleted: 0, hoursEquivalent: 0, dollarsSaved: 0, accuracyRate: 0, avgTimeToInsight: 0 });
+      setThroughput([]);
     }
     
     setAlerts(newAlerts);
