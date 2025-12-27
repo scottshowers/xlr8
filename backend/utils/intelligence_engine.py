@@ -988,14 +988,29 @@ class IntelligenceEngine:
             return clarification
         
         # CUSTOMER TRUTHS - Intent and Configuration
-        intent = self._gather_intent(question, analysis)
+        # SKIP intent for validation questions - RAG pulls unrelated docs (earnings codes for SUI questions, etc.)
+        if is_validation_question:
+            intent = []
+            logger.warning(f"[INTELLIGENCE] Skipping intent gathering for validation question - focus on Reality data only")
+        else:
+            intent = self._gather_intent(question, analysis)
         configuration = self._gather_configuration(question, analysis)
         
         # GLOBAL TRUTHS - Reference Library (reference, regulatory, compliance)
-        reference, regulatory, compliance = self._gather_reference_library(question, analysis)
+        # SKIP for validation questions - focus on Reality data only
+        if is_validation_question:
+            reference, regulatory, compliance = [], [], []
+            logger.warning(f"[INTELLIGENCE] Skipping reference library for validation question")
+        else:
+            reference, regulatory, compliance = self._gather_reference_library(question, analysis)
         
         # Detect conflicts across all truth sources
-        conflicts = self._detect_conflicts(reality, intent, configuration, reference, regulatory, compliance)
+        # SKIP for validation questions - gap detection pulls unrelated docs and produces garbage
+        if is_validation_question:
+            conflicts = []
+            logger.warning(f"[INTELLIGENCE] Skipping gap detection for validation question")
+        else:
+            conflicts = self._detect_conflicts(reality, intent, configuration, reference, regulatory, compliance)
         insights = self._run_proactive_checks(analysis)
         
         # Auto-compliance check if we have regulatory rules
