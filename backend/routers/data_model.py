@@ -399,12 +399,55 @@ async def delete_relationship(
     Delete a relationship.
     """
     try:
-        logger.info(f"Relationship deleted: {source_table}.{source_column} -> "
-                   f"{target_table}.{target_column}")
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if supabase:
+            # Delete from Supabase
+            result = supabase.table('project_relationships') \
+                .delete() \
+                .eq('project_name', project_name) \
+                .eq('source_table', source_table) \
+                .eq('source_column', source_column) \
+                .eq('target_table', target_table) \
+                .eq('target_column', target_column) \
+                .execute()
+            
+            deleted_count = len(result.data or [])
+            logger.info(f"Relationship deleted: {source_table}.{source_column} -> "
+                       f"{target_table}.{target_column} ({deleted_count} rows)")
         
         return {"status": "deleted"}
     except Exception as e:
         logger.error(f"Failed to delete relationship: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/data-model/relationships/{project_name}/all")
+async def delete_all_relationships(project_name: str, confirm: bool = False):
+    """
+    Delete ALL relationships for a project.
+    Requires confirm=true.
+    """
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Must set confirm=true to delete all relationships")
+    
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        deleted_count = 0
+        if supabase:
+            result = supabase.table('project_relationships') \
+                .delete() \
+                .eq('project_name', project_name) \
+                .execute()
+            deleted_count = len(result.data or [])
+            logger.warning(f"⚠️ Deleted ALL {deleted_count} relationships for project {project_name}")
+        
+        return {"status": "deleted", "count": deleted_count, "project": project_name}
+    except Exception as e:
+        logger.error(f"Failed to delete all relationships: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
