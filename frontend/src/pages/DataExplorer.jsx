@@ -629,9 +629,286 @@ export default function DataExplorer() {
         </div>
       )}
 
-      {/* ... rest of existing tabs (relationships, health, compliance, rules) ... */}
+      {/* Relationships Tab */}
+      {activeTab === 'relationships' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
+            <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Detected Relationships ({relationships.length})
+          </h3>
+          {relationships.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
+              <Link2 size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
+              <p>No relationships detected yet.</p>
+              <p style={{ fontSize: '0.85rem' }}>Upload related files to see FK/PK relationships.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {relationships.map((rel, i) => (
+                <div key={i} style={{ 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  gap: '1rem',
+                  padding: '0.75rem 1rem',
+                  background: c.background,
+                  borderRadius: 8,
+                  border: `1px solid ${c.border}`
+                }}>
+                  <div style={{ flex: 1 }}>
+                    <code style={{ fontSize: '0.8rem', color: c.primary }}>{rel.from_table}.{rel.from_column}</code>
+                  </div>
+                  <div style={{ color: c.textMuted }}>→</div>
+                  <div style={{ flex: 1 }}>
+                    <code style={{ fontSize: '0.8rem', color: c.accent }}>{rel.to_table}.{rel.to_column}</code>
+                  </div>
+                  <div style={{ 
+                    fontSize: '0.7rem', 
+                    padding: '0.25rem 0.5rem', 
+                    background: `${c.success}15`, 
+                    color: c.success, 
+                    borderRadius: 4 
+                  }}>
+                    {rel.confidence || 'detected'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Data Health Tab */}
+      {activeTab === 'health' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
+          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
+            <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            Data Health Issues ({healthIssues.length})
+          </h3>
+          {healthIssues.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: c.success }}>
+              <CheckCircle size={48} style={{ marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600 }}>All data looks healthy!</p>
+              <p style={{ fontSize: '0.85rem', color: c.textMuted }}>No integrity issues detected.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {healthIssues.map((issue, i) => (
+                <div key={i} style={{ 
+                  padding: '0.75rem 1rem',
+                  background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`,
+                  borderRadius: 8,
+                  border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}40`
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
+                    {issue.severity === 'error' ? 
+                      <XCircle size={16} style={{ color: c.scarletSage }} /> : 
+                      <AlertTriangle size={16} style={{ color: c.warning }} />
+                    }
+                    <span style={{ fontWeight: 600, color: c.text }}>{issue.type || 'Issue'}</span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>{issue.message}</div>
+                  {issue.table && <code style={{ fontSize: '0.75rem', color: c.primary }}>{issue.table}</code>}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Compliance Tab */}
+      {activeTab === 'compliance' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
+              <Shield size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+              Compliance Check
+            </h3>
+            <button
+              onClick={async () => {
+                setComplianceRunning(true);
+                setComplianceError(null);
+                try {
+                  const res = await api.post(`/standards/compliance/check/${activeProject?.id || 'default'}`);
+                  setComplianceResults(res.data);
+                } catch (e) {
+                  setComplianceError(e.message || 'Compliance check failed');
+                } finally {
+                  setComplianceRunning(false);
+                }
+              }}
+              disabled={complianceRunning}
+              style={{
+                padding: '0.5rem 1rem',
+                background: c.primary,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                cursor: complianceRunning ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              {complianceRunning ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
+              Run Check
+            </button>
+          </div>
+          
+          {complianceError && (
+            <div style={{ padding: '1rem', background: `${c.scarletSage}10`, borderRadius: 8, color: c.scarletSage, marginBottom: '1rem' }}>
+              {complianceError}
+            </div>
+          )}
+          
+          {complianceResults ? (
+            <div style={{ display: 'grid', gap: '1rem' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+                <div style={{ padding: '1rem', background: `${c.success}10`, borderRadius: 8, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.success }}>{complianceResults.passed || 0}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Passed</div>
+                </div>
+                <div style={{ padding: '1rem', background: `${c.warning}10`, borderRadius: 8, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.warning }}>{complianceResults.warnings || 0}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Warnings</div>
+                </div>
+                <div style={{ padding: '1rem', background: `${c.scarletSage}10`, borderRadius: 8, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.scarletSage }}>{complianceResults.failed || 0}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Failed</div>
+                </div>
+              </div>
+              {complianceResults.details?.map((d, i) => (
+                <div key={i} style={{ padding: '0.75rem', background: c.background, borderRadius: 6, fontSize: '0.85rem' }}>
+                  {d.rule}: <span style={{ color: d.passed ? c.success : c.scarletSage }}>{d.passed ? 'PASS' : 'FAIL'}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
+              <Shield size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
+              <p>Click "Run Check" to validate data against standards.</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Rules Tab */}
+      {activeTab === 'rules' && (
+        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
+              <BookOpen size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+              Extracted Rules ({rules.length})
+            </h3>
+            <button
+              onClick={async () => {
+                setLoadingRules(true);
+                try {
+                  const res = await api.get('/standards/rules');
+                  setRules(res.data?.rules || []);
+                } catch (e) {
+                  console.error('Failed to load rules:', e);
+                } finally {
+                  setLoadingRules(false);
+                }
+              }}
+              disabled={loadingRules}
+              style={{
+                padding: '0.5rem 1rem',
+                background: c.background,
+                color: c.text,
+                border: `1px solid ${c.border}`,
+                borderRadius: 6,
+                cursor: loadingRules ? 'wait' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem'
+              }}
+            >
+              {loadingRules ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+              Load Rules
+            </button>
+          </div>
+          
+          {rules.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
+              <BookOpen size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
+              <p>No rules extracted yet.</p>
+              <p style={{ fontSize: '0.85rem' }}>Upload standards documents to extract validation rules.</p>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gap: '0.75rem' }}>
+              {rules.map((rule, i) => (
+                <div key={i} style={{ 
+                  padding: '0.75rem 1rem',
+                  background: c.background,
+                  borderRadius: 8,
+                  border: `1px solid ${c.border}`
+                }}>
+                  <div style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text, marginBottom: '0.25rem' }}>
+                    {rule.name || `Rule ${i + 1}`}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>{rule.description || rule.condition}</div>
+                  {rule.source && (
+                    <div style={{ fontSize: '0.75rem', color: c.primary, marginTop: '0.5rem' }}>
+                      Source: {rule.source}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Quick Actions Bar */}
+      <div style={{ 
+        marginTop: '1.5rem', 
+        padding: '1rem', 
+        background: c.cardBg, 
+        border: `1px solid ${c.border}`, 
+        borderRadius: 10,
+        display: 'flex',
+        gap: '1rem',
+        justifyContent: 'flex-end'
+      }}>
+        <Link to="/data-cleanup" style={{ textDecoration: 'none' }}>
+          <button style={{
+            padding: '0.5rem 1rem',
+            background: `${c.scarletSage}15`,
+            color: c.scarletSage,
+            border: `1px solid ${c.scarletSage}40`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontWeight: 500
+          }}>
+            <Trash2 size={16} /> Data Cleanup
+          </button>
+        </Link>
+        <Link to="/admin-endpoints" style={{ textDecoration: 'none' }}>
+          <button style={{
+            padding: '0.5rem 1rem',
+            background: `${c.accent}15`,
+            color: c.accent,
+            border: `1px solid ${c.accent}40`,
+            borderRadius: 6,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontWeight: 500
+          }}>
+            <Code size={16} /> Admin Endpoints
+          </button>
+        </Link>
+      </div>
       
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .spin { animation: spin 1s linear infinite; }
+      `}</style>
     </div>
   );
 }
