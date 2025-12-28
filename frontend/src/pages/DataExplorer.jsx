@@ -162,20 +162,28 @@ export default function DataExplorer() {
       const files = platform?.files || [];
       const allTables = [];
       files.forEach(file => {
-        if (file.sheets) {
+        if (file.sheets && file.sheets.length > 0) {
+          // Use sheets with actual DuckDB table names
           file.sheets.forEach(sheet => {
             allTables.push({
-              ...sheet,
+              table_name: sheet.table_name,  // Actual DuckDB table name
+              display_name: sheet.display_name || sheet.table_name,
+              row_count: sheet.row_count || 0,
+              column_count: sheet.column_count || 0,
+              columns: [],  // Will be populated on table select
               filename: file.filename,
               project: file.project,
               truth_type: file.truth_type
             });
           });
         } else {
+          // Fallback for files without sheets
           allTables.push({
             table_name: file.filename?.replace(/\.[^.]+$/, '') || file.filename,
+            display_name: file.filename?.replace(/\.[^.]+$/, '') || file.filename,
             filename: file.filename,
             row_count: file.rows || file.row_count || 0,
+            column_count: 0,
             columns: file.columns || [],
             project: file.project,
             truth_type: file.truth_type || file.type
@@ -204,10 +212,14 @@ export default function DataExplorer() {
         const files = res.data?.files || [];
         const allTables = [];
         files.forEach(file => {
-          if (file.sheets) {
+          if (file.sheets && file.sheets.length > 0) {
             file.sheets.forEach(sheet => {
               allTables.push({
-                ...sheet,
+                table_name: sheet.table_name,
+                display_name: sheet.display_name || sheet.table_name,
+                row_count: sheet.row_count || 0,
+                column_count: sheet.column_count || 0,
+                columns: [],
                 filename: file.filename,
                 project: file.project,
                 truth_type: file.truth_type
@@ -216,8 +228,10 @@ export default function DataExplorer() {
           } else {
             allTables.push({
               table_name: file.filename.replace(/\.[^.]+$/, ''),
+              display_name: file.filename.replace(/\.[^.]+$/, ''),
               filename: file.filename,
               row_count: file.row_count || 0,
+              column_count: 0,
               columns: file.columns || [],
               project: file.project,
               truth_type: file.truth_type
@@ -390,7 +404,7 @@ export default function DataExplorer() {
   ];
 
   const totalTables = tables.length;
-  const totalColumns = tables.reduce((sum, t) => sum + (t.columns?.length || 0), 0);
+  const totalColumns = tables.reduce((sum, t) => sum + (t.column_count || t.columns?.length || 0), 0);
   const totalIssues = healthIssues?.length || 0;
 
   if (loading) {

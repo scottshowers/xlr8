@@ -387,56 +387,82 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
         handler = get_structured_handler()
         files_dict = {}  # Dedupe by filename
         
-        # From _schema_metadata
+        # From _schema_metadata - get actual table names
         try:
             schema_files = handler.conn.execute("""
-                SELECT DISTINCT file_name, project, 
-                    COUNT(DISTINCT table_name) as tables,
-                    SUM(row_count) as rows,
-                    MAX(created_at) as loaded_at
+                SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
                 FROM _schema_metadata 
                 WHERE is_current = TRUE
-                GROUP BY file_name, project
+                ORDER BY file_name, table_name
             """).fetchall()
             
             for row in schema_files:
                 fname = row[0]
-                if fname and fname not in files_dict:
+                if not fname:
+                    continue
+                    
+                if fname not in files_dict:
                     files_dict[fname] = {
                         "filename": fname,
                         "project": row[1],
-                        "tables": row[2] or 0,
-                        "rows": int(row[3] or 0),
-                        "loaded_at": str(row[4]) if row[4] else None,
-                        "type": "structured"
+                        "tables": 0,
+                        "rows": 0,
+                        "row_count": 0,  # Alias for frontend compatibility
+                        "loaded_at": str(row[6]) if row[6] else None,
+                        "type": "structured",
+                        "sheets": []
                     }
-        except:
-            pass
+                
+                # Add this table to sheets
+                files_dict[fname]["sheets"].append({
+                    "table_name": row[2],  # Actual DuckDB table name
+                    "display_name": row[3] or row[2],
+                    "row_count": int(row[4] or 0),
+                    "column_count": int(row[5] or 0)
+                })
+                files_dict[fname]["tables"] += 1
+                files_dict[fname]["rows"] += int(row[4] or 0)
+                files_dict[fname]["row_count"] += int(row[4] or 0)
+        except Exception as e:
+            logger.debug(f"[PLATFORM] Schema metadata query: {e}")
         
-        # From _pdf_tables
+        # From _pdf_tables - also get actual table names
         try:
             pdf_files = handler.conn.execute("""
-                SELECT DISTINCT source_file, project,
-                    COUNT(*) as tables,
-                    SUM(row_count) as rows,
-                    MAX(created_at) as loaded_at
+                SELECT source_file, project, table_name, row_count, created_at
                 FROM _pdf_tables
-                GROUP BY source_file, project
+                ORDER BY source_file, table_name
             """).fetchall()
             
             for row in pdf_files:
                 fname = row[0]
-                if fname and fname not in files_dict:
+                if not fname:
+                    continue
+                
+                if fname not in files_dict:
                     files_dict[fname] = {
                         "filename": fname,
                         "project": row[1],
-                        "tables": row[2] or 0,
-                        "rows": int(row[3] or 0),
+                        "tables": 0,
+                        "rows": 0,
+                        "row_count": 0,
                         "loaded_at": str(row[4]) if row[4] else None,
-                        "type": "pdf"
+                        "type": "pdf",
+                        "sheets": []
                     }
-        except:
-            pass
+                
+                # Add this table to sheets
+                files_dict[fname]["sheets"].append({
+                    "table_name": row[2],  # Actual DuckDB table name
+                    "display_name": row[2],
+                    "row_count": int(row[3] or 0),
+                    "column_count": 0  # PDF tables don't store column_count in _pdf_tables
+                })
+                files_dict[fname]["tables"] += 1
+                files_dict[fname]["rows"] += int(row[3] or 0)
+                files_dict[fname]["row_count"] += int(row[3] or 0)
+        except Exception as e:
+            logger.debug(f"[PLATFORM] PDF tables query: {e}")
         
         # From Supabase registry (for unstructured docs)
         try:
