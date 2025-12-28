@@ -407,15 +407,29 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                         if "does not exist" not in str(e).lower():
                             logger.debug(f"[DEEP-CLEAN] {table}: {e}")
                 
-                # Reset platform_metrics (don't delete, just zero out)
+                # Clear platform_metrics (event log table - DELETE not UPDATE)
                 try:
-                    supabase.table("platform_metrics").update({
-                        "value": 0
-                    }).neq("id", "00000000-0000-0000-0000-000000000000").execute()
-                    results["supabase"]["cleaned"] += 1
-                    logger.info(f"[DEEP-CLEAN] Reset platform_metrics to 0")
+                    result = supabase.table("platform_metrics").delete().neq(
+                        "id", "00000000-0000-0000-0000-000000000000"
+                    ).execute()
+                    count = len(result.data) if result.data else 0
+                    if count > 0:
+                        results["supabase"]["cleaned"] += count
+                        logger.info(f"[DEEP-CLEAN] Cleared {count} platform_metrics records")
                 except Exception as e:
-                    logger.debug(f"[DEEP-CLEAN] platform_metrics reset: {e}")
+                    logger.debug(f"[DEEP-CLEAN] platform_metrics clear: {e}")
+                
+                # Clear cost_tracking if full wipe
+                try:
+                    result = supabase.table("cost_tracking").delete().neq(
+                        "id", "00000000-0000-0000-0000-000000000000"
+                    ).execute()
+                    count = len(result.data) if result.data else 0
+                    if count > 0:
+                        results["supabase"]["cleaned"] += count
+                        logger.info(f"[DEEP-CLEAN] Cleared {count} cost_tracking records")
+                except Exception as e:
+                    logger.debug(f"[DEEP-CLEAN] cost_tracking clear: {e}")
                 
                 logger.warning(f"[DEEP-CLEAN] Supabase wipe complete: {results['supabase']['cleaned']} items")
             else:
