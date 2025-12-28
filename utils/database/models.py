@@ -1354,8 +1354,28 @@ class ProcessingJobModel:
             print(f"Error creating job: {e}")
             return None
     
+    # Throttle progress updates to reduce Supabase load
+    _progress_cache = {}  # job_id -> (last_update_time, last_percent)
+    _PROGRESS_THROTTLE_SECONDS = 2.0  # Only update Supabase every 2 seconds per job
+    
     @staticmethod
     def update_progress(job_id: str, percent: int, step: str) -> bool:
+        """Update job progress with throttling to reduce Supabase load."""
+        import time
+        
+        # Check throttle - skip if we updated this job recently (unless it's a milestone)
+        now = time.time()
+        cache_key = job_id
+        last_update, last_percent = ProcessingJobModel._progress_cache.get(cache_key, (0, -1))
+        
+        # Always update for: first update (0%), completion (100%), or significant jumps (>10%)
+        is_milestone = percent == 0 or percent >= 100 or (percent - last_percent) >= 10
+        time_elapsed = now - last_update
+        
+        if not is_milestone and time_elapsed < ProcessingJobModel._PROGRESS_THROTTLE_SECONDS:
+            # Skip this update - too soon
+            return True
+        
         supabase = get_supabase()
         if not supabase:
             return False
@@ -1364,6 +1384,18 @@ class ProcessingJobModel:
             if percent == 0:
                 data['started_at'] = datetime.utcnow().isoformat()
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
+            
+            # Update cache
+            ProcessingJobModel._progress_cache[cache_key] = (now, percent)
+            
+            # Cleanup old cache entries (prevent memory leak)
+            if len(ProcessingJobModel._progress_cache) > 100:
+                cutoff = now - 300  # Remove entries older than 5 minutes
+                ProcessingJobModel._progress_cache = {
+                    k: v for k, v in ProcessingJobModel._progress_cache.items() 
+                    if v[0] > cutoff
+                }
+            
             return True
         except Exception as e:
             print(f"Error updating job progress: {e}")
