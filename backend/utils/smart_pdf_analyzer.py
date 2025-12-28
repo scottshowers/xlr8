@@ -1036,7 +1036,7 @@ def process_pdf_intelligently(
             try:
                 vision_result = extract_all_tables_with_vision(
                     file_path=file_path,
-                    dpi=150,
+                    dpi=100,  # Reduced from 150 - sufficient for text/headers
                     redact_pii=True,
                     status_callback=lambda msg: update_status(msg)
                 )
