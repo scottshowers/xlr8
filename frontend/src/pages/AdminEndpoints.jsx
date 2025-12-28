@@ -13,7 +13,7 @@
  * Add to navigation (AdminLayout or sidebar):
  *   { path: '/admin/endpoints', label: 'API Endpoints', icon: '🔗' }
  * 
- * Last Updated: December 27, 2025
+ * Last Updated: December 28, 2025
  */
 
 import React, { useState } from 'react';
@@ -98,10 +98,24 @@ const ENDPOINT_CATEGORIES = [
     id: 'metrics',
     name: 'Metrics & Analytics',
     icon: '📊',
-    description: 'Platform metrics for dashboards',
+    description: 'Platform metrics, costs, and analytics for dashboards',
     endpoints: [
-      { method: 'GET', path: '/api/metrics/summary', description: 'Platform summary metrics', priority: 'medium' },
-      { method: 'GET', path: '/api/metrics/usage', description: 'Usage statistics', priority: 'low' },
+      { method: 'GET', path: '/api/metrics/summary', description: 'Platform summary metrics (uploads, queries, LLM calls)', priority: 'high' },
+      { method: 'GET', path: '/api/metrics/trends', description: 'Time-series metrics for trend analysis', priority: 'medium' },
+      { method: 'GET', path: '/api/metrics/processors', description: 'Per-processor breakdown', priority: 'medium' },
+      { method: 'GET', path: '/api/metrics/llm', description: 'LLM usage and costs by provider', priority: 'medium' },
+      { method: 'GET', path: '/api/metrics/health', description: 'Metrics system health check', priority: 'medium' },
+      { method: 'GET', path: '/api/metrics/throughput', description: 'Hourly throughput for charts (last 24h)', priority: 'high' },
+      { method: 'GET', path: '/api/metrics/activity', description: 'Recent events for activity log', priority: 'high' },
+      { method: 'DELETE', path: '/api/metrics/reset?confirm=true', description: 'Clear all platform_metrics (for testing)', priority: 'low', dangerous: true },
+      { method: 'DELETE', path: '/api/metrics/reset?confirm=true&include_costs=true', description: 'Clear metrics AND cost_tracking', priority: 'low', dangerous: true },
+      { method: 'GET', path: '/api/metrics/costs', description: 'Cost summary for last 30 days', priority: 'high' },
+      { method: 'GET', path: '/api/metrics/costs/month', description: 'Current month costs (includes fixed)', priority: 'high' },
+      { method: 'GET', path: '/api/metrics/costs/daily', description: 'Daily cost breakdown (last 7 days)', priority: 'medium' },
+      { method: 'GET', path: '/api/metrics/costs/fixed', description: 'Fixed/subscription costs', priority: 'medium' },
+      { method: 'PUT', path: '/api/metrics/costs/fixed/{name}', description: 'Update fixed cost entry', priority: 'low', param: 'name' },
+      { method: 'GET', path: '/api/metrics/costs/by-project', description: 'Costs grouped by project', priority: 'low' },
+      { method: 'GET', path: '/api/metrics/costs/recent', description: 'Recent cost entries (last 100)', priority: 'low' },
     ]
   },
   {
@@ -112,6 +126,19 @@ const ENDPOINT_CATEGORIES = [
     endpoints: [
       { method: 'POST', path: '/api/upload/smart', description: 'Unified smart upload endpoint', priority: 'high' },
       { method: 'GET', path: '/api/progress/{job_id}', description: 'SSE progress stream for upload', priority: 'medium', param: 'job_id' },
+    ]
+  },
+  {
+    id: 'chat',
+    name: 'Chat & Analysis',
+    icon: '💬',
+    description: 'Unified chat and query endpoints',
+    endpoints: [
+      { method: 'POST', path: '/api/chat/unified', description: 'Main chat endpoint - FIVE TRUTHS analysis', priority: 'high' },
+      { method: 'GET', path: '/api/chat/unified/health', description: 'Chat service health', priority: 'medium' },
+      { method: 'GET', path: '/api/chat/unified/stats', description: 'Chat usage statistics', priority: 'low' },
+      { method: 'POST', path: '/api/bi/query', description: 'BI Builder natural language query', priority: 'high' },
+      { method: 'GET', path: '/api/bi/saved-queries', description: 'List saved BI queries', priority: 'medium' },
     ]
   },
   {
@@ -462,7 +489,7 @@ export default function AdminEndpoints() {
       }}>
         <strong>Note:</strong> DELETE and POST endpoints cannot be tested via browser link. Use the Data Cleanup page or curl commands.
         <br />
-        Last updated: December 27, 2025 • Endpoint consolidation - 319→~80 endpoints
+        Last updated: December 28, 2025 • Enterprise metrics + FIVE TRUTHS architecture
       </div>
     </div>
   );
