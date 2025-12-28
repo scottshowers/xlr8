@@ -1189,7 +1189,6 @@ def process_file_background(
                     try:
                         pdf_tables = duckdb_result.get('tables_created', [])
                         if pdf_tables and STRUCTURED_HANDLER_AVAILABLE:
-                            from utils.structured_data_handler import get_structured_handler
                             handler = get_structured_handler()
                             for table_name in pdf_tables:
                                 try:
