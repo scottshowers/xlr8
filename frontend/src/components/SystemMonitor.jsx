@@ -626,34 +626,60 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
 
   const handleMouseUp = () => setIsPanning(false);
 
-  // Node positions - adjusted to prevent overlap with legend and connection lines
+  // XLR8 FIVE TRUTHS ARCHITECTURE - Accurate representation
   const nodes = {
-    user: { x: 50, y: 130, icon: '◉', label: 'USER', color: T.blue },
-    api: { x: 160, y: 130, icon: '⬡', label: 'API', color: T.blue, encrypted: true, threat: threatData?.api },
-    supabase: { x: 70, y: 210, icon: '◈', label: 'AUTH', color: T.purple, encrypted: true, threat: threatData?.supabase },
-    twilio: { x: 160, y: 210, icon: '📱', label: 'SMS', color: T.purple, encrypted: true },
-    duckdb: { x: 280, y: 45, icon: '▣', label: 'STRUCT', color: T.purple, encrypted: true, threat: threatData?.duckdb },
-    rag: { x: 280, y: 115, icon: '◎', label: 'RAG', color: T.orange, threat: threatData?.rag },
-    chromadb: { x: 280, y: 230, icon: '◇', label: 'VECTOR', color: T.cyan, threat: threatData?.chromadb },
-    router: { x: 420, y: 130, icon: '⬢', label: 'ROUTER', color: T.yellow },
-    claude: { x: 560, y: 70, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude },
-    llama: { x: 520, y: 185, icon: '○', label: 'LLAMA', color: T.green },
-    mistral: { x: 590, y: 185, icon: '○', label: 'MISTRAL', color: T.green },
-    deepseek: { x: 660, y: 185, icon: '○', label: 'DEEP', color: T.green },
+    // User Layer
+    user: { x: 50, y: 140, icon: '◉', label: 'USER', color: T.blue },
+    
+    // API Gateway
+    api: { x: 160, y: 140, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
+    
+    // Auth & Metadata
+    supabase: { x: 80, y: 230, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
+    
+    // FIVE TRUTHS DATA LAYER
+    reality: { x: 290, y: 50, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
+    intent: { x: 290, y: 105, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
+    config: { x: 290, y: 160, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
+    reference: { x: 290, y: 215, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
+    regulatory: { x: 290, y: 270, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
+    
+    // Intelligence Engine
+    intelligence: { x: 430, y: 140, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
+    
+    // LLM Router
+    router: { x: 550, y: 140, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
+    
+    // Local LLMs (Primary)
+    deepseek: { x: 660, y: 80, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
+    mistral: { x: 660, y: 140, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
+    
+    // Cloud LLM (Fallback)
+    claude: { x: 660, y: 210, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
   };
 
   const connections = [
+    // User flow
     { from: 'user', to: 'api', color: T.blue, label: 'HTTPS', active: flow.user },
     { from: 'api', to: 'supabase', color: T.purple, label: 'AUTH', active: flow.auth },
-    { from: 'supabase', to: 'twilio', color: T.purple, label: 'MFA', active: flow.auth },
-    { from: 'api', to: 'duckdb', color: T.purple, label: 'SQL', active: flow.struct },
-    { from: 'api', to: 'rag', color: T.orange, active: flow.semantic },
-    { from: 'rag', to: 'chromadb', color: T.cyan, label: 'EMBED', active: flow.vector },
-    { from: 'rag', to: 'router', color: T.yellow, active: flow.llm },
-    { from: 'router', to: 'claude', color: T.cyan, active: flow.cloud },
-    { from: 'router', to: 'llama', color: T.green, active: flow.local },
+    
+    // API to Intelligence Engine
+    { from: 'api', to: 'intelligence', color: T.orange, label: 'QUERY', active: flow.semantic },
+    
+    // Intelligence Engine to Five Truths
+    { from: 'intelligence', to: 'reality', color: T.green, label: 'SQL', active: flow.struct },
+    { from: 'intelligence', to: 'intent', color: T.cyan, active: flow.vector },
+    { from: 'intelligence', to: 'config', color: T.cyan, active: flow.vector },
+    { from: 'intelligence', to: 'reference', color: T.cyan, active: flow.vector },
+    { from: 'intelligence', to: 'regulatory', color: T.cyan, active: flow.vector },
+    
+    // Intelligence to Router
+    { from: 'intelligence', to: 'router', color: T.yellow, active: flow.llm },
+    
+    // Router to LLMs (Local first, Claude fallback)
+    { from: 'router', to: 'deepseek', color: T.green, label: 'PRIMARY', active: flow.local },
     { from: 'router', to: 'mistral', color: T.green, active: flow.local },
-    { from: 'router', to: 'deepseek', color: T.green, active: flow.local },
+    { from: 'router', to: 'claude', color: T.cyan, label: 'FALLBACK', active: flow.cloud },
   ];
 
   const Node = ({ id, data }) => {
@@ -682,6 +708,7 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         )}
         <text textAnchor="middle" dominantBaseline="middle" fontSize={14} fill={data.color}>{data.icon}</text>
         <text y={32} textAnchor="middle" fontSize={8} fill={T.textDim} style={{ fontFamily: 'monospace', fontWeight: 600 }}>{data.label}</text>
+        {data.desc && <text y={42} textAnchor="middle" fontSize={6} fill={T.textDim} style={{ fontFamily: 'monospace' }}>{data.desc}</text>}
       </g>
     );
   };
@@ -1276,20 +1303,31 @@ export default function SystemMonitor() {
     return () => clearInterval(interval);
   }, []);
 
+  // FETCH REAL ACTIVITY DATA from /api/metrics/activity
   useEffect(() => {
-    const messages = [
-      { message: 'CLAUDE: Response generated', status: 0, cost: 0.0034 },
-      { message: 'DUCKDB: Query executed', status: 0 },
-      { message: 'RAG: Context retrieved', status: 0 },
-      { message: 'LLAMA: Inference complete', status: 0, cost: 0.0012 },
-      { message: 'AUTH: Session validated', status: 0 },
-      { message: 'VECTOR: Similarity search', status: 0 },
-    ];
-    const addEntry = () => {
-      const msg = messages[Math.floor(Math.random() * messages.length)];
-      setActivity(prev => [{ ...msg, time: new Date().toLocaleTimeString('en-US', { hour12: false }), id: Date.now() }, ...prev].slice(0, 20));
+    const fetchActivity = async () => {
+      try {
+        const response = await api.get('/metrics/activity?limit=50');
+        if (response.data?.events && response.data.events.length > 0) {
+          // Format events for display
+          const formatted = response.data.events.map(e => ({
+            id: e.id || Date.now() + Math.random(),
+            time: e.time ? new Date(e.time).toLocaleTimeString('en-US', { hour12: false }) : 'Now',
+            message: e.message || 'Event',
+            status: e.status || 0,
+            duration_ms: e.duration_ms
+          }));
+          setActivity(formatted.slice(0, 20));
+        }
+      } catch (err) {
+        console.log('Activity API not available, showing empty state');
+        // Don't set fake data - just keep empty or show "No activity"
+        setActivity([{ id: 'empty', time: '--:--:--', message: 'No recent activity', status: 0 }]);
+      }
     };
-    const interval = setInterval(addEntry, 3000);
+    
+    fetchActivity();
+    const interval = setInterval(fetchActivity, 10000); // Refresh every 10 seconds
     return () => clearInterval(interval);
   }, []);
 
