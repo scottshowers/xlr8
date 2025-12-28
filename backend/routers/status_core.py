@@ -34,7 +34,7 @@ async def get_platform_status():
         # Get health from existing components
         from utils.structured_data_handler import get_structured_handler
         from utils.rag_handler import RAGHandler
-        from utils.database.client import get_supabase
+        from utils.database.supabase_client import get_supabase
         
         status = {
             "status": "operational",
@@ -96,7 +96,7 @@ async def get_dashboard_status(project_id: Optional[str] = None):
     try:
         from utils.structured_data_handler import get_structured_handler
         from utils.rag_handler import RAGHandler
-        from utils.database.client import get_supabase
+        from utils.database.supabase_client import get_supabase
         
         stats = {
             "timestamp": datetime.utcnow().isoformat(),
@@ -109,11 +109,11 @@ async def get_dashboard_status(project_id: Optional[str] = None):
             "health_score": 100,
         }
         
-        # DuckDB stats
+        # DuckDB stats - try multiple sources
         try:
             handler = get_structured_handler()
             
-            # Get table count from metadata
+            # Try _schema_metadata first
             try:
                 meta = handler.conn.execute("""
                     SELECT COUNT(DISTINCT table_name), COALESCE(SUM(row_count), 0)
@@ -123,6 +123,29 @@ async def get_dashboard_status(project_id: Optional[str] = None):
                 stats["rows"] = int(meta[1] or 0)
             except:
                 pass
+            
+            # Also check _pdf_tables for PDF-derived tables
+            if stats["tables"] == 0:
+                try:
+                    pdf_meta = handler.conn.execute("""
+                        SELECT COUNT(*), COALESCE(SUM(row_count), 0)
+                        FROM _pdf_tables
+                    """).fetchone()
+                    stats["tables"] += pdf_meta[0] or 0
+                    stats["rows"] += int(pdf_meta[1] or 0)
+                except:
+                    pass
+            
+            # Fallback: count actual user tables (not system tables)
+            if stats["tables"] == 0:
+                try:
+                    tables_result = handler.conn.execute("""
+                        SELECT COUNT(*) FROM information_schema.tables 
+                        WHERE table_schema = 'main' AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+                    """).fetchone()
+                    stats["tables"] = tables_result[0] or 0
+                except:
+                    pass
                 
         except Exception as e:
             logger.warning(f"DuckDB stats failed: {e}")
@@ -142,7 +165,6 @@ async def get_dashboard_status(project_id: Optional[str] = None):
                 # Count document registry entries
                 result = supabase.table("document_registry").select("id", count="exact").execute()
                 stats["documents"] = result.count if hasattr(result, 'count') else len(result.data or [])
-                stats["ingested"] = stats["documents"]
                 
                 # Count insights from intelligence findings if exists
                 try:
@@ -154,8 +176,15 @@ async def get_dashboard_status(project_id: Optional[str] = None):
         except Exception as e:
             logger.warning(f"Supabase stats failed: {e}")
         
+        # Ingested = documents from registry OR infer from chunks/tables
+        if stats["documents"] > 0:
+            stats["ingested"] = stats["documents"]
+        elif stats["chunks"] > 0 or stats["tables"] > 0:
+            # Estimate: each file creates ~10-20 chunks or 1 table
+            stats["ingested"] = max(stats["tables"], stats["chunks"] // 15, 1)
+        
         # Calculate health score based on data presence
-        if stats["tables"] == 0 and stats["documents"] == 0:
+        if stats["tables"] == 0 and stats["documents"] == 0 and stats["chunks"] == 0:
             stats["health_score"] = 100  # Clean state is healthy
         else:
             stats["health_score"] = min(100, 70 + (stats["tables"] * 2) + (stats["insights"]))
@@ -183,7 +212,7 @@ async def get_project_genome(project_id: Optional[str] = Query(None)):
     try:
         from utils.structured_data_handler import get_structured_handler
         from utils.rag_handler import RAGHandler
-        from utils.database.client import get_supabase
+        from utils.database.supabase_client import get_supabase
         
         genome = {
             "project_id": project_id,
