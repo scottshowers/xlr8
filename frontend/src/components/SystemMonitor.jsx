@@ -661,29 +661,29 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
   // XLR8 FIVE TRUTHS ARCHITECTURE - Horizontal layout for full width
   const nodes = {
     // User & API Layer (left)
-    user: { x: 60, y: 100, icon: '◉', label: 'USER', color: T.blue },
-    api: { x: 160, y: 100, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
-    supabase: { x: 110, y: 180, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
+    user: { x: 70, y: 140, icon: '◉', label: 'USER', color: T.blue },
+    api: { x: 180, y: 140, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
+    supabase: { x: 125, y: 240, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
     
-    // FIVE TRUTHS - Arranged in 2 rows for better spacing
-    reality: { x: 320, y: 60, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
-    intent: { x: 420, y: 60, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
-    config: { x: 520, y: 60, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
-    reference: { x: 370, y: 140, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
-    regulatory: { x: 470, y: 140, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
+    // FIVE TRUTHS - Spread out vertically
+    reality: { x: 340, y: 70, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
+    intent: { x: 450, y: 70, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
+    config: { x: 560, y: 70, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
+    reference: { x: 395, y: 180, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
+    regulatory: { x: 505, y: 180, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
     
     // Intelligence Engine (center)
-    intelligence: { x: 640, y: 100, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
+    intelligence: { x: 680, y: 125, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
     
     // LLM Router
-    router: { x: 780, y: 100, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
+    router: { x: 820, y: 125, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
     
     // Local LLMs (Primary) - top
-    deepseek: { x: 900, y: 50, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
-    mistral: { x: 900, y: 110, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
+    deepseek: { x: 940, y: 60, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
+    mistral: { x: 940, y: 130, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
     
     // Cloud LLM (Fallback) - bottom
-    claude: { x: 900, y: 170, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
+    claude: { x: 940, y: 200, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
   };
 
   const connections = [
@@ -753,16 +753,16 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <svg width="100%" height="240" viewBox="0 0 980 240"
+        <svg width="100%" height="320" viewBox="0 0 1020 300"
           style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center', transition: isPanning ? 'none' : 'transform 0.1s ease-out' }}
         >
           {/* Five Truths zone - center */}
-          <rect x="295" y="30" width="260" height="140" rx={6} fill={T.cyan} opacity={0.05} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.2} />
-          <text x="305" y={45} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>FIVE TRUTHS</text>
+          <rect x="310" y="35" width="280" height="185" rx={6} fill={T.cyan} opacity={0.05} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.2} />
+          <text x="320" y={52} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>FIVE TRUTHS</text>
           
           {/* Local LLM zone - right */}
-          <rect x="860" y="25" width="100" height="150" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="870" y={40} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL</text>
+          <rect x="895" y="30" width="110" height="200" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
+          <text x="905" y={47} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL</text>
           
           {connections.map((conn, i) => {
             const from = nodes[conn.from];
@@ -780,13 +780,13 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
           {Object.entries(nodes).map(([id, data]) => <Node key={id} id={id} data={data} />)}
           
           {/* Legend - positioned at bottom */}
-          <g transform="translate(20, 215)">
+          <g transform="translate(20, 275)">
             <circle cx={5} cy={0} r={4} fill={T.green} /><text x={14} y={3} fontSize={7} fill={T.textDim}>SECURE</text>
             <circle cx={70} cy={0} r={4} fill={T.yellow} /><text x={79} y={3} fontSize={7} fill={T.textDim}>REVIEW</text>
             <circle cx={130} cy={0} r={4} fill={T.red} /><text x={139} y={3} fontSize={7} fill={T.textDim}>ACTION</text>
             <g transform="translate(190, -3)"><circle r={5} fill="none" stroke={T.yellow} strokeWidth={1.5} strokeDasharray="2,2" /></g>
             <text x={200} y={3} fontSize={7} fill={T.textDim}>THREAT</text>
-            <text x={700} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
+            <text x={750} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
           </g>
         </svg>
       </div>
