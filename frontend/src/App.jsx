@@ -86,10 +86,6 @@ function AppRoutes() {
         {/* Journey - Visual infographic */}
         <Route path="/journey" element={<JourneyPage />} />
         
-        {/* Hype Video - Cinematic brand film */}
-        <Route path="/hype" element={<HypeVideo />} />
-        <Route path="/beat-lab/jeremy" element={<BeatLabWelcome_Jeremy />} />
-        
         {/* Intelligence Demo - Watch XLR8 Think */}
         <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
         
