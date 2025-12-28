@@ -725,23 +725,6 @@ export default function Landing() {
         }}>
           © 2025 HCMPACT. XLR8 — Context That Compounds.
         </p>
-        <Link 
-          to="/beat-lab/jeremy" 
-          style={{
-            display: 'inline-block',
-            marginTop: '1rem',
-            padding: '0.5rem 1rem',
-            background: 'linear-gradient(135deg, #ff2d92, #8b5cf6)',
-            color: 'white',
-            borderRadius: '6px',
-            fontSize: '0.75rem',
-            fontWeight: '600',
-            textDecoration: 'none',
-            letterSpacing: '0.05em',
-          }}
-        >
-          🎹 BEAT LAB: JEREMY
-        </Link>
       </footer>
     </div>
   )
