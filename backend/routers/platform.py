@@ -27,10 +27,20 @@ from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime, timedelta
 import time
+import threading
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["platform"])
+
+# Simple time-based cache for platform status
+_platform_cache = {
+    'data': None,
+    'timestamp': 0,
+    'project': None,
+    'lock': threading.Lock()
+}
+_CACHE_TTL_SECONDS = 5  # Cache for 5 seconds
 
 
 @router.get("/platform")
@@ -47,6 +57,18 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
     Returns:
         Complete platform state including health, stats, jobs, metrics
     """
+    # Check cache first - return cached data if fresh enough
+    now = time.time()
+    with _platform_cache['lock']:
+        if (_platform_cache['data'] is not None 
+            and _platform_cache['project'] == project
+            and (now - _platform_cache['timestamp']) < _CACHE_TTL_SECONDS):
+            # Return cached data with updated timestamp
+            cached = _platform_cache['data'].copy()
+            cached['_cached'] = True
+            cached['_cache_age_ms'] = int((now - _platform_cache['timestamp']) * 1000)
+            return cached
+    
     start_time = time.time()
     
     response = {
@@ -487,6 +509,9 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                 if not fname:
                     continue
                 
+                # Get provenance from registry (source of truth)
+                provenance = registry_lookup.get(fname.lower(), {})
+                
                 if fname not in files_dict:
                     files_dict[fname] = {
                         "filename": fname,
@@ -496,9 +521,11 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                         "row_count": 0,
                         "chunks": 0,  # Will be updated from document_registry if exists
                         "loaded_at": str(row[4]) if row[4] else None,
+                        "uploaded_by": provenance.get('uploaded_by', ''),
+                        "uploaded_at": provenance.get('uploaded_at', ''),
                         "type": "structured",  # Default to structured, may become hybrid
                         "sheets": [],
-                        "truth_type": ""
+                        "truth_type": provenance.get('truth_type', '')
                     }
                 
                 # Add this table to sheets
@@ -542,6 +569,10 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                             files_dict[fname]["type"] = "hybrid"
                         if not files_dict[fname].get("truth_type"):
                             files_dict[fname]["truth_type"] = doc.get("truth_type", "")
+                        # Also merge uploaded_by if not set
+                        if not files_dict[fname].get("uploaded_by"):
+                            files_dict[fname]["uploaded_by"] = doc.get("uploaded_by_email", "")
+                            files_dict[fname]["uploaded_at"] = doc.get("created_at", "")
                     else:
                         # New file from registry only (unstructured/vector only)
                         files_dict[fname] = {
@@ -551,6 +582,8 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                             "rows": 0,
                             "chunks": chunk_count,
                             "loaded_at": doc.get("created_at"),
+                            "uploaded_by": doc.get("uploaded_by_email", ""),
+                            "uploaded_at": doc.get("created_at", ""),
                             "type": storage_type if chunk_count > 0 else "unknown",
                             "truth_type": doc.get("truth_type", ""),
                         }
@@ -660,6 +693,12 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
     # FINALIZE
     # =========================================================================
     response["_meta"]["response_time_ms"] = int((time.time() - start_time) * 1000)
+    
+    # Cache the response
+    with _platform_cache['lock']:
+        _platform_cache['data'] = response.copy()
+        _platform_cache['timestamp'] = time.time()
+        _platform_cache['project'] = project
     
     return response
 
