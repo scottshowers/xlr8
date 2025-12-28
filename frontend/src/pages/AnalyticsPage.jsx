@@ -18,6 +18,8 @@
  * 
  * NAV: Update navigation
  *   { name: 'Analytics', path: '/analytics', icon: BarChart3 }
+ * 
+ * FIXED: Comprehensive null safety for API responses
  */
 
 import { useState, useEffect } from 'react'
@@ -142,36 +144,57 @@ export default function AnalyticsPage() {
     
     try {
       const response = await api.get(`/bi/schema/${projectName}`)
-      const tables = response.data.tables || []
+      // NULL SAFETY: Check response.data exists before accessing properties
+      const data = response?.data || {}
+      const tables = Array.isArray(data.tables) ? data.tables : []
       
       // Organize tables by truth_type -> domain
       const organized = organizeTables(tables)
       setCatalog(organized)
       
       // Auto-expand first non-empty truth type
-      const firstTruth = organized.find(t => (t.domains || []).some(d => (d.tables || []).length > 0))
-      if (firstTruth) {
-        setExpandedTruthTypes({ [firstTruth.truthType]: true })
-        const firstDomain = (firstTruth.domains || []).find(d => (d.tables || []).length > 0)
-        if (firstDomain) {
-          setExpandedDomains({ [`${firstTruth.truthType}:${firstDomain.domain}`]: true })
+      if (Array.isArray(organized) && organized.length > 0) {
+        const firstTruth = organized.find(t => {
+          const domains = Array.isArray(t?.domains) ? t.domains : []
+          return domains.some(d => {
+            const tables = Array.isArray(d?.tables) ? d.tables : []
+            return tables.length > 0
+          })
+        })
+        if (firstTruth) {
+          setExpandedTruthTypes({ [firstTruth.truthType]: true })
+          const domains = Array.isArray(firstTruth.domains) ? firstTruth.domains : []
+          const firstDomain = domains.find(d => {
+            const tables = Array.isArray(d?.tables) ? d.tables : []
+            return tables.length > 0
+          })
+          if (firstDomain) {
+            setExpandedDomains({ [`${firstTruth.truthType}:${firstDomain.domain}`]: true })
+          }
         }
       }
     } catch (err) {
       console.error('Failed to load catalog:', err)
-      setCatalogError(err.message || 'Failed to load data catalog')
+      setCatalogError(err?.message || 'Failed to load data catalog')
     } finally {
       setCatalogLoading(false)
     }
   }
   
   const organizeTables = (tables) => {
+    // NULL SAFETY: Ensure tables is an array
+    if (!Array.isArray(tables)) {
+      return []
+    }
+    
     // Group by truth_type -> domain -> tables
     const hierarchy = {}
     
     tables.forEach(table => {
+      if (!table) return // Skip null/undefined entries
+      
       const truthType = table.truth_type || 'reality'
-      const domain = table.domain || inferDomain(table.name)
+      const domain = table.domain || inferDomain(table.name || '')
       
       if (!hierarchy[truthType]) {
         hierarchy[truthType] = {}
@@ -181,11 +204,15 @@ export default function AnalyticsPage() {
       }
       
       // Normalize columns to have type info
-      const normalizedColumns = (table.columns || []).map(col => {
+      const tableColumns = Array.isArray(table.columns) ? table.columns : []
+      const normalizedColumns = tableColumns.map(col => {
         if (typeof col === 'string') {
           return { name: col, type: inferColumnType(col) }
         }
-        return { ...col, type: col.type || inferColumnType(col.name) }
+        if (col && typeof col === 'object') {
+          return { ...col, type: col.type || inferColumnType(col.name || '') }
+        }
+        return { name: String(col || ''), type: 'string' }
       })
       
       hierarchy[truthType][domain].push({
@@ -199,13 +226,18 @@ export default function AnalyticsPage() {
       const config = TRUTH_TYPE_CONFIG[truthType] || TRUTH_TYPE_CONFIG.reality
       const domainList = Object.entries(domains).map(([domain, tables]) => {
         const domainConfig = DOMAIN_CONFIG[domain] || DOMAIN_CONFIG.general
+        const tableList = Array.isArray(tables) ? tables : []
         return {
           domain,
           label: domain || domainConfig.label,
           icon: domainConfig.icon,
-          tables: tables.sort((a, b) => (a.display_name || a.name).localeCompare(b.display_name || b.name))
+          tables: tableList.sort((a, b) => {
+            const nameA = a?.display_name || a?.name || ''
+            const nameB = b?.display_name || b?.name || ''
+            return nameA.localeCompare(nameB)
+          })
         }
-      }).sort((a, b) => b.tables.length - a.tables.length)
+      }).sort((a, b) => (b.tables?.length || 0) - (a.tables?.length || 0))
       
       return {
         truthType,
@@ -213,18 +245,18 @@ export default function AnalyticsPage() {
         icon: config.icon,
         color: config.color,
         domains: domainList,
-        tableCount: domainList.reduce((sum, d) => sum + d.tables.length, 0)
+        tableCount: domainList.reduce((sum, d) => sum + (d.tables?.length || 0), 0)
       }
     })
     
     // Sort by table count descending
-    return result.sort((a, b) => b.tableCount - a.tableCount)
+    return result.sort((a, b) => (b.tableCount || 0) - (a.tableCount || 0))
   }
   
   const inferDomain = (tableName) => {
-    const name = tableName.toLowerCase()
+    const name = (tableName || '').toLowerCase()
     for (const [domain, config] of Object.entries(DOMAIN_CONFIG)) {
-      if (config.keywords.some(kw => name.includes(kw))) {
+      if (config.keywords?.some(kw => name.includes(kw))) {
         return domain
       }
     }
@@ -232,7 +264,7 @@ export default function AnalyticsPage() {
   }
   
   const inferColumnType = (colName) => {
-    const name = colName.toLowerCase()
+    const name = (colName || '').toLowerCase()
     if (name.includes('date') || name.includes('time') || name.includes('_dt') || name.includes('_ts')) return 'date'
     if (name.includes('amount') || name.includes('rate') || name.includes('hours') || name.includes('salary') || 
         name.includes('wage') || name.includes('cost') || name.includes('price') || name.includes('qty') ||
@@ -256,7 +288,7 @@ export default function AnalyticsPage() {
     setYAxis(null)
     setResults(null)
     setResultsError(null)
-    setSqlText(`SELECT *\nFROM ${table.name}\nLIMIT 100`)
+    setSqlText(`SELECT *\nFROM ${table?.name || 'table'}\nLIMIT 100`)
   }
   
   const toggleTruthType = (truthType) => {
@@ -273,7 +305,7 @@ export default function AnalyticsPage() {
   // ===========================================
   
   const handleDragStart = (e, column) => {
-    setDraggedColumn({ ...column, table: selectedTable.name })
+    setDraggedColumn({ ...column, table: selectedTable?.name })
     e.dataTransfer.effectAllowed = 'copy'
   }
   
@@ -332,7 +364,7 @@ export default function AnalyticsPage() {
   
   const handleDropOnFilters = (e) => {
     e.preventDefault()
-    if (draggedColumn && !filters.find(f => f.column.name === draggedColumn.name)) {
+    if (draggedColumn && !filters.find(f => f.column?.name === draggedColumn.name)) {
       setFilters([...filters, { column: draggedColumn, operator: '=', value: '' }])
     }
     setDraggedColumn(null)
@@ -345,14 +377,14 @@ export default function AnalyticsPage() {
   const removeColumn = (index) => {
     const removed = columns[index]
     setColumns(columns.filter((_, i) => i !== index))
-    if (xAxis?.name === removed.name) setXAxis(null)
-    if (yAxis?.name === removed.name) setYAxis(null)
+    if (xAxis?.name === removed?.name) setXAxis(null)
+    if (yAxis?.name === removed?.name) setYAxis(null)
   }
   
   const removeGroupBy = (index) => {
     const removed = groupBy[index]
     setGroupBy(groupBy.filter((_, i) => i !== index))
-    if (xAxis?.name === removed.name) setXAxis(null)
+    if (xAxis?.name === removed?.name) setXAxis(null)
   }
   
   const removeFilter = (index) => {
@@ -363,7 +395,7 @@ export default function AnalyticsPage() {
     const updated = [...columns]
     updated[index] = { ...updated[index], aggregation: agg }
     setColumns(updated)
-    if (yAxis?.name === updated[index].name) {
+    if (yAxis?.name === updated[index]?.name) {
       setYAxis(updated[index])
     }
   }
@@ -379,44 +411,47 @@ export default function AnalyticsPage() {
   // ===========================================
   
   const generateSQL = () => {
-    if (!selectedTable || columns.length === 0) return ''
+    if (!selectedTable || !Array.isArray(columns) || columns.length === 0) return ''
     
     const selectCols = columns.map(c => {
-      if (c.aggregation) {
+      if (c?.aggregation) {
         const agg = c.aggregation === 'COUNT DISTINCT' ? 'COUNT(DISTINCT' : c.aggregation + '('
         const close = c.aggregation === 'COUNT DISTINCT' ? ')' : ')'
-        return `${agg}${c.name}${close} AS ${c.aggregation.replace(' ', '_').toLowerCase()}_${c.name.toLowerCase()}`
+        const colName = c.name || 'column'
+        return `${agg}${colName}${close} AS ${c.aggregation.replace(' ', '_').toLowerCase()}_${colName.toLowerCase()}`
       }
-      return c.name
+      return c?.name || 'column'
     }).join(',\n       ')
     
-    let sql = `SELECT ${selectCols}\nFROM ${selectedTable.name}`
+    let sql = `SELECT ${selectCols}\nFROM ${selectedTable.name || 'table'}`
     
     // WHERE clause
-    const activeFilters = filters.filter(f => f.value)
+    const activeFilters = (filters || []).filter(f => f?.value)
     if (activeFilters.length > 0) {
       const whereClauses = activeFilters.map(f => {
-        const val = f.column.type === 'number' ? f.value : `'${f.value}'`
-        if (f.operator === 'LIKE') return `${f.column.name} LIKE '%${f.value}%'`
-        if (f.operator === 'IN') return `${f.column.name} IN (${f.value})`
-        return `${f.column.name} ${f.operator} ${val}`
+        const colType = f.column?.type
+        const colName = f.column?.name || 'column'
+        const val = colType === 'number' ? f.value : `'${f.value}'`
+        if (f.operator === 'LIKE') return `${colName} LIKE '%${f.value}%'`
+        if (f.operator === 'IN') return `${colName} IN (${f.value})`
+        return `${colName} ${f.operator} ${val}`
       })
       sql += `\nWHERE ${whereClauses.join('\n  AND ')}`
     }
     
     // GROUP BY clause
-    if (groupBy.length > 0) {
-      sql += `\nGROUP BY ${groupBy.map(c => c.name).join(', ')}`
+    if (Array.isArray(groupBy) && groupBy.length > 0) {
+      sql += `\nGROUP BY ${groupBy.map(c => c?.name || 'column').join(', ')}`
     }
     
     // ORDER BY clause
     if (orderBy) {
-      sql += `\nORDER BY ${orderBy.name} ${orderBy.direction || 'DESC'}`
-    } else if (columns.find(c => c.aggregation)) {
+      sql += `\nORDER BY ${orderBy.name || 'column'} ${orderBy.direction || 'DESC'}`
+    } else if (columns.find(c => c?.aggregation)) {
       // Default: order by first aggregated column
-      const aggCol = columns.find(c => c.aggregation)
+      const aggCol = columns.find(c => c?.aggregation)
       if (aggCol) {
-        const alias = `${aggCol.aggregation.replace(' ', '_').toLowerCase()}_${aggCol.name.toLowerCase()}`
+        const alias = `${aggCol.aggregation.replace(' ', '_').toLowerCase()}_${(aggCol.name || 'column').toLowerCase()}`
         sql += `\nORDER BY ${alias} DESC`
       }
     }
@@ -431,7 +466,7 @@ export default function AnalyticsPage() {
   // ===========================================
   
   const runBuilderQuery = async () => {
-    if (columns.length === 0) return
+    if (!Array.isArray(columns) || columns.length === 0) return
     
     setResultsLoading(true)
     setResultsError(null)
@@ -444,22 +479,27 @@ export default function AnalyticsPage() {
         mode: 'sql'
       })
       
+      // NULL SAFETY: Defensive access to response data
+      const data = response?.data || {}
+      const resultData = Array.isArray(data.data) ? data.data : []
+      const resultColumns = Array.isArray(data.columns) ? data.columns : []
+      
       setResults({
-        data: response.data.data || [],
-        columns: response.data.columns || [],
+        data: resultData,
+        columns: resultColumns,
         sql: sql,
-        rowCount: response.data.row_count || response.data.data?.length || 0
+        rowCount: data.row_count || resultData.length || 0
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(err.response?.data?.detail || err.message || 'Query failed')
+      setResultsError(err?.response?.data?.detail || err?.message || 'Query failed')
     } finally {
       setResultsLoading(false)
     }
   }
   
   const runSQLQuery = async () => {
-    if (!sqlText.trim()) return
+    if (!sqlText?.trim()) return
     
     setResultsLoading(true)
     setResultsError(null)
@@ -471,22 +511,27 @@ export default function AnalyticsPage() {
         mode: 'sql'
       })
       
+      // NULL SAFETY: Defensive access to response data
+      const data = response?.data || {}
+      const resultData = Array.isArray(data.data) ? data.data : []
+      const resultColumns = Array.isArray(data.columns) ? data.columns : []
+      
       setResults({
-        data: response.data.data || [],
-        columns: response.data.columns || [],
+        data: resultData,
+        columns: resultColumns,
         sql: sqlText,
-        rowCount: response.data.row_count || response.data.data?.length || 0
+        rowCount: data.row_count || resultData.length || 0
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(err.response?.data?.detail || err.message || 'Query failed')
+      setResultsError(err?.response?.data?.detail || err?.message || 'Query failed')
     } finally {
       setResultsLoading(false)
     }
   }
   
   const runNLQuery = async () => {
-    if (!nlQuery.trim()) return
+    if (!nlQuery?.trim()) return
     
     setNlMessages(prev => [...prev, { role: 'user', content: nlQuery }])
     const query = nlQuery
@@ -501,19 +546,24 @@ export default function AnalyticsPage() {
         context: selectedTable?.name
       })
       
+      // NULL SAFETY: Defensive access to response data
+      const data = response?.data || {}
+      const resultData = Array.isArray(data.data) ? data.data : []
+      const resultColumns = Array.isArray(data.columns) ? data.columns : []
+      
       setNlMessages(prev => [...prev, {
         role: 'assistant',
-        content: response.data.answer_text || 'Here are the results:',
-        data: response.data.data || [],
-        columns: response.data.columns || [],
-        sql: response.data.sql,
-        chartType: response.data.chart?.recommended || 'table'
+        content: data.answer_text || 'Here are the results:',
+        data: resultData,
+        columns: resultColumns,
+        sql: data.sql,
+        chartType: data.chart?.recommended || 'table'
       }])
     } catch (err) {
       console.error('NL Query error:', err)
       setNlMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Sorry, I couldn't process that query: ${err.response?.data?.detail || err.message}`,
+        content: `Sorry, I couldn't process that query: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
         isError: true
       }])
     } finally {
@@ -532,7 +582,7 @@ export default function AnalyticsPage() {
   
   const copySQL = () => {
     const sql = mode === 'sql' ? sqlText : generateSQL()
-    navigator.clipboard.writeText(sql)
+    navigator.clipboard.writeText(sql || '')
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
@@ -560,17 +610,31 @@ export default function AnalyticsPage() {
   }
   
   // Filter catalog by search (searches across truth types and domains)
-  const filteredCatalog = catalog?.map(truthTypeGroup => ({
-    ...truthTypeGroup,
-    domains: (truthTypeGroup.domains || []).map(domainGroup => ({
-      ...domainGroup,
-      tables: (domainGroup.tables || []).filter(t =>
-        t.name?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        (t.display_name || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        t.columns?.some(c => c.name?.toLowerCase().includes(catalogSearch.toLowerCase()))
-      )
-    })).filter(d => (d.tables || []).length > 0)
-  })).filter(t => (t.domains || []).length > 0)
+  // NULL SAFETY: Comprehensive null checking throughout
+  const filteredCatalog = Array.isArray(catalog) ? catalog.map(truthTypeGroup => {
+    if (!truthTypeGroup) return null
+    const domains = Array.isArray(truthTypeGroup.domains) ? truthTypeGroup.domains : []
+    return {
+      ...truthTypeGroup,
+      domains: domains.map(domainGroup => {
+        if (!domainGroup) return null
+        const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
+        return {
+          ...domainGroup,
+          tables: tables.filter(t => {
+            if (!t) return false
+            const name = (t.name || '').toLowerCase()
+            const displayName = (t.display_name || '').toLowerCase()
+            const search = (catalogSearch || '').toLowerCase()
+            const cols = Array.isArray(t.columns) ? t.columns : []
+            return name.includes(search) ||
+              displayName.includes(search) ||
+              cols.some(c => (c?.name || '').toLowerCase().includes(search))
+          })
+        }
+      }).filter(d => d && Array.isArray(d.tables) && d.tables.length > 0)
+    }
+  }).filter(t => t && Array.isArray(t.domains) && t.domains.length > 0) : []
   
   // ===========================================
   // RENDER: No Project
@@ -604,9 +668,9 @@ export default function AnalyticsPage() {
             <Layers size={14} className="text-[#83b16d]" />
             Data Catalog
           </h2>
-          {catalog && (
+          {Array.isArray(catalog) && catalog.length > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
-              {catalog.reduce((sum, t) => sum + (t.tableCount || 0), 0)} tables
+              {catalog.reduce((sum, t) => sum + (t?.tableCount || 0), 0)} tables
             </p>
           )}
         </div>
@@ -647,9 +711,11 @@ export default function AnalyticsPage() {
             </div>
           )}
           
-          {filteredCatalog?.map(truthTypeGroup => {
+          {Array.isArray(filteredCatalog) && filteredCatalog.map(truthTypeGroup => {
+            if (!truthTypeGroup) return null
             const isTruthExpanded = expandedTruthTypes[truthTypeGroup.truthType]
-            const totalTables = (truthTypeGroup.domains || []).reduce((sum, d) => sum + (d.tables || []).length, 0)
+            const domains = Array.isArray(truthTypeGroup.domains) ? truthTypeGroup.domains : []
+            const totalTables = domains.reduce((sum, d) => sum + (Array.isArray(d?.tables) ? d.tables.length : 0), 0)
             
             return (
               <div key={truthTypeGroup.truthType} className="border-b border-gray-200">
@@ -657,7 +723,7 @@ export default function AnalyticsPage() {
                 <button
                   onClick={() => toggleTruthType(truthTypeGroup.truthType)}
                   className="w-full px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
-                  style={{ borderLeft: `3px solid ${truthTypeGroup.color}` }}
+                  style={{ borderLeft: `3px solid ${truthTypeGroup.color || '#83b16d'}` }}
                 >
                   <span className="text-base">{truthTypeGroup.icon}</span>
                   <div className="flex-1 text-left min-w-0">
@@ -674,10 +740,12 @@ export default function AnalyticsPage() {
                 {/* Domains within Truth Type */}
                 {isTruthExpanded && (
                   <div className="bg-gray-50/50">
-                    {(truthTypeGroup.domains || []).map(domainGroup => {
+                    {domains.map(domainGroup => {
+                      if (!domainGroup) return null
                       const Icon = domainGroup.icon || Database
                       const domainKey = `${truthTypeGroup.truthType}:${domainGroup.domain}`
                       const isDomainExpanded = expandedDomains[domainKey]
+                      const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
                       
                       return (
                         <div key={domainGroup.domain} className="border-t border-gray-100">
@@ -691,7 +759,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div className="flex-1 text-left min-w-0">
                               <div className="text-xs font-medium text-gray-700">{domainGroup.label || 'General'}</div>
-                              <div className="text-xs text-gray-400">{(domainGroup.tables || []).length} tables</div>
+                              <div className="text-xs text-gray-400">{tables.length} tables</div>
                             </div>
                             {isDomainExpanded ? (
                               <ChevronDown size={12} className="text-gray-400" />
@@ -703,23 +771,26 @@ export default function AnalyticsPage() {
                           {/* Tables within Domain */}
                           {isDomainExpanded && (
                             <div className="pb-1 bg-white">
-                              {(domainGroup.tables || []).map(table => (
-                                <button
-                                  key={table.name || table.full_name}
-                                  onClick={() => handleTableSelect(table)}
-                                  className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
-                                    selectedTable?.name === table.name 
-                                      ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
-                                      : 'text-gray-600'
-                                  }`}
-                                >
-                                  <Table2 size={10} className="text-gray-400 flex-shrink-0" />
-                                  <span className="truncate flex-1">{table.display_name || table.name}</span>
-                                  <span className="text-xs text-gray-400 flex-shrink-0">
-                                    {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
-                                  </span>
-                                </button>
-                              ))}
+                              {tables.map(table => {
+                                if (!table) return null
+                                return (
+                                  <button
+                                    key={table.name || table.full_name}
+                                    onClick={() => handleTableSelect(table)}
+                                    className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
+                                      selectedTable?.name === table.name 
+                                        ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
+                                        : 'text-gray-600'
+                                    }`}
+                                  >
+                                    <Table2 size={10} className="text-gray-400 flex-shrink-0" />
+                                    <span className="truncate flex-1">{table.display_name || table.name}</span>
+                                    <span className="text-xs text-gray-400 flex-shrink-0">
+                                      {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
+                                    </span>
+                                  </button>
+                                )
+                              })}
                             </div>
                           )}
                         </div>
@@ -745,7 +816,7 @@ export default function AnalyticsPage() {
             </h1>
             {selectedTable && (
               <span className="text-xs text-gray-400">
-                {selectedTable.rows?.toLocaleString()} rows • {selectedTable.columns?.length} columns
+                {selectedTable.rows?.toLocaleString() || 0} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
               </span>
             )}
           </div>
@@ -826,7 +897,7 @@ export default function AnalyticsPage() {
                 />
                 <button
                   onClick={runNLQuery}
-                  disabled={!nlQuery.trim() || isAnalyzing}
+                  disabled={!nlQuery?.trim() || isAnalyzing}
                   className="px-3 py-2 rounded-lg bg-[#83b16d] text-white disabled:opacity-50 hover:bg-[#6b9b5a] transition-colors"
                 >
                   <Send size={14} />
@@ -855,7 +926,7 @@ export default function AnalyticsPage() {
                         runSQLQuery()
                       }
                     }}
-                    placeholder={`SELECT *\nFROM ${selectedTable.name}\nLIMIT 100`}
+                    placeholder={`SELECT *\nFROM ${selectedTable.name || 'table'}\nLIMIT 100`}
                     className="w-full p-3 text-xs font-mono border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d] bg-gray-50 resize-none min-h-[140px]"
                     spellCheck={false}
                   />
@@ -870,7 +941,7 @@ export default function AnalyticsPage() {
                       </button>
                       <button
                         onClick={runSQLQuery}
-                        disabled={!sqlText.trim() || resultsLoading}
+                        disabled={!sqlText?.trim() || resultsLoading}
                         className="px-4 py-1.5 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                       >
                         {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -925,8 +996,8 @@ export default function AnalyticsPage() {
                         <ColumnChip
                           key={i}
                           column={col}
-                          showAggregation={col.type === 'number'}
-                          aggregation={col.aggregation}
+                          showAggregation={col?.type === 'number'}
+                          aggregation={col?.aggregation}
                           onAggregationChange={(agg) => updateAggregation(i, agg)}
                           onRemove={() => removeColumn(i)}
                         />
@@ -1055,7 +1126,7 @@ export default function AnalyticsPage() {
                   <div className="flex items-center gap-3 mb-3">
                     <button
                       onClick={runBuilderQuery}
-                      disabled={columns.length === 0 || resultsLoading}
+                      disabled={!Array.isArray(columns) || columns.length === 0 || resultsLoading}
                       className="px-4 py-2 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                     >
                       {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -1115,19 +1186,22 @@ export default function AnalyticsPage() {
                     <div className="text-xs text-gray-400 mt-0.5">Drag to query builder</div>
                   </div>
                   <div className="flex-1 overflow-auto p-2">
-                    {selectedTable.columns?.map((col, i) => (
-                      <div
-                        key={i}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, col)}
-                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-grab active:cursor-grabbing group transition-colors"
-                      >
-                        <GripVertical size={10} className="text-gray-300 group-hover:text-gray-400" />
-                        <TypeIcon type={col.type} />
-                        <span className="text-xs text-gray-700 flex-1 truncate">{col.name}</span>
-                        <span className="text-xs text-gray-400">{col.type}</span>
-                      </div>
-                    ))}
+                    {Array.isArray(selectedTable?.columns) && selectedTable.columns.map((col, i) => {
+                      if (!col) return null
+                      return (
+                        <div
+                          key={i}
+                          draggable
+                          onDragStart={(e) => handleDragStart(e, col)}
+                          className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-grab active:cursor-grabbing group transition-colors"
+                        >
+                          <GripVertical size={10} className="text-gray-300 group-hover:text-gray-400" />
+                          <TypeIcon type={col.type} />
+                          <span className="text-xs text-gray-700 flex-1 truncate">{col.name}</span>
+                          <span className="text-xs text-gray-400">{col.type}</span>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               </>
@@ -1156,6 +1230,7 @@ function NoTableSelected() {
 }
 
 function DropZone({ label, hint, items, onDragOver, onDrop, renderItem, isDragActive, className = '' }) {
+  const safeItems = Array.isArray(items) ? items : []
   return (
     <div
       onDragOver={onDragOver}
@@ -1166,15 +1241,15 @@ function DropZone({ label, hint, items, onDragOver, onDrop, renderItem, isDragAc
     >
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-medium text-gray-700">{label}</span>
-        <span className="text-xs text-gray-400">{items.length > 0 ? `${items.length} selected` : hint}</span>
+        <span className="text-xs text-gray-400">{safeItems.length > 0 ? `${safeItems.length} selected` : hint}</span>
       </div>
       <div className={`min-h-[40px] border-2 border-dashed rounded-lg p-2 flex flex-wrap gap-1.5 transition-colors ${
         isDragActive ? 'border-[#83b16d] bg-[rgba(131,177,109,0.1)]' : 'border-gray-200'
       }`}>
-        {items.length === 0 ? (
+        {safeItems.length === 0 ? (
           <span className="text-xs text-gray-400 m-auto">Drop here</span>
         ) : (
-          items.map((item, i) => renderItem(item, i))
+          safeItems.map((item, i) => renderItem(item, i))
         )}
       </div>
     </div>
@@ -1183,6 +1258,8 @@ function DropZone({ label, hint, items, onDragOver, onDrop, renderItem, isDragAc
 
 function ColumnChip({ column, showAggregation, aggregation, onAggregationChange, onRemove }) {
   const [showDropdown, setShowDropdown] = useState(false)
+  
+  if (!column) return null
   
   return (
     <div className="inline-flex items-center gap-1 px-2 py-1 bg-gray-100 rounded text-xs relative">
@@ -1220,6 +1297,8 @@ function ColumnChip({ column, showAggregation, aggregation, onAggregationChange,
 }
 
 function FilterRow({ filter, onChange, onRemove }) {
+  if (!filter || !filter.column) return null
+  
   const operators = filter.column.type === 'number'
     ? ['=', '!=', '>', '<', '>=', '<=']
     : ['=', '!=', 'LIKE', 'IN', 'IS NULL', 'IS NOT NULL']
@@ -1229,7 +1308,7 @@ function FilterRow({ filter, onChange, onRemove }) {
       <TypeIcon type={filter.column.type} size={10} />
       <span className="text-xs text-gray-700 min-w-[70px] truncate">{filter.column.name}</span>
       <select
-        value={filter.operator}
+        value={filter.operator || '='}
         onChange={(e) => onChange('operator', e.target.value)}
         className="px-2 py-1 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#83b16d]"
       >
@@ -1238,7 +1317,7 @@ function FilterRow({ filter, onChange, onRemove }) {
       {!['IS NULL', 'IS NOT NULL'].includes(filter.operator) && (
         <input
           type="text"
-          value={filter.value}
+          value={filter.value || ''}
           onChange={(e) => onChange('value', e.target.value)}
           placeholder="value"
           className="flex-1 px-2 py-1 text-xs border rounded min-w-[80px] focus:outline-none focus:ring-1 focus:ring-[#83b16d]"
@@ -1258,14 +1337,19 @@ function TypeIcon({ type, size = 10 }) {
 }
 
 function ResultsPanel({ results, chartType, setChartType, onExport }) {
-  const xKey = results.columns?.[0]
-  const yKey = results.columns?.[1]
+  // NULL SAFETY: Ensure results exists and has expected structure
+  if (!results) return null
+  
+  const data = Array.isArray(results.data) ? results.data : []
+  const columns = Array.isArray(results.columns) ? results.columns : []
+  const xKey = columns[0]
+  const yKey = columns[1]
   
   return (
     <div className="bg-white rounded-lg border overflow-hidden">
       <div className="px-3 py-2 border-b bg-gray-50 flex items-center justify-between">
         <span className="text-xs font-medium text-gray-700">
-          Results ({results.rowCount || results.data?.length || 0} rows)
+          Results ({results.rowCount || data.length || 0} rows)
         </span>
         <div className="flex items-center gap-2">
           <div className="flex gap-0.5 bg-gray-100 rounded p-0.5">
@@ -1299,7 +1383,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
       </div>
       
       <div className="p-3">
-        {(!results.data || results.data.length === 0) ? (
+        {data.length === 0 ? (
           <div className="text-center py-8 text-gray-400 text-sm">No data returned</div>
         ) : (
           <>
@@ -1308,7 +1392,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="bg-gray-50">
-                      {results.columns?.map(col => (
+                      {columns.map(col => (
                         <th key={col} className="px-3 py-2 text-left font-medium text-gray-600 border-b whitespace-nowrap">
                           {col}
                         </th>
@@ -1316,11 +1400,11 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                     </tr>
                   </thead>
                   <tbody>
-                    {results.data.slice(0, 100).map((row, i) => (
+                    {data.slice(0, 100).map((row, i) => (
                       <tr key={i} className="border-b border-gray-50 hover:bg-gray-50">
-                        {results.columns?.map(col => (
+                        {columns.map(col => (
                           <td key={col} className="px-3 py-2 text-gray-700 whitespace-nowrap">
-                            {formatCellValue(row[col])}
+                            {formatCellValue(row?.[col])}
                           </td>
                         ))}
                       </tr>
@@ -1333,7 +1417,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
             {chartType === 'bar' && xKey && yKey && (
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={results.data.slice(0, 20)}>
+                  <BarChart data={data.slice(0, 20)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                     <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }} tickFormatter={formatAxisValue} />
@@ -1347,7 +1431,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
             {chartType === 'line' && xKey && yKey && (
               <div className="h-52">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={results.data.slice(0, 50)}>
+                  <AreaChart data={data.slice(0, 50)}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
                     <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }} tickFormatter={formatAxisValue} />
@@ -1363,7 +1447,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                 <ResponsiveContainer width="100%" height="100%">
                   <RechartsPie>
                     <Pie
-                      data={results.data.slice(0, 10)}
+                      data={data.slice(0, 10)}
                       dataKey={yKey}
                       nameKey={xKey}
                       cx="50%"
@@ -1373,7 +1457,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                       labelLine={false}
                       fontSize={10}
                     >
-                      {results.data.slice(0, 10).map((_, index) => (
+                      {data.slice(0, 10).map((_, index) => (
                         <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                       ))}
                     </Pie>
@@ -1457,7 +1541,9 @@ function NLEmptyState({ selectedTable, onQuickQuery }) {
 }
 
 function NLMessageBubble({ message }) {
-  const [localChartType, setLocalChartType] = useState(message.chartType || 'table')
+  const [localChartType, setLocalChartType] = useState(message?.chartType || 'table')
+  
+  if (!message) return null
   
   if (message.role === 'user') {
     return (
@@ -1469,6 +1555,9 @@ function NLMessageBubble({ message }) {
     )
   }
   
+  const data = Array.isArray(message.data) ? message.data : []
+  const columns = Array.isArray(message.columns) ? message.columns : []
+  
   return (
     <div className="flex gap-2">
       <div className="w-6 h-6 rounded-full bg-[rgba(131,177,109,0.1)] flex items-center justify-center flex-shrink-0 mt-0.5">
@@ -1479,10 +1568,10 @@ function NLMessageBubble({ message }) {
           {message.content}
         </div>
         
-        {message.data && message.data.length > 0 && (
+        {data.length > 0 && (
           <div className="bg-white border rounded-lg overflow-hidden">
             <div className="px-2 py-1.5 border-b bg-gray-50 flex items-center justify-between">
-              <span className="text-xs text-gray-500">{message.data.length} rows</span>
+              <span className="text-xs text-gray-500">{data.length} rows</span>
               <div className="flex gap-0.5">
                 {[
                   { type: 'table', icon: Table2 },
@@ -1511,16 +1600,16 @@ function NLMessageBubble({ message }) {
                   <table className="w-full text-xs">
                     <thead>
                       <tr className="bg-gray-50">
-                        {message.columns?.map(col => (
+                        {columns.map(col => (
                           <th key={col} className="px-2 py-1.5 text-left font-medium text-gray-600 border-b">{col}</th>
                         ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {message.data.slice(0, 20).map((row, i) => (
+                      {data.slice(0, 20).map((row, i) => (
                         <tr key={i} className="border-b border-gray-50">
-                          {message.columns?.map(col => (
-                            <td key={col} className="px-2 py-1.5 text-gray-700">{formatCellValue(row[col])}</td>
+                          {columns.map(col => (
+                            <td key={col} className="px-2 py-1.5 text-gray-700">{formatCellValue(row?.[col])}</td>
                           ))}
                         </tr>
                       ))}
@@ -1529,42 +1618,42 @@ function NLMessageBubble({ message }) {
                 </div>
               )}
               
-              {localChartType === 'bar' && message.columns?.length >= 2 && (
+              {localChartType === 'bar' && columns.length >= 2 && (
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={message.data.slice(0, 15)}>
+                    <BarChart data={data.slice(0, 15)}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                      <XAxis dataKey={message.columns[0]} tick={{ fontSize: 9 }} />
+                      <XAxis dataKey={columns[0]} tick={{ fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 9 }} tickFormatter={formatAxisValue} />
                       <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 10 }} />
-                      <Bar dataKey={message.columns[1]} fill="#83b16d" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey={columns[1]} fill="#83b16d" radius={[2, 2, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
               )}
               
-              {localChartType === 'line' && message.columns?.length >= 2 && (
+              {localChartType === 'line' && columns.length >= 2 && (
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={message.data.slice(0, 30)}>
+                    <AreaChart data={data.slice(0, 30)}>
                       <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                      <XAxis dataKey={message.columns[0]} tick={{ fontSize: 9 }} />
+                      <XAxis dataKey={columns[0]} tick={{ fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 9 }} tickFormatter={formatAxisValue} />
                       <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 10 }} />
-                      <Area type="monotone" dataKey={message.columns[1]} stroke="#83b16d" fill="rgba(131,177,109,0.1)" strokeWidth={2} />
+                      <Area type="monotone" dataKey={columns[1]} stroke="#83b16d" fill="rgba(131,177,109,0.1)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>
               )}
               
-              {localChartType === 'pie' && message.columns?.length >= 2 && (
+              {localChartType === 'pie' && columns.length >= 2 && (
                 <div className="h-40">
                   <ResponsiveContainer width="100%" height="100%">
                     <RechartsPie>
                       <Pie
-                        data={message.data.slice(0, 8)}
-                        dataKey={message.columns[1]}
-                        nameKey={message.columns[0]}
+                        data={data.slice(0, 8)}
+                        dataKey={columns[1]}
+                        nameKey={columns[0]}
                         cx="50%"
                         cy="50%"
                         outerRadius={60}
@@ -1572,7 +1661,7 @@ function NLMessageBubble({ message }) {
                         labelLine={false}
                         fontSize={9}
                       >
-                        {message.data.slice(0, 8).map((_, index) => (
+                        {data.slice(0, 8).map((_, index) => (
                           <Cell key={`cell-${index}`} fill={CHART_PALETTE[index % CHART_PALETTE.length]} />
                         ))}
                       </Pie>
