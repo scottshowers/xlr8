@@ -23,7 +23,7 @@ import logging
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from backend.routers import chat, upload, status, projects, jobs
+from backend.routers import upload, projects, jobs
 
 # Import playbooks router
 try:
@@ -222,9 +222,7 @@ async def startup_event():
 
 
 # Register core routers
-app.include_router(chat.router, prefix="/api")
 app.include_router(upload.router, prefix="/api")
-app.include_router(status.router, prefix="/api")
 app.include_router(projects.router, prefix="/api/projects")
 app.include_router(jobs.router, prefix="/api")
 
