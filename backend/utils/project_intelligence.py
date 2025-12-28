@@ -1044,6 +1044,13 @@ class ProjectIntelligenceService:
                     column_map[col_lower] = []
                 column_map[col_lower].append(table_name)
         
+        # Log column inventory for debugging
+        multi_table_cols = {k: v for k, v in column_map.items() if len(v) >= 2}
+        logger.warning(f"[INTELLIGENCE] Relationship detection: {len(tables)} tables, {len(column_map)} unique columns, {len(multi_table_cols)} columns in 2+ tables")
+        if multi_table_cols:
+            for col, tbls in list(multi_table_cols.items())[:5]:  # Show first 5
+                logger.warning(f"[INTELLIGENCE]   - '{col}' in: {tbls}")
+        
         # Find columns that appear in multiple tables (potential FK)
         for col_name, table_list in column_map.items():
             if len(table_list) < 2:
