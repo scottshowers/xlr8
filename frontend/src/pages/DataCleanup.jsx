@@ -638,7 +638,7 @@ export default function DataCleanup() {
               </div>
             ) : (
               documents.map((doc, i) => {
-                const filename = doc.filename || doc.source || doc.name || doc;
+                const filename = doc.document_name || doc.filename || doc.source || doc.name || 'unknown';
                 const isSelected = selectedDocs.has(filename);
                 return (
                   <div
