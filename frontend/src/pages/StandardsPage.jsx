@@ -9,6 +9,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
+import { Tooltip } from '../components/ui';
 import api from '../services/api';
 
 // Brand Colors
@@ -623,10 +624,10 @@ export default function StandardsPage() {
   const [key, setKey] = useState(0);
 
   const tabs = [
-    { id: 'upload', label: 'Upload', icon: '📤' },
-    { id: 'documents', label: 'Documents', icon: '📚' },
-    { id: 'rules', label: 'Rules', icon: '📋' },
-    { id: 'compliance', label: 'Compliance', icon: '🔍' },
+    { id: 'upload', label: 'Upload', icon: '📤', tooltip: { title: 'Upload Standards', detail: 'Upload compliance documents (PDF, DOCX). AI extracts rules automatically.', action: 'Supports SECURE 2.0, SOX, internal policies' } },
+    { id: 'documents', label: 'Documents', icon: '📚', tooltip: { title: 'Standards Library', detail: 'View all uploaded compliance documents and their metadata.', action: 'Delete or review document details' } },
+    { id: 'rules', label: 'Rules', icon: '📋', tooltip: { title: 'Extracted Rules', detail: 'AI-extracted compliance rules from your uploaded documents.', action: 'Rules are linked to playbooks for checking' } },
+    { id: 'compliance', label: 'Compliance', icon: '🔍', tooltip: { title: 'Run Compliance Check', detail: 'Check project data against extracted rules.', action: 'Requires active project selection' } },
   ];
 
   // Refresh docs and rules tabs
@@ -672,18 +673,19 @@ export default function StandardsPage() {
         {/* Tab navigation */}
         <div style={{ display: 'flex', borderBottom: '1px solid #e1e8ed', background: '#fafbfc' }}>
           {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem',
-                border: 'none', background: activeTab === tab.id ? 'white' : 'transparent',
-                color: activeTab === tab.id ? '#83b16d' : '#5f6c7b', fontWeight: '600', cursor: 'pointer',
-                borderBottom: activeTab === tab.id ? '2px solid #83b16d' : '2px solid transparent', marginBottom: '-1px',
-              }}
-            >
-              <span>{tab.icon}</span>{tab.label}
-            </button>
+            <Tooltip key={tab.id} title={tab.tooltip.title} detail={tab.tooltip.detail} action={tab.tooltip.action}>
+              <button
+                onClick={() => setActiveTab(tab.id)}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.5rem',
+                  border: 'none', background: activeTab === tab.id ? 'white' : 'transparent',
+                  color: activeTab === tab.id ? '#83b16d' : '#5f6c7b', fontWeight: '600', cursor: 'pointer',
+                  borderBottom: activeTab === tab.id ? '2px solid #83b16d' : '2px solid transparent', marginBottom: '-1px',
+                }}
+              >
+                <span>{tab.icon}</span>{tab.label}
+              </button>
+            </Tooltip>
           ))}
         </div>
 
