@@ -340,42 +340,56 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
         logger.warning(f"Jobs stats failed: {e}")
     
     # =========================================================================
-    # METRICS: Performance metrics
+    # METRICS: Performance metrics from platform_metrics table
     # =========================================================================
     try:
         supabase = get_supabase()
         if supabase:
-            # Get recent upload metrics
             week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
             
+            # Query platform_metrics table (the ACTUAL table that MetricsService writes to)
             try:
-                uploads = supabase.table("upload_metrics").select("duration_ms").gte("created_at", week_ago).execute()
-                if uploads.data:
-                    durations = [u["duration_ms"] for u in uploads.data if u.get("duration_ms")]
-                    if durations:
-                        response["metrics"]["upload_speed_ms"] = int(sum(durations) / len(durations))
-            except:
-                pass
-            
-            # Get recent query metrics
-            try:
-                queries = supabase.table("query_metrics").select("duration_ms").gte("created_at", week_ago).execute()
-                if queries.data:
-                    durations = [q["duration_ms"] for q in queries.data if q.get("duration_ms")]
-                    if durations:
-                        response["metrics"]["query_response_ms"] = int(sum(durations) / len(durations))
-            except:
-                pass
-            
-            # Get LLM metrics
-            try:
-                llm = supabase.table("llm_metrics").select("duration_ms").gte("created_at", week_ago).execute()
-                if llm.data:
-                    durations = [l["duration_ms"] for l in llm.data if l.get("duration_ms")]
-                    if durations:
-                        response["metrics"]["llm_latency_ms"] = int(sum(durations) / len(durations))
-            except:
-                pass
+                metrics_result = supabase.table("platform_metrics").select(
+                    "metric_type, duration_ms, success"
+                ).gte("created_at", week_ago).execute()
+                
+                if metrics_result.data:
+                    # Separate by metric type
+                    uploads = [m for m in metrics_result.data if m.get("metric_type") == "upload"]
+                    queries = [m for m in metrics_result.data if m.get("metric_type") == "query"]
+                    llm_calls = [m for m in metrics_result.data if m.get("metric_type") == "llm_call"]
+                    errors = [m for m in metrics_result.data if m.get("metric_type") == "error"]
+                    
+                    # Upload speed (avg duration)
+                    upload_durations = [u["duration_ms"] for u in uploads if u.get("duration_ms")]
+                    if upload_durations:
+                        response["metrics"]["upload_speed_ms"] = int(sum(upload_durations) / len(upload_durations))
+                    
+                    # Query response time (avg duration)
+                    query_durations = [q["duration_ms"] for q in queries if q.get("duration_ms")]
+                    if query_durations:
+                        response["metrics"]["query_response_ms"] = int(sum(query_durations) / len(query_durations))
+                    
+                    # LLM latency (avg duration)
+                    llm_durations = [l["duration_ms"] for l in llm_calls if l.get("duration_ms")]
+                    if llm_durations:
+                        response["metrics"]["llm_latency_ms"] = int(sum(llm_durations) / len(llm_durations))
+                    
+                    # Error rate
+                    total_ops = len(uploads) + len(queries)
+                    if total_ops > 0:
+                        failed_ops = len([m for m in (uploads + queries) if not m.get("success")])
+                        response["metrics"]["error_rate_percent"] = round((failed_ops / total_ops) * 100, 1)
+                    
+                    # Store throughput data for frontend
+                    response["metrics"]["_raw"] = {
+                        "upload_count": len(uploads),
+                        "query_count": len(queries),
+                        "llm_count": len(llm_calls),
+                        "error_count": len(errors)
+                    }
+            except Exception as metrics_e:
+                logger.debug(f"[PLATFORM] platform_metrics query: {metrics_e}")
                 
     except Exception as e:
         logger.warning(f"Metrics failed: {e}")
