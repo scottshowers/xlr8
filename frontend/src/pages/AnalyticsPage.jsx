@@ -24,6 +24,7 @@
 
 import { useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
+import { Tooltip } from '../components/ui'
 import api from '../services/api'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
@@ -825,6 +826,7 @@ export default function AnalyticsPage() {
           <div className="flex bg-gray-100 rounded-lg p-0.5">
             <button
               onClick={() => setMode('natural')}
+              title="Ask questions in plain English - AI generates and runs the query"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                 mode === 'natural' 
                   ? 'bg-white shadow-sm text-gray-800' 
@@ -836,6 +838,7 @@ export default function AnalyticsPage() {
             </button>
             <button
               onClick={() => setMode('builder')}
+              title="Drag and drop columns to build queries visually"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                 mode === 'builder' 
                   ? 'bg-white shadow-sm text-gray-800' 
@@ -847,6 +850,7 @@ export default function AnalyticsPage() {
             </button>
             <button
               onClick={() => setMode('sql')}
+              title="Write or paste SQL directly for full control"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                 mode === 'sql' 
                   ? 'bg-white shadow-sm text-gray-800' 
@@ -935,6 +939,7 @@ export default function AnalyticsPage() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => setSqlText('')}
+                        title="Clear the SQL editor"
                         className="px-3 py-1.5 rounded-lg text-xs text-gray-500 hover:bg-gray-100 transition-colors"
                       >
                         Clear
@@ -942,6 +947,7 @@ export default function AnalyticsPage() {
                       <button
                         onClick={runSQLQuery}
                         disabled={!sqlText?.trim() || resultsLoading}
+                        title="Execute the SQL query against your project data"
                         className="px-4 py-1.5 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                       >
                         {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -1127,6 +1133,7 @@ export default function AnalyticsPage() {
                     <button
                       onClick={runBuilderQuery}
                       disabled={!Array.isArray(columns) || columns.length === 0 || resultsLoading}
+                      title="Execute the generated query against your project data"
                       className="px-4 py-2 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                     >
                       {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
@@ -1134,6 +1141,7 @@ export default function AnalyticsPage() {
                     </button>
                     <button
                       onClick={() => setShowSQL(!showSQL)}
+                      title={showSQL ? 'Hide the generated SQL' : 'Show the generated SQL query'}
                       className={`px-3 py-2 rounded-lg text-xs flex items-center gap-1.5 transition-colors ${
                         showSQL 
                           ? 'bg-gray-200 text-gray-700' 
