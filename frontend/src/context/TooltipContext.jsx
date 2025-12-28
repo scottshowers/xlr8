@@ -33,8 +33,9 @@ export function TooltipProvider({ children }) {
 
 export function useTooltips() {
   const context = useContext(TooltipContext);
+  // Return default values if no provider (don't throw)
   if (!context) {
-    throw new Error('useTooltips must be used within a TooltipProvider');
+    return { tooltipsEnabled: true, setTooltipsEnabled: () => {}, toggleTooltips: () => {} };
   }
   return context;
 }
