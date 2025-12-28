@@ -1204,12 +1204,11 @@ class StructuredDataHandler:
                 other_values = row.iloc[1:] if len(row) > 1 else pd.Series()
                 non_empty_others = sum(1 for v in other_values if pd.notna(v) and str(v).strip())
                 
-                # Title row pattern: text in A, and 90%+ of rest is empty, and text is short-ish
-                if len(row) > 4 and non_empty_others <= max(1, len(row) * 0.1) and len(first_text) < 100:
-                    # Likely a section title
-                    separator_rows.add(row_idx)
-                    title_rows[row_idx] = first_text
-                    logger.warning(f"[VERTICAL-DETECT] Title row {row_idx}: '{first_text[:50]}'")
+                # STRICT: Only treat as title row if it's COMPLETELY alone (no other values)
+                # AND preceded/followed by blank rows. The old 90% heuristic was too aggressive.
+                # Merged cells (detected above) are the reliable indicator of section headers.
+                # Skip the text-in-col-A heuristic - it causes over-splitting.
+                pass  # Removed aggressive title detection
             
             logger.warning(f"[VERTICAL-DETECT] Total separator rows found: {len(separator_rows)}")
             
