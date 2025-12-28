@@ -548,10 +548,42 @@ class DocumentRegistryModel:
             
             data = {k: v for k, v in data.items() if v is not None}
             
-            response = supabase.table('document_registry').insert(data).execute()
+            # Check if document already exists (handles DuckDB registering first, then ChromaDB adding chunks)
+            existing = None
+            try:
+                query = supabase.table('document_registry').select('id, chunk_count, storage_type').eq('filename', filename)
+                if project_id:
+                    query = query.eq('project_id', project_id)
+                else:
+                    query = query.is_('project_id', 'null')
+                existing_resp = query.execute()
+                existing = existing_resp.data[0] if existing_resp.data else None
+            except:
+                pass
+            
+            if existing:
+                # UPDATE existing entry - merge chunk_count and update storage_type if needed
+                existing_chunks = existing.get('chunk_count', 0) or 0
+                new_chunks = chunk_count or 0
+                merged_chunks = max(existing_chunks, new_chunks)
+                
+                # Determine storage type: if we now have chunks AND had tables, it's 'both'
+                existing_storage = existing.get('storage_type', '')
+                if existing_storage == 'duckdb' and new_chunks > 0:
+                    data['storage_type'] = 'both'
+                elif existing_storage == 'chromadb' and row_count and row_count > 0:
+                    data['storage_type'] = 'both'
+                
+                data['chunk_count'] = merged_chunks
+                
+                response = supabase.table('document_registry').update(data).eq('id', existing['id']).execute()
+                logger.info(f"[REGISTRY] Updated: {filename} (chunks: {existing_chunks} -> {merged_chunks}, storage: {data.get('storage_type', storage_type)})")
+            else:
+                # INSERT new entry
+                response = supabase.table('document_registry').insert(data).execute()
+                logger.info(f"[REGISTRY] Registered: {filename} as {truth_type} -> {storage_type}")
             
             if response.data:
-                logger.info(f"[REGISTRY] Registered: {filename} as {truth_type} -> {storage_type}")
                 return response.data[0]
             return None
             
