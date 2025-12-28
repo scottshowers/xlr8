@@ -708,8 +708,33 @@ function FilesPanel({ c, project, targetScope }) {
   const [referenceFiles, setReferenceFiles] = useState(null);
   const [loading, setLoading] = useState(true);
   const [expandedSections, setExpandedSections] = useState({ structured: true, documents: true, reference: true });
+  
+  // Track completed uploads to auto-refresh
+  const prevCompletedRef = useRef(new Set());
 
   useEffect(() => { loadData(); }, [project?.id, targetScope]);
+  
+  // Auto-refresh when uploads complete
+  useEffect(() => {
+    const completedIds = new Set(
+      uploads.filter(u => u.status === 'completed').map(u => u.id)
+    );
+    
+    // Check if there are NEW completions (not just existing ones)
+    const hasNewCompletions = [...completedIds].some(id => !prevCompletedRef.current.has(id));
+    
+    if (hasNewCompletions && completedIds.size > 0) {
+      // Small delay to let backend finish any async work
+      const timer = setTimeout(() => {
+        loadData();
+      }, 1000);
+      
+      prevCompletedRef.current = completedIds;
+      return () => clearTimeout(timer);
+    }
+    
+    prevCompletedRef.current = completedIds;
+  }, [uploads]);
 
   const loadData = async () => {
     setLoading(true);
