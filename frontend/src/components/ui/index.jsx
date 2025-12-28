@@ -768,6 +768,11 @@ export function Tabs({ tabs, activeTab, onChange }) {
   );
 }
 
+// ============================================================
+// TOOLTIP - Re-export from dedicated file
+// ============================================================
+export { default as Tooltip, SimpleTooltip } from './Tooltip';
+
 export default {
   LoadingSpinner,
   ErrorState,
