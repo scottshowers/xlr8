@@ -1054,7 +1054,9 @@ async def get_bi_schema(project: str):
                 'rows': t.get('row_count', 0),
                 'columns': [c.get('name') if isinstance(c, dict) else c for c in t.get('columns', [])],
                 'file': t.get('file'),
-                'sheet': t.get('sheet')
+                'sheet': t.get('sheet'),
+                'truth_type': t.get('truth_type', 'reality'),
+                'domain': t.get('domain', '')
             })
         
         return {
