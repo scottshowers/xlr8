@@ -28,15 +28,24 @@ const PRODUCTION_URL = 'https://hcmpact-xlr8-production.up.railway.app';
 
 const ENDPOINT_CATEGORIES = [
   {
+    id: 'platform',
+    name: 'Platform (Primary)',
+    icon: '🚀',
+    description: 'Comprehensive platform endpoint - USE THIS',
+    endpoints: [
+      { method: 'GET', path: '/api/platform', description: 'COMPREHENSIVE status - files, tables, health, stats, jobs', priority: 'high' },
+      { method: 'GET', path: '/api/platform/health', description: 'Quick health check only', priority: 'high' },
+      { method: 'GET', path: '/api/platform/stats', description: 'Stats only (for dashboard cards)', priority: 'medium' },
+    ]
+  },
+  {
     id: 'health',
-    name: 'Health & Status',
+    name: 'Health & Debug',
     icon: '💚',
-    description: 'System health checks and status endpoints',
+    description: 'System health checks and debug endpoints',
     endpoints: [
       { method: 'GET', path: '/api/health', description: 'Full system health check', priority: 'high' },
-      { method: 'GET', path: '/api/debug/imports', description: 'Check if all modules loaded correctly', priority: 'high' },
-      { method: 'GET', path: '/api/status/structured', description: 'List all DuckDB tables', priority: 'high' },
-      { method: 'GET', path: '/api/status/documents', description: 'List all ChromaDB documents', priority: 'medium' },
+      { method: 'GET', path: '/api/debug/imports', description: 'Check if all modules loaded correctly', priority: 'medium' },
     ]
   },
   {
@@ -450,7 +459,7 @@ export default function AdminEndpoints() {
       }}>
         <strong>Note:</strong> DELETE and POST endpoints cannot be tested via browser link. Use the Data Cleanup page or curl commands.
         <br />
-        Last updated: December 27, 2025 • Classification transparency + Display names release
+        Last updated: December 27, 2025 • Endpoint consolidation - 319→~80 endpoints
       </div>
     </div>
   );
