@@ -75,20 +75,20 @@ const COLORS = {
 
 // Main nav items - core workflow
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Mission Control', icon: '🏠', permission: null },
-  { path: '/projects', label: 'Projects', icon: '🏢', permission: null },
-  { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD },
-  { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS },
-  { path: '/analytics', label: 'Smart Analytics', icon: '📊', permission: null },
-  { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null },
+  { path: '/dashboard', label: 'Mission Control', icon: '🏠', permission: null, tooltip: 'Platform health, metrics, and system status at a glance' },
+  { path: '/projects', label: 'Projects', icon: '🏢', permission: null, tooltip: 'Create and manage customer implementation projects' },
+  { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
+  { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
+  { path: '/analytics', label: 'Smart Analytics', icon: '📊', permission: null, tooltip: 'Query your data with natural language or SQL' },
+  { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null, tooltip: 'Chat with AI about your project data' },
 ];
 
 // Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER },
-  { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER },
-  { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER },
-  { path: '/admin', label: 'System', icon: '⚙️', permission: Permissions.OPS_CENTER },
+  { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER, tooltip: 'AI-powered recommendations for tasks and next steps' },
+  { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER, tooltip: 'Create and customize analysis playbooks' },
+  { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER, tooltip: 'Train the system with domain knowledge' },
+  { path: '/admin', label: 'System', icon: '⚙️', permission: Permissions.OPS_CENTER, tooltip: 'System settings, users, and configuration' },
 ];
 
 // Logo SVG
@@ -347,6 +347,7 @@ function Navigation({ onOpenGenome }) {
                   to={item.path}
                   data-tour={getTourAttr(item.path)}
                   style={styles.navLink(isActive(item.path))}
+                  title={item.tooltip}
                 >
                   <span>{item.icon}</span>
                   {item.label}
@@ -376,6 +377,7 @@ function Navigation({ onOpenGenome }) {
                           key={item.path}
                           to={item.path}
                           style={styles.adminDropdownItem(isActive(item.path))}
+                          title={item.tooltip}
                           onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
                           onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
                         >
@@ -420,7 +422,7 @@ function Navigation({ onOpenGenome }) {
               color: tourEnabled ? 'white' : COLORS.textLight,
               borderColor: tourEnabled ?COLORS.primary : '#e1e8ed',
             }}
-            title={tourEnabled ? 'Turn off guide' : 'Turn on guide'}
+            title={tourEnabled ? 'Turn off guided tour' : 'Turn on guided tour - walks you through page features'}
           >
             <HelpCircle size={16} />
           </button>
@@ -430,6 +432,7 @@ function Navigation({ onOpenGenome }) {
             data-tour="theme-toggle"
             onClick={toggle}
             style={styles.themeBtn}
+            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
           >
             {darkMode ? <Sun size={14} /> : <Moon size={14} />}
             {darkMode ? 'Light' : 'Dark'}
@@ -442,7 +445,7 @@ function Navigation({ onOpenGenome }) {
                 <div style={styles.userName}>{user.full_name || user.email}</div>
                 <div style={styles.userRole}>{user.role}</div>
               </div>
-              <button onClick={logout} style={styles.logoutBtn}>Logout</button>
+              <button onClick={logout} style={styles.logoutBtn} title="Sign out of XLR8">Logout</button>
             </div>
           )}
         </div>
