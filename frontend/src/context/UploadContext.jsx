@@ -162,7 +162,11 @@ export function UploadProvider({ children }) {
     
     if (options.standards_mode) {
       formData.append('standards_mode', 'true');
-      formData.append('domain', options.domain || 'general');
+    }
+    
+    // Always pass domain if provided (for structured data classification)
+    if (options.domain) {
+      formData.append('domain', options.domain);
     }
     
     if (options.truth_type) {
