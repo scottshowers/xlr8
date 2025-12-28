@@ -31,15 +31,8 @@ export default function Tooltip({
   const [coords, setCoords] = useState({ x: 0, y: 0, showBelow: false });
   const triggerRef = useRef(null);
   
-  // Get global tooltip setting
-  let tooltipsEnabled = true;
-  try {
-    const context = useTooltips();
-    tooltipsEnabled = context.tooltipsEnabled;
-  } catch {
-    // If not wrapped in TooltipProvider, default to enabled
-    tooltipsEnabled = true;
-  }
+  // Get global tooltip setting (hook returns defaults if no provider)
+  const { tooltipsEnabled } = useTooltips();
 
   const handleMouseEnter = () => {
     if (!tooltipsEnabled || disabled) return;
@@ -129,14 +122,7 @@ export default function Tooltip({
  */
 export function SimpleTooltip({ children, text, position = 'top' }) {
   const [show, setShow] = useState(false);
-  
-  let tooltipsEnabled = true;
-  try {
-    const context = useTooltips();
-    tooltipsEnabled = context.tooltipsEnabled;
-  } catch {
-    tooltipsEnabled = true;
-  }
+  const { tooltipsEnabled } = useTooltips();
 
   if (!tooltipsEnabled) {
     return children;
