@@ -21,8 +21,13 @@ PII PROTECTION:
 - Regex identifies PII patterns
 - Black boxes drawn over PII before sending to external API
 
+CONCURRENCY:
+- Semaphore limits concurrent Claude Vision calls to prevent rate limiting
+- Timeout prevents indefinite hangs
+- Retry with exponential backoff for transient failures
+
 Author: XLR8 Team
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import os
@@ -30,10 +35,22 @@ import re
 import io
 import base64
 import logging
+import time
+import threading
 from typing import List, Dict, Tuple, Optional, Any
 from PIL import Image, ImageDraw
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# CLAUDE API CONCURRENCY CONTROL
+# =============================================================================
+# Limit concurrent Claude Vision API calls to prevent rate limiting
+# and ensure responsive processing even with bulk uploads
+CLAUDE_VISION_SEMAPHORE = threading.Semaphore(2)  # Max 2 concurrent Vision calls
+CLAUDE_VISION_TIMEOUT = 120  # 2 minutes per call
+CLAUDE_VISION_MAX_RETRIES = 3
+CLAUDE_VISION_RETRY_DELAY = 5  # Base delay in seconds (exponential backoff)
 
 # Try to import required libraries
 try:
@@ -387,10 +404,37 @@ def redact_image(image: Image.Image, regions: List[Dict[str, Any]] = None) -> Im
     return redacted
 
 
-def image_to_base64(image: Image.Image, format: str = 'PNG') -> str:
-    """Convert PIL Image to base64 string for API transmission."""
+def image_to_base64(image: Image.Image, format: str = 'JPEG', quality: int = 80) -> str:
+    """
+    Convert PIL Image to base64 string for API transmission.
+    
+    Args:
+        image: PIL Image
+        format: 'JPEG' (smaller, lossy) or 'PNG' (larger, lossless)
+        quality: JPEG quality 1-100 (ignored for PNG)
+    
+    Returns:
+        Base64-encoded string
+    """
     buffer = io.BytesIO()
-    image.save(buffer, format=format)
+    
+    # Convert RGBA to RGB for JPEG (JPEG doesn't support alpha)
+    if format.upper() == 'JPEG' and image.mode == 'RGBA':
+        # Create white background
+        background = Image.new('RGB', image.size, (255, 255, 255))
+        background.paste(image, mask=image.split()[3])  # Use alpha as mask
+        image = background
+    elif format.upper() == 'JPEG' and image.mode != 'RGB':
+        image = image.convert('RGB')
+    
+    if format.upper() == 'JPEG':
+        image.save(buffer, format='JPEG', quality=quality, optimize=True)
+    else:
+        image.save(buffer, format=format)
+    
+    size_kb = len(buffer.getvalue()) / 1024
+    logger.info(f"[PDF-VISION] Image encoded: {size_kb:.1f}KB ({format}, {image.size})")
+    
     return base64.standard_b64encode(buffer.getvalue()).decode('utf-8')
 
 
@@ -505,14 +549,14 @@ def extract_columns_with_vision(
             if redact_pii:
                 img = redact_image(img)
             
-            # Convert to base64
-            b64_data = image_to_base64(img, format='PNG')
+            # Convert to base64 (JPEG for smaller size - headers don't need lossless)
+            b64_data = image_to_base64(img, format='JPEG', quality=80)
             
             image_contents.append({
                 "type": "image",
                 "source": {
                     "type": "base64",
-                    "media_type": "image/png",
+                    "media_type": "image/jpeg",
                     "data": b64_data
                 }
             })
@@ -525,37 +569,64 @@ def extract_columns_with_vision(
             "text": COLUMN_EXTRACTION_PROMPT
         })
         
-        # Call Claude Vision API with timeout
-        client = anthropic.Anthropic(
-            api_key=api_key,
-            timeout=120.0  # 2 minute timeout for Vision API
-        )
+        # Call Claude Vision API with concurrency control and retry
+        # Acquire semaphore to limit concurrent calls
+        logger.info(f"[PDF-VISION] Waiting for API slot (max {CLAUDE_VISION_SEMAPHORE._value} concurrent)...")
         
-        logger.warning("[PDF-VISION] Calling Claude Vision API...")
-        
-        try:
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1024,
-                messages=[{
-                    "role": "user",
-                    "content": image_contents
-                }]
+        with CLAUDE_VISION_SEMAPHORE:
+            logger.warning("[PDF-VISION] Calling Claude Vision API...")
+            
+            client = anthropic.Anthropic(
+                api_key=api_key,
+                timeout=float(CLAUDE_VISION_TIMEOUT)
             )
-        except anthropic.APITimeoutError:
-            logger.error("[PDF-VISION] Claude Vision API timed out after 120s")
-            return {
-                'columns': [],
-                'error': 'Claude Vision API timeout',
-                'success': False
-            }
-        except anthropic.RateLimitError as e:
-            logger.error(f"[PDF-VISION] Rate limited: {e}")
-            return {
-                'columns': [],
-                'error': 'Rate limited - try again later',
-                'success': False
-            }
+            
+            response = None
+            last_error = None
+            
+            for attempt in range(CLAUDE_VISION_MAX_RETRIES):
+                try:
+                    response = client.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=1024,
+                        messages=[{
+                            "role": "user",
+                            "content": image_contents
+                        }]
+                    )
+                    break  # Success - exit retry loop
+                    
+                except anthropic.APITimeoutError:
+                    last_error = "timeout"
+                    logger.warning(f"[PDF-VISION] Timeout on attempt {attempt + 1}/{CLAUDE_VISION_MAX_RETRIES}")
+                    if attempt < CLAUDE_VISION_MAX_RETRIES - 1:
+                        wait_time = CLAUDE_VISION_RETRY_DELAY * (2 ** attempt)
+                        logger.info(f"[PDF-VISION] Retrying in {wait_time}s...")
+                        time.sleep(wait_time)
+                        
+                except anthropic.RateLimitError as e:
+                    last_error = f"rate_limit: {e}"
+                    logger.warning(f"[PDF-VISION] Rate limited on attempt {attempt + 1}/{CLAUDE_VISION_MAX_RETRIES}")
+                    if attempt < CLAUDE_VISION_MAX_RETRIES - 1:
+                        # Rate limit needs longer backoff
+                        wait_time = CLAUDE_VISION_RETRY_DELAY * (3 ** attempt)  # 5s, 15s, 45s
+                        logger.info(f"[PDF-VISION] Rate limited, waiting {wait_time}s...")
+                        time.sleep(wait_time)
+                        
+                except anthropic.APIError as e:
+                    last_error = f"api_error: {e}"
+                    logger.warning(f"[PDF-VISION] API error on attempt {attempt + 1}: {e}")
+                    if attempt < CLAUDE_VISION_MAX_RETRIES - 1:
+                        wait_time = CLAUDE_VISION_RETRY_DELAY * (2 ** attempt)
+                        time.sleep(wait_time)
+            
+            if response is None:
+                logger.error(f"[PDF-VISION] All {CLAUDE_VISION_MAX_RETRIES} attempts failed: {last_error}")
+                return {
+                    'columns': [],
+                    'error': f'Claude Vision API failed after {CLAUDE_VISION_MAX_RETRIES} attempts: {last_error}',
+                    'success': False
+                }
         
         # Parse response
         response_text = response.content[0].text.strip()
