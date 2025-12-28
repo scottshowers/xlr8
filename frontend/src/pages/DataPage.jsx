@@ -730,9 +730,11 @@ function FilesPanel({ c, project, targetScope }) {
         total_tables: platform?.stats?.tables || 0,
       };
       
-      // Documents from platform files that have chunks
+      // Documents from platform files that have chunks (chromadb or hybrid)
       const documents = {
-        documents: (platform?.files || []).filter(f => f.type === 'chromadb' || f.chunks > 0),
+        documents: (platform?.files || []).filter(f => 
+          f.type === 'chromadb' || f.type === 'hybrid' || (f.chunks && f.chunks > 0)
+        ),
         count: platform?.stats?.documents || 0,
       };
       
