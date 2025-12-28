@@ -59,7 +59,6 @@ import WelcomePage from './pages/WelcomePage';
 import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
 import HypeVideo from './pages/HypeVideo';
-import BeatLabWelcome_Jeremy from './components/BeatLabWelcome_Jeremy';
 import IntelligenceDemo from './pages/IntelligenceDemo';
 import ArchitecturePage from './pages/ArchitecturePage';
 
