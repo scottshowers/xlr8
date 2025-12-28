@@ -153,10 +153,13 @@ export default function DataExplorer() {
   const loadTables = async () => {
     setLoading(true);
     try {
-      const res = await api.get('/status/structured');
-      const files = res.data?.files || [];
+      // SINGLE API CALL - /api/platform returns everything we need
+      const projectName = activeProject?.name || activeProject?.id || 'default';
+      const res = await api.get(`/platform?project=${encodeURIComponent(projectName)}`);
+      const platform = res.data;
       
-      // Flatten sheets from all files into tables
+      // Get files and build tables from platform.files
+      const files = platform?.files || [];
       const allTables = [];
       files.forEach(file => {
         if (file.sheets) {
@@ -170,12 +173,12 @@ export default function DataExplorer() {
           });
         } else {
           allTables.push({
-            table_name: file.filename.replace(/\.[^.]+$/, ''),
+            table_name: file.filename?.replace(/\.[^.]+$/, '') || file.filename,
             filename: file.filename,
-            row_count: file.row_count || 0,
+            row_count: file.rows || file.row_count || 0,
             columns: file.columns || [],
             project: file.project,
-            truth_type: file.truth_type
+            truth_type: file.truth_type || file.type
           });
         }
       });
@@ -187,31 +190,47 @@ export default function DataExplorer() {
         setSelectedTable(allTables[0].table_name);
       }
       
-      // Load health issues
-      try {
-        const healthRes = await api.get('/status/data-integrity');
-        setHealthIssues(healthRes.data?.issues || []);
-      } catch (e) {
-        console.log('No health data available');
-      }
+      // Health issues from platform (if available)
+      setHealthIssues([]);  // Platform doesn't include detailed issues yet
       
-      // Load relationships from data-model endpoint (has IDs for CRUD)
-      try {
-        const projectName = activeProject?.name || activeProject?.id || 'default';
-        const relRes = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
-        setRelationships(relRes.data?.relationships || []);
-      } catch (e) {
-        // Fallback to status endpoint
-        try {
-          const relRes = await api.get('/status/relationships');
-          setRelationships(relRes.data?.relationships || []);
-        } catch (e2) {
-          setRelationships([]);
-        }
-      }
+      // Relationships from platform.relationships
+      setRelationships(platform?.relationships || []);
       
     } catch (err) {
       console.error('Failed to load tables:', err);
+      // Fallback to old endpoints if /platform not available
+      try {
+        const res = await api.get('/status/structured');
+        const files = res.data?.files || [];
+        const allTables = [];
+        files.forEach(file => {
+          if (file.sheets) {
+            file.sheets.forEach(sheet => {
+              allTables.push({
+                ...sheet,
+                filename: file.filename,
+                project: file.project,
+                truth_type: file.truth_type
+              });
+            });
+          } else {
+            allTables.push({
+              table_name: file.filename.replace(/\.[^.]+$/, ''),
+              filename: file.filename,
+              row_count: file.row_count || 0,
+              columns: file.columns || [],
+              project: file.project,
+              truth_type: file.truth_type
+            });
+          }
+        });
+        setTables(allTables);
+        if (allTables.length > 0 && !selectedTable) {
+          setSelectedTable(allTables[0].table_name);
+        }
+      } catch (e2) {
+        console.error('Fallback also failed:', e2);
+      }
     } finally {
       setLoading(false);
     }
