@@ -61,6 +61,9 @@ const ENDPOINT_CATEGORIES = [
       { method: 'GET', path: '/api/classification/chunks', description: 'List all documents with chunk counts', priority: 'medium' },
       { method: 'GET', path: '/api/classification/chunks/{document_name}', description: 'All chunks for a document', priority: 'medium', param: 'document_name' },
       { method: 'GET', path: '/api/classification/routing', description: 'Recent routing decisions (debug)', priority: 'low' },
+      { method: 'GET', path: '/api/custom-domains', description: 'List all custom domains', priority: 'medium' },
+      { method: 'POST', path: '/api/custom-domains', description: 'Create custom domain for classification', priority: 'medium' },
+      { method: 'DELETE', path: '/api/custom-domains/{domain_name}', description: 'Delete a custom domain', priority: 'low', param: 'domain_name', dangerous: true },
     ]
   },
   {
