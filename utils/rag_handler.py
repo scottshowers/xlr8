@@ -136,6 +136,7 @@ class RAGHandler:
             self.embedding_model = "nomic-embed-text"
             self.chunk_size = 800
             self.chunk_overlap = 100
+            self.max_chunk_size = 5000  # Hard limit for Ollama embed context window
             
             if UNIVERSAL_CHUNKING_AVAILABLE:
                 self.analyzer = DocumentAnalyzer()
@@ -294,7 +295,7 @@ class RAGHandler:
                     logger.warning(f"[CHUNK] Falling back to basic chunking for better granularity")
                     # Don't throw - fall through to basic chunking
                 else:
-                    return chunks
+                    return self._enforce_max_chunk_size(chunks)
                 
             except Exception as e:
                 logger.error(f"[CHUNK] Universal chunking failed: {e}", exc_info=True)
@@ -330,7 +331,38 @@ class RAGHandler:
                 position = len(text)
         
         logger.info(f"[CHUNK] COMPLETED: {len(chunks)} basic chunks created")
-        return chunks
+        return self._enforce_max_chunk_size(chunks)
+    
+    def _enforce_max_chunk_size(self, chunks: List[str]) -> List[str]:
+        """Split any chunks that exceed max_chunk_size to prevent Ollama embed failures."""
+        result = []
+        split_count = 0
+        
+        for chunk in chunks:
+            if len(chunk) <= self.max_chunk_size:
+                result.append(chunk)
+            else:
+                # Split oversized chunk
+                split_count += 1
+                position = 0
+                while position < len(chunk):
+                    end = min(position + self.max_chunk_size, len(chunk))
+                    # Try to break at sentence boundary
+                    if end < len(chunk):
+                        for sep in ['. ', '.\n', '\n\n', '\n', ' ']:
+                            break_point = chunk.rfind(sep, position + self.max_chunk_size // 2, end)
+                            if break_point > position:
+                                end = break_point + len(sep)
+                                break
+                    sub_chunk = chunk[position:end].strip()
+                    if sub_chunk:
+                        result.append(sub_chunk)
+                    position = end
+        
+        if split_count > 0:
+            logger.warning(f"[CHUNK] Split {split_count} oversized chunks (>{self.max_chunk_size} chars) into {len(result) - len(chunks) + split_count} pieces")
+        
+        return result
 
     def add_document(
         self, 
