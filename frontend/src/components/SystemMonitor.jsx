@@ -658,32 +658,36 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
 
   const handleMouseUp = () => setIsPanning(false);
 
-  // XLR8 FIVE TRUTHS ARCHITECTURE - Horizontal layout for full width
+  // XLR8 FIVE TRUTHS ARCHITECTURE - Properly spaced layout
+  // ViewBox: 1020x300, Legend at y=275
+  // Node labels at y+32, descriptions at y+42
+  // Max node y = 220 to keep labels clear of legend (220+42=262 < 275)
   const nodes = {
-    // User & API Layer (left)
-    user: { x: 70, y: 140, icon: '◉', label: 'USER', color: T.blue },
-    api: { x: 180, y: 140, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
-    supabase: { x: 125, y: 240, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
+    // User & API Layer (left side)
+    user: { x: 80, y: 110, icon: '◉', label: 'USER', color: T.blue },
+    api: { x: 180, y: 110, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
+    supabase: { x: 130, y: 195, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
     
-    // FIVE TRUTHS - Spread out vertically
-    reality: { x: 340, y: 70, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
-    intent: { x: 450, y: 70, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
-    config: { x: 560, y: 70, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
-    reference: { x: 395, y: 180, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
-    regulatory: { x: 505, y: 180, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
+    // FIVE TRUTHS - contained in zone x:320-610, y:45-225
+    // Top row y=90, Bottom row y=175
+    reality: { x: 370, y: 90, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
+    intent: { x: 480, y: 90, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
+    config: { x: 590, y: 90, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
+    reference: { x: 425, y: 175, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
+    regulatory: { x: 535, y: 175, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
     
-    // Intelligence Engine (center)
-    intelligence: { x: 680, y: 125, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
+    // Intelligence Engine
+    intelligence: { x: 700, y: 135, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
     
     // LLM Router
-    router: { x: 820, y: 125, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
+    router: { x: 820, y: 135, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
     
-    // Local LLMs (Primary) - top
-    deepseek: { x: 940, y: 60, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
-    mistral: { x: 940, y: 130, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
+    // Local LLMs (in LOCAL zone) - 70px vertical spacing
+    deepseek: { x: 950, y: 75, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
+    mistral: { x: 950, y: 145, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
     
-    // Cloud LLM (Fallback) - bottom
-    claude: { x: 940, y: 200, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
+    // Cloud LLM (outside LOCAL zone)
+    claude: { x: 950, y: 215, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
   };
 
   const connections = [
@@ -756,13 +760,13 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         <svg width="100%" height="320" viewBox="0 0 1020 300"
           style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center', transition: isPanning ? 'none' : 'transform 0.1s ease-out' }}
         >
-          {/* Five Truths zone - center */}
-          <rect x="310" y="35" width="280" height="185" rx={6} fill={T.cyan} opacity={0.05} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.2} />
-          <text x="320" y={52} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>FIVE TRUTHS</text>
+          {/* Five Truths zone - contains all 5 truth nodes */}
+          <rect x="325" y="50" width="300" height="175" rx={6} fill={T.cyan} opacity={0.05} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.2} />
+          <text x="335" y={67} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>FIVE TRUTHS</text>
           
-          {/* Local LLM zone - right */}
-          <rect x="895" y="30" width="110" height="200" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="905" y={47} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL</text>
+          {/* Local LLM zone - contains only DEEPSEEK and MISTRAL (not Claude) */}
+          <rect x="905" y="35" width="95" height="155" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
+          <text x="915" y={52} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL</text>
           
           {connections.map((conn, i) => {
             const from = nodes[conn.from];
