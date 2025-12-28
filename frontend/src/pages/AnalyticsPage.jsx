@@ -24,7 +24,6 @@
 
 import { useState, useEffect } from 'react'
 import { useProject } from '../context/ProjectContext'
-import { Tooltip } from '../components/ui'
 import api from '../services/api'
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
