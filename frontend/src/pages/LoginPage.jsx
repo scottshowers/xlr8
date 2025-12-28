@@ -8,7 +8,7 @@ import { Rocket } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const COLORS = {
-  grassGreen: '#83b16d',
+  primary: '#83b16d',
   text: '#2a3441',
   textLight: '#5f6c7b',
   border: '#e1e8ed',
@@ -112,7 +112,7 @@ export default function LoginPage() {
       }}>
         {/* Green Header */}
         <div style={{
-          background: COLORS.grassGreen,
+          background: COLORS.primary,
           padding: '1.25rem 1.5rem',
           display: 'flex',
           alignItems: 'center',
@@ -220,8 +220,8 @@ export default function LoginPage() {
                 fontSize: '1rem',
                 fontWeight: 600,
                 color: COLORS.white,
-                background: COLORS.grassGreen,
-                border: `2px solid ${COLORS.grassGreen}`,
+                background: COLORS.primary,
+                border: `2px solid ${COLORS.primary}`,
                 borderRadius: 8,
                 cursor: loading ? 'not-allowed' : 'pointer',
                 opacity: loading ? 0.6 : 1,
@@ -242,7 +242,7 @@ export default function LoginPage() {
             <a 
               href="/" 
               style={{
-                color: COLORS.grassGreen,
+                color: COLORS.primary,
                 textDecoration: 'none',
                 fontWeight: 600,
               }}

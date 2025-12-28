@@ -82,7 +82,7 @@ class ErrorBoundary extends Component {
 
 // Brand Colors
 const COLORS = {
-  grassGreen: '#83b16d',
+  primary: '#83b16d',
   skyBlue: '#93abd9',
   clearwater: '#b2d6de',
   turkishSea: '#285390',
@@ -1337,7 +1337,7 @@ function TooltipModal({ isOpen, onClose, onSave, actionId, existingTooltip }) {
               padding: '0.5rem 1rem',
               border: 'none',
               borderRadius: '6px',
-              background: COLORS.grassGreen,
+              background: COLORS.primary,
               color: 'white',
               fontWeight: '600',
               cursor: saving ? 'not-allowed' : 'pointer',
@@ -1821,7 +1821,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
     },
     scanBtn: {
       padding: '0.5rem 1rem',
-      background: COLORS.grassGreen,
+      background: COLORS.primary,
       color: 'white',
       border: 'none',
       borderRadius: '6px',
@@ -1884,7 +1884,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             )}
             <span style={styles.actionType}>{action.action_type || 'unknown'}</span>
             {allDocsFound.length > 0 && (
-              <span style={{ fontSize: '0.75rem', color: COLORS.grassGreen }}>
+              <span style={{ fontSize: '0.75rem', color: COLORS.primary }}>
                 ✓ {allDocsFound.length} doc{allDocsFound.length > 1 ? 's' : ''} found
               </span>
             )}
@@ -2583,7 +2583,7 @@ function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, 
       fontWeight: '700',
       fontSize: '1rem',
       color: 'white',
-      background: allComplete ? '#059669' : COLORS.grassGreen,
+      background: allComplete ? '#059669' : COLORS.primary,
       width: '36px',
       height: '36px',
       borderRadius: '8px',
@@ -3339,7 +3339,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     },
     exportBtn: {
       padding: '0.5rem 1rem',
-      background: COLORS.grassGreen,
+      background: COLORS.primary,
       border: 'none',
       borderRadius: '8px',
       color: 'white',
@@ -3377,7 +3377,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     },
     progressFill: {
       height: '100%',
-      background: `linear-gradient(90deg, ${COLORS.grassGreen}, #6aa84f)`,
+      background: `linear-gradient(90deg, ${COLORS.primary}, #6aa84f)`,
       borderRadius: '6px',
       transition: 'width 0.3s ease',
       width: `${progressPercent}%`,
@@ -3394,7 +3394,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     progressPercent: {
       fontSize: '1.5rem',
       fontWeight: '700',
-      color: COLORS.grassGreen,
+      color: COLORS.primary,
     },
     phaseFilter: {
       display: 'flex',
@@ -3403,8 +3403,8 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
     },
     phaseBtn: (isActive) => ({
       padding: '0.5rem 1rem',
-      background: isActive ? COLORS.grassGreen : 'white',
-      border: `1px solid ${isActive ? COLORS.grassGreen : '#e1e8ed'}`,
+      background: isActive ? COLORS.primary : 'white',
+      border: `1px solid ${isActive ? COLORS.primary : '#e1e8ed'}`,
       borderRadius: '20px',
       color: isActive ? 'white' : COLORS.textLight,
       fontWeight: '600',

@@ -23,13 +23,13 @@ const getColors = (dark) => ({
   text: dark ? '#e8eaed' : '#2a3441',
   textMuted: dark ? '#8b95a5' : '#6b7280',
   textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',
+  primary: '#83b16d',
   primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  blue: '#4a6b8a',
+  blue: '#285390',
   blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',
+  amber: '#d97706',
   amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
-  red: '#8a4a4a',
+  red: '#993c44',
   redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
   green: '#5a8a5a',
   greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
@@ -38,7 +38,7 @@ const getColors = (dark) => ({
   divider: dark ? '#2d3548' : '#e8ecf1',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   selected: dark ? 'rgba(90, 138, 74, 0.2)' : 'rgba(90, 138, 74, 0.1)',
-  selectedBorder: '#5a8a4a',
+  selectedBorder: '#83b16d',
 });
 
 // Confidence thresholds for visual indicators
@@ -49,10 +49,10 @@ const CONFIDENCE = {
 
 // Section type display info - muted colors
 const SECTION_INFO = {
-  employee_info: { label: 'Employee Info', color: '#4a6b8a', icon: '👤' },
+  employee_info: { label: 'Employee Info', color: '#285390', icon: '👤' },
   earnings: { label: 'Earnings', color: '#5a8a5a', icon: '💰' },
-  taxes: { label: 'Taxes', color: '#8a4a4a', icon: '🏛️' },
-  deductions: { label: 'Deductions', color: '#8a6b4a', icon: '📋' },
+  taxes: { label: 'Taxes', color: '#993c44', icon: '🏛️' },
+  deductions: { label: 'Deductions', color: '#d97706', icon: '📋' },
   pay_info: { label: 'Pay Info', color: '#6b5a7a', icon: '💵' },
   unknown: { label: 'Unknown', color: '#6b7280', icon: '❓' }
 };
@@ -657,14 +657,14 @@ function ColumnCard({ column, header, editing, availableTypes, onEdit, onConfirm
 
 function ConfidenceBadge({ confidence, showLabel = false, small = false }) {
   const pct = Math.round((confidence || 0) * 100);
-  let color = '#8a4a4a'; // muted red
+  let color = '#993c44'; // muted red
   let label = 'Low';
   
   if (confidence >= CONFIDENCE.HIGH) {
     color = '#5a8a5a'; // muted green
     label = 'High';
   } else if (confidence >= CONFIDENCE.MEDIUM) {
-    color = '#8a6b4a'; // muted amber
+    color = '#d97706'; // muted amber
     label = 'Medium';
   }
   
@@ -737,7 +737,7 @@ const styles = {
   },
   mapFileBtn: {
     padding: '8px 16px',
-    background: '#5a8a4a',
+    background: '#83b16d',
     color: 'white',
     border: 'none',
     borderRadius: '6px',
@@ -767,7 +767,7 @@ const styles = {
   error: {
     backgroundColor: 'rgba(138, 74, 74, 0.1)',
     border: '1px solid rgba(138, 74, 74, 0.3)',
-    color: '#8a4a4a',
+    color: '#993c44',
     padding: '12px 16px',
     borderRadius: '8px',
     marginBottom: '16px',
@@ -780,7 +780,7 @@ const styles = {
     border: 'none',
     fontSize: '20px',
     cursor: 'pointer',
-    color: '#8a4a4a'
+    color: '#993c44'
   },
   layout: {
     display: 'flex',
@@ -828,7 +828,7 @@ const styles = {
   },
   fileItemSelected: {
     backgroundColor: '#e0f2fe',
-    boxShadow: '0 0 0 2px #5a8a4a'
+    boxShadow: '0 0 0 2px #83b16d'
   },
   fileName: {
     fontSize: '13px',
@@ -856,7 +856,7 @@ const styles = {
   },
   extractCardSelected: {
     backgroundColor: '#f0f9ff',
-    boxShadow: '0 0 0 2px #5a8a4a'
+    boxShadow: '0 0 0 2px #83b16d'
   },
   extractHeader: {
     display: 'flex',
@@ -938,7 +938,7 @@ const styles = {
     cursor: 'pointer'
   },
   btnCorrect: {
-    backgroundColor: '#8a6b4a',
+    backgroundColor: '#d97706',
     color: '#fff',
     border: 'none',
     borderRadius: '6px',
@@ -1028,7 +1028,7 @@ const styles = {
   },
   columnDetected: {
     fontSize: '11px',
-    color: '#5a8a4a',
+    color: '#83b16d',
     marginBottom: '4px'
   },
   columnActions: {
@@ -1057,7 +1057,7 @@ const styles = {
     cursor: 'pointer'
   },
   btnSmallEdit: {
-    backgroundColor: '#8a6b4a',
+    backgroundColor: '#d97706',
     color: '#fff',
     border: 'none',
     borderRadius: '4px',
@@ -1122,7 +1122,7 @@ const styles = {
   },
   thType: {
     fontSize: '10px',
-    color: '#5a8a4a',
+    color: '#83b16d',
     fontWeight: '400'
   },
   td: {

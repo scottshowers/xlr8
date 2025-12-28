@@ -597,7 +597,7 @@ export function GenomeButton({ onClick }) {
         borderRadius: 6,
         cursor: 'pointer',
         transition: 'all 0.15s ease',
-        color: hovered ? '#5a8a4a' : '#5f6c7b',
+        color: hovered ? '#83b16d' : '#5f6c7b',
       }}
     >
       {/* DNA Icon */}

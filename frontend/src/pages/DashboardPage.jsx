@@ -306,7 +306,7 @@ function ValueDelivered({ data }) {
   
   return (
     <div style={{ 
-      background: 'linear-gradient(135deg, #6b9b5a 0%, #5a8a4a 50%, #4a7a3a 100%)', 
+      background: 'linear-gradient(135deg, #6b9b5a 0%, #83b16d 50%, #6b9b5a 100%)', 
       borderRadius: '12px', 
       padding: '24px', 
       color: colors.white 

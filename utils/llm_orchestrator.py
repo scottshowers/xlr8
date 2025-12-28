@@ -13,6 +13,7 @@ Author: XLR8 Team
 
 import os
 import re
+import json
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import List, Dict, Any, Tuple, Optional
@@ -1045,3 +1046,167 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
         result = re.sub(r'!\s*!', '!', result)
         
         return result.strip()
+
+    def generate_json(
+        self, 
+        prompt: str, 
+        system_prompt: str = None,
+        use_claude_fallback: bool = True,
+        max_tokens: int = 2000
+    ) -> Dict[str, Any]:
+        """
+        Generate structured JSON output using local LLMs first.
+        
+        Use this for:
+        - Entity extraction (FEINs, company names)
+        - Column type inference
+        - Document analysis returning structured findings
+        - Any task requiring JSON output
+        
+        Flow:
+        1. Try Mistral (good at following JSON format instructions)
+        2. Fall back to Claude ONLY if local fails
+        
+        Args:
+            prompt: The prompt requesting JSON output
+            system_prompt: Optional system prompt
+            use_claude_fallback: Whether to fall back to Claude if local fails
+            max_tokens: Maximum tokens for response
+            
+        Returns:
+            Dict with: response (parsed JSON or raw), raw_text, model_used, success, error
+        """
+        result = {
+            "response": None,
+            "raw_text": "",
+            "model_used": None,
+            "success": False,
+            "error": None
+        }
+        
+        # Default system prompt for JSON tasks
+        if not system_prompt:
+            system_prompt = """You are a precise data extraction assistant.
+Always respond with valid JSON only - no explanations, no markdown, no code blocks.
+If you cannot extract the requested data, return an appropriate empty JSON structure."""
+        
+        # ==============================================================
+        # STEP 1: Try Mistral first (good at structured output)
+        # ==============================================================
+        if self.ollama_url:
+            models_to_try = [
+                'mistral:7b',
+                'mistral:latest',
+                'llama2:7b',
+            ]
+            
+            for model in models_to_try:
+                logger.info(f"[JSON-GEN] Trying {model}...")
+                response_text, success = self._call_ollama(model, prompt, system_prompt)
+                
+                if success and response_text and len(response_text.strip()) > 5:
+                    # Try to parse as JSON
+                    parsed = self._try_parse_json(response_text)
+                    if parsed is not None:
+                        result["response"] = parsed
+                        result["raw_text"] = response_text
+                        result["model_used"] = model
+                        result["success"] = True
+                        logger.info(f"[JSON-GEN] {model} succeeded")
+                        return result
+                    else:
+                        logger.warning(f"[JSON-GEN] {model} returned invalid JSON, trying next")
+                else:
+                    logger.warning(f"[JSON-GEN] {model} failed or empty response")
+        else:
+            logger.warning("[JSON-GEN] Ollama not configured, skipping local models")
+        
+        # ==============================================================
+        # STEP 2: Fall back to Claude ONLY if enabled
+        # ==============================================================
+        if use_claude_fallback and self.claude_api_key:
+            logger.warning("[JSON-GEN] Local models failed, falling back to Claude")
+            response_text, success = self._call_claude(prompt, system_prompt)
+            
+            if success:
+                parsed = self._try_parse_json(response_text)
+                if parsed is not None:
+                    result["response"] = parsed
+                    result["raw_text"] = response_text
+                    result["model_used"] = "claude-sonnet-4-fallback"
+                    result["success"] = True
+                    logger.info("[JSON-GEN] Claude fallback succeeded")
+                    return result
+                else:
+                    # Return raw text if JSON parsing fails
+                    result["response"] = response_text
+                    result["raw_text"] = response_text
+                    result["model_used"] = "claude-sonnet-4-fallback"
+                    result["success"] = True
+                    result["error"] = "Response was not valid JSON"
+                    logger.warning("[JSON-GEN] Claude returned non-JSON response")
+                    return result
+            else:
+                result["error"] = response_text
+                logger.error(f"[JSON-GEN] Claude fallback also failed: {response_text}")
+        else:
+            if not use_claude_fallback:
+                result["error"] = "Local models failed and Claude fallback disabled"
+            else:
+                result["error"] = "Local models failed and no Claude API key"
+        
+        return result
+    
+    def _try_parse_json(self, text: str) -> Optional[Any]:
+        """
+        Try to parse JSON from text, handling common formatting issues.
+        """
+        if not text:
+            return None
+        
+        text = text.strip()
+        
+        # Remove markdown code blocks if present
+        if "```json" in text:
+            text = text.split("```json")[1].split("```")[0].strip()
+        elif "```" in text:
+            parts = text.split("```")
+            if len(parts) >= 2:
+                text = parts[1].strip()
+        
+        # Try direct parse
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            pass
+        
+        # Try to find JSON object/array in text
+        try:
+            # Find first { or [
+            start_obj = text.find('{')
+            start_arr = text.find('[')
+            
+            if start_obj >= 0 and (start_arr < 0 or start_obj < start_arr):
+                # Object
+                depth = 0
+                for i, c in enumerate(text[start_obj:], start_obj):
+                    if c == '{':
+                        depth += 1
+                    elif c == '}':
+                        depth -= 1
+                        if depth == 0:
+                            return json.loads(text[start_obj:i+1])
+            elif start_arr >= 0:
+                # Array
+                depth = 0
+                for i, c in enumerate(text[start_arr:], start_arr):
+                    if c == '[':
+                        depth += 1
+                    elif c == ']':
+                        depth -= 1
+                        if depth == 0:
+                            return json.loads(text[start_arr:i+1])
+        except (json.JSONDecodeError, ValueError):
+            pass
+        
+        return None

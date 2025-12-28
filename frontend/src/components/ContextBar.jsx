@@ -18,7 +18,7 @@ import { LoadingSpinner } from './ui';
 
 // Brand Colors
 const COLORS = {
-  grassGreen: '#83b16d',
+  primary: '#83b16d',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
   clearwater: '#b2d6de',
@@ -64,7 +64,7 @@ export default function ContextBar() {
 
   const styles = {
     bar: {
-      background: COLORS.grassGreen,
+      background: COLORS.primary,
       padding: '0.75rem 1.5rem',
       display: 'flex',
       alignItems: 'center',
@@ -173,8 +173,8 @@ export default function ContextBar() {
       gap: '0.75rem',
       padding: '0.75rem 1rem',
       cursor: 'pointer',
-      background: isActive ? `${COLORS.grassGreen}15` : 'white',
-      borderLeft: isActive ? `3px solid ${COLORS.grassGreen}` : '3px solid transparent',
+      background: isActive ? `${COLORS.primary}15` : 'white',
+      borderLeft: isActive ? `3px solid ${COLORS.primary}` : '3px solid transparent',
       borderBottom: '1px solid #f0f0f0',
       transition: 'all 0.15s ease',
     }),
@@ -191,7 +191,7 @@ export default function ContextBar() {
       width: '20px',
       height: '20px',
       borderRadius: '50%',
-      background: COLORS.grassGreen,
+      background: COLORS.primary,
       color: 'white',
       display: 'flex',
       alignItems: 'center',
@@ -218,8 +218,8 @@ export default function ContextBar() {
       gap: '0.75rem',
       padding: '0.75rem 1rem',
       cursor: 'pointer',
-      background: !activeProject ? `${COLORS.grassGreen}15` : 'white',
-      borderLeft: !activeProject ? `3px solid ${COLORS.grassGreen}` : '3px solid transparent',
+      background: !activeProject ? `${COLORS.primary}15` : 'white',
+      borderLeft: !activeProject ? `3px solid ${COLORS.primary}` : '3px solid transparent',
       borderBottom: '2px solid #e1e8ed',
       transition: 'all 0.15s ease',
     },
@@ -334,7 +334,7 @@ export default function ContextBar() {
                       if (activeProject) e.currentTarget.style.background = '#f8fafc';
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.background = !activeProject ? `${COLORS.grassGreen}15` : 'white';
+                      e.currentTarget.style.background = !activeProject ? `${COLORS.primary}15` : 'white';
                     }}
                   >
                     <div style={styles.allProjectsIcon}>🌐</div>
@@ -370,7 +370,7 @@ export default function ContextBar() {
                           }
                         }}
                         onMouseLeave={(e) => {
-                          e.currentTarget.style.background = activeProject?.id === project.id ? `${COLORS.grassGreen}15` : 'white';
+                          e.currentTarget.style.background = activeProject?.id === project.id ? `${COLORS.primary}15` : 'white';
                         }}
                       >
                         <div style={styles.projectIcon(color)}>

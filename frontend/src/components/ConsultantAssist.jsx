@@ -1,7 +1,7 @@
 /**
  * ConsultantAssist.jsx - Help Claude understand new register formats
  * 
- * POLISHED: All purple → grassGreen for consistency
+ * POLISHED: All purple → primary for consistency
  */
 
 import React, { useState, useEffect } from 'react';
@@ -22,8 +22,8 @@ import {
 import { COLORS } from '../components/ui';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-const BRAND = COLORS?.grassGreen || '#5a8a4a';
-const BRAND_DARK = '#4a7a3a';
+const BRAND = COLORS?.primary || '#83b16d';
+const BRAND_DARK = '#6b9b5a';
 const BRAND_LIGHT = 'rgba(90, 138, 74, 0.1)';
 
 export default function ConsultantAssist({ 

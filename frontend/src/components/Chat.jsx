@@ -23,27 +23,32 @@ import {
   ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2, Eye, EyeOff
 } from 'lucide-react'
 
-// Theme-aware colors - matches other pages
+// Theme-aware colors - Mission Control palette
 const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  bg: dark ? '#1a1f2e' : '#f0f2f5',
   card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',
-  primaryDark: '#4a7a3a',
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  primaryBorder: 'rgba(90, 138, 74, 0.3)',
-  blue: '#4a6b8a',
-  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',
-  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
-  red: '#8a4a4a',
-  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
-  divider: dark ? '#2d3548' : '#e8ecf1',
+  cardBorder: dark ? '#2d3548' : '#e2e8f0',
+  text: dark ? '#e8eaed' : '#1a2332',
+  textMuted: dark ? '#8b95a5' : '#64748b',
+  textLight: dark ? '#5f6a7d' : '#94a3b8',
+  primary: '#83b16d',
+  primaryDark: '#6b9b5a',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  primaryBorder: 'rgba(131, 177, 109, 0.3)',
+  accent: '#285390',
+  accentLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
+  warning: '#d97706',
+  warningLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
+  red: '#993c44',
+  redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
+  divider: dark ? '#2d3548' : '#e2e8f0',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   messageBg: dark ? '#2d3548' : '#f1f5f9',
+  // Aliases for backward compatibility
+  blue: '#285390',
+  blueLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
+  amber: '#d97706',
+  amberLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
 })
 
 export default function Chat({ functionalAreas = [] }) {
@@ -158,7 +163,7 @@ export default function Chat({ functionalAreas = [] }) {
 
   const submitFeedback = async (jobId, feedbackType, messageContent, responseContent) => {
     try {
-      await api.post('/chat/feedback', {
+      await api.post('/chat/unified/feedback', {
         job_id: jobId,
         feedback: feedbackType,
         message: messageContent,
@@ -286,106 +291,9 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  // STANDARD MESSAGE HANDLER
-  const sendStandardMessage = async () => {
-    if (!input.trim()) return
-
-    const userMessage = {
-      role: 'user',
-      content: input.trim(),
-      timestamp: new Date().toISOString()
-    }
-
-    setMessages(prev => [...prev, userMessage])
-    setInput('')
-    setLoading(true)
-
-    const tempId = `temp-${Date.now()}`
-    setMessages(prev => [...prev, {
-      role: 'assistant',
-      content: '🔵 Starting...',
-      isStatus: true,
-      tempId,
-      timestamp: new Date().toISOString()
-    }])
-
-    try {
-      const startResponse = await api.post('/chat/start', {
-        message: userMessage.content,
-        project: projectName || null,
-        max_results: 50,
-        persona: currentPersona?.id || 'bessie',
-        scope: scope
-      })
-
-      const { job_id } = startResponse.data
-
-      const pollInterval = setInterval(async () => {
-        try {
-          const statusResponse = await api.get(`/chat/status/${job_id}`)
-          const { status, message: statusMessage, result } = statusResponse.data
-
-          setMessages(prev => prev.map(m => 
-            m.tempId === tempId ? { ...m, content: statusMessage } : m
-          ))
-
-          if (status === 'completed') {
-            clearInterval(pollInterval)
-            setMessages(prev => prev.filter(m => m.tempId !== tempId))
-            
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              type: 'standard',
-              content: result.answer || result.content,
-              sources: result.sources || [],
-              piiDetected: result.piiDetected,
-              job_id: job_id,
-              userQuery: userMessage.content,
-              timestamp: new Date().toISOString()
-            }])
-            setLoading(false)
-          } else if (status === 'failed') {
-            clearInterval(pollInterval)
-            setMessages(prev => prev.filter(m => m.tempId !== tempId))
-            setMessages(prev => [...prev, {
-              role: 'assistant',
-              content: '❌ ' + (statusMessage || 'Failed to process question'),
-              error: true,
-              timestamp: new Date().toISOString()
-            }])
-            setLoading(false)
-          }
-        } catch (err) {
-          clearInterval(pollInterval)
-          setMessages(prev => prev.filter(m => m.tempId !== tempId))
-          setMessages(prev => [...prev, {
-            role: 'assistant',
-            content: '❌ ' + err.message,
-            error: true,
-            timestamp: new Date().toISOString()
-          }])
-          setLoading(false)
-        }
-      }, 1000)
-
-    } catch (err) {
-      setMessages(prev => prev.filter(m => m.tempId !== tempId))
-      setMessages(prev => [...prev, {
-        role: 'assistant',
-        content: '❌ ' + (err.response?.data?.detail || err.message),
-        error: true,
-        timestamp: new Date().toISOString()
-      }])
-      setLoading(false)
-    }
-  }
-
   const sendMessage = () => {
-    if (intelligentMode) {
-      sendIntelligentMessage()
-    } else {
-      sendStandardMessage()
-    }
+    // Always use intelligent mode - standard mode endpoints don't exist
+    sendIntelligentMessage()
   }
 
   const handleKeyPress = (e) => {
@@ -447,9 +355,8 @@ export default function Chat({ functionalAreas = [] }) {
             onCreateNew={() => setShowPersonaCreator(true)}
           />
           
-          {/* Intelligent Mode Toggle */}
-          <button
-            onClick={() => setIntelligentMode(!intelligentMode)}
+          {/* Always using Intelligent Mode - indicator badge */}
+          <div
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -458,21 +365,13 @@ export default function Chat({ functionalAreas = [] }) {
               borderRadius: 8,
               fontSize: '0.85rem',
               fontWeight: 500,
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              ...(intelligentMode ? {
-                background: colors.primary,
-                color: 'white',
-              } : {
-                background: colors.inputBg,
-                color: colors.textMuted,
-              })
+              background: colors.primary,
+              color: 'white',
             }}
           >
             <Brain size={16} />
-            {intelligentMode ? 'Intelligent' : 'Standard'}
-          </button>
+            Intelligent
+          </div>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>

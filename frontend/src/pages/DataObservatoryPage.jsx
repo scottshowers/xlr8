@@ -15,11 +15,11 @@ const getColors = (dark) => ({
   text: dark ? '#e8eaed' : '#2a3441',
   textMuted: dark ? '#8b95a5' : '#6b7280',
   textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',  // Muted forest green
+  primary: '#83b16d',  // Muted forest green
   primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  blue: '#4a6b8a',     // Slate blue
+  blue: '#285390',     // Slate blue
   blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',    // Muted rust
+  amber: '#d97706',    // Muted rust
   amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
   green: '#5a8a5a',    // Muted green
   greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',

@@ -25,14 +25,18 @@ import {
  * animations, and consistent brand colors
  */
 
-// Brand colors from the platform
+// Mission Control Color Palette
 const COLORS = {
-  grassGreen: '#5a8a4a',
-  grassGreenDark: '#4a7a3a',
-  skyBlue: '#4a6b8a',
+  primary: '#83b16d',
+  primaryDark: '#6b9b5a',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
   iceFlow: '#c9d3d4',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  bg: '#f0f2f5',
+  card: '#ffffff',
+  border: '#e2e8f0',
 }
 
 const ADVISOR_PERSONA = `You are a friendly, experienced implementation consultant helping a colleague figure out the best approach for their task. Ask thoughtful questions to understand what they need.
@@ -59,7 +63,7 @@ const FEATURES = {
     icon: MessageSquare,
     title: 'Chat',
     description: 'Upload files and explore with AI. Great for thinking through problems.',
-    color: COLORS.skyBlue,
+    color: COLORS.accent,
     bgColor: 'rgba(147, 171, 217, 0.1)',
     route: '/workspace',
     available: true
@@ -284,7 +288,7 @@ export default function WorkAdvisor() {
     },
     subtitle: {
       fontSize: '0.875rem',
-      color: COLORS.textLight,
+      color: COLORS.textMuted,
       margin: 0,
     },
     headerActions: {
@@ -296,7 +300,7 @@ export default function WorkAdvisor() {
       padding: '0.5rem 1rem',
       fontSize: '0.875rem',
       fontWeight: '500',
-      color: COLORS.textLight,
+      color: COLORS.textMuted,
       background: 'transparent',
       border: 'none',
       borderRadius: '10px',
@@ -309,7 +313,7 @@ export default function WorkAdvisor() {
       border: 'none',
       borderRadius: '10px',
       cursor: 'pointer',
-      color: COLORS.textLight,
+      color: COLORS.textMuted,
       transition: 'all 0.2s',
     },
     messagesArea: {
@@ -681,11 +685,11 @@ function RecommendationCard({ featureKey, onSelect }) {
             }}>SOON</span>
           )}
         </div>
-        <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
+        <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginTop: '0.25rem' }}>
           {feature.description}
         </div>
       </div>
-      <ChevronRight size={20} color={COLORS.textLight} />
+      <ChevronRight size={20} color={COLORS.textMuted} />
     </button>
   )
 }
@@ -818,13 +822,13 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
                 cursor: 'pointer',
               }}
             >
-              <ArrowRight size={18} style={{ transform: 'rotate(180deg)', color: COLORS.textLight }} />
+              <ArrowRight size={18} style={{ transform: 'rotate(180deg)', color: COLORS.textMuted }} />
             </button>
             <div>
               <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: COLORS.text }}>
                 {isGenerating ? '✨ Designing Your Playbook...' : 'Build Playbook'}
               </h1>
-              <p style={{ margin: 0, fontSize: '0.875rem', color: COLORS.textLight }}>
+              <p style={{ margin: 0, fontSize: '0.875rem', color: COLORS.textMuted }}>
                 {isGenerating 
                   ? 'AI is drafting steps based on your description'
                   : `Step ${step + 1} of ${stepTitles.length}: ${stepTitles[step]}`
@@ -892,7 +896,7 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
                 border: 'none',
                 borderRadius: '10px',
                 fontWeight: '600',
-                color: COLORS.textLight,
+                color: COLORS.textMuted,
                 cursor: step === 0 ? 'not-allowed' : 'pointer',
                 opacity: step === 0 ? 0.5 : 1,
               }}
@@ -951,7 +955,7 @@ function GeneratingState() {
         <Sparkles size={36} color="white" />
       </div>
       <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>Designing Your Playbook</h2>
-      <p style={{ color: COLORS.textLight, maxWidth: '400px' }}>
+      <p style={{ color: COLORS.textMuted, maxWidth: '400px' }}>
         Based on your description, I'm drafting the inputs, workflow steps, and outputs. 
         You'll be able to review and refine everything.
       </p>
@@ -995,7 +999,7 @@ function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
           <div style={{ fontWeight: '600', color: COLORS.text, marginBottom: '0.25rem' }}>
             AI-Generated Draft
           </div>
-          <div style={{ fontSize: '0.875rem', color: COLORS.textLight }}>
+          <div style={{ fontSize: '0.875rem', color: COLORS.textMuted }}>
             I've drafted a playbook based on your description. Review and edit anything that needs adjustment.
           </div>
         </div>
@@ -1008,7 +1012,7 @@ function StepReviewPlan({ playbook, setPlaybook, onRegenerate }) {
             borderRadius: '8px',
             fontSize: '0.8rem',
             fontWeight: '600',
-            color: COLORS.textLight,
+            color: COLORS.textMuted,
             cursor: 'pointer',
             whiteSpace: 'nowrap'
           }}
@@ -1091,10 +1095,10 @@ function SummaryCard({ icon: Icon, label, count, items, color }) {
         </div>
         <div>
           <div style={{ fontSize: '1.5rem', fontWeight: '700', color: COLORS.text }}>{count}</div>
-          <div style={{ fontSize: '0.75rem', color: COLORS.textLight, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
+          <div style={{ fontSize: '0.75rem', color: COLORS.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em' }}>{label}</div>
         </div>
       </div>
-      <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>
+      <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>
         {items.length > 0 ? (
           <ul style={{ margin: 0, paddingLeft: '1rem' }}>
             {items.slice(0, 3).map((item, i) => (
@@ -1157,7 +1161,7 @@ function StepInputs({ playbook, setPlaybook }) {
   const add = () => setPlaybook({ ...playbook, inputs: [...playbook.inputs, { name: '', description: '' }] })
   return (
     <div>
-      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What files or data does this playbook need?</p>
+      <p style={{ color: COLORS.textMuted, marginBottom: '1rem' }}>What files or data does this playbook need?</p>
       {playbook.inputs.map((inp, i) => (
         <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
           <input
@@ -1184,7 +1188,7 @@ function StepInputs({ playbook, setPlaybook }) {
       ))}
       <button onClick={add} style={{
         width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
-        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+        background: 'transparent', color: COLORS.textMuted, fontWeight: '600', cursor: 'pointer'
       }}>+ Add Input</button>
     </div>
   )
@@ -1194,7 +1198,7 @@ function StepWorkflow({ playbook, setPlaybook }) {
   const add = () => setPlaybook({ ...playbook, steps: [...playbook.steps, { title: '', description: '' }] })
   return (
     <div>
-      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What are the workflow steps?</p>
+      <p style={{ color: COLORS.textMuted, marginBottom: '1rem' }}>What are the workflow steps?</p>
       {playbook.steps.map((s, i) => (
         <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -1228,7 +1232,7 @@ function StepWorkflow({ playbook, setPlaybook }) {
       ))}
       <button onClick={add} style={{
         width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
-        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+        background: 'transparent', color: COLORS.textMuted, fontWeight: '600', cursor: 'pointer'
       }}>+ Add Step</button>
     </div>
   )
@@ -1238,7 +1242,7 @@ function StepOutputs({ playbook, setPlaybook }) {
   const add = () => setPlaybook({ ...playbook, outputs: [...playbook.outputs, { name: '', format: 'report' }] })
   return (
     <div>
-      <p style={{ color: COLORS.textLight, marginBottom: '1rem' }}>What deliverables come out?</p>
+      <p style={{ color: COLORS.textMuted, marginBottom: '1rem' }}>What deliverables come out?</p>
       {playbook.outputs.map((o, i) => (
         <div key={i} style={{ background: 'white', padding: '1rem', borderRadius: '12px', border: '1px solid #e8ecef', marginBottom: '0.75rem' }}>
           <input
@@ -1268,7 +1272,7 @@ function StepOutputs({ playbook, setPlaybook }) {
       ))}
       <button onClick={add} style={{
         width: '100%', padding: '1rem', border: '2px dashed #d1d5db', borderRadius: '12px',
-        background: 'transparent', color: COLORS.textLight, fontWeight: '600', cursor: 'pointer'
+        background: 'transparent', color: COLORS.textMuted, fontWeight: '600', cursor: 'pointer'
       }}>+ Add Output</button>
     </div>
   )
@@ -1278,12 +1282,12 @@ function StepReview({ playbook }) {
   return (
     <div style={{ background: 'white', padding: '1.5rem', borderRadius: '14px', border: '1px solid #e8ecef' }}>
       <h2 style={{ margin: '0 0 0.5rem', color: COLORS.text }}>{playbook.name || 'Untitled'}</h2>
-      <p style={{ color: COLORS.textLight, marginBottom: '1.5rem' }}>{playbook.description || 'No description'}</p>
+      <p style={{ color: COLORS.textMuted, marginBottom: '1.5rem' }}>{playbook.description || 'No description'}</p>
       
       {playbook.inputs.length > 0 && (
         <div style={{ marginBottom: '1rem' }}>
           <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📥 Inputs</h4>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted }}>
             {playbook.inputs.map((i, idx) => <li key={idx}>{i.name || 'Unnamed'}</li>)}
           </ul>
         </div>
@@ -1292,7 +1296,7 @@ function StepReview({ playbook }) {
       {playbook.steps.length > 0 && (
         <div style={{ marginBottom: '1rem' }}>
           <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📋 Steps</h4>
-          <ol style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+          <ol style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted }}>
             {playbook.steps.map((s, idx) => <li key={idx}>{s.title || 'Unnamed'}</li>)}
           </ol>
         </div>
@@ -1301,7 +1305,7 @@ function StepReview({ playbook }) {
       {playbook.outputs.length > 0 && (
         <div>
           <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📤 Outputs</h4>
-          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight }}>
+          <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted }}>
             {playbook.outputs.map((o, idx) => <li key={idx}>{o.name || 'Unnamed'} ({o.format})</li>)}
           </ul>
         </div>

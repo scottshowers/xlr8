@@ -75,7 +75,7 @@ function StartScreen({ onSelectMode }) {
       icon: '📝',
       title: 'Create from Template',
       description: 'Pick a playbook type and fill in the details. Best for standard workflows.',
-      color: '#5a8a4a',
+      color: '#83b16d',
     },
     {
       id: 'components',
@@ -205,7 +205,7 @@ function TemplateMode({ onBack, onSave }) {
                 transition: 'all 0.2s ease',
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = '#5a8a4a';
+                e.currentTarget.style.borderColor = '#83b16d';
               }}
               onMouseLeave={(e) => {
                 e.currentTarget.style.borderColor = '#e1e8ed';
@@ -307,7 +307,7 @@ function TemplateMode({ onBack, onSave }) {
               disabled={!config.playbook_id || !config.name}
               style={{
                 padding: '0.75rem 1.5rem',
-                background: (!config.playbook_id || !config.name) ? '#ccc' : '#5a8a4a',
+                background: (!config.playbook_id || !config.name) ? '#ccc' : '#83b16d',
                 color: 'white',
                 border: 'none',
                 borderRadius: '8px',
@@ -355,7 +355,7 @@ function TemplateMode({ onBack, onSave }) {
             onClick={() => setStep(4)}
             style={{
               padding: '0.75rem 1.5rem',
-              background: '#5a8a4a',
+              background: '#83b16d',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -413,7 +413,7 @@ function TemplateMode({ onBack, onSave }) {
             onClick={() => onSave(config)}
             style={{
               padding: '0.75rem 2rem',
-              background: '#5a8a4a',
+              background: '#83b16d',
               color: 'white',
               border: 'none',
               borderRadius: '8px',
@@ -575,7 +575,7 @@ function AnalysisConfig({ config, updateConfig }) {
             style={{
               padding: '0.75rem 1rem',
               background: focusAreas.includes(area.id) ? COLORS.iceFlow : 'white',
-              border: `2px solid ${focusAreas.includes(area.id) ? '#5a8a4a' : '#e1e8ed'}`,
+              border: `2px solid ${focusAreas.includes(area.id) ? '#83b16d' : '#e1e8ed'}`,
               borderRadius: '8px',
               cursor: 'pointer',
               display: 'flex',
@@ -585,7 +585,7 @@ function AnalysisConfig({ config, updateConfig }) {
           >
             <span>{area.icon}</span>
             <span>{area.label}</span>
-            {focusAreas.includes(area.id) && <span style={{ marginLeft: 'auto', color: '#5a8a4a' }}>✓</span>}
+            {focusAreas.includes(area.id) && <span style={{ marginLeft: 'auto', color: '#83b16d' }}>✓</span>}
           </div>
         ))}
       </div>
@@ -627,7 +627,7 @@ function ComplianceConfig({ config, updateConfig }) {
             style={{
               padding: '0.75rem 1rem',
               background: domains.includes(domain.id) ? COLORS.iceFlow : 'white',
-              border: `2px solid ${domains.includes(domain.id) ? '#5a8a4a' : '#e1e8ed'}`,
+              border: `2px solid ${domains.includes(domain.id) ? '#83b16d' : '#e1e8ed'}`,
               borderRadius: '8px',
               cursor: 'pointer',
               display: 'flex',
@@ -637,7 +637,7 @@ function ComplianceConfig({ config, updateConfig }) {
           >
             <span>{domain.icon}</span>
             <span>{domain.label}</span>
-            {domains.includes(domain.id) && <span style={{ marginLeft: 'auto', color: '#5a8a4a' }}>✓</span>}
+            {domains.includes(domain.id) && <span style={{ marginLeft: 'auto', color: '#83b16d' }}>✓</span>}
           </div>
         ))}
       </div>
@@ -734,7 +734,7 @@ function CloneMode({ onBack, onSave }) {
                   alignItems: 'center',
                   gap: '1rem',
                 }}
-                onMouseEnter={(e) => e.currentTarget.style.borderColor = '#5a8a4a'}
+                onMouseEnter={(e) => e.currentTarget.style.borderColor = '#83b16d'}
                 onMouseLeave={(e) => e.currentTarget.style.borderColor = '#e1e8ed'}
               >
                 <span style={{ fontSize: '1.5rem' }}>{t.icon}</span>
@@ -783,7 +783,7 @@ function CloneMode({ onBack, onSave }) {
                 disabled={!newId || !newName || saving}
                 style={{
                   padding: '0.75rem 1.5rem',
-                  background: (!newId || !newName || saving) ? '#ccc' : '#5a8a4a',
+                  background: (!newId || !newName || saving) ? '#ccc' : '#83b16d',
                   color: 'white',
                   border: 'none',
                   borderRadius: '8px',
@@ -893,14 +893,14 @@ function ComponentMode({ onBack, onSave }) {
             style={{
               padding: '1rem',
               background: config.components.includes(comp.component_id) ? COLORS.iceFlow : 'white',
-              border: `2px solid ${config.components.includes(comp.component_id) ? '#5a8a4a' : '#e1e8ed'}`,
+              border: `2px solid ${config.components.includes(comp.component_id) ? '#83b16d' : '#e1e8ed'}`,
               borderRadius: '8px',
               cursor: 'pointer',
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <strong>{comp.name}</strong>
-              {config.components.includes(comp.component_id) && <span style={{ color: '#5a8a4a' }}>✓</span>}
+              {config.components.includes(comp.component_id) && <span style={{ color: '#83b16d' }}>✓</span>}
             </div>
             <p style={{ margin: '0.5rem 0 0 0', fontSize: '0.85rem', color: COLORS.textLight }}>{comp.description}</p>
           </div>
@@ -913,7 +913,7 @@ function ComponentMode({ onBack, onSave }) {
           disabled={!config.playbook_id || !config.name}
           style={{
             padding: '0.75rem 2rem',
-            background: (!config.playbook_id || !config.name) ? '#ccc' : '#5a8a4a',
+            background: (!config.playbook_id || !config.name) ? '#ccc' : '#83b16d',
             color: 'white',
             border: 'none',
             borderRadius: '8px',
@@ -974,7 +974,7 @@ export default function PlaybookBuilderPage() {
           </button>
           <button
             onClick={() => navigate('/admin')}
-            style={{ padding: '0.75rem 1.5rem', background: '#5a8a4a', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
+            style={{ padding: '0.75rem 1.5rem', background: '#83b16d', color: 'white', border: 'none', borderRadius: '8px', fontWeight: '600', cursor: 'pointer' }}
           >
             Go to Admin →
           </button>

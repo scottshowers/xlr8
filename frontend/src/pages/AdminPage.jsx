@@ -26,9 +26,12 @@ import { useProject } from '../context/ProjectContext';
 import { PageHeader, EmptyState } from '../components/ui';
 
 const COLORS = {
-  grassGreen: '#83b16d',
-  text: '#2a3441',
-  textLight: '#5f6c7b',
+  primary: '#83b16d',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  bg: '#f0f2f5',
+  card: '#ffffff',
+  border: '#e2e8f0',
 };
 
 // ==================== INTEGRATIONS TAB (UKG Connections) ====================
@@ -45,7 +48,7 @@ function IntegrationsTab() {
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🔌 UKG API Connections</h3>
-        <p style={{ margin: '0.25rem 0 0', color: COLORS.textLight, fontSize: '0.9rem' }}>
+        <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Connect to customer UKG instances to pull configuration and data directly
         </p>
       </div>
@@ -59,16 +62,16 @@ function IntegrationsTab() {
           }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>{product.icon}</div>
             <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>{product.name}</div>
-            <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginBottom: '1rem' }}>{product.description}</div>
-            <div style={{ fontSize: '0.75rem', color: product.connected ? '#166534' : COLORS.textLight, marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.8rem', color: COLORS.textMuted, marginBottom: '1rem' }}>{product.description}</div>
+            <div style={{ fontSize: '0.75rem', color: product.connected ? '#166534' : COLORS.textMuted, marginBottom: '1rem' }}>
               {product.connected ? '✓ Connected' : 'Not connected'}
             </div>
             <button disabled={!activeProject} style={{
               padding: '0.5rem 1rem',
-              background: product.connected ? '#f0f4f7' : COLORS.grassGreen,
+              background: product.connected ? '#f0f4f7' : COLORS.primary,
               border: product.connected ? '1px solid #e1e8ed' : 'none',
               borderRadius: '6px',
-              color: product.connected ? COLORS.textLight : 'white',
+              color: product.connected ? COLORS.textMuted : 'white',
               fontWeight: 600,
               cursor: activeProject ? 'pointer' : 'not-allowed',
               opacity: activeProject ? 1 : 0.5,
@@ -87,7 +90,7 @@ function IntegrationsTab() {
 
       <div style={{ marginTop: '1.5rem', padding: '1rem', background: '#f8fafc', borderRadius: '8px' }}>
         <h4 style={{ margin: '0 0 0.5rem', fontSize: '0.9rem', color: COLORS.text }}>Coming Soon</h4>
-        <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textLight, fontSize: '0.85rem' }}>
+        <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted, fontSize: '0.85rem' }}>
           <li>Direct API integration with customer UKG tenants</li>
           <li>Automatic configuration extraction</li>
           <li>Real-time data synchronization</li>
@@ -104,7 +107,7 @@ function CleanupTab() {
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🗑️ Data Cleanup</h3>
-        <p style={{ margin: '0.25rem 0 0', color: COLORS.textLight, fontSize: '0.9rem' }}>
+        <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Delete tables, documents, and orphaned data. Use Force Wipe to reset all backend storage.
         </p>
       </div>
@@ -118,7 +121,7 @@ function CleanupTab() {
         }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>💾</div>
           <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Selective Delete</div>
-          <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginBottom: '1rem' }}>
             Choose specific tables or documents to remove
           </div>
         </div>
@@ -131,7 +134,7 @@ function CleanupTab() {
         }}>
           <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚡</div>
           <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Force Full Wipe</div>
-          <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '1rem' }}>
+          <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginBottom: '1rem' }}>
             Clear ALL data: DuckDB, ChromaDB, Supabase
           </div>
         </div>
@@ -164,7 +167,7 @@ function EndpointsTab() {
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🔧 API Endpoints</h3>
-        <p style={{ margin: '0.25rem 0 0', color: COLORS.textLight, fontSize: '0.9rem' }}>
+        <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Test and explore API endpoints. View responses, debug issues, and verify functionality.
         </p>
       </div>
@@ -178,7 +181,7 @@ function EndpointsTab() {
           textAlign: 'center',
         }}>
           <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>GET</div>
-          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Read data</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Read data</div>
         </div>
         <div style={{
           background: '#eff6ff',
@@ -188,7 +191,7 @@ function EndpointsTab() {
           textAlign: 'center',
         }}>
           <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>POST</div>
-          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Create/Update</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Create/Update</div>
         </div>
         <div style={{
           background: '#fef2f2',
@@ -198,12 +201,12 @@ function EndpointsTab() {
           textAlign: 'center',
         }}>
           <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>DELETE</div>
-          <div style={{ fontSize: '0.8rem', color: COLORS.textLight }}>Remove data</div>
+          <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Remove data</div>
         </div>
       </div>
 
       <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem' }}>
-        <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '0.5rem' }}>Quick Endpoints:</div>
+        <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginBottom: '0.5rem' }}>Quick Endpoints:</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
           {['/api/platform', '/api/platform/health', '/api/classification/tables', '/api/classification/chunks', '/api/metrics/summary'].map(ep => (
             <code key={ep} style={{
@@ -220,7 +223,7 @@ function EndpointsTab() {
       <Link to="/admin/endpoints" style={{ textDecoration: 'none' }}>
         <button style={{
           padding: '0.75rem 1.5rem',
-          background: COLORS.grassGreen,
+          background: COLORS.primary,
           border: 'none',
           borderRadius: '8px',
           color: 'white',
@@ -266,8 +269,8 @@ export default function AdminPage() {
     tab: (active) => ({
       display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.25rem',
       border: 'none', background: active ? 'white' : 'transparent',
-      color: active ? COLORS.grassGreen : COLORS.textLight, fontWeight: '600', fontSize: '0.85rem',
-      cursor: 'pointer', borderBottom: active ? `2px solid ${COLORS.grassGreen}` : '2px solid transparent',
+      color: active ? COLORS.primary : COLORS.textMuted, fontWeight: '600', fontSize: '0.85rem',
+      cursor: 'pointer', borderBottom: active ? `2px solid ${COLORS.primary}` : '2px solid transparent',
       marginBottom: '-1px', whiteSpace: 'nowrap',
     }),
     tabContent: { padding: '1.5rem', minHeight: '400px' },

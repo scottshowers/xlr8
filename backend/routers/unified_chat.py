@@ -1402,8 +1402,20 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                     except:
                         row_count = 0
                     
+                    # Try to get display_name from _schema_metadata
+                    display_name = ''
+                    try:
+                        dn_result = handler.conn.execute("""
+                            SELECT display_name FROM _schema_metadata WHERE table_name = ? LIMIT 1
+                        """, [table_name]).fetchone()
+                        if dn_result and dn_result[0]:
+                            display_name = dn_result[0]
+                    except:
+                        pass
+                    
                     tables.append({
                         'table_name': table_name,
+                        'display_name': display_name,
                         'project': project or 'unknown',
                         'columns': columns,
                         'row_count': row_count,
@@ -1504,6 +1516,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                 
                 tables.append({
                     'table_name': table_name,
+                    'display_name': table_info.get('display_name', ''),
+                    'file_name': table_info.get('file_name', ''),
                     'project': project or 'unknown',
                     'columns': columns,
                     'row_count': row_count,
@@ -3328,6 +3342,51 @@ async def get_learning_stats():
 # =============================================================================
 # BACKWARD COMPATIBILITY REDIRECTS
 # =============================================================================
+
+@router.get("/chat/models")
+async def get_chat_models():
+    """
+    Get available chat models and their status.
+    Called by frontend Chat component on load.
+    """
+    models = {
+        "primary": "mistral:7b",
+        "fallback": "claude-sonnet-4",
+        "sql": "deepseek-coder:6.7b",
+        "embeddings": "nomic-embed-text"
+    }
+    
+    status = {
+        "ollama_available": False,
+        "claude_available": False,
+        "models": models
+    }
+    
+    # Check Ollama
+    try:
+        import os
+        ollama_url = os.getenv("LLM_ENDPOINT", "")
+        if ollama_url:
+            import httpx
+            async with httpx.AsyncClient(timeout=2.0) as client:
+                r = await client.get(f"{ollama_url.rstrip('/')}/api/tags")
+                if r.status_code == 200:
+                    status["ollama_available"] = True
+                    data = r.json()
+                    status["ollama_models"] = [m.get("name") for m in data.get("models", [])]
+    except:
+        pass
+    
+    # Check Claude
+    try:
+        import os
+        if os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
+            status["claude_available"] = True
+    except:
+        pass
+    
+    return status
+
 
 @router.post("/chat/intelligent")
 async def intelligent_chat_redirect(request: UnifiedChatRequest):

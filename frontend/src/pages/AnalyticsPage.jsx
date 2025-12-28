@@ -39,21 +39,28 @@ import {
 // CONSTANTS
 // =============================================================================
 
-// Muted brand palette - using inline hex values
+// Mission Control Color Palette (consistent with other pages)
 const COLORS = {
-  primary: '#5a8a4a',
-  primaryLight: '#eef4ec',
-  blue: '#4a6b8a',
-  blueLight: '#edf1f5',
-  amber: '#8a6b4a',
-  amberLight: '#f5f1ed',
-  red: '#8a4a4a',
-  redLight: '#f5eded',
-  teal: '#4a7a7a',
-  tealLight: '#edf3f3',
+  primary: '#83b16d',
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  accent: '#285390',
+  accentLight: 'rgba(40, 83, 144, 0.1)',
+  blue: '#285390',
+  blueLight: 'rgba(40, 83, 144, 0.1)',
+  amber: '#d97706',
+  amberLight: 'rgba(217, 119, 6, 0.1)',
+  red: '#993c44',
+  redLight: 'rgba(153, 60, 68, 0.1)',
+  teal: '#0891b2',
+  tealLight: 'rgba(8, 145, 178, 0.1)',
+  bg: '#f0f2f5',
+  card: '#ffffff',
+  cardBorder: '#e2e8f0',
+  text: '#1a2332',
+  textMuted: '#64748b',
 }
 
-const CHART_PALETTE = ['#5a8a4a', '#4a6b8a', '#8a6b4a', '#4a7a7a', '#8a4a4a', '#6a6a8a', '#7a8a5a', '#5a6a7a']
+const CHART_PALETTE = ['#83b16d', '#285390', '#d97706', '#0891b2', '#993c44', '#5f4282', '#7c9a5e', '#4a7a9a']
 const AGGREGATIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'COUNT DISTINCT']
 
 // Domain detection and icons
@@ -548,7 +555,7 @@ export default function AnalyticsPage() {
         {/* Header */}
         <div className="p-3 border-b bg-gray-50">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
-            <Layers size={14} className="text-[#5a8a4a]" />
+            <Layers size={14} className="text-[#83b16d]" />
             Data Catalog
           </h2>
           {catalog && (
@@ -567,7 +574,7 @@ export default function AnalyticsPage() {
               placeholder="Search tables..."
               value={catalogSearch}
               onChange={(e) => setCatalogSearch(e.target.value)}
-              className="w-full pl-7 pr-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-[#5a8a4a] focus:border-[#5a8a4a]"
+              className="w-full pl-7 pr-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
             />
           </div>
         </div>
@@ -583,11 +590,11 @@ export default function AnalyticsPage() {
           
           {catalogError && (
             <div className="p-4 text-center">
-              <AlertCircle size={20} className="mx-auto mb-2 text-[#8a4a4a]" />
-              <p className="text-xs text-[#8a4a4a] mb-2">{catalogError}</p>
+              <AlertCircle size={20} className="mx-auto mb-2 text-[#993c44]" />
+              <p className="text-xs text-[#993c44] mb-2">{catalogError}</p>
               <button
                 onClick={loadCatalog}
-                className="text-xs text-[#5a8a4a] hover:underline flex items-center gap-1 mx-auto"
+                className="text-xs text-[#83b16d] hover:underline flex items-center gap-1 mx-auto"
               >
                 <RefreshCw size={10} /> Retry
               </button>
@@ -604,8 +611,8 @@ export default function AnalyticsPage() {
                   onClick={() => toggleDomain(domain.domain)}
                   className="w-full px-2 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors"
                 >
-                  <div className="w-6 h-6 rounded flex items-center justify-center bg-[#eef4ec]">
-                    <Icon size={12} className="text-[#5a8a4a]" />
+                  <div className="w-6 h-6 rounded flex items-center justify-center bg-[rgba(131,177,109,0.1)]">
+                    <Icon size={12} className="text-[#83b16d]" />
                   </div>
                   <div className="flex-1 text-left min-w-0">
                     <div className="text-xs font-medium text-gray-700 truncate">{domain.label}</div>
@@ -626,7 +633,7 @@ export default function AnalyticsPage() {
                         onClick={() => handleTableSelect(table)}
                         className={`w-full px-2 py-1.5 pl-8 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
                           selectedTable?.name === table.name 
-                            ? 'bg-[#eef4ec] text-[#5a8a4a] font-medium' 
+                            ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
                             : 'text-gray-600'
                         }`}
                       >
@@ -715,8 +722,8 @@ export default function AnalyticsPage() {
                   ))}
                   {isAnalyzing && (
                     <div className="flex items-center gap-2 text-gray-500 text-xs">
-                      <div className="w-5 h-5 rounded-full bg-[#eef4ec] flex items-center justify-center">
-                        <Sparkles size={10} className="text-[#5a8a4a] animate-pulse" />
+                      <div className="w-5 h-5 rounded-full bg-[rgba(131,177,109,0.1)] flex items-center justify-center">
+                        <Sparkles size={10} className="text-[#83b16d] animate-pulse" />
                       </div>
                       <span>Analyzing...</span>
                     </div>
@@ -734,12 +741,12 @@ export default function AnalyticsPage() {
                   onChange={(e) => setNlQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && runNLQuery()}
                   placeholder={selectedTable ? `Ask about ${selectedTable.name}...` : "Ask a question about your data..."}
-                  className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#5a8a4a] focus:border-[#5a8a4a]"
+                  className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
                 />
                 <button
                   onClick={runNLQuery}
                   disabled={!nlQuery.trim() || isAnalyzing}
-                  className="px-3 py-2 rounded-lg bg-[#5a8a4a] text-white disabled:opacity-50 hover:bg-[#4a7a3a] transition-colors"
+                  className="px-3 py-2 rounded-lg bg-[#83b16d] text-white disabled:opacity-50 hover:bg-[#6b9b5a] transition-colors"
                 >
                   <Send size={14} />
                 </button>
@@ -768,7 +775,7 @@ export default function AnalyticsPage() {
                       }
                     }}
                     placeholder={`SELECT *\nFROM ${selectedTable.name}\nLIMIT 100`}
-                    className="w-full p-3 text-xs font-mono border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#5a8a4a] focus:border-[#5a8a4a] bg-gray-50 resize-none min-h-[140px]"
+                    className="w-full p-3 text-xs font-mono border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d] bg-gray-50 resize-none min-h-[140px]"
                     spellCheck={false}
                   />
                   <div className="flex justify-between items-center mt-2">
@@ -783,7 +790,7 @@ export default function AnalyticsPage() {
                       <button
                         onClick={runSQLQuery}
                         disabled={!sqlText.trim() || resultsLoading}
-                        className="px-4 py-1.5 rounded-lg bg-[#5a8a4a] text-white text-xs font-medium hover:bg-[#4a7a3a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                        className="px-4 py-1.5 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                       >
                         {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
                         Run Query
@@ -793,7 +800,7 @@ export default function AnalyticsPage() {
                 </div>
                 
                 {resultsError && (
-                  <div className="p-3 bg-[#f5eded] border border-[#8a4a4a]/20 rounded-lg text-[#8a4a4a] text-xs">
+                  <div className="p-3 bg-[rgba(153,60,68,0.1)] border border-[#993c44]/20 rounded-lg text-[#993c44] text-xs">
                     <div className="flex items-center gap-2">
                       <AlertCircle size={14} />
                       <span>{resultsError}</span>
@@ -898,7 +905,7 @@ export default function AnalyticsPage() {
                             onClick={() => setChartType(type)}
                             className={`p-1.5 rounded transition-colors ${
                               chartType === type 
-                                ? 'bg-white shadow-sm text-[#5a8a4a]' 
+                                ? 'bg-white shadow-sm text-[#83b16d]' 
                                 : 'text-gray-400 hover:text-gray-600'
                             }`}
                             title={label}
@@ -917,13 +924,13 @@ export default function AnalyticsPage() {
                           onDrop={handleDropOnXAxis}
                           className={`border-2 border-dashed rounded-lg p-2 text-center transition-colors ${
                             draggedColumn 
-                              ? 'border-[#5a8a4a] bg-[#eef4ec]' 
+                              ? 'border-[#83b16d] bg-[rgba(131,177,109,0.1)]' 
                               : 'border-gray-200'
                           }`}
                         >
                           <div className="text-xs text-gray-500 mb-1">X-Axis (Category)</div>
                           {xAxis ? (
-                            <div className="inline-flex items-center gap-1 px-2 py-1 bg-[#4a6b8a] text-white rounded text-xs">
+                            <div className="inline-flex items-center gap-1 px-2 py-1 bg-[#285390] text-white rounded text-xs">
                               {xAxis.name}
                               <button onClick={() => setXAxis(null)} className="hover:text-red-200">
                                 <X size={10} />
@@ -940,13 +947,13 @@ export default function AnalyticsPage() {
                           onDrop={handleDropOnYAxis}
                           className={`border-2 border-dashed rounded-lg p-2 text-center transition-colors ${
                             draggedColumn && draggedColumn.type === 'number' 
-                              ? 'border-[#5a8a4a] bg-[#eef4ec]' 
+                              ? 'border-[#83b16d] bg-[rgba(131,177,109,0.1)]' 
                               : 'border-gray-200'
                           }`}
                         >
                           <div className="text-xs text-gray-500 mb-1">Y-Axis (Value)</div>
                           {yAxis ? (
-                            <div className="inline-flex items-center gap-1 px-2 py-1 bg-[#5a8a4a] text-white rounded text-xs">
+                            <div className="inline-flex items-center gap-1 px-2 py-1 bg-[#83b16d] text-white rounded text-xs">
                               {yAxis.aggregation && (
                                 <span className="opacity-75">{yAxis.aggregation}</span>
                               )}
@@ -968,7 +975,7 @@ export default function AnalyticsPage() {
                     <button
                       onClick={runBuilderQuery}
                       disabled={columns.length === 0 || resultsLoading}
-                      className="px-4 py-2 rounded-lg bg-[#5a8a4a] text-white text-xs font-medium hover:bg-[#4a7a3a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
+                      className="px-4 py-2 rounded-lg bg-[#83b16d] text-white text-xs font-medium hover:bg-[#6b9b5a] disabled:opacity-50 flex items-center gap-1.5 transition-colors"
                     >
                       {resultsLoading ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />}
                       Run Query
@@ -1002,7 +1009,7 @@ export default function AnalyticsPage() {
                   )}
                   
                   {resultsError && (
-                    <div className="p-3 bg-[#f5eded] border border-[#8a4a4a]/20 rounded-lg text-[#8a4a4a] text-xs mb-3">
+                    <div className="p-3 bg-[rgba(153,60,68,0.1)] border border-[#993c44]/20 rounded-lg text-[#993c44] text-xs mb-3">
                       <div className="flex items-center gap-2">
                         <AlertCircle size={14} />
                         <span>{resultsError}</span>
@@ -1073,7 +1080,7 @@ function DropZone({ label, hint, items, onDragOver, onDrop, renderItem, isDragAc
       onDragOver={onDragOver}
       onDrop={onDrop}
       className={`bg-white rounded-lg border p-3 transition-all ${
-        isDragActive ? 'border-[#5a8a4a] ring-2 ring-[#5a8a4a]/20' : ''
+        isDragActive ? 'border-[#83b16d] ring-2 ring-[#83b16d]/20' : ''
       } ${className}`}
     >
       <div className="flex items-center justify-between mb-2">
@@ -1081,7 +1088,7 @@ function DropZone({ label, hint, items, onDragOver, onDrop, renderItem, isDragAc
         <span className="text-xs text-gray-400">{items.length > 0 ? `${items.length} selected` : hint}</span>
       </div>
       <div className={`min-h-[40px] border-2 border-dashed rounded-lg p-2 flex flex-wrap gap-1.5 transition-colors ${
-        isDragActive ? 'border-[#5a8a4a] bg-[#eef4ec]' : 'border-gray-200'
+        isDragActive ? 'border-[#83b16d] bg-[rgba(131,177,109,0.1)]' : 'border-gray-200'
       }`}>
         {items.length === 0 ? (
           <span className="text-xs text-gray-400 m-auto">Drop here</span>
@@ -1102,7 +1109,7 @@ function ColumnChip({ column, showAggregation, aggregation, onAggregationChange,
       {showAggregation && aggregation && (
         <button
           onClick={() => setShowDropdown(!showDropdown)}
-          className="text-[#5a8a4a] font-medium hover:underline"
+          className="text-[#83b16d] font-medium hover:underline"
         >
           {aggregation}
         </button>
@@ -1119,7 +1126,7 @@ function ColumnChip({ column, showAggregation, aggregation, onAggregationChange,
               key={agg}
               onClick={() => { onAggregationChange(agg); setShowDropdown(false) }}
               className={`w-full px-3 py-1 text-left text-xs hover:bg-gray-50 transition-colors ${
-                aggregation === agg ? 'text-[#5a8a4a] font-medium bg-[#eef4ec]' : 'text-gray-600'
+                aggregation === agg ? 'text-[#83b16d] font-medium bg-[rgba(131,177,109,0.1)]' : 'text-gray-600'
               }`}
             >
               {agg}
@@ -1143,7 +1150,7 @@ function FilterRow({ filter, onChange, onRemove }) {
       <select
         value={filter.operator}
         onChange={(e) => onChange('operator', e.target.value)}
-        className="px-2 py-1 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#5a8a4a]"
+        className="px-2 py-1 text-xs border rounded bg-white focus:outline-none focus:ring-1 focus:ring-[#83b16d]"
       >
         {operators.map(op => <option key={op} value={op}>{op}</option>)}
       </select>
@@ -1153,7 +1160,7 @@ function FilterRow({ filter, onChange, onRemove }) {
           value={filter.value}
           onChange={(e) => onChange('value', e.target.value)}
           placeholder="value"
-          className="flex-1 px-2 py-1 text-xs border rounded min-w-[80px] focus:outline-none focus:ring-1 focus:ring-[#5a8a4a]"
+          className="flex-1 px-2 py-1 text-xs border rounded min-w-[80px] focus:outline-none focus:ring-1 focus:ring-[#83b16d]"
         />
       )}
       <button onClick={onRemove} className="text-gray-400 hover:text-red-500 transition-colors">
@@ -1164,8 +1171,8 @@ function FilterRow({ filter, onChange, onRemove }) {
 }
 
 function TypeIcon({ type, size = 10 }) {
-  if (type === 'number') return <Hash size={size} className="text-[#8a6b4a]" />
-  if (type === 'date' || type === 'time') return <Calendar size={size} className="text-[#4a6b8a]" />
+  if (type === 'number') return <Hash size={size} className="text-[#d97706]" />
+  if (type === 'date' || type === 'time') return <Calendar size={size} className="text-[#285390]" />
   return <FileText size={size} className="text-gray-400" />
 }
 
@@ -1192,7 +1199,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                 onClick={() => setChartType(type)}
                 className={`p-1.5 rounded transition-colors ${
                   chartType === type 
-                    ? 'bg-white shadow-sm text-[#5a8a4a]' 
+                    ? 'bg-white shadow-sm text-[#83b16d]' 
                     : 'text-gray-400 hover:text-gray-600'
                 }`}
               >
@@ -1250,7 +1257,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                     <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }} tickFormatter={formatAxisValue} />
                     <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 11 }} />
-                    <Bar dataKey={yKey} fill="#5a8a4a" radius={[3, 3, 0, 0]} />
+                    <Bar dataKey={yKey} fill="#83b16d" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -1264,7 +1271,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
                     <XAxis dataKey={xKey} tick={{ fontSize: 10 }} />
                     <YAxis tick={{ fontSize: 10 }} tickFormatter={formatAxisValue} />
                     <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 11 }} />
-                    <Area type="monotone" dataKey={yKey} stroke="#5a8a4a" fill="#eef4ec" strokeWidth={2} />
+                    <Area type="monotone" dataKey={yKey} stroke="#83b16d" fill="rgba(131,177,109,0.1)" strokeWidth={2} />
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1338,8 +1345,8 @@ function NLEmptyState({ selectedTable, onQuickQuery }) {
   return (
     <div className="max-w-md mx-auto pt-8">
       <div className="text-center mb-5">
-        <div className="w-10 h-10 rounded-xl mx-auto mb-2 flex items-center justify-center bg-[#eef4ec]">
-          <Sparkles size={18} className="text-[#5a8a4a]" />
+        <div className="w-10 h-10 rounded-xl mx-auto mb-2 flex items-center justify-center bg-[rgba(131,177,109,0.1)]">
+          <Sparkles size={18} className="text-[#83b16d]" />
         </div>
         <h2 className="text-base font-semibold text-gray-800 mb-1">
           {selectedTable ? `Explore ${selectedTable.name}` : 'Ask a question'}
@@ -1352,13 +1359,13 @@ function NLEmptyState({ selectedTable, onQuickQuery }) {
           <button
             key={i}
             onClick={() => onQuickQuery(item.query)}
-            className="p-3 bg-white border rounded-lg text-left hover:border-[#5a8a4a] hover:shadow-sm transition-all group flex items-center gap-3"
+            className="p-3 bg-white border rounded-lg text-left hover:border-[#83b16d] hover:shadow-sm transition-all group flex items-center gap-3"
           >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 group-hover:bg-[#eef4ec] transition-colors">
-              <item.icon size={14} className="text-gray-400 group-hover:text-[#5a8a4a]" />
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-gray-100 group-hover:bg-[rgba(131,177,109,0.1)] transition-colors">
+              <item.icon size={14} className="text-gray-400 group-hover:text-[#83b16d]" />
             </div>
             <div>
-              <div className="text-sm font-medium text-gray-700 group-hover:text-[#5a8a4a]">{item.label}</div>
+              <div className="text-sm font-medium text-gray-700 group-hover:text-[#83b16d]">{item.label}</div>
               <div className="text-xs text-gray-400 truncate">{item.query}</div>
             </div>
           </button>
@@ -1374,7 +1381,7 @@ function NLMessageBubble({ message }) {
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="bg-[#5a8a4a] text-white px-3 py-2 rounded-xl rounded-br-sm max-w-md text-sm">
+        <div className="bg-[#83b16d] text-white px-3 py-2 rounded-xl rounded-br-sm max-w-md text-sm">
           {message.content}
         </div>
       </div>
@@ -1383,11 +1390,11 @@ function NLMessageBubble({ message }) {
   
   return (
     <div className="flex gap-2">
-      <div className="w-6 h-6 rounded-full bg-[#eef4ec] flex items-center justify-center flex-shrink-0 mt-0.5">
-        <Sparkles size={12} className="text-[#5a8a4a]" />
+      <div className="w-6 h-6 rounded-full bg-[rgba(131,177,109,0.1)] flex items-center justify-center flex-shrink-0 mt-0.5">
+        <Sparkles size={12} className="text-[#83b16d]" />
       </div>
       <div className="flex-1 space-y-2 min-w-0">
-        <div className={`text-sm ${message.isError ? 'text-[#8a4a4a]' : 'text-gray-700'}`}>
+        <div className={`text-sm ${message.isError ? 'text-[#993c44]' : 'text-gray-700'}`}>
           {message.content}
         </div>
         
@@ -1407,7 +1414,7 @@ function NLMessageBubble({ message }) {
                     onClick={() => setLocalChartType(type)}
                     className={`p-1 rounded transition-colors ${
                       localChartType === type 
-                        ? 'bg-[#5a8a4a] text-white' 
+                        ? 'bg-[#83b16d] text-white' 
                         : 'text-gray-400 hover:text-gray-600'
                     }`}
                   >
@@ -1449,7 +1456,7 @@ function NLMessageBubble({ message }) {
                       <XAxis dataKey={message.columns[0]} tick={{ fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 9 }} tickFormatter={formatAxisValue} />
                       <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 10 }} />
-                      <Bar dataKey={message.columns[1]} fill="#5a8a4a" radius={[2, 2, 0, 0]} />
+                      <Bar dataKey={message.columns[1]} fill="#83b16d" radius={[2, 2, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -1463,7 +1470,7 @@ function NLMessageBubble({ message }) {
                       <XAxis dataKey={message.columns[0]} tick={{ fontSize: 9 }} />
                       <YAxis tick={{ fontSize: 9 }} tickFormatter={formatAxisValue} />
                       <Tooltip formatter={formatTooltipValue} contentStyle={{ fontSize: 10 }} />
-                      <Area type="monotone" dataKey={message.columns[1]} stroke="#5a8a4a" fill="#eef4ec" strokeWidth={2} />
+                      <Area type="monotone" dataKey={message.columns[1]} stroke="#83b16d" fill="rgba(131,177,109,0.1)" strokeWidth={2} />
                     </AreaChart>
                   </ResponsiveContainer>
                 </div>

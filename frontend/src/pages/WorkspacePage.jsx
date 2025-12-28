@@ -14,16 +14,16 @@ import { getCustomerColorPalette } from '../utils/customerColors';
 import Chat from '../components/Chat';
 import { MessageSquare, FolderOpen } from 'lucide-react';
 
-// Theme-aware colors
+// Theme-aware colors (Mission Control palette)
 const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  bg: dark ? '#1a1f2e' : '#f0f2f5',
   card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',  // Muted forest green
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+  cardBorder: dark ? '#2d3548' : '#e2e8f0',
+  text: dark ? '#e8eaed' : '#1a2332',
+  textMuted: dark ? '#8b95a5' : '#64748b',
+  textLight: dark ? '#5f6a7d' : '#94a3b8',
+  primary: '#83b16d',  // Mission Control green
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
 });
 
 // No-project placeholder

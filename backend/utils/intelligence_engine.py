@@ -4879,11 +4879,20 @@ SQL:"""
                         if rows:
                             table_name = sql_info.get('table', 'query') if sql_info else 'query'
                             q_type = sql_info.get('query_type', 'list') if sql_info else 'list'
+                            
+                            # Look up display_name from schema for better source_name
+                            display_name = table_name
+                            if self.schema and self.schema.get('tables'):
+                                for t in self.schema.get('tables', []):
+                                    if t.get('table_name') == table_name:
+                                        display_name = t.get('display_name') or table_name
+                                        break
+                            
                             logger.warning(f"[GATHER-REALITY] Creating Truth with query_type={q_type}, rows={len(rows)}")
                             
                             truths.append(Truth(
                                 source_type='reality',
-                                source_name=f"SQL: {table_name}",
+                                source_name=display_name,
                                 content={
                                     'sql': sql,
                                     'columns': cols,
@@ -4891,6 +4900,7 @@ SQL:"""
                                     'total': len(rows),
                                     'query_type': q_type,
                                     'table': table_name,
+                                    'display_name': display_name,
                                     'is_targeted_query': True
                                 },
                                 confidence=0.98,

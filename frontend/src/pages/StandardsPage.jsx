@@ -13,7 +13,7 @@ import api from '../services/api';
 
 // Brand Colors
 const COLORS = {
-  grassGreen: '#83b16d',
+  primary: '#83b16d',
   skyBlue: '#93abd9',
   iceFlow: '#c9d3d4',
   white: '#f6f5fa',
@@ -149,7 +149,7 @@ function UploadTab({ onUploadSuccess }) {
           disabled={!file || uploading}
           style={{
             padding: '0.75rem 1.5rem',
-            background: COLORS.grassGreen,
+            background: COLORS.primary,
             color: 'white',
             border: 'none',
             borderRadius: '8px',
@@ -524,7 +524,7 @@ function ComplianceTab({ activeProject, projectName, customerName }) {
         disabled={running}
         style={{ 
           padding: '0.75rem 1.5rem', 
-          background: COLORS.grassGreen, 
+          background: COLORS.primary, 
           color: 'white', 
           border: 'none', 
           borderRadius: '8px', 
@@ -659,7 +659,7 @@ export default function StandardsPage() {
           }}>
             <span>{customerName}</span>
             <span>→</span>
-            <span style={{ color: COLORS.grassGreen, fontWeight: '600' }}>{projectName}</span>
+            <span style={{ color: COLORS.primary, fontWeight: '600' }}>{projectName}</span>
           </div>
         )}
         <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: '700', color: '#2a3441', margin: 0 }}>

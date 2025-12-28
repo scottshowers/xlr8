@@ -18,25 +18,28 @@ import {
   CheckCircle, XCircle, BookOpen, Folder, Filter
 } from 'lucide-react';
 
-// Theme-aware colors - muted professional palette
+// Theme-aware colors - Mission Control palette
 const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
+  bg: dark ? '#1a1f2e' : '#f0f2f5',
   card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#5a8a4a',  // Muted forest green
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
-  blue: '#4a6b8a',     // Slate blue
-  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
-  amber: '#8a6b4a',    // Muted rust
-  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
-  red: '#8a4a4a',      // Muted burgundy
-  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
-  green: '#5a8a5a',    // Muted green
-  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
-  divider: dark ? '#2d3548' : '#e8ecf1',
+  cardBorder: dark ? '#2d3548' : '#e2e8f0',
+  text: dark ? '#e8eaed' : '#1a2332',
+  textMuted: dark ? '#8b95a5' : '#64748b',
+  textLight: dark ? '#5f6a7d' : '#94a3b8',
+  primary: '#83b16d',
+  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  accent: '#285390',
+  accentLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
+  blue: '#285390',
+  blueLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
+  warning: '#d97706',
+  amber: '#d97706',
+  amberLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
+  red: '#993c44',
+  redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
+  green: '#83b16d',
+  greenLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  divider: dark ? '#2d3548' : '#e2e8f0',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   tabBg: dark ? '#1e2433' : '#fafbfc',
 });

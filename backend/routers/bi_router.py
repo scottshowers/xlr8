@@ -464,6 +464,9 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
     """
     Get schema for BI queries - compatible with IntelligenceEngine.
     Returns {'tables': [...], 'filter_candidates': {...}}
+    
+    IMPORTANT: Uses stored display_name from _schema_metadata when available,
+    only generates on the fly as fallback.
     """
     tables = []
     filter_candidates = {}
@@ -481,6 +484,20 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 customer_name = proj_record.get('customer') or project
         except Exception as e:
             logger.debug(f"[BI] Could not look up customer name: {e}")
+        
+        # STEP 1: Build lookup of display_names from _schema_metadata (source of truth)
+        display_name_lookup = {}
+        try:
+            meta_results = handler.conn.execute("""
+                SELECT table_name, display_name, file_name, sheet_name
+                FROM _schema_metadata
+                WHERE is_current = TRUE
+            """).fetchall()
+            for row in meta_results:
+                if row[0] and row[1]:  # table_name and display_name
+                    display_name_lookup[row[0]] = row[1]
+        except Exception as e:
+            logger.debug(f"[BI] Could not load display names from metadata: {e}")
         
         # Get all tables from DuckDB
         all_tables = handler.conn.execute("SHOW TABLES").fetchall()
@@ -526,9 +543,14 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 except:
                     row_count = 0
                 
+                # Use stored display_name if available, otherwise generate
+                display_name = display_name_lookup.get(table_name)
+                if not display_name:
+                    display_name = generate_display_name(table_name, project=customer_name)
+                
                 tables.append({
                     'table_name': table_name,
-                    'display_name': generate_display_name(table_name, project=customer_name),
+                    'display_name': display_name,
                     'project': project,
                     'customer': customer_name,
                     'columns': columns,
@@ -996,8 +1018,9 @@ async def get_bi_schema(project: str):
         tables = []
         for t in schema.get('tables', []):
             tables.append({
-                'name': t.get('table_name', '').split('__')[-1],
+                'name': t.get('display_name') or t.get('table_name', '').split('__')[-1],
                 'full_name': t.get('table_name'),
+                'display_name': t.get('display_name'),
                 'rows': t.get('row_count', 0),
                 'columns': [c.get('name') if isinstance(c, dict) else c for c in t.get('columns', [])],
                 'file': t.get('file'),

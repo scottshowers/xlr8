@@ -131,7 +131,7 @@ export default function AdminDashboard() {
               </button>
               <button
                 onClick={() => exportData('all')}
-                className="flex items-center gap-2 px-4 py-2 bg-[#5a8a4a] text-white rounded-lg hover:bg-[#4a7a3a]"
+                className="flex items-center gap-2 px-4 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9b5a]"
               >
                 <Download size={18} />
                 Export All
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
               onClick={() => setActiveTab(tab.id)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
                 activeTab === tab.id
-                  ? 'bg-[#5a8a4a] text-white'
+                  ? 'bg-[#83b16d] text-white'
                   : 'text-gray-600 hover:bg-gray-100'
               }`}
             >
@@ -259,9 +259,9 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
 
   const colors = {
     green: 'bg-[rgba(90,138,90,0.15)] text-[#5a8a5a]',
-    blue: 'bg-[rgba(74,107,138,0.15)] text-[#4a6b8a]',
+    blue: 'bg-[rgba(74,107,138,0.15)] text-[#285390]',
     teal: 'bg-[rgba(74,122,122,0.15)] text-[#4a7a7a]',
-    amber: 'bg-[rgba(138,107,74,0.15)] text-[#8a6b4a]',
+    amber: 'bg-[rgba(138,107,74,0.15)] text-[#d97706]',
   }
 
   return (
@@ -297,7 +297,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
               <span className="text-sm text-gray-600">Satisfaction Rate</span>
               <span className={`text-2xl font-bold ${
                 feedbackRate >= 80 ? 'text-[#5a8a5a]' : 
-                feedbackRate >= 60 ? 'text-[#8a6b4a]' : 'text-[#8a4a4a]'
+                feedbackRate >= 60 ? 'text-[#d97706]' : 'text-[#993c44]'
               }`}>
                 {feedbackRate}%
               </span>
@@ -314,7 +314,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
               <span className="flex items-center gap-1 text-[#5a8a5a]">
                 <ThumbsUp size={14} /> {positiveCount} positive
               </span>
-              <span className="flex items-center gap-1 text-[#8a4a4a]">
+              <span className="flex items-center gap-1 text-[#993c44]">
                 <ThumbsDown size={14} /> {negativeCount} negative
               </span>
             </div>
@@ -344,7 +344,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
             
             <div className="flex items-center justify-between text-sm">
               <span className="text-gray-600">Patterns needing more data</span>
-              <span className="font-medium text-[#8a6b4a]">
+              <span className="font-medium text-[#d97706]">
                 {learnedQueries.filter(q => q.use_count < 3).length} patterns
               </span>
             </div>
@@ -376,7 +376,7 @@ function OverviewTab({ stats, learnedQueries, feedback, preferences }) {
                 {query.avg_feedback >= 0 ? (
                   <span className="text-[#5a8a5a]"><ThumbsUp size={14} /></span>
                 ) : (
-                  <span className="text-[#8a4a4a]"><ThumbsDown size={14} /></span>
+                  <span className="text-[#993c44]"><ThumbsDown size={14} /></span>
                 )}
                 <span className="text-xs text-gray-400">
                   {new Date(query.created_at).toLocaleDateString()}
@@ -473,7 +473,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
                 <td className="px-4 py-3 text-center">
                   <span className={`text-sm font-medium ${
                     query.avg_feedback >= 0.5 ? 'text-[#5a8a5a]' :
-                    query.avg_feedback >= 0 ? 'text-gray-600' : 'text-[#8a4a4a]'
+                    query.avg_feedback >= 0 ? 'text-gray-600' : 'text-[#993c44]'
                   }`}>
                     {query.avg_feedback >= 0 ? '+' : ''}{query.avg_feedback?.toFixed(1) || '0'}
                   </span>
@@ -481,7 +481,7 @@ function QueriesTab({ queries, onDelete, onExport }) {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDelete(query.id)}
-                    className="p-1 text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
+                    className="p-1 text-[#993c44] hover:bg-[rgba(138,74,74,0.1)] rounded"
                     title="Delete"
                   >
                     <Trash2 size={16} />
@@ -548,7 +548,7 @@ function FeedbackTab({ feedback, onDelete }) {
                   }`}>
                     {item.feedback === 'positive' 
                       ? <ThumbsUp className="text-[#5a8a5a]" size={16} />
-                      : <ThumbsDown className="text-[#8a4a4a]" size={16} />
+                      : <ThumbsDown className="text-[#993c44]" size={16} />
                     }
                   </div>
                   <div>
@@ -568,7 +568,7 @@ function FeedbackTab({ feedback, onDelete }) {
                 </div>
                 <button
                   onClick={() => onDelete(item.id)}
-                  className="p-1 text-gray-400 hover:text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
+                  className="p-1 text-gray-400 hover:text-[#993c44] hover:bg-[rgba(138,74,74,0.1)] rounded"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -619,7 +619,7 @@ function PreferencesTab({ preferences, onDelete }) {
                     </span>
                     <span className={`text-xs ${
                       pref.confidence >= 0.8 ? 'text-[#5a8a5a]' : 
-                      pref.confidence >= 0.5 ? 'text-[#8a6b4a]' : 'text-gray-500'
+                      pref.confidence >= 0.5 ? 'text-[#d97706]' : 'text-gray-500'
                     }`}>
                       {(pref.confidence * 100).toFixed(0)}% confident
                     </span>
@@ -631,7 +631,7 @@ function PreferencesTab({ preferences, onDelete }) {
                 </div>
                 <button
                   onClick={() => onDelete(pref.id)}
-                  className="p-1 text-gray-400 hover:text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
+                  className="p-1 text-gray-400 hover:text-[#993c44] hover:bg-[rgba(138,74,74,0.1)] rounded"
                 >
                   <Trash2 size={16} />
                 </button>
@@ -694,7 +694,7 @@ function ClarificationsTab({ patterns, onDelete }) {
                   </div>
                   <button
                     onClick={() => onDelete(opt.id)}
-                    className="p-1 text-gray-400 hover:text-[#8a4a4a]"
+                    className="p-1 text-gray-400 hover:text-[#993c44]"
                   >
                     <Trash2 size={14} />
                   </button>
@@ -785,7 +785,7 @@ function MappingsTab({ mappings, onDelete, onRefresh }) {
                 <td className="px-4 py-3 text-right">
                   <button
                     onClick={() => onDelete(mapping.id)}
-                    className="p-1 text-[#8a4a4a] hover:bg-[rgba(138,74,74,0.1)] rounded"
+                    className="p-1 text-[#993c44] hover:bg-[rgba(138,74,74,0.1)] rounded"
                     title="Delete"
                   >
                     <Trash2 size={16} />

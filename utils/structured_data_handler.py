@@ -1540,7 +1540,8 @@ class StructuredDataHandler:
     def infer_column_mappings(self, project: str, file_name: str, table_name: str, 
                                columns: List[str], sample_data: List[Dict]) -> List[Dict]:
         """
-        Use Claude to infer semantic meaning of columns.
+        Use LLM to infer semantic meaning of columns.
+        LOCAL FIRST: Uses Mistral via LLMOrchestrator, Claude only as fallback.
         
         Args:
             project: Project name
@@ -1560,7 +1561,7 @@ class StructuredDataHandler:
             for i, row in enumerate(sample_data[:5]):
                 sample_str += f"Row {i+1}: {row}\n"
             
-            # Build prompt for Claude
+            # Build prompt for LLM
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
 COLUMN NAMES:
@@ -1593,32 +1594,26 @@ Respond with JSON array only, no explanation:
 
 Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
 
-            # Call Claude for inference
-            import anthropic
-            import os
+            # Use LLMOrchestrator - LOCAL FIRST (Mistral), Claude fallback
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
             
-            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
-            if not api_key:
-                logger.warning("[MAPPINGS] No API key available for inference")
-                return self._fallback_column_inference(columns)
+            result = orchestrator.generate_json(prompt)
             
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            if not result.get('success'):
+                logger.warning(f"[MAPPINGS] LLM inference failed: {result.get('error')}, using fallback")
+                return self._fallback_column_inference(columns, project, file_name, table_name)
             
-            response_text = response.content[0].text.strip()
+            inferred = result.get('response')
+            if not isinstance(inferred, list):
+                logger.warning(f"[MAPPINGS] LLM returned non-list, using fallback")
+                return self._fallback_column_inference(columns, project, file_name, table_name)
             
-            # Parse JSON response
-            # Handle markdown code blocks
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            inferred = json.loads(response_text)
+            logger.info(f"[MAPPINGS] Using {result.get('model_used', 'unknown')} for column inference")
             
             # Store mappings
             for item in inferred:
@@ -1648,7 +1643,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             return mappings
             
         except Exception as e:
-            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            logger.warning(f"[MAPPINGS] LLM inference failed: {e}, using fallback")
             return self._fallback_column_inference(columns, project, file_name, table_name)
     
     def _fallback_column_inference(self, columns: List[str], project: str = None, 
@@ -1988,7 +1983,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     def _infer_column_mappings_threaded(self, thread_conn, project: str, file_name: str, 
                                          table_name: str, columns: List[str], 
                                          sample_data: List[Dict]) -> List[Dict]:
-        """Thread-safe version of infer_column_mappings using provided connection"""
+        """Thread-safe version of infer_column_mappings using provided connection.
+        LOCAL FIRST: Uses Mistral via LLMOrchestrator, Claude only as fallback."""
         mappings = []
         
         try:
@@ -1997,7 +1993,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             for i, row in enumerate(sample_data[:5]):
                 sample_str += f"Row {i+1}: {row}\n"
             
-            # Build prompt for Claude
+            # Build prompt for LLM
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
 COLUMN NAMES:
@@ -2030,30 +2026,26 @@ Respond with JSON array only, no explanation:
 
 Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
 
-            # Call Claude for inference
-            import anthropic
+            # Use LLMOrchestrator - LOCAL FIRST (Mistral), Claude fallback
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
             
-            api_key = os.environ.get('ANTHROPIC_API_KEY') or os.environ.get('CLAUDE_API_KEY')
-            if not api_key:
-                logger.warning("[MAPPINGS] No API key available for inference")
+            result = orchestrator.generate_json(prompt)
+            
+            if not result.get('success'):
+                logger.warning(f"[MAPPINGS] LLM inference failed: {result.get('error')}, using fallback")
                 return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
             
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2000,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            inferred = result.get('response')
+            if not isinstance(inferred, list):
+                logger.warning(f"[MAPPINGS] LLM returned non-list, using fallback")
+                return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
             
-            response_text = response.content[0].text.strip()
-            
-            # Parse JSON response
-            if "```json" in response_text:
-                response_text = response_text.split("```json")[1].split("```")[0].strip()
-            elif "```" in response_text:
-                response_text = response_text.split("```")[1].split("```")[0].strip()
-            
-            inferred = json.loads(response_text)
+            logger.info(f"[MAPPINGS] Using {result.get('model_used', 'unknown')} for column inference (threaded)")
             
             # Store mappings using thread connection
             for item in inferred:
@@ -2083,7 +2075,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             return mappings
             
         except Exception as e:
-            logger.warning(f"[MAPPINGS] Claude inference failed: {e}, using fallback")
+            logger.warning(f"[MAPPINGS] LLM inference failed: {e}, using fallback")
             return self._fallback_column_inference_threaded(thread_conn, columns, project, file_name, table_name)
     
     def _fallback_column_inference_threaded(self, thread_conn, columns: List[str], 
