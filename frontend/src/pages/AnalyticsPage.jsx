@@ -63,13 +63,22 @@ const COLORS = {
 const CHART_PALETTE = ['#83b16d', '#285390', '#d97706', '#0891b2', '#993c44', '#5f4282', '#7c9a5e', '#4a7a9a']
 const AGGREGATIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'COUNT DISTINCT']
 
-// Domain detection and icons
+// Truth Type icons and labels (Five Truths)
+const TRUTH_TYPE_CONFIG = {
+  configuration: { icon: '⚙️', label: 'Configuration', color: '#285390' },
+  reality: { icon: '📊', label: 'Reality', color: '#83b16d' },
+  intent: { icon: '📋', label: 'Intent', color: '#d97706' },
+  reference: { icon: '📚', label: 'Reference', color: '#0891b2' },
+  regulatory: { icon: '⚖️', label: 'Regulatory', color: '#993c44' },
+}
+
+// Domain detection and icons (fallback for auto-detection)
 const DOMAIN_CONFIG = {
   payroll: { icon: DollarSign, label: 'Payroll & Compensation', keywords: ['pay', 'wage', 'salary', 'earning', 'deduct', 'tax', 'gross', 'net'] },
   hr: { icon: Users, label: 'HR & People', keywords: ['emp', 'person', 'worker', 'staff', 'job', 'position', 'department', 'org'] },
   time: { icon: Clock, label: 'Time & Attendance', keywords: ['time', 'schedule', 'attendance', 'punch', 'clock', 'shift', 'hours'] },
   benefits: { icon: Shield, label: 'Benefits & Deductions', keywords: ['benefit', 'insurance', '401k', 'health', 'dental', 'vision', 'pto', 'leave'] },
-  general: { icon: Database, label: 'Other Data', keywords: [] },
+  general: { icon: Database, label: 'Other', keywords: [] },
 }
 
 
@@ -85,6 +94,7 @@ export default function AnalyticsPage() {
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [catalogError, setCatalogError] = useState(null)
   const [catalogSearch, setCatalogSearch] = useState('')
+  const [expandedTruthTypes, setExpandedTruthTypes] = useState({})
   const [expandedDomains, setExpandedDomains] = useState({})
   const [selectedTable, setSelectedTable] = useState(null)
   
@@ -134,14 +144,18 @@ export default function AnalyticsPage() {
       const response = await api.get(`/bi/schema/${projectName}`)
       const tables = response.data.tables || []
       
-      // Organize tables by domain
+      // Organize tables by truth_type -> domain
       const organized = organizeTables(tables)
       setCatalog(organized)
       
-      // Auto-expand first non-empty domain
-      const firstDomain = organized.find(d => d.tables.length > 0)
-      if (firstDomain) {
-        setExpandedDomains({ [firstDomain.domain]: true })
+      // Auto-expand first non-empty truth type
+      const firstTruth = organized.find(t => t.domains.some(d => d.tables.length > 0))
+      if (firstTruth) {
+        setExpandedTruthTypes({ [firstTruth.truthType]: true })
+        const firstDomain = firstTruth.domains.find(d => d.tables.length > 0)
+        if (firstDomain) {
+          setExpandedDomains({ [`${firstTruth.truthType}:${firstDomain.domain}`]: true })
+        }
       }
     } catch (err) {
       console.error('Failed to load catalog:', err)
@@ -152,18 +166,18 @@ export default function AnalyticsPage() {
   }
   
   const organizeTables = (tables) => {
-    const domains = {}
+    // Group by truth_type -> domain -> tables
+    const hierarchy = {}
     
     tables.forEach(table => {
-      const domain = inferDomain(table.name)
-      if (!domains[domain]) {
-        const config = DOMAIN_CONFIG[domain]
-        domains[domain] = {
-          domain,
-          label: config.label,
-          icon: config.icon,
-          tables: []
-        }
+      const truthType = table.truth_type || 'reality'
+      const domain = table.domain || inferDomain(table.name)
+      
+      if (!hierarchy[truthType]) {
+        hierarchy[truthType] = {}
+      }
+      if (!hierarchy[truthType][domain]) {
+        hierarchy[truthType][domain] = []
       }
       
       // Normalize columns to have type info
@@ -174,14 +188,37 @@ export default function AnalyticsPage() {
         return { ...col, type: col.type || inferColumnType(col.name) }
       })
       
-      domains[domain].tables.push({
+      hierarchy[truthType][domain].push({
         ...table,
         columns: normalizedColumns
       })
     })
     
+    // Convert to array structure for rendering
+    const result = Object.entries(hierarchy).map(([truthType, domains]) => {
+      const config = TRUTH_TYPE_CONFIG[truthType] || TRUTH_TYPE_CONFIG.reality
+      const domainList = Object.entries(domains).map(([domain, tables]) => {
+        const domainConfig = DOMAIN_CONFIG[domain] || DOMAIN_CONFIG.general
+        return {
+          domain,
+          label: domain || domainConfig.label,
+          icon: domainConfig.icon,
+          tables: tables.sort((a, b) => (a.display_name || a.name).localeCompare(b.display_name || b.name))
+        }
+      }).sort((a, b) => b.tables.length - a.tables.length)
+      
+      return {
+        truthType,
+        label: config.label,
+        icon: config.icon,
+        color: config.color,
+        domains: domainList,
+        tableCount: domainList.reduce((sum, d) => sum + d.tables.length, 0)
+      }
+    })
+    
     // Sort by table count descending
-    return Object.values(domains).sort((a, b) => b.tables.length - a.tables.length)
+    return result.sort((a, b) => b.tableCount - a.tableCount)
   }
   
   const inferDomain = (tableName) => {
@@ -222,8 +259,13 @@ export default function AnalyticsPage() {
     setSqlText(`SELECT *\nFROM ${table.name}\nLIMIT 100`)
   }
   
-  const toggleDomain = (domain) => {
-    setExpandedDomains(prev => ({ ...prev, [domain]: !prev[domain] }))
+  const toggleTruthType = (truthType) => {
+    setExpandedTruthTypes(prev => ({ ...prev, [truthType]: !prev[truthType] }))
+  }
+  
+  const toggleDomain = (truthType, domain) => {
+    const key = `${truthType}:${domain}`
+    setExpandedDomains(prev => ({ ...prev, [key]: !prev[key] }))
   }
   
   // ===========================================
@@ -517,14 +559,18 @@ export default function AnalyticsPage() {
     }
   }
   
-  // Filter catalog by search
-  const filteredCatalog = catalog?.map(domain => ({
-    ...domain,
-    tables: domain.tables.filter(t =>
-      t.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
-      t.columns?.some(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()))
-    )
-  })).filter(d => d.tables.length > 0)
+  // Filter catalog by search (searches across truth types and domains)
+  const filteredCatalog = catalog?.map(truthTypeGroup => ({
+    ...truthTypeGroup,
+    domains: truthTypeGroup.domains.map(domainGroup => ({
+      ...domainGroup,
+      tables: domainGroup.tables.filter(t =>
+        t.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+        (t.display_name || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
+        t.columns?.some(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()))
+      )
+    })).filter(d => d.tables.length > 0)
+  })).filter(t => t.domains.length > 0)
   
   // ===========================================
   // RENDER: No Project
@@ -551,7 +597,7 @@ export default function AnalyticsPage() {
       {/* ================================================================
           LEFT PANEL: Data Catalog
           ================================================================ */}
-      <div className="w-52 bg-white border-r flex flex-col shadow-sm">
+      <div className="w-96 bg-white border-r flex flex-col shadow-sm">
         {/* Header */}
         <div className="p-3 border-b bg-gray-50">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
@@ -601,49 +647,84 @@ export default function AnalyticsPage() {
             </div>
           )}
           
-          {filteredCatalog?.map(domain => {
-            const Icon = domain.icon
-            const isExpanded = expandedDomains[domain.domain]
+          {filteredCatalog?.map(truthTypeGroup => {
+            const isTruthExpanded = expandedTruthTypes[truthTypeGroup.truthType]
+            const totalTables = truthTypeGroup.domains.reduce((sum, d) => sum + d.tables.length, 0)
             
             return (
-              <div key={domain.domain} className="border-b border-gray-100">
+              <div key={truthTypeGroup.truthType} className="border-b border-gray-200">
+                {/* Truth Type Header */}
                 <button
-                  onClick={() => toggleDomain(domain.domain)}
-                  className="w-full px-2 py-2 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+                  onClick={() => toggleTruthType(truthTypeGroup.truthType)}
+                  className="w-full px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+                  style={{ borderLeft: `3px solid ${truthTypeGroup.color}` }}
                 >
-                  <div className="w-6 h-6 rounded flex items-center justify-center bg-[rgba(131,177,109,0.1)]">
-                    <Icon size={12} className="text-[#83b16d]" />
-                  </div>
+                  <span className="text-base">{truthTypeGroup.icon}</span>
                   <div className="flex-1 text-left min-w-0">
-                    <div className="text-xs font-medium text-gray-700 truncate">{domain.label}</div>
-                    <div className="text-xs text-gray-400">{domain.tables.length} tables</div>
+                    <div className="text-sm font-semibold text-gray-800">{truthTypeGroup.label}</div>
+                    <div className="text-xs text-gray-400">{totalTables} tables</div>
                   </div>
-                  {isExpanded ? (
-                    <ChevronDown size={12} className="text-gray-400" />
+                  {isTruthExpanded ? (
+                    <ChevronDown size={14} className="text-gray-400" />
                   ) : (
-                    <ChevronRight size={12} className="text-gray-400" />
+                    <ChevronRight size={14} className="text-gray-400" />
                   )}
                 </button>
                 
-                {isExpanded && (
-                  <div className="pb-1">
-                    {domain.tables.map(table => (
-                      <button
-                        key={table.name}
-                        onClick={() => handleTableSelect(table)}
-                        className={`w-full px-2 py-1.5 pl-8 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
-                          selectedTable?.name === table.name 
-                            ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
-                            : 'text-gray-600'
-                        }`}
-                      >
-                        <Table2 size={10} className="text-gray-400 flex-shrink-0" />
-                        <span className="truncate flex-1">{table.name}</span>
-                        <span className="text-xs text-gray-400">
-                          {table.rows ? (table.rows / 1000).toFixed(0) + 'k' : ''}
-                        </span>
-                      </button>
-                    ))}
+                {/* Domains within Truth Type */}
+                {isTruthExpanded && (
+                  <div className="bg-gray-50/50">
+                    {truthTypeGroup.domains.map(domainGroup => {
+                      const Icon = domainGroup.icon
+                      const domainKey = `${truthTypeGroup.truthType}:${domainGroup.domain}`
+                      const isDomainExpanded = expandedDomains[domainKey]
+                      
+                      return (
+                        <div key={domainGroup.domain} className="border-t border-gray-100">
+                          {/* Domain Header */}
+                          <button
+                            onClick={() => toggleDomain(truthTypeGroup.truthType, domainGroup.domain)}
+                            className="w-full px-3 py-2 pl-6 flex items-center gap-2 hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="w-5 h-5 rounded flex items-center justify-center bg-white border border-gray-200">
+                              <Icon size={10} className="text-gray-500" />
+                            </div>
+                            <div className="flex-1 text-left min-w-0">
+                              <div className="text-xs font-medium text-gray-700">{domainGroup.label || 'General'}</div>
+                              <div className="text-xs text-gray-400">{domainGroup.tables.length} tables</div>
+                            </div>
+                            {isDomainExpanded ? (
+                              <ChevronDown size={12} className="text-gray-400" />
+                            ) : (
+                              <ChevronRight size={12} className="text-gray-400" />
+                            )}
+                          </button>
+                          
+                          {/* Tables within Domain */}
+                          {isDomainExpanded && (
+                            <div className="pb-1 bg-white">
+                              {domainGroup.tables.map(table => (
+                                <button
+                                  key={table.name || table.full_name}
+                                  onClick={() => handleTableSelect(table)}
+                                  className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
+                                    selectedTable?.name === table.name 
+                                      ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
+                                      : 'text-gray-600'
+                                  }`}
+                                >
+                                  <Table2 size={10} className="text-gray-400 flex-shrink-0" />
+                                  <span className="truncate flex-1">{table.display_name || table.name}</span>
+                                  <span className="text-xs text-gray-400 flex-shrink-0">
+                                    {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 )}
               </div>
