@@ -382,12 +382,39 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
     
     # =========================================================================
     # FILES: Get file list for Data page
+    # Pull metadata from document_registry (source of truth), table info from DuckDB
     # =========================================================================
     try:
         handler = get_structured_handler()
         files_dict = {}  # Dedupe by filename
         
-        # From _schema_metadata - get actual table names
+        # STEP 1: Build registry lookup from document_registry (source of truth for provenance)
+        # This matches the pattern in /status/structured
+        registry_lookup = {}  # filename -> {uploaded_by, uploaded_at, truth_type}
+        try:
+            from utils.database.models import DocumentRegistryModel
+            
+            if project_filter:
+                from utils.database.models import ProjectModel
+                proj_record = ProjectModel.get_by_name(project_filter)
+                project_id = proj_record.get('id') if proj_record else None
+                registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+            else:
+                registry_entries = DocumentRegistryModel.get_all()
+            
+            for entry in registry_entries:
+                filename = entry.get('filename', '')
+                if filename:
+                    registry_lookup[filename.lower()] = {
+                        'uploaded_by': entry.get('uploaded_by_email', ''),
+                        'uploaded_at': entry.get('created_at', ''),
+                        'truth_type': entry.get('truth_type', 'reality'),
+                        'domain': entry.get('content_domain', '')
+                    }
+        except Exception as reg_e:
+            logger.debug(f"[PLATFORM] Registry lookup: {reg_e}")
+        
+        # STEP 2: Query _schema_metadata for table structure only
         try:
             schema_files = handler.conn.execute("""
                 SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
@@ -400,6 +427,9 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                 fname = row[0]
                 if not fname:
                     continue
+                
+                # Get provenance from registry (source of truth)
+                provenance = registry_lookup.get(fname.lower(), {})
                     
                 if fname not in files_dict:
                     files_dict[fname] = {
@@ -409,6 +439,10 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                         "rows": 0,
                         "row_count": 0,  # Alias for frontend compatibility
                         "loaded_at": str(row[6]) if row[6] else None,
+                        "uploaded_by": provenance.get('uploaded_by', ''),
+                        "uploaded_at": provenance.get('uploaded_at', ''),
+                        "truth_type": provenance.get('truth_type', ''),
+                        "domain": provenance.get('domain', ''),
                         "type": "structured",
                         "sheets": []
                     }
