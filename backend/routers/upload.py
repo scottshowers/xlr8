@@ -885,14 +885,16 @@ def process_file_background(
                 if file_ext == 'csv':
                     result = handler.store_csv(
                         file_path, project, filename,
-                        progress_callback=structured_progress_callback
+                        progress_callback=structured_progress_callback,
+                        uploaded_by=uploaded_by_email
                     )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
                 else:
                     result = handler.store_excel(
                         file_path, project, filename,
-                        progress_callback=structured_progress_callback
+                        progress_callback=structured_progress_callback,
+                        uploaded_by=uploaded_by_email
                     )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
