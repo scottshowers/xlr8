@@ -494,9 +494,11 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                         "tables": 0,
                         "rows": 0,
                         "row_count": 0,
+                        "chunks": 0,  # Will be updated from document_registry if exists
                         "loaded_at": str(row[4]) if row[4] else None,
-                        "type": "pdf",
-                        "sheets": []
+                        "type": "structured",  # Default to structured, may become hybrid
+                        "sheets": [],
+                        "truth_type": ""
                     }
                 
                 # Add this table to sheets
@@ -512,7 +514,7 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
         except Exception as e:
             logger.debug(f"[PLATFORM] PDF tables query: {e}")
         
-        # From Supabase registry (for unstructured docs)
+        # From Supabase registry (for unstructured docs AND to add chunk info)
         try:
             supabase = get_supabase()
             if supabase:
@@ -526,15 +528,30 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
                 
                 for doc in (registry.data or []):
                     fname = doc.get("filename", "")
-                    if fname and fname not in files_dict:
+                    if not fname:
+                        continue
+                    
+                    chunk_count = doc.get("chunk_count", 0)
+                    storage_type = doc.get("storage_type", "chromadb")
+                    
+                    if fname in files_dict:
+                        # File exists from DuckDB - MERGE the chunk info
+                        files_dict[fname]["chunks"] = chunk_count
+                        if chunk_count > 0:
+                            # Has both structured AND vector data
+                            files_dict[fname]["type"] = "hybrid"
+                        if not files_dict[fname].get("truth_type"):
+                            files_dict[fname]["truth_type"] = doc.get("truth_type", "")
+                    else:
+                        # New file from registry only (unstructured/vector only)
                         files_dict[fname] = {
                             "filename": fname,
                             "project": doc.get("project_name", ""),
                             "tables": 0,
                             "rows": 0,
-                            "chunks": doc.get("chunk_count", 0),
+                            "chunks": chunk_count,
                             "loaded_at": doc.get("created_at"),
-                            "type": doc.get("storage_type", "chromadb"),
+                            "type": storage_type if chunk_count > 0 else "unknown",
                             "truth_type": doc.get("truth_type", ""),
                         }
         except:
