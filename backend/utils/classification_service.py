@@ -450,7 +450,11 @@ class ClassificationService:
         self, 
         columns: List[ColumnClassification]
     ) -> tuple:
-        """Detect the domain (tax, payroll, hr, etc.) from column values."""
+        """Detect the domain (tax, payroll, hr, etc.) from column values.
+        
+        Checks custom domains FIRST, then built-in domains.
+        """
+        # Built-in domain signals
         domain_signals = {
             'tax': ['sui', 'futa', 'sit', 'fica', 'withholding', 'w2', 'tax_code', 'tax_type'],
             'payroll': ['earnings', 'deduction', 'gross', 'net', 'pay_period', 'check_date'],
@@ -458,6 +462,23 @@ class ClassificationService:
             'benefits': ['benefit', 'coverage', 'plan', 'enrollment', 'premium'],
             'time': ['hours', 'timecard', 'punch', 'overtime', 'pto', 'absence']
         }
+        
+        # Load custom domains from DuckDB
+        try:
+            if self.structured_handler:
+                custom_rows = self.structured_handler.conn.execute("""
+                    SELECT name, signals FROM _custom_domains
+                """).fetchall()
+                
+                for row in custom_rows:
+                    name = row[0]
+                    signals = [s.strip() for s in row[1].split(',') if s.strip()]
+                    if signals:
+                        domain_signals[name] = signals
+                        logger.debug(f"[DOMAIN] Loaded custom domain '{name}' with {len(signals)} signals")
+        except Exception as e:
+            # Table might not exist yet - that's fine
+            logger.debug(f"[DOMAIN] No custom domains loaded: {e}")
         
         domain_scores = {d: 0 for d in domain_signals}
         
@@ -491,6 +512,11 @@ class ClassificationService:
                     break
         
         reason = "; ".join(triggers[:3]) if triggers else "Pattern matching on values"
+        
+        # Mark if it's a custom domain
+        is_custom = best_domain not in ['tax', 'payroll', 'hr', 'benefits', 'time']
+        if is_custom:
+            reason = f"[Custom Domain] {reason}"
         
         return best_domain, round(confidence, 2), reason
     
