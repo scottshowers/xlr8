@@ -176,6 +176,33 @@ const getThreatDataFallback = () => ({
 // UTILITY COMPONENTS
 // =============================================================================
 
+const Tooltip = ({ children, title, detail, action, T }) => {
+  const [show, setShow] = useState(false);
+  return (
+    <div style={{ position: 'relative', display: 'inline-block', width: '100%' }}
+      onMouseEnter={() => setShow(true)} onMouseLeave={() => setShow(false)}>
+      {children}
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+          marginBottom: '8px', padding: '12px 16px', backgroundColor: T.text, color: T.bg,
+          borderRadius: '8px', fontSize: '12px', width: '220px', zIndex: 1000, boxShadow: `0 4px 12px ${T.shadow}`,
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
+          <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
+          {action && (
+            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(128,128,128,0.3)', color: T.green, fontWeight: 500, fontSize: '11px' }}>
+              💡 {action}
+            </div>
+          )}
+          <div style={{ position: 'absolute', bottom: '-6px', left: '50%', transform: 'translateX(-50%)',
+            width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `6px solid ${T.text}` }} />
+        </div>
+      )}
+    </div>
+  );
+};
+
 const AccentText = ({ children, color, size = '1rem', mono = false, glow = false, T }) => (
   <span style={{
     color: color || T.green,
@@ -544,8 +571,8 @@ function SettingsModal({ open, onClose, T, onSave }) {
 // METRIC CARD
 // =============================================================================
 
-function MetricCard({ label, value, sublabel, status, T }) {
-  return (
+function MetricCard({ label, value, sublabel, status, T, tooltip }) {
+  const card = (
     <Panel T={T}>
       <div style={{ textAlign: 'center' }}>
         <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.4rem', letterSpacing: '0.05em' }}>
@@ -561,6 +588,11 @@ function MetricCard({ label, value, sublabel, status, T }) {
       </div>
     </Panel>
   );
+  
+  if (tooltip) {
+    return <Tooltip title={tooltip.title || label} detail={tooltip.detail} action={tooltip.action} T={T}>{card}</Tooltip>;
+  }
+  return card;
 }
 
 // =============================================================================
@@ -626,36 +658,32 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
 
   const handleMouseUp = () => setIsPanning(false);
 
-  // XLR8 FIVE TRUTHS ARCHITECTURE - Accurate representation
+  // XLR8 FIVE TRUTHS ARCHITECTURE - Horizontal layout for full width
   const nodes = {
-    // User Layer
-    user: { x: 50, y: 140, icon: '◉', label: 'USER', color: T.blue },
+    // User & API Layer (left)
+    user: { x: 60, y: 100, icon: '◉', label: 'USER', color: T.blue },
+    api: { x: 160, y: 100, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
+    supabase: { x: 110, y: 180, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
     
-    // API Gateway
-    api: { x: 160, y: 140, icon: '⬡', label: 'FASTAPI', color: T.blue, encrypted: true, threat: threatData?.api },
+    // FIVE TRUTHS - Arranged in 2 rows for better spacing
+    reality: { x: 320, y: 60, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
+    intent: { x: 420, y: 60, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
+    config: { x: 520, y: 60, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
+    reference: { x: 370, y: 140, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
+    regulatory: { x: 470, y: 140, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
     
-    // Auth & Metadata
-    supabase: { x: 80, y: 230, icon: '◈', label: 'SUPABASE', color: T.purple, encrypted: true, threat: threatData?.supabase },
-    
-    // FIVE TRUTHS DATA LAYER
-    reality: { x: 290, y: 50, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
-    intent: { x: 290, y: 105, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
-    config: { x: 290, y: 160, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
-    reference: { x: 290, y: 215, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
-    regulatory: { x: 290, y: 270, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
-    
-    // Intelligence Engine
-    intelligence: { x: 430, y: 140, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
+    // Intelligence Engine (center)
+    intelligence: { x: 640, y: 100, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
     
     // LLM Router
-    router: { x: 550, y: 140, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
+    router: { x: 780, y: 100, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
     
-    // Local LLMs (Primary)
-    deepseek: { x: 660, y: 80, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
-    mistral: { x: 660, y: 140, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
+    // Local LLMs (Primary) - top
+    deepseek: { x: 900, y: 50, icon: '○', label: 'DEEPSEEK', color: T.green, desc: 'SQL Gen' },
+    mistral: { x: 900, y: 110, icon: '○', label: 'MISTRAL', color: T.green, desc: 'Synthesis' },
     
-    // Cloud LLM (Fallback)
-    claude: { x: 660, y: 210, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
+    // Cloud LLM (Fallback) - bottom
+    claude: { x: 900, y: 170, icon: '●', label: 'CLAUDE', color: T.cyan, threat: threatData?.claude, desc: 'Fallback' },
   };
 
   const connections = [
@@ -714,7 +742,7 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
   };
 
   return (
-    <Panel title="SYSTEM TOPOLOGY" style={{ gridColumn: fullWidth ? 'span 4' : 'span 3' }} T={T}
+    <Panel title="SYSTEM TOPOLOGY" style={{ gridColumn: fullWidth ? 'span 6' : 'span 3' }} T={T}
       action={<span style={{ fontSize: '0.55rem', color: T.textDim }}>Zoom: {(zoom * 100).toFixed(0)}%</span>}
     >
       <div
@@ -725,16 +753,16 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        <svg width="100%" height="280" viewBox="0 0 720 280"
+        <svg width="100%" height="240" viewBox="0 0 980 240"
           style={{ transform: `scale(${zoom}) translate(${pan.x / zoom}px, ${pan.y / zoom}px)`, transformOrigin: 'center center', transition: isPanning ? 'none' : 'transform 0.1s ease-out' }}
         >
-          {/* Cloud zone - top right */}
-          <rect x="490" y="35" width="180" height="75" rx={6} fill={T.cyan} opacity={0.08} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="500" y={50} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>CLOUD ZONE</text>
+          {/* Five Truths zone - center */}
+          <rect x="295" y="30" width="260" height="140" rx={6} fill={T.cyan} opacity={0.05} stroke={T.cyan} strokeWidth={1} strokeOpacity={0.2} />
+          <text x="305" y={45} fontSize={8} fill={T.cyanDim} style={{ fontFamily: 'monospace' }}>FIVE TRUTHS</text>
           
-          {/* Local zone - bottom right */}
-          <rect x="490" y="145" width="200" height="80" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
-          <text x="500" y={160} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL ZONE</text>
+          {/* Local LLM zone - right */}
+          <rect x="860" y="25" width="100" height="150" rx={6} fill={T.green} opacity={0.08} stroke={T.green} strokeWidth={1} strokeOpacity={0.3} />
+          <text x="870" y={40} fontSize={8} fill={T.greenDim} style={{ fontFamily: 'monospace' }}>LOCAL</text>
           
           {connections.map((conn, i) => {
             const from = nodes[conn.from];
@@ -751,14 +779,14 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
           })}
           {Object.entries(nodes).map(([id, data]) => <Node key={id} id={id} data={data} />)}
           
-          {/* Legend - positioned at bottom with proper spacing */}
-          <g transform="translate(20, 255)">
+          {/* Legend - positioned at bottom */}
+          <g transform="translate(20, 215)">
             <circle cx={5} cy={0} r={4} fill={T.green} /><text x={14} y={3} fontSize={7} fill={T.textDim}>SECURE</text>
             <circle cx={70} cy={0} r={4} fill={T.yellow} /><text x={79} y={3} fontSize={7} fill={T.textDim}>REVIEW</text>
             <circle cx={130} cy={0} r={4} fill={T.red} /><text x={139} y={3} fontSize={7} fill={T.textDim}>ACTION</text>
             <g transform="translate(190, -3)"><circle r={5} fill="none" stroke={T.yellow} strokeWidth={1.5} strokeDasharray="2,2" /></g>
             <text x={200} y={3} fontSize={7} fill={T.textDim}>THREAT</text>
-            <text x={460} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
+            <text x={700} y={3} fontSize={7} fill={T.textDim} textAnchor="end">SCROLL TO ZOOM • DRAG TO PAN</text>
           </g>
         </svg>
       </div>
@@ -879,11 +907,36 @@ function SecurityPage({ T, onNodeClick, threatData }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
-      {/* Summary cards */}
-      <MetricCard label="TOTAL ISSUES" value={allIssues.length} status={allIssues.length > 5 ? 2 : allIssues.length > 0 ? 1 : 0} T={T} />
-      <MetricCard label="OPEN ISSUES" value={openIssues.length} status={openIssues.length > 3 ? 2 : openIssues.length > 0 ? 1 : 0} T={T} />
-      <MetricCard label="HIGH SEVERITY" value={highSeverity.length} status={highSeverity.length > 0 ? 2 : 0} T={T} />
-      <MetricCard label="COMPONENTS AT RISK" value={components.filter(c => c.level > 0).length} sublabel={`of ${components.length}`} status={0} T={T} />
+      {/* Summary cards with tooltips */}
+      <MetricCard 
+        label="TOTAL ISSUES" 
+        value={allIssues.length} 
+        status={allIssues.length > 5 ? 2 : allIssues.length > 0 ? 1 : 0} 
+        T={T}
+        tooltip={{ detail: "All security issues detected across components, including open, acknowledged, and in-progress.", action: "Review Open Issues below" }}
+      />
+      <MetricCard 
+        label="OPEN ISSUES" 
+        value={openIssues.length} 
+        status={openIssues.length > 3 ? 2 : openIssues.length > 0 ? 1 : 0} 
+        T={T}
+        tooltip={{ detail: "Security issues not yet addressed. These require review and remediation.", action: "Click component to see details" }}
+      />
+      <MetricCard 
+        label="HIGH SEVERITY" 
+        value={highSeverity.length} 
+        status={highSeverity.length > 0 ? 2 : 0} 
+        T={T}
+        tooltip={{ detail: "Critical issues that should be addressed immediately. Could expose sensitive data or create vulnerabilities.", action: "Prioritize these first" }}
+      />
+      <MetricCard 
+        label="COMPONENTS AT RISK" 
+        value={components.filter(c => c.level > 0).length} 
+        sublabel={`of ${components.length}`} 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "System components with at least one open security issue.", action: "Click topology nodes for details" }}
+      />
 
       {/* Component grid */}
       <Panel title="COMPONENT STATUS" style={{ gridColumn: 'span 2' }} T={T}>
@@ -1016,12 +1069,43 @@ function PerformancePage({ T, data }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
-      {/* Response times */}
-      <MetricCard label="AVG RESPONSE" value={`${perfData.avgResponse}s`} status={perfData.avgResponse < 2 ? 0 : perfData.avgResponse < 5 ? 1 : 2} T={T} />
-      <MetricCard label="P95 RESPONSE" value={`${perfData.p95Response}s`} status={perfData.p95Response < 3 ? 0 : perfData.p95Response < 6 ? 1 : 2} T={T} />
-      <MetricCard label="P99 RESPONSE" value={`${perfData.p99Response}s`} status={perfData.p99Response < 5 ? 0 : perfData.p99Response < 10 ? 1 : 2} T={T} />
-      <MetricCard label="SUCCESS RATE" value={`${perfData.successRate}%`} status={perfData.successRate > 99 ? 0 : perfData.successRate > 95 ? 1 : 2} T={T} />
-      <MetricCard label="THROUGHPUT" value={perfData.throughput} sublabel="req/min" status={0} T={T} />
+      {/* Response times with tooltips */}
+      <MetricCard 
+        label="AVG RESPONSE" 
+        value={`${perfData.avgResponse}s`} 
+        status={perfData.avgResponse < 2 ? 0 : perfData.avgResponse < 5 ? 1 : 2} 
+        T={T}
+        tooltip={{ detail: "Mean response time across all queries. Target: under 2 seconds.", action: "Check slow queries in logs" }}
+      />
+      <MetricCard 
+        label="P95 RESPONSE" 
+        value={`${perfData.p95Response}s`} 
+        status={perfData.p95Response < 3 ? 0 : perfData.p95Response < 6 ? 1 : 2} 
+        T={T}
+        tooltip={{ detail: "95th percentile response time. 95% of queries are faster than this.", action: "Good indicator of typical user experience" }}
+      />
+      <MetricCard 
+        label="P99 RESPONSE" 
+        value={`${perfData.p99Response}s`} 
+        status={perfData.p99Response < 5 ? 0 : perfData.p99Response < 10 ? 1 : 2} 
+        T={T}
+        tooltip={{ detail: "99th percentile response time. Worst-case performance for most users.", action: "High P99 indicates outlier issues" }}
+      />
+      <MetricCard 
+        label="SUCCESS RATE" 
+        value={`${perfData.successRate}%`} 
+        status={perfData.successRate > 99 ? 0 : perfData.successRate > 95 ? 1 : 2} 
+        T={T}
+        tooltip={{ detail: "Percentage of requests that complete successfully without errors.", action: "Target: 99%+ for production" }}
+      />
+      <MetricCard 
+        label="THROUGHPUT" 
+        value={perfData.throughput} 
+        sublabel="req/min" 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Total requests processed per minute across all endpoints.", action: "Higher = more platform utilization" }}
+      />
 
       {/* Resource usage */}
       <Panel title="RESOURCE USAGE" style={{ gridColumn: 'span 3' }} T={T}>
@@ -1110,10 +1194,34 @@ function CostsPage({ T, data, onSettingsClick }) {
 
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem' }}>
-      <MetricCard label="MTD SPEND" value={`$${(data.month.total || 0).toFixed(0)}`} sublabel={data.month.month_name} T={T} />
-      <MetricCard label="FIXED COSTS" value={`$${(data.month.fixed || 0).toFixed(0)}`} sublabel="subscriptions" T={T} />
-      <MetricCard label="API USAGE" value={`$${(data.usage.total || 0).toFixed(2)}`} sublabel={`${data.usage.calls || 0} calls`} T={T} />
-      <MetricCard label="DAILY AVG" value={`$${dailyCosts.length ? (dailyCosts.reduce((s, d) => s + (d.total || 0), 0) / dailyCosts.length).toFixed(2) : '0.00'}`} sublabel="last 14 days" T={T} />
+      <MetricCard 
+        label="MTD SPEND" 
+        value={`$${(data.month.total || 0).toFixed(0)}`} 
+        sublabel={data.month.month_name} 
+        T={T}
+        tooltip={{ detail: "Month-to-date total spend including fixed subscriptions and variable API costs.", action: "Compare to budget targets" }}
+      />
+      <MetricCard 
+        label="FIXED COSTS" 
+        value={`$${(data.month.fixed || 0).toFixed(0)}`} 
+        sublabel="subscriptions" 
+        T={T}
+        tooltip={{ detail: "Monthly subscription costs for Supabase, RunPod, Railway, Vercel, and other services.", action: "Manage in Settings" }}
+      />
+      <MetricCard 
+        label="API USAGE" 
+        value={`$${(data.usage.total || 0).toFixed(2)}`} 
+        sublabel={`${data.usage.calls || 0} calls`} 
+        T={T}
+        tooltip={{ detail: "Variable costs from Claude, RunPod inference, and other pay-per-use APIs.", action: "Increase local LLM usage to reduce" }}
+      />
+      <MetricCard 
+        label="DAILY AVG" 
+        value={`$${dailyCosts.length ? (dailyCosts.reduce((s, d) => s + (d.total || 0), 0) / dailyCosts.length).toFixed(2) : '0.00'}`} 
+        sublabel="last 14 days" 
+        T={T}
+        tooltip={{ detail: "Average daily spend over the past two weeks. Use to project monthly costs.", action: "Multiply by 30 for monthly estimate" }}
+      />
 
       <Panel title="14-DAY TREND" style={{ gridColumn: 'span 4' }} T={T}>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 4, height: 120 }}>
@@ -1162,38 +1270,90 @@ function CostsPage({ T, data, onSettingsClick }) {
 
 function OverviewPage({ T, data, flow, selectedNode, onNodeClick, activity, threatData }) {
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
-      <MetricCard label={`${data.month.month_name || 'DEC'} SPEND`} value={`$${(data.month.total || 0).toFixed(0)}`} sublabel="Total" T={T} />
-      <MetricCard label="API USAGE" value={`$${(data.usage.total || 0).toFixed(2)}`} sublabel={`${data.usage.calls || 0} calls`} status={0} T={T} />
-      <MetricCard label="DOCUMENTS" value={(data.stats.files || 0).toLocaleString()} sublabel="Processed" status={0} T={T} />
-      <MetricCard label="LOCAL %" value="62%" sublabel="Cost savings" status={0} T={T} />
-      <MetricCard label="UPTIME" value="99.9%" sublabel="30 days" status={0} T={T} />
+    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: '0.75rem' }}>
+      {/* Row 1: Metric Cards with Tooltips */}
+      <MetricCard 
+        label={`${data.month.month_name || 'DEC'} SPEND`} 
+        value={`$${(data.month.total || 0).toFixed(0)}`} 
+        sublabel="Total" 
+        T={T}
+        tooltip={{ detail: "Total platform costs this month including fixed subscriptions and API usage.", action: "View Costs tab for breakdown" }}
+      />
+      <MetricCard 
+        label="API USAGE" 
+        value={`$${(data.usage.total || 0).toFixed(2)}`} 
+        sublabel={`${data.usage.calls || 0} calls`} 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Variable costs from Claude, RunPod, and other APIs. Updated in real-time.", action: "Local LLMs reduce this cost" }}
+      />
+      <MetricCard 
+        label="DOCUMENTS" 
+        value={(data.stats.files || 0).toLocaleString()} 
+        sublabel="Processed" 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Files uploaded and processed into the platform. Includes PDFs, Excel, CSV, and documents.", action: "Upload more via Data page" }}
+      />
+      <MetricCard 
+        label="LOCAL %" 
+        value="62%" 
+        sublabel="Cost savings" 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Percentage of LLM calls handled by local models (DeepSeek, Mistral) vs cloud (Claude).", action: "Higher = more savings" }}
+      />
+      <MetricCard 
+        label="UPTIME" 
+        value="99.9%" 
+        sublabel="30 days" 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Platform availability over the last 30 days. Calculated from all service health checks.", action: "Check Security tab for issues" }}
+      />
+      <MetricCard 
+        label="QUERIES" 
+        value={(data.stats.queries || 0).toLocaleString()} 
+        sublabel="This month" 
+        status={0} 
+        T={T}
+        tooltip={{ detail: "Total chat queries processed this month. Includes both structured (SQL) and semantic (RAG) queries.", action: "View Performance tab for response times" }}
+      />
 
+      {/* Row 2: Spend + Storage + Activity (side by side) */}
       <SpendBreakdown data={{ fixed: data.month.fixed, claude: data.usage.claude, runpod: data.usage.runpod, textract: data.usage.textract }} T={T} />
-      <SystemTopology flow={flow} onNodeClick={onNodeClick} selectedNode={selectedNode} T={T} threatData={threatData} />
 
       <Panel title="STORAGE" style={{ gridColumn: 'span 2' }} T={T}>
         <div style={{ display: 'flex', gap: '1.5rem' }}>
-          <div>
-            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>STRUCTURED</div>
-            <AccentText size="1.2rem" color={T.purple} mono glow={T.name === 'dark'} T={T}>{(data.stats.rows || 0).toLocaleString()}</AccentText>
-            <div style={{ fontSize: '0.6rem', color: T.textDim }}>rows</div>
-          </div>
-          <div>
-            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>VECTOR</div>
-            <AccentText size="1.2rem" color={T.cyan} mono glow={T.name === 'dark'} T={T}>{(data.stats.chunks || 0).toLocaleString()}</AccentText>
-            <div style={{ fontSize: '0.6rem', color: T.textDim }}>chunks</div>
-          </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>RATIO</div>
-            <div style={{ height: 6, background: T.panelBorder, borderRadius: 3, marginTop: '0.5rem' }}>
-              <div style={{ height: '100%', width: '60%', background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})`, borderRadius: 3 }} />
+          <Tooltip title="Structured Data" detail="Rows stored in DuckDB from uploaded spreadsheets and CSVs. Queryable via SQL." action="View in Data Explorer" T={T}>
+            <div>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>STRUCTURED</div>
+              <AccentText size="1.2rem" color={T.purple} mono glow={T.name === 'dark'} T={T}>{(data.stats.rows || 0).toLocaleString()}</AccentText>
+              <div style={{ fontSize: '0.6rem', color: T.textDim }}>rows</div>
             </div>
-          </div>
+          </Tooltip>
+          <Tooltip title="Vector Data" detail="Document chunks stored in ChromaDB for semantic search. Used by RAG engine." action="Upload PDFs to add more" T={T}>
+            <div>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>VECTOR</div>
+              <AccentText size="1.2rem" color={T.cyan} mono glow={T.name === 'dark'} T={T}>{(data.stats.chunks || 0).toLocaleString()}</AccentText>
+              <div style={{ fontSize: '0.6rem', color: T.textDim }}>chunks</div>
+            </div>
+          </Tooltip>
+          <Tooltip title="Storage Ratio" detail="Balance between structured (SQL queryable) and vector (semantic searchable) data." action="Ideal ratio depends on use case" T={T}>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: '0.6rem', color: T.textDim, fontFamily: 'monospace', marginBottom: '0.3rem' }}>RATIO</div>
+              <div style={{ height: 6, background: T.panelBorder, borderRadius: 3, marginTop: '0.5rem' }}>
+                <div style={{ height: '100%', width: '60%', background: `linear-gradient(90deg, ${T.purple}, ${T.cyan})`, borderRadius: 3 }} />
+              </div>
+            </div>
+          </Tooltip>
         </div>
       </Panel>
 
-      <ActivityLog entries={activity} T={T} />
+      <ActivityLog entries={activity} style={{ gridColumn: 'span 2' }} T={T} />
+
+      {/* Row 3: System Topology (full width, larger) */}
+      <SystemTopology flow={flow} onNodeClick={onNodeClick} selectedNode={selectedNode} T={T} threatData={threatData} fullWidth={true} />
     </div>
   );
 }
