@@ -525,19 +525,37 @@ def extract_columns_with_vision(
             "text": COLUMN_EXTRACTION_PROMPT
         })
         
-        # Call Claude Vision API
-        client = anthropic.Anthropic(api_key=api_key)
+        # Call Claude Vision API with timeout
+        client = anthropic.Anthropic(
+            api_key=api_key,
+            timeout=120.0  # 2 minute timeout for Vision API
+        )
         
         logger.warning("[PDF-VISION] Calling Claude Vision API...")
         
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            messages=[{
-                "role": "user",
-                "content": image_contents
-            }]
-        )
+        try:
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=1024,
+                messages=[{
+                    "role": "user",
+                    "content": image_contents
+                }]
+            )
+        except anthropic.APITimeoutError:
+            logger.error("[PDF-VISION] Claude Vision API timed out after 120s")
+            return {
+                'columns': [],
+                'error': 'Claude Vision API timeout',
+                'success': False
+            }
+        except anthropic.RateLimitError as e:
+            logger.error(f"[PDF-VISION] Rate limited: {e}")
+            return {
+                'columns': [],
+                'error': 'Rate limited - try again later',
+                'success': False
+            }
         
         # Parse response
         response_text = response.content[0].text.strip()
