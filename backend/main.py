@@ -10,7 +10,6 @@ Updated: December 17, 2025 - Replaced vacuum with register_extractor (local LLM 
 Updated: December 23, 2025 - Added smart_router (unified upload endpoint)
 Updated: December 23, 2025 - Added metrics_router (platform analytics)
 Updated: December 27, 2025 - Added classification_router (FIVE TRUTHS transparency layer)
-Updated: December 27, 2025 - Added status_core router (/api/status, /api/status/dashboard, /api/project-intelligence/genome)
 """
 
 from fastapi import FastAPI
@@ -177,13 +176,13 @@ except ImportError as e:
     CLASSIFICATION_AVAILABLE = False
     logging.warning(f"Classification router import failed: {e}")
 
-# Import status_core router (base status endpoints)
+# Import platform router (COMPREHENSIVE status endpoint - replaces 50+ scattered endpoints)
 try:
-    from backend.routers import status_core
-    STATUS_CORE_AVAILABLE = True
+    from backend.routers import platform
+    PLATFORM_AVAILABLE = True
 except ImportError as e:
-    STATUS_CORE_AVAILABLE = False
-    logging.warning(f"Status core router import failed: {e}")
+    PLATFORM_AVAILABLE = False
+    logging.warning(f"Platform router import failed: {e}")
 
 # Standards endpoints are now in upload.py (no separate router needed)
 
@@ -422,12 +421,12 @@ if CLASSIFICATION_AVAILABLE:
 else:
     logger.warning("Classification router not available")
 
-# Register status_core router (base /status, /status/dashboard, /project-intelligence/genome)
-if STATUS_CORE_AVAILABLE:
-    app.include_router(status_core.router, prefix="/api", tags=["status"])
-    logger.info("Status core router registered at /api")
+# Register platform router if available (COMPREHENSIVE status - ONE endpoint for everything)
+if PLATFORM_AVAILABLE:
+    app.include_router(platform.router, prefix="/api", tags=["platform"])
+    logger.info("Platform router registered at /api/platform - USE THIS INSTEAD OF 50+ STATUS ENDPOINTS")
 else:
-    logger.warning("Status core router not available")
+    logger.warning("Platform router not available")
 
 
 @app.get("/api/debug/imports")
