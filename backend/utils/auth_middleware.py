@@ -98,28 +98,33 @@ async def get_user_profile(user_id: str) -> dict:
             "mfa_enabled": False,
         }
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}&select=*",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-            }
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}&select=*",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                }
+            )
+            
+            if response.status_code == 200:
+                profiles = response.json()
+                if profiles:
+                    return profiles[0]
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        # Log but don't crash - return default profile
+        import logging
+        logging.warning(f"Supabase profile fetch timeout for {user_id}: {e}")
         
-        if response.status_code == 200:
-            profiles = response.json()
-            if profiles:
-                return profiles[0]
-        
-        # Return default if not found
-        return {
-            "id": user_id,
-            "email": "unknown",
-            "role": "customer",
-            "project_id": None,
-            "mfa_enabled": False,
-        }
+    # Return default if not found or timeout
+    return {
+        "id": user_id,
+        "email": "unknown",
+        "role": "customer",
+        "project_id": None,
+        "mfa_enabled": False,
+    }
 
 
 async def get_role_permissions(role: str) -> List[str]:
@@ -141,20 +146,25 @@ async def get_role_permissions(role: str) -> List[str]:
         else:
             return ["chat", "export", "projects_own"]
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(
-            f"{SUPABASE_URL}/rest/v1/role_permissions?role=eq.{role}&allowed=eq.true&select=permission",
-            headers={
-                "apikey": SUPABASE_KEY,
-                "Authorization": f"Bearer {SUPABASE_KEY}",
-            }
-        )
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                f"{SUPABASE_URL}/rest/v1/role_permissions?role=eq.{role}&allowed=eq.true&select=permission",
+                headers={
+                    "apikey": SUPABASE_KEY,
+                    "Authorization": f"Bearer {SUPABASE_KEY}",
+                }
+            )
+            
+            if response.status_code == 200:
+                rows = response.json()
+                return [row["permission"] for row in rows]
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        import logging
+        logging.warning(f"Supabase permissions fetch timeout for role {role}: {e}")
         
-        if response.status_code == 200:
-            rows = response.json()
-            return [row["permission"] for row in rows]
-        
-        return []
+    # Return basic permissions on timeout
+    return ["chat", "export", "projects_own"]
 
 
 # =============================================================================
