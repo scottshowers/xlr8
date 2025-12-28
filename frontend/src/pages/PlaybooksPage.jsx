@@ -13,7 +13,7 @@ import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import YearEndPlaybook from '../components/YearEndPlaybook';
-import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card } from '../components/ui';
+import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card, Tooltip } from '../components/ui';
 import api from '../services/api';
 import { getCustomerColorPalette } from '../utils/customerColors';
 
@@ -784,26 +784,36 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       </div>
 
       <div style={styles.footer}>
-        <span style={styles.time}>⏱️ {playbook.estimatedTime}</span>
+        <Tooltip title="Estimated Time" detail={`This playbook typically takes ${playbook.estimatedTime} to complete.`} action="Time varies based on data complexity">
+          <span style={styles.time}>⏱️ {playbook.estimatedTime}</span>
+        </Tooltip>
         <div style={styles.buttons}>
           {isAdmin && (
-            <button 
-              style={styles.configBtn}
-              onClick={(e) => {
-                e.stopPropagation();
-                onConfigure(playbook);
-              }}
-            >
-              ⚙️ Configure
-            </button>
+            <Tooltip title="Configure Playbook" detail="Link standards documents to this playbook for compliance checking." action="Admin only">
+              <button 
+                style={styles.configBtn}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfigure(playbook);
+                }}
+              >
+                ⚙️ Configure
+              </button>
+            </Tooltip>
           )}
-          <button 
-            style={styles.button} 
-            onClick={() => onRun(playbook)}
-            disabled={!playbook.hasRunner}
+          <Tooltip 
+            title={playbook.hasRunner ? (hasProgress ? 'Continue Analysis' : 'Start Analysis') : 'Coming Soon'} 
+            detail={playbook.hasRunner ? `Run ${playbook.name} against your project data.` : 'This playbook is still in development.'}
+            action={playbook.hasRunner ? 'Results saved automatically' : 'Check back soon'}
           >
-            {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
-          </button>
+            <button 
+              style={styles.button} 
+              onClick={() => onRun(playbook)}
+              disabled={!playbook.hasRunner}
+            >
+              {playbook.hasRunner ? (hasProgress ? 'Continue →' : 'Kickoff →') : 'Coming Soon'}
+            </button>
+          </Tooltip>
         </div>
       </div>
     </div>
