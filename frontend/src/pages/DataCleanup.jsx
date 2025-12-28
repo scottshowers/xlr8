@@ -55,50 +55,23 @@ export default function DataCleanup() {
   const loadTables = async () => {
     setLoading(l => ({ ...l, tables: true }));
     try {
-      const res = await fetch(`${API_BASE}/api/status/structured`);
+      // Use classification endpoint - provides all table details
+      const res = await fetch(`${API_BASE}/api/classification/tables`);
       const data = await res.json();
       
-      // Response is { files: [{ filename, sheets: [{ table_name, row_count, ... }] }] }
-      // Flatten to array of tables
-      const allTables = [];
-      if (data.files && Array.isArray(data.files)) {
-        for (const file of data.files) {
-          if (file.sheets && Array.isArray(file.sheets)) {
-            for (const sheet of file.sheets) {
-              // Generate friendly display name
-              // Priority: explicit display_name > file.filename > sheet.sheet_name > table_name
-              let displayName = sheet.display_name;
-              if (!displayName) {
-                // Use filename without extension, cleaned up
-                const baseName = (file.filename || '').replace(/\.[^/.]+$/, '');
-                if (file.sheets.length > 1 && sheet.sheet_name && sheet.sheet_name !== 'data') {
-                  // Multi-sheet file: "Filename - Sheet"
-                  displayName = `${baseName} - ${sheet.sheet_name}`;
-                } else {
-                  displayName = baseName || sheet.sheet_name || sheet.table_name;
-                }
-              }
-              
-              allTables.push({
-                table_name: sheet.table_name,
-                display_name: displayName,
-                row_count: sheet.row_count || 0,
-                column_count: sheet.column_count || sheet.columns?.length || 0,
-                file_name: file.filename,
-                sheet_name: sheet.sheet_name,
-                project: file.project,
-                created_at: sheet.created_at || file.loaded_at,
-                uploaded_by: sheet.uploaded_by
-              });
-            }
-          }
-        }
-      } else if (data.tables) {
-        // Fallback if response format is different
-        allTables.push(...data.tables);
-      } else if (Array.isArray(data)) {
-        allTables.push(...data);
-      }
+      // Response is array of table classifications
+      const allTables = (data || []).map(t => ({
+        table_name: t.table_name,
+        display_name: t.display_name || t.table_name,
+        row_count: t.row_count || 0,
+        column_count: t.column_count || t.columns?.length || 0,
+        file_name: t.file_name || t.source_file,
+        sheet_name: t.sheet_name,
+        project: t.project,
+        created_at: t.created_at,
+        uploaded_by: t.uploaded_by,
+        domain: t.domain
+      }));
       
       setTables(allTables);
     } catch (e) {
@@ -111,9 +84,10 @@ export default function DataCleanup() {
   const loadDocuments = async () => {
     setLoading(l => ({ ...l, documents: true }));
     try {
-      const res = await fetch(`${API_BASE}/api/status/documents`);
+      // Use classification endpoint - provides document chunk counts
+      const res = await fetch(`${API_BASE}/api/classification/chunks`);
       const data = await res.json();
-      // Response is { documents: [{ filename, chunks, ... }] }
+      // Response is { documents: [{ filename, chunk_count, ... }] }
       setDocuments(data.documents || data || []);
     } catch (e) {
       console.error('Failed to load documents:', e);
