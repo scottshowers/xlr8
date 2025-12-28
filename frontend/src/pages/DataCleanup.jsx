@@ -59,18 +59,18 @@ export default function DataCleanup() {
       const res = await fetch(`${API_BASE}/api/classification/tables`);
       const data = await res.json();
       
-      // Response is array of table classifications
-      const allTables = (data || []).map(t => ({
+      // Response is { success, tables: [...], total }
+      const allTables = (data.tables || []).map(t => ({
         table_name: t.table_name,
         display_name: t.display_name || t.table_name,
         row_count: t.row_count || 0,
         column_count: t.column_count || t.columns?.length || 0,
-        file_name: t.file_name || t.source_file,
+        file_name: t.source_filename || t.file_name || t.source_file,
         sheet_name: t.sheet_name,
         project: t.project,
         created_at: t.created_at,
         uploaded_by: t.uploaded_by,
-        domain: t.domain
+        domain: t.detected_domain || t.domain
       }));
       
       setTables(allTables);
