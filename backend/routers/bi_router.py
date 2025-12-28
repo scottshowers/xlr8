@@ -485,8 +485,26 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         except Exception as e:
             logger.debug(f"[BI] Could not look up customer name: {e}")
         
-        # STEP 1: Build lookup of display_names from _schema_metadata (source of truth)
+        # STEP 0: Build lookup of truth_type and domain from document_registry
+        file_metadata_lookup = {}  # filename.lower() -> {truth_type, domain}
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                registry = supabase.table('document_registry').select('filename, truth_type, content_domain').execute()
+                for entry in (registry.data or []):
+                    fname = (entry.get('filename') or '').lower()
+                    if fname:
+                        file_metadata_lookup[fname] = {
+                            'truth_type': entry.get('truth_type') or 'reality',
+                            'domain': entry.get('content_domain') or ''
+                        }
+        except Exception as e:
+            logger.debug(f"[BI] Could not load file metadata from registry: {e}")
+        
+        # STEP 1: Build lookup of display_names and file_names from _schema_metadata (source of truth)
         display_name_lookup = {}
+        file_name_lookup = {}  # table_name -> file_name
         try:
             meta_results = handler.conn.execute("""
                 SELECT table_name, display_name, file_name, sheet_name
@@ -494,8 +512,11 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 WHERE is_current = TRUE
             """).fetchall()
             for row in meta_results:
-                if row[0] and row[1]:  # table_name and display_name
-                    display_name_lookup[row[0]] = row[1]
+                if row[0]:  # table_name
+                    if row[1]:  # display_name
+                        display_name_lookup[row[0]] = row[1]
+                    if row[2]:  # file_name
+                        file_name_lookup[row[0]] = row[2]
         except Exception as e:
             logger.debug(f"[BI] Could not load display names from metadata: {e}")
         
@@ -548,13 +569,22 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 if not display_name:
                     display_name = generate_display_name(table_name, project=customer_name)
                 
+                # Get truth_type and domain from file metadata
+                file_name = file_name_lookup.get(table_name, '')
+                file_meta = file_metadata_lookup.get(file_name.lower(), {})
+                truth_type = file_meta.get('truth_type', 'reality')
+                domain = file_meta.get('domain', '')
+                
                 tables.append({
                     'table_name': table_name,
                     'display_name': display_name,
                     'project': project,
                     'customer': customer_name,
                     'columns': columns,
-                    'row_count': row_count
+                    'row_count': row_count,
+                    'truth_type': truth_type,
+                    'domain': domain,
+                    'file': file_name
                 })
                 
             except Exception as e:
