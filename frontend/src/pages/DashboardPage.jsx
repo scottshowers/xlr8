@@ -50,7 +50,7 @@ const colors = {
   success: '#285390',
 };
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
 
 async function fetchJSON(endpoint) {
   try {
