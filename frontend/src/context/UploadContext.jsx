@@ -70,31 +70,42 @@ export function UploadProvider({ children }) {
 
     const poll = async () => {
       try {
-        const res = await api.get(`/register/job/${jobId}`);
+        const res = await api.get(`/jobs/${jobId}`);
         const job = res.data;
 
         setUploads(prev => prev.map(u => {
           if (u.id !== uploadId) return u;
 
-          // Determine display status and message
+          // Map actual API response to our format
+          // API returns: { status, progress: {step, percent}, result_data, error_message }
           let displayStatus = job.status || 'processing';
-          let displayMessage = job.message || STAGE_MESSAGES[displayStatus] || 'Processing...';
+          let displayProgress = job.progress?.percent || u.progress || 50;
+          let displayMessage = job.progress?.step || STAGE_MESSAGES[displayStatus] || 'Processing...';
 
-          // Map backend status to our canonical format
+          // Handle completion
           if (job.status === 'completed') {
             displayStatus = 'completed';
-            displayMessage = `Done: ${job.result?.employees_found || job.result?.row_count || 0} rows`;
+            const result = job.result_data || {};
+            const rowCount = result.total_rows || result.row_count || result.employees_found || 0;
+            const chunks = result.chunks_created || 0;
+            if (rowCount > 0) {
+              displayMessage = `Done: ${rowCount.toLocaleString()} rows`;
+            } else if (chunks > 0) {
+              displayMessage = `Done: ${chunks} chunks`;
+            } else {
+              displayMessage = 'Complete';
+            }
           } else if (job.status === 'failed' || job.status === 'error') {
             displayStatus = 'failed';
-            displayMessage = job.error || job.message || 'Processing failed';
+            displayMessage = job.error_message || job.error || 'Processing failed';
           }
 
           return {
             ...u,
             status: displayStatus,
-            progress: job.progress || u.progress,
+            progress: displayProgress,
             message: displayMessage,
-            result: job.result,
+            result: job.result_data,
           };
         }));
 
@@ -235,6 +246,15 @@ export function UploadProvider({ children }) {
 
   const clearCompleted = useCallback(() => {
     setUploads(prev => prev.filter(u => u.status !== 'completed'));
+  }, []);
+
+  const clearAll = useCallback(() => {
+    // Stop ALL polling
+    Object.keys(pollIntervals.current).forEach(id => {
+      clearInterval(pollIntervals.current[id]);
+      delete pollIntervals.current[id];
+    });
+    setUploads([]);
   }, []);
 
   const activeCount = uploads.filter(u => 
