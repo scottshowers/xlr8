@@ -371,7 +371,7 @@ function SettingsModal({ open, onClose, T, onSave }) {
   useEffect(() => {
     if (open) {
       // Fetch current settings from API
-      api.get('/status/costs/fixed').then(res => {
+      api.get('/metrics/costs/fixed').then(res => {
         if (res.data && Array.isArray(res.data)) {
           const subs = res.data.filter(i => i.category === 'subscription');
           if (subs.length > 0) {
@@ -401,7 +401,7 @@ function SettingsModal({ open, onClose, T, onSave }) {
     setSaving(true);
     try {
       for (const sub of subscriptions) {
-        await api.put(`/status/costs/fixed/${encodeURIComponent(sub.name)}`, null, {
+        await api.put(`/metrics/costs/fixed/${encodeURIComponent(sub.name)}`, null, {
           params: { cost_per_unit: sub.cost, quantity: sub.quantity }
         });
       }
@@ -1072,7 +1072,7 @@ function CostsPage({ T, data, onSettingsClick }) {
   const [dailyCosts, setDailyCosts] = useState([]);
 
   useEffect(() => {
-    api.get('/status/costs/daily?days=14').then(res => {
+    api.get('/metrics/costs/daily?days=14').then(res => {
       if (res.data && Array.isArray(res.data)) {
         setDailyCosts(res.data);
       }
@@ -1248,9 +1248,9 @@ export default function SystemMonitor() {
     const fetchData = async () => {
       try {
         const [monthRes, usageRes, structRes] = await Promise.all([
-          api.get('/status/costs/month').catch(() => ({ data: {} })),
-          api.get('/status/costs?days=30').catch(() => ({ data: {} })),
-          api.get('/status/structured').catch(() => ({ data: {} })),
+          api.get('/metrics/costs/month').catch(() => ({ data: {} })),
+          api.get('/metrics/costs?days=30').catch(() => ({ data: {} })),
+          api.get('/platform').catch(() => ({ data: {} })),
         ]);
         setData({
           month: { total: monthRes.data?.total || 0, fixed: monthRes.data?.fixed_costs || 0, api: monthRes.data?.api_usage || 0, month_name: monthRes.data?.month_name?.toUpperCase()?.slice(0, 3) || 'DEC' },

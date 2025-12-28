@@ -138,3 +138,128 @@ async def get_metrics_health():
         return {"healthy": True, "recent_uploads": summary.get('total_uploads', 0)}
     except Exception as e:
         return {"healthy": False, "reason": str(e)}
+
+
+# =============================================================================
+# COST TRACKING ENDPOINTS
+# =============================================================================
+
+@router.get("/costs")
+async def get_cost_summary(days: int = 30, project_id: Optional[str] = None):
+    """Get cost summary for System Monitor dashboard."""
+    try:
+        from backend.utils.cost_tracker import get_cost_summary
+        return get_cost_summary(days=days, project_id=project_id)
+    except ImportError:
+        try:
+            from utils.cost_tracker import get_cost_summary
+            return get_cost_summary(days=days, project_id=project_id)
+        except ImportError:
+            return {"error": "Cost tracker not available", "total_cost": 0}
+    except Exception as e:
+        logger.error(f"Cost summary failed: {e}")
+        return {"error": str(e), "total_cost": 0}
+
+
+@router.get("/costs/by-project")
+async def get_costs_by_project():
+    """Get costs grouped by project."""
+    try:
+        from backend.utils.cost_tracker import get_cost_by_project
+        return get_cost_by_project()
+    except ImportError:
+        try:
+            from utils.cost_tracker import get_cost_by_project
+            return get_cost_by_project()
+        except ImportError:
+            return []
+    except Exception as e:
+        logger.error(f"Cost by project failed: {e}")
+        return []
+
+
+@router.get("/costs/recent")
+async def get_recent_costs(limit: int = 100):
+    """Get recent cost entries for detailed view."""
+    try:
+        from utils.database.supabase_client import get_supabase
+        client = get_supabase()
+        if not client:
+            return {"error": "Supabase not available", "records": []}
+        
+        result = client.table("cost_tracking").select("*").order(
+            "created_at", desc=True
+        ).limit(limit).execute()
+        
+        return {"records": result.data or [], "count": len(result.data or [])}
+    except Exception as e:
+        logger.error(f"Recent costs query failed: {e}")
+        return {"records": [], "count": 0, "error": str(e)}
+
+
+@router.get("/costs/daily")
+async def get_daily_costs(days: int = 7):
+    """Get daily cost breakdown."""
+    try:
+        from backend.utils.cost_tracker import get_daily_costs
+        return get_daily_costs(days=days)
+    except ImportError:
+        try:
+            from utils.cost_tracker import get_daily_costs
+            return get_daily_costs(days=days)
+        except ImportError:
+            return []
+    except Exception as e:
+        logger.error(f"Daily costs failed: {e}")
+        return []
+
+
+@router.get("/costs/month")
+async def get_month_costs(year: int = None, month: int = None):
+    """Get costs for a specific calendar month (includes fixed costs)."""
+    try:
+        from backend.utils.cost_tracker import get_month_costs
+        return get_month_costs(year=year, month=month)
+    except ImportError:
+        try:
+            from utils.cost_tracker import get_month_costs
+            return get_month_costs(year=year, month=month)
+        except ImportError:
+            return {"error": "Cost tracker not available"}
+    except Exception as e:
+        logger.error(f"Month costs failed: {e}")
+        return {"error": str(e)}
+
+
+@router.get("/costs/fixed")
+async def get_fixed_costs():
+    """Get fixed/subscription costs."""
+    try:
+        from backend.utils.cost_tracker import get_fixed_costs
+        return get_fixed_costs()
+    except ImportError:
+        try:
+            from utils.cost_tracker import get_fixed_costs
+            return get_fixed_costs()
+        except ImportError:
+            return {"error": "Cost tracker not available", "items": [], "total": 0}
+    except Exception as e:
+        logger.error(f"Fixed costs failed: {e}")
+        return {"error": str(e), "items": [], "total": 0}
+
+
+@router.put("/costs/fixed/{name}")
+async def update_fixed_cost(name: str, cost_per_unit: float = None, quantity: int = None):
+    """Update a fixed cost entry."""
+    try:
+        from backend.utils.cost_tracker import update_fixed_cost
+        return update_fixed_cost(name=name, cost_per_unit=cost_per_unit, quantity=quantity)
+    except ImportError:
+        try:
+            from utils.cost_tracker import update_fixed_cost
+            return update_fixed_cost(name=name, cost_per_unit=cost_per_unit, quantity=quantity)
+        except ImportError:
+            return {"error": "Cost tracker not available"}
+    except Exception as e:
+        logger.error(f"Update fixed cost failed: {e}")
+        return {"error": str(e)}

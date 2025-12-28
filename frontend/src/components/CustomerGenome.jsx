@@ -241,7 +241,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
       
       const [registryRes, structuredRes, statsRes] = await Promise.all([
         api.get(`/status/registry${projectParam}`).catch(() => ({ data: {} })),
-        api.get(`/status/structured${projectParam}`).catch(() => ({ data: {} })),
+        api.get(`/platform${projectParam}`).catch(() => ({ data: {} })),
         api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
       ]);
 

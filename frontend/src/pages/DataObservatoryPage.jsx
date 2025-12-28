@@ -46,7 +46,7 @@ export default function DataObservatoryPage({ embedded = false }) {
     setLoading(true);
     try {
       const [duckRes, docsRes, chromaRes] = await Promise.all([
-        api.get('/status/structured').catch(() => ({ data: { files: [], total_rows: 0 } })),
+        api.get('/platform').catch(() => ({ data: { files: [], total_rows: 0 } })),
         api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
         api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } })),
       ]);

@@ -208,7 +208,7 @@ export default function DataExplorer() {
       console.error('Failed to load tables:', err);
       // Fallback to old endpoints if /platform not available
       try {
-        const res = await api.get('/status/structured');
+        const res = await api.get('/platform');
         const files = res.data?.files || [];
         const allTables = [];
         files.forEach(file => {

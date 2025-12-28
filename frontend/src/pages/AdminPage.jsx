@@ -205,7 +205,7 @@ function EndpointsTab() {
       <div style={{ background: '#f8fafc', borderRadius: '8px', padding: '1rem', marginBottom: '1.5rem' }}>
         <div style={{ fontSize: '0.85rem', color: COLORS.textLight, marginBottom: '0.5rem' }}>Quick Endpoints:</div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-          {['/api/status', '/api/status/health', '/api/status/structured', '/api/status/documents', '/api/metrics/summary'].map(ep => (
+          {['/api/platform', '/api/platform/health', '/api/classification/tables', '/api/classification/chunks', '/api/metrics/summary'].map(ep => (
             <code key={ep} style={{
               padding: '0.25rem 0.5rem',
               background: '#e2e8f0',

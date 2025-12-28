@@ -694,3 +694,256 @@ async def delete_all_references(
     except Exception as e:
         logger.error(f"[REFERENCES] Clear all error: {e}")
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# MORE BACKWARD COMPAT ENDPOINTS
+# =============================================================================
+
+@router.get("/status/structured")
+async def list_structured_files():
+    """
+    List all structured files/tables in DuckDB.
+    Backward compatible endpoint.
+    """
+    try:
+        conn = _get_duckdb()
+        if not conn:
+            return {"files": [], "total": 0}
+        
+        # Get from _schema_metadata
+        files_dict = {}
+        try:
+            rows = conn.execute("""
+                SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+                ORDER BY file_name
+            """).fetchall()
+            
+            for row in rows:
+                fname = row[0]
+                if not fname:
+                    continue
+                if fname not in files_dict:
+                    files_dict[fname] = {
+                        "filename": fname,
+                        "project": row[1],
+                        "tables": 0,
+                        "row_count": 0,
+                        "sheets": []
+                    }
+                files_dict[fname]["sheets"].append({
+                    "table_name": row[2],
+                    "display_name": row[3] or row[2],
+                    "row_count": int(row[4] or 0),
+                    "column_count": int(row[5] or 0)
+                })
+                files_dict[fname]["tables"] += 1
+                files_dict[fname]["row_count"] += int(row[4] or 0)
+        except Exception as e:
+            logger.debug(f"[STATUS] Schema query: {e}")
+        
+        # Also check _pdf_tables
+        try:
+            pdf_rows = conn.execute("""
+                SELECT source_file, project, table_name, row_count, created_at
+                FROM _pdf_tables
+                ORDER BY source_file
+            """).fetchall()
+            
+            for row in pdf_rows:
+                fname = row[0]
+                if not fname:
+                    continue
+                if fname not in files_dict:
+                    files_dict[fname] = {
+                        "filename": fname,
+                        "project": row[1],
+                        "tables": 0,
+                        "row_count": 0,
+                        "sheets": []
+                    }
+                files_dict[fname]["sheets"].append({
+                    "table_name": row[2],
+                    "display_name": row[2],
+                    "row_count": int(row[3] or 0)
+                })
+                files_dict[fname]["tables"] += 1
+                files_dict[fname]["row_count"] += int(row[3] or 0)
+        except Exception as e:
+            logger.debug(f"[STATUS] PDF tables query: {e}")
+        
+        return {
+            "files": list(files_dict.values()),
+            "total": len(files_dict),
+            "total_rows": sum(f["row_count"] for f in files_dict.values())
+        }
+    except Exception as e:
+        logger.error(f"[STATUS] List structured failed: {e}")
+        return {"files": [], "total": 0, "error": str(e)}
+
+
+@router.get("/status/documents")
+async def list_documents():
+    """List all documents in ChromaDB."""
+    try:
+        rag = _get_rag_handler()
+        if not rag:
+            return {"documents": [], "total": 0}
+        
+        try:
+            coll = rag.client.get_collection(name="documents")
+            results = coll.get(include=["metadatas"])
+        except:
+            return {"documents": [], "total": 0}
+        
+        # Aggregate by source document
+        doc_counts = {}
+        doc_metadata = {}
+        
+        for meta in results.get('metadatas', []):
+            if not meta:
+                continue
+            source = meta.get('source') or meta.get('filename')
+            if source:
+                doc_counts[source] = doc_counts.get(source, 0) + 1
+                if source not in doc_metadata:
+                    doc_metadata[source] = {
+                        'truth_type': meta.get('truth_type'),
+                        'project': meta.get('project_id') or meta.get('project'),
+                    }
+        
+        documents = []
+        for filename, count in doc_counts.items():
+            meta = doc_metadata.get(filename, {})
+            documents.append({
+                "filename": filename,
+                "chunk_count": count,
+                "truth_type": meta.get('truth_type'),
+                "project": meta.get('project')
+            })
+        
+        return {
+            "documents": documents,
+            "total": len(documents),
+            "total_chunks": sum(doc_counts.values())
+        }
+    except Exception as e:
+        logger.error(f"[STATUS] List documents failed: {e}")
+        return {"documents": [], "total": 0, "error": str(e)}
+
+
+@router.get("/status/chromadb")
+async def get_chromadb_status():
+    """Get ChromaDB status and chunk counts."""
+    try:
+        rag = _get_rag_handler()
+        if not rag:
+            return {"available": False, "total_chunks": 0}
+        
+        try:
+            coll = rag.client.get_collection(name="documents")
+            count = coll.count()
+            return {"available": True, "total_chunks": count}
+        except:
+            return {"available": True, "total_chunks": 0}
+    except Exception as e:
+        return {"available": False, "total_chunks": 0, "error": str(e)}
+
+
+@router.get("/status/table-profile/{table_name}")
+async def get_table_profile(table_name: str):
+    """Get column statistics for a specific table."""
+    try:
+        conn = _get_duckdb()
+        if not conn:
+            return {"error": "DuckDB not available", "columns": []}
+        
+        # Get row count
+        try:
+            row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+        except:
+            return {"error": f"Table {table_name} not found", "columns": []}
+        
+        # Get column info
+        columns = []
+        try:
+            col_info = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+            for col in col_info:
+                col_name = col[1]
+                col_type = col[2]
+                
+                # Get distinct count and sample values
+                try:
+                    distinct = conn.execute(f'SELECT COUNT(DISTINCT "{col_name}") FROM "{table_name}"').fetchone()[0]
+                    samples = conn.execute(f'SELECT DISTINCT "{col_name}" FROM "{table_name}" LIMIT 10').fetchall()
+                    sample_values = [str(s[0]) for s in samples if s[0] is not None]
+                except:
+                    distinct = 0
+                    sample_values = []
+                
+                columns.append({
+                    "name": col_name,
+                    "type": col_type,
+                    "distinct_count": distinct,
+                    "sample_values": sample_values[:5]
+                })
+        except Exception as e:
+            logger.debug(f"Column info error: {e}")
+        
+        return {
+            "table_name": table_name,
+            "row_count": row_count,
+            "columns": columns,
+            "column_count": len(columns)
+        }
+    except Exception as e:
+        logger.error(f"[STATUS] Table profile failed: {e}")
+        return {"error": str(e), "columns": []}
+
+
+@router.get("/status/data-integrity")
+async def get_data_integrity():
+    """Get data integrity status."""
+    try:
+        conn = _get_duckdb()
+        if not conn:
+            return {"healthy": False, "issues": []}
+        
+        issues = []
+        
+        # Check for orphaned metadata
+        try:
+            # Get actual tables
+            actual = set()
+            for row in conn.execute("SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'").fetchall():
+                if not row[0].startswith('_'):
+                    actual.add(row[0])
+            
+            # Get metadata tables
+            metadata = set()
+            try:
+                for row in conn.execute("SELECT DISTINCT table_name FROM _schema_metadata").fetchall():
+                    metadata.add(row[0])
+            except:
+                pass
+            
+            # Find orphans
+            orphaned_metadata = metadata - actual
+            if orphaned_metadata:
+                issues.append({
+                    "type": "orphaned_metadata",
+                    "count": len(orphaned_metadata),
+                    "items": list(orphaned_metadata)[:5]
+                })
+        except Exception as e:
+            logger.debug(f"Integrity check error: {e}")
+        
+        return {
+            "healthy": len(issues) == 0,
+            "issues": issues,
+            "checked_at": str(datetime.now())
+        }
+    except Exception as e:
+        return {"healthy": False, "issues": [], "error": str(e)}
