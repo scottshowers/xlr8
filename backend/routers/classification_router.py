@@ -441,3 +441,143 @@ async def classification_health():
         "structured_handler": STRUCTURED_AVAILABLE,
         "rag_handler": RAG_AVAILABLE
     }
+
+
+# =============================================================================
+# CUSTOM DOMAINS
+# =============================================================================
+
+@router.get("/custom-domains")
+async def get_custom_domains():
+    """
+    Get all custom domains for domain detection.
+    These are user-created domains that extend the built-in ones.
+    """
+    try:
+        handler = get_structured_handler()
+        
+        # Ensure table exists
+        handler.conn.execute("""
+            CREATE TABLE IF NOT EXISTS _custom_domains (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR NOT NULL UNIQUE,
+                label VARCHAR NOT NULL,
+                signals TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by VARCHAR
+            )
+        """)
+        handler.conn.commit()
+        
+        # Get all domains
+        rows = handler.conn.execute("""
+            SELECT name, label, signals, created_at 
+            FROM _custom_domains
+            ORDER BY created_at DESC
+        """).fetchall()
+        
+        domains = []
+        for row in rows:
+            signals = row[2].split(',') if row[2] else []
+            domains.append({
+                "value": row[0],
+                "label": row[1],
+                "signals": signals,
+                "created_at": str(row[3]) if row[3] else None
+            })
+        
+        return {"domains": domains}
+        
+    except Exception as e:
+        logger.error(f"[CUSTOM-DOMAINS] Error getting domains: {e}")
+        return {"domains": [], "error": str(e)}
+
+
+@router.post("/custom-domains")
+async def create_custom_domain(
+    name: str = Query(..., description="Domain identifier (lowercase, no spaces)"),
+    label: str = Query(..., description="Display label"),
+    signals: List[str] = Query(default=[], description="Signal words for auto-detection")
+):
+    """
+    Create a custom domain for classification.
+    
+    The domain will be used for:
+    1. Manual selection during upload
+    2. Auto-detection when column names/values match signal words
+    """
+    try:
+        handler = get_structured_handler()
+        
+        # Ensure table exists
+        handler.conn.execute("""
+            CREATE TABLE IF NOT EXISTS _custom_domains (
+                id INTEGER PRIMARY KEY,
+                name VARCHAR NOT NULL UNIQUE,
+                label VARCHAR NOT NULL,
+                signals TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by VARCHAR
+            )
+        """)
+        
+        # Clean name
+        clean_name = name.lower().strip().replace(' ', '_')
+        signals_str = ','.join([s.lower().strip() for s in signals if s.strip()])
+        
+        # Check if exists
+        existing = handler.conn.execute(
+            "SELECT name FROM _custom_domains WHERE name = ?", 
+            [clean_name]
+        ).fetchone()
+        
+        if existing:
+            raise HTTPException(status_code=400, detail=f"Domain '{clean_name}' already exists")
+        
+        # Insert
+        handler.conn.execute("""
+            INSERT INTO _custom_domains (name, label, signals)
+            VALUES (?, ?, ?)
+        """, [clean_name, label.strip(), signals_str])
+        handler.conn.commit()
+        
+        logger.info(f"[CUSTOM-DOMAINS] Created domain '{clean_name}' with signals: {signals_str}")
+        
+        return {
+            "success": True,
+            "domain": {
+                "value": clean_name,
+                "label": label.strip(),
+                "signals": [s.lower().strip() for s in signals if s.strip()]
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[CUSTOM-DOMAINS] Error creating domain: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/custom-domains/{domain_name}")
+async def delete_custom_domain(domain_name: str):
+    """Delete a custom domain."""
+    try:
+        handler = get_structured_handler()
+        
+        result = handler.conn.execute(
+            "DELETE FROM _custom_domains WHERE name = ?",
+            [domain_name.lower()]
+        )
+        handler.conn.commit()
+        
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail=f"Domain '{domain_name}' not found")
+        
+        return {"success": True, "deleted": domain_name}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[CUSTOM-DOMAINS] Error deleting domain: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
