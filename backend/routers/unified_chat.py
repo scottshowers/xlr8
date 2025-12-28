@@ -227,6 +227,18 @@ except ImportError:
         SUPABASE_AVAILABLE = False
         logger.warning("[UNIFIED] Supabase not available")
 
+# Metrics Service (for query tracking)
+try:
+    from utils.metrics_service import MetricsService
+    METRICS_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.metrics_service import MetricsService
+        METRICS_AVAILABLE = True
+    except ImportError:
+        METRICS_AVAILABLE = False
+        logger.debug("[UNIFIED] MetricsService not available - query metrics will not be recorded")
+
 # Project Intelligence Service (Phase 3)
 try:
     from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
@@ -1707,6 +1719,8 @@ async def unified_chat(request: UnifiedChatRequest):
     
     Returns a comprehensive response suitable for rich frontend display.
     """
+    query_start_time = time.time()  # For metrics tracking
+    
     project = request.project
     message = request.message
     session_id, session = get_or_create_session(request.session_id, project)
@@ -2467,12 +2481,47 @@ async def unified_chat(request: UnifiedChatRequest):
         except Exception as lineage_error:
             logger.debug(f"[UNIFIED] Lineage tracking skipped: {lineage_error}")
         
+        # Record query metrics
+        query_duration_ms = int((time.time() - query_start_time) * 1000)
+        if METRICS_AVAILABLE:
+            try:
+                # Count rows if we have data results
+                rows_processed = 0
+                if response.get("data") and isinstance(response["data"], dict):
+                    rows_data = response["data"].get("rows", [])
+                    rows_processed = len(rows_data) if isinstance(rows_data, list) else 0
+                
+                MetricsService.record_query(
+                    query_type='chat',
+                    duration_ms=query_duration_ms,
+                    success=True,
+                    project_id=project_id,
+                    rows_processed=rows_processed
+                )
+                logger.debug(f"[UNIFIED] Recorded query metric: {query_duration_ms}ms, {rows_processed} rows")
+            except Exception as metrics_err:
+                logger.debug(f"[UNIFIED] Query metrics failed: {metrics_err}")
+        
         # Cleanup old sessions
         cleanup_old_sessions()
         
         return response
         
     except Exception as e:
+        # Record failed query
+        query_duration_ms = int((time.time() - query_start_time) * 1000)
+        if METRICS_AVAILABLE:
+            try:
+                MetricsService.record_query(
+                    query_type='chat',
+                    duration_ms=query_duration_ms,
+                    success=False,
+                    project_id=project_id if 'project_id' in dir() else None,
+                    error_message=str(e)[:200]
+                )
+            except:
+                pass
+        
         logger.error(f"[UNIFIED] Error: {e}")
         logger.error(traceback.format_exc())
         raise HTTPException(500, f"Chat error: {str(e)}")
