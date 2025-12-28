@@ -149,10 +149,10 @@ export default function AnalyticsPage() {
       setCatalog(organized)
       
       // Auto-expand first non-empty truth type
-      const firstTruth = organized.find(t => t.domains.some(d => d.tables.length > 0))
+      const firstTruth = organized.find(t => (t.domains || []).some(d => (d.tables || []).length > 0))
       if (firstTruth) {
         setExpandedTruthTypes({ [firstTruth.truthType]: true })
-        const firstDomain = firstTruth.domains.find(d => d.tables.length > 0)
+        const firstDomain = (firstTruth.domains || []).find(d => (d.tables || []).length > 0)
         if (firstDomain) {
           setExpandedDomains({ [`${firstTruth.truthType}:${firstDomain.domain}`]: true })
         }
@@ -562,15 +562,15 @@ export default function AnalyticsPage() {
   // Filter catalog by search (searches across truth types and domains)
   const filteredCatalog = catalog?.map(truthTypeGroup => ({
     ...truthTypeGroup,
-    domains: truthTypeGroup.domains.map(domainGroup => ({
+    domains: (truthTypeGroup.domains || []).map(domainGroup => ({
       ...domainGroup,
-      tables: domainGroup.tables.filter(t =>
-        t.name.toLowerCase().includes(catalogSearch.toLowerCase()) ||
+      tables: (domainGroup.tables || []).filter(t =>
+        t.name?.toLowerCase().includes(catalogSearch.toLowerCase()) ||
         (t.display_name || '').toLowerCase().includes(catalogSearch.toLowerCase()) ||
-        t.columns?.some(c => c.name.toLowerCase().includes(catalogSearch.toLowerCase()))
+        t.columns?.some(c => c.name?.toLowerCase().includes(catalogSearch.toLowerCase()))
       )
-    })).filter(d => d.tables.length > 0)
-  })).filter(t => t.domains.length > 0)
+    })).filter(d => (d.tables || []).length > 0)
+  })).filter(t => (t.domains || []).length > 0)
   
   // ===========================================
   // RENDER: No Project
@@ -606,7 +606,7 @@ export default function AnalyticsPage() {
           </h2>
           {catalog && (
             <p className="text-xs text-gray-400 mt-0.5">
-              {catalog.reduce((sum, d) => sum + d.tables.length, 0)} tables
+              {catalog.reduce((sum, t) => sum + (t.tableCount || 0), 0)} tables
             </p>
           )}
         </div>
@@ -649,7 +649,7 @@ export default function AnalyticsPage() {
           
           {filteredCatalog?.map(truthTypeGroup => {
             const isTruthExpanded = expandedTruthTypes[truthTypeGroup.truthType]
-            const totalTables = truthTypeGroup.domains.reduce((sum, d) => sum + d.tables.length, 0)
+            const totalTables = (truthTypeGroup.domains || []).reduce((sum, d) => sum + (d.tables || []).length, 0)
             
             return (
               <div key={truthTypeGroup.truthType} className="border-b border-gray-200">
@@ -674,8 +674,8 @@ export default function AnalyticsPage() {
                 {/* Domains within Truth Type */}
                 {isTruthExpanded && (
                   <div className="bg-gray-50/50">
-                    {truthTypeGroup.domains.map(domainGroup => {
-                      const Icon = domainGroup.icon
+                    {(truthTypeGroup.domains || []).map(domainGroup => {
+                      const Icon = domainGroup.icon || Database
                       const domainKey = `${truthTypeGroup.truthType}:${domainGroup.domain}`
                       const isDomainExpanded = expandedDomains[domainKey]
                       
@@ -691,7 +691,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div className="flex-1 text-left min-w-0">
                               <div className="text-xs font-medium text-gray-700">{domainGroup.label || 'General'}</div>
-                              <div className="text-xs text-gray-400">{domainGroup.tables.length} tables</div>
+                              <div className="text-xs text-gray-400">{(domainGroup.tables || []).length} tables</div>
                             </div>
                             {isDomainExpanded ? (
                               <ChevronDown size={12} className="text-gray-400" />
@@ -703,7 +703,7 @@ export default function AnalyticsPage() {
                           {/* Tables within Domain */}
                           {isDomainExpanded && (
                             <div className="pb-1 bg-white">
-                              {domainGroup.tables.map(table => (
+                              {(domainGroup.tables || []).map(table => (
                                 <button
                                   key={table.name || table.full_name}
                                   onClick={() => handleTableSelect(table)}
