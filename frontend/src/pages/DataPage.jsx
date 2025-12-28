@@ -243,13 +243,82 @@ export default function DataPage() {
 // ============================================================================
 function UploadPanel({ c, project, targetScope, setTargetScope }) {
   const { addUpload, uploads } = useUpload();
-  const [truthType, setTruthType] = useState('intent');
+  const [truthType, setTruthType] = useState('reality');
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef(null);
+  
+  // Domain selection state
+  const [selectedDomain, setSelectedDomain] = useState('auto');
+  const [customDomains, setCustomDomains] = useState([]);
+  const [showDomainModal, setShowDomainModal] = useState(false);
+  const [newDomainName, setNewDomainName] = useState('');
+  const [newDomainSignals, setNewDomainSignals] = useState('');
+  
+  // Built-in domains
+  const builtInDomains = [
+    { value: 'auto', label: '🔮 Auto-detect', desc: 'Let AI determine the domain' },
+    { value: 'hr', label: '👥 HR', desc: 'Employee, hire dates, terminations' },
+    { value: 'payroll', label: '💰 Payroll', desc: 'Earnings, deductions, pay periods' },
+    { value: 'tax', label: '📋 Tax', desc: 'Withholdings, W2, FICA, SUI' },
+    { value: 'benefits', label: '🏥 Benefits', desc: 'Plans, coverage, enrollment' },
+    { value: 'time', label: '⏱️ Time', desc: 'Hours, timecards, PTO, overtime' },
+  ];
+  
+  // Load custom domains on mount
+  useEffect(() => {
+    const loadCustomDomains = async () => {
+      try {
+        const res = await api.get('/custom-domains');
+        if (res.data?.domains) {
+          setCustomDomains(res.data.domains);
+        }
+      } catch (e) {
+        console.log('Custom domains not available yet');
+      }
+    };
+    loadCustomDomains();
+  }, []);
+  
+  // Create custom domain
+  const handleCreateDomain = async () => {
+    if (!newDomainName.trim()) return;
+    
+    const signals = newDomainSignals.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    
+    try {
+      const res = await api.post('/custom-domains', {
+        name: newDomainName.trim().toLowerCase().replace(/\s+/g, '_'),
+        label: newDomainName.trim(),
+        signals: signals
+      });
+      
+      if (res.data?.domain) {
+        setCustomDomains(prev => [...prev, res.data.domain]);
+        setSelectedDomain(res.data.domain.value);
+      }
+      
+      setShowDomainModal(false);
+      setNewDomainName('');
+      setNewDomainSignals('');
+    } catch (e) {
+      console.error('Failed to create domain:', e);
+      alert('Failed to create domain');
+    }
+  };
 
   // Truth type options with tooltip content
   const truthTypes = targetScope === 'project' 
     ? [
+        { 
+          value: 'reality', 
+          label: '📊 Employee & Transactional Data', 
+          desc: 'Demographics, payroll records, time entries',
+          tooltip: {
+            title: 'Reality Data',
+            detail: 'The actual data - employee records, payroll transactions, time entries. What EXISTS in the system.',
+            action: 'Upload employee files, payroll registers, demographic exports'
+          }
+        },
         { 
           value: 'intent', 
           label: '📋 Customer Requirements', 
@@ -305,7 +374,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
       ];
 
   useEffect(() => {
-    setTruthType(targetScope === 'project' ? 'intent' : 'reference');
+    setTruthType(targetScope === 'project' ? 'reality' : 'reference');
   }, [targetScope]);
 
   const handleFiles = (files) => {
@@ -323,7 +392,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
       addUpload(file, projectId, projectName, { 
         truth_type: truthType,
         standards_mode: isRuleSource,
-        domain: isRuleSource ? 'regulatory' : undefined
+        domain: selectedDomain !== 'auto' ? selectedDomain : (isRuleSource ? 'regulatory' : undefined)
       });
     });
   };
@@ -420,6 +489,148 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
             ))}
           </div>
         </div>
+
+        {/* Domain Selection - Only for Reality/Configuration (structured data) */}
+        {(truthType === 'reality' || truthType === 'configuration') && targetScope === 'project' && (
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ 
+              fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, 
+              textTransform: 'uppercase', letterSpacing: '0.05em', 
+              display: 'block', marginBottom: '0.5rem' 
+            }}>
+              Domain (optional)
+            </label>
+            <select
+              value={selectedDomain}
+              onChange={(e) => setSelectedDomain(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.6rem 0.75rem',
+                borderRadius: 8,
+                border: `1px solid ${c.border}`,
+                background: c.background,
+                color: c.text,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                marginBottom: '0.5rem'
+              }}
+            >
+              {builtInDomains.map(d => (
+                <option key={d.value} value={d.value}>{d.label} - {d.desc}</option>
+              ))}
+              {customDomains.length > 0 && (
+                <optgroup label="Custom Domains">
+                  {customDomains.map(d => (
+                    <option key={d.value} value={d.value}>✨ {d.label}</option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <button
+              onClick={() => setShowDomainModal(true)}
+              style={{
+                width: '100%',
+                padding: '0.5rem',
+                borderRadius: 6,
+                border: `1px dashed ${c.border}`,
+                background: 'transparent',
+                color: c.textMuted,
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.35rem'
+              }}
+            >
+              <Sparkles size={14} /> Create Custom Domain
+            </button>
+          </div>
+        )}
+
+        {/* Custom Domain Modal */}
+        {showDomainModal && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex',
+            alignItems: 'center', justifyContent: 'center', zIndex: 1000
+          }} onClick={() => setShowDomainModal(false)}>
+            <div style={{
+              background: c.cardBg, borderRadius: 12, padding: '1.5rem',
+              width: '90%', maxWidth: 400, boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
+            }} onClick={e => e.stopPropagation()}>
+              <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
+                ✨ Create Custom Domain
+              </h3>
+              <p style={{ fontSize: '0.8rem', color: c.textMuted, marginBottom: '1rem' }}>
+                Custom domains help AI classify your data. Signal words trigger auto-detection on future uploads.
+              </p>
+              
+              <div style={{ marginBottom: '1rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: c.text, display: 'block', marginBottom: '0.35rem' }}>
+                  Domain Name
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., Workers Comp"
+                  value={newDomainName}
+                  onChange={(e) => setNewDomainName(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.6rem 0.75rem', borderRadius: 6,
+                    border: `1px solid ${c.border}`, background: c.background,
+                    color: c.text, fontSize: '0.85rem'
+                  }}
+                />
+              </div>
+              
+              <div style={{ marginBottom: '1.5rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: c.text, display: 'block', marginBottom: '0.35rem' }}>
+                  Signal Words (comma-separated)
+                </label>
+                <input
+                  type="text"
+                  placeholder="e.g., claim, injury, osha, incident, comp"
+                  value={newDomainSignals}
+                  onChange={(e) => setNewDomainSignals(e.target.value)}
+                  style={{
+                    width: '100%', padding: '0.6rem 0.75rem', borderRadius: 6,
+                    border: `1px solid ${c.border}`, background: c.background,
+                    color: c.text, fontSize: '0.85rem'
+                  }}
+                />
+                <p style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.35rem' }}>
+                  When columns contain these words, this domain will be auto-detected
+                </p>
+              </div>
+              
+              <div style={{ display: 'flex', gap: '0.75rem' }}>
+                <button
+                  onClick={() => setShowDomainModal(false)}
+                  style={{
+                    flex: 1, padding: '0.6rem', borderRadius: 6,
+                    border: `1px solid ${c.border}`, background: 'transparent',
+                    color: c.text, cursor: 'pointer', fontSize: '0.85rem'
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCreateDomain}
+                  disabled={!newDomainName.trim()}
+                  style={{
+                    flex: 1, padding: '0.6rem', borderRadius: 6,
+                    border: 'none', background: c.primary,
+                    color: '#fff', cursor: newDomainName.trim() ? 'pointer' : 'not-allowed',
+                    fontSize: '0.85rem', fontWeight: 600,
+                    opacity: newDomainName.trim() ? 1 : 0.5
+                  }}
+                >
+                  Create Domain
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Drop Zone */}
         <input 
