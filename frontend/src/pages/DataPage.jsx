@@ -503,13 +503,30 @@ function FilesPanel({ c, project, targetScope }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [structRes, docsRes, refRes] = await Promise.all([
-        api.get('/status/structured').catch(() => ({ data: { files: [], total_rows: 0 } })),
-        api.get('/status/documents').catch(() => ({ data: { documents: [] } })),
+      // Use /api/platform for structured data and stats, keep references separate (not in platform yet)
+      const projectName = project?.name || project?.id || '';
+      const [platformRes, refRes] = await Promise.all([
+        api.get(`/platform${projectName ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
-      setStructuredData(structRes.data);
-      setDocuments(docsRes.data);
+      
+      // Map platform response to expected format
+      const platform = platformRes.data;
+      const structuredData = {
+        files: platform?.files || [],
+        total_rows: platform?.stats?.rows || 0,
+        total_files: platform?.stats?.files || 0,
+        total_tables: platform?.stats?.tables || 0,
+      };
+      
+      // Documents from platform files that have chunks
+      const documents = {
+        documents: (platform?.files || []).filter(f => f.type === 'chromadb' || f.chunks > 0),
+        count: platform?.stats?.documents || 0,
+      };
+      
+      setStructuredData(structuredData);
+      setDocuments(documents);
       setReferenceFiles(refRes.data);
     } catch (err) {
       console.error('Failed to load:', err);
@@ -689,10 +706,8 @@ function FilesPanel({ c, project, targetScope }) {
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
                     <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                      {file.sheets?.length || 1} table(s) • {(file.total_rows || 0).toLocaleString()} rows
+                      {file.sheets?.length || 1} table(s) • {(file.row_count || 0).toLocaleString()} rows
                       {file.truth_type && ` • ${getTruthLabel(file.truth_type)}`}
-                      {file.uploaded_by && ` • by ${file.uploaded_by.split('@')[0]}`}
-                      {file.loaded_at && ` • ${new Date(file.loaded_at).toLocaleDateString()}`}
                     </div>
                   </div>
                 </div>
@@ -737,7 +752,6 @@ function FilesPanel({ c, project, targetScope }) {
                     <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
                       {doc.chunk_count || doc.chunks || 0} chunks
                       {doc.truth_type && ` • ${getTruthLabel(doc.truth_type)}`}
-                      {doc.upload_date && ` • ${new Date(doc.upload_date).toLocaleDateString()}`}
                     </div>
                   </div>
                 </div>
