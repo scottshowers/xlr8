@@ -263,3 +263,192 @@ async def update_fixed_cost(name: str, cost_per_unit: float = None, quantity: in
     except Exception as e:
         logger.error(f"Update fixed cost failed: {e}")
         return {"error": str(e)}
+
+
+# =============================================================================
+# NEW ENTERPRISE METRICS ENDPOINTS
+# =============================================================================
+
+@router.delete("/reset")
+async def reset_metrics(confirm: bool = False, include_costs: bool = False):
+    """
+    Clear all platform metrics for testing/reset purposes.
+    
+    Args:
+        confirm: Must be True to actually delete (safety check)
+        include_costs: If True, also clear cost_tracking table
+    
+    Returns:
+        Summary of what was cleared
+    """
+    if not confirm:
+        return {
+            "warning": "This will delete all platform metrics. Pass confirm=true to proceed.",
+            "will_clear": ["platform_metrics"] + (["cost_tracking"] if include_costs else [])
+        }
+    
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        if not supabase:
+            return {"error": "Supabase not available"}
+        
+        cleared = []
+        counts = {}
+        
+        # Clear platform_metrics
+        try:
+            result = supabase.table("platform_metrics").delete().neq(
+                "id", "00000000-0000-0000-0000-000000000000"
+            ).execute()
+            counts["platform_metrics"] = len(result.data) if result.data else 0
+            cleared.append("platform_metrics")
+        except Exception as e:
+            logger.warning(f"platform_metrics clear failed: {e}")
+        
+        # Optionally clear cost_tracking
+        if include_costs:
+            try:
+                result = supabase.table("cost_tracking").delete().neq(
+                    "id", "00000000-0000-0000-0000-000000000000"
+                ).execute()
+                counts["cost_tracking"] = len(result.data) if result.data else 0
+                cleared.append("cost_tracking")
+            except Exception as e:
+                logger.warning(f"cost_tracking clear failed: {e}")
+        
+        return {
+            "success": True,
+            "cleared": cleared,
+            "counts": counts
+        }
+        
+    except Exception as e:
+        logger.error(f"Metrics reset failed: {e}")
+        return {"error": str(e)}
+
+
+@router.get("/throughput")
+async def get_throughput(hours: int = Query(default=24, ge=1, le=168)):
+    """
+    Get hourly throughput for charts.
+    
+    Returns counts of uploads, queries, and LLM calls per hour for the last N hours.
+    Used by Dashboard throughput chart.
+    
+    Args:
+        hours: Number of hours to look back (1-168, default 24)
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        from datetime import datetime, timedelta
+        
+        supabase = get_supabase()
+        if not supabase:
+            return {"error": "Supabase not available", "data": []}
+        
+        cutoff = (datetime.utcnow() - timedelta(hours=hours)).isoformat()
+        
+        result = supabase.table("platform_metrics").select(
+            "created_at, metric_type"
+        ).gte("created_at", cutoff).order("created_at").execute()
+        
+        records = result.data or []
+        
+        # Bucket by hour
+        hourly = {}
+        for r in records:
+            # Parse timestamp and truncate to hour
+            ts = r.get("created_at", "")[:13]  # "2025-12-28T14"
+            if not ts:
+                continue
+            
+            if ts not in hourly:
+                hourly[ts] = {"hour": ts + ":00:00", "uploads": 0, "queries": 0, "llm_calls": 0, "errors": 0}
+            
+            metric_type = r.get("metric_type", "")
+            if metric_type == "upload":
+                hourly[ts]["uploads"] += 1
+            elif metric_type == "query":
+                hourly[ts]["queries"] += 1
+            elif metric_type == "llm_call":
+                hourly[ts]["llm_calls"] += 1
+            elif metric_type == "error":
+                hourly[ts]["errors"] += 1
+        
+        # Sort by hour and return as list
+        data = sorted(hourly.values(), key=lambda x: x["hour"])
+        
+        return {
+            "period_hours": hours,
+            "data": data,
+            "total_records": len(records)
+        }
+        
+    except Exception as e:
+        logger.error(f"Throughput query failed: {e}")
+        return {"error": str(e), "data": []}
+
+
+@router.get("/activity")
+async def get_activity(limit: int = Query(default=50, ge=1, le=200)):
+    """
+    Get recent platform events for activity log.
+    
+    Returns the most recent platform_metrics records for real-time activity display.
+    Used by SystemMonitor activity feed.
+    
+    Args:
+        limit: Number of events to return (1-200, default 50)
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        
+        supabase = get_supabase()
+        if not supabase:
+            return {"error": "Supabase not available", "events": []}
+        
+        result = supabase.table("platform_metrics").select(
+            "id, created_at, metric_type, processor, filename, success, duration_ms, error_message, llm_provider, llm_model"
+        ).order("created_at", desc=True).limit(limit).execute()
+        
+        events = []
+        for r in (result.data or []):
+            # Format human-readable message
+            metric_type = r.get("metric_type", "unknown")
+            processor = r.get("processor", "")
+            filename = r.get("filename", "")
+            success = r.get("success", True)
+            duration = r.get("duration_ms", 0)
+            llm_provider = r.get("llm_provider", "")
+            llm_model = r.get("llm_model", "")
+            
+            if metric_type == "upload":
+                message = f"UPLOAD: {filename or 'file'} via {processor}"
+            elif metric_type == "query":
+                message = f"QUERY: {processor or 'chat'} query"
+            elif metric_type == "llm_call":
+                provider = (llm_provider or "LLM").upper()
+                message = f"{provider}: {llm_model or 'inference'}"
+            elif metric_type == "error":
+                message = f"ERROR: {r.get('error_message', 'Unknown error')[:50]}"
+            else:
+                message = f"{metric_type.upper()}: {processor}"
+            
+            events.append({
+                "id": r.get("id"),
+                "time": r.get("created_at"),
+                "message": message,
+                "status": 0 if success else 1,  # 0=success, 1=error
+                "duration_ms": duration,
+                "metric_type": metric_type
+            })
+        
+        return {
+            "events": events,
+            "count": len(events)
+        }
+        
+    except Exception as e:
+        logger.error(f"Activity query failed: {e}")
+        return {"error": str(e), "events": []}
