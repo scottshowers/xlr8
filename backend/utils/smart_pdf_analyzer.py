@@ -892,12 +892,25 @@ def parse_line_with_pattern(match, line: str, pattern_def: Dict, patterns: Dict,
 # DUCKDB STORAGE
 # =============================================================================
 
-def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: str = None) -> Dict[str, Any]:
+def store_to_duckdb(
+    rows: List[Dict], 
+    project: str, 
+    filename: str, 
+    project_id: str = None,
+    table_description: str = None
+) -> Dict[str, Any]:
     """
     Store parsed rows to DuckDB using the shared structured data handler.
     
     This ensures consistency with how Excel/CSV files are stored and
     makes the data immediately visible to all status/query endpoints.
+    
+    Args:
+        rows: List of dicts to store
+        project: Project name
+        filename: Source filename
+        project_id: Optional project ID
+        table_description: Optional description from Vision (used for display name)
     
     Note: With the sys.modules singleton pattern, import path doesn't matter -
     we always get the same handler instance.
@@ -914,6 +927,21 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
         if df.empty:
             return {"success": False, "error": "DataFrame is empty"}
         
+        # Generate meaningful sheet_name from table_description or filename
+        # This affects both table_name (for DuckDB) and display_name (for UI)
+        if table_description and len(table_description) > 3:
+            # Clean up description for use as sheet name
+            sheet_name = table_description.strip()[:50]
+        else:
+            # Extract from filename: "TEAM Company Tax Verification.pdf" -> "Company Tax Verification"
+            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            # Remove common prefixes like "TEAM ", "Client ", etc.
+            for prefix in ['TEAM ', 'CLIENT ', 'CUSTOMER ']:
+                if base_name.upper().startswith(prefix):
+                    base_name = base_name[len(prefix):]
+                    break
+            sheet_name = base_name.strip()[:50] or 'data'
+        
         # Get the shared handler - uses sys.modules singleton so import path doesn't matter
         try:
             from backend.utils.structured_data_handler import get_structured_handler
@@ -926,7 +954,7 @@ def store_to_duckdb(rows: List[Dict], project: str, filename: str, project_id: s
             df=df,
             project=project,
             file_name=filename,
-            sheet_name='PDF',
+            sheet_name=sheet_name,
             source_type='pdf'
         )
         
@@ -1017,6 +1045,7 @@ def process_pdf_intelligently(
                     rows = vision_result['rows']
                     columns = vision_result.get('columns', [])
                     page_count = vision_result.get('page_count', 0)
+                    table_description = vision_result.get('table_description', '')
                     
                     update_status(f"✓ Vision extracted {len(rows)} rows, {len(columns)} columns from {page_count} pages", 60)
                     
@@ -1025,7 +1054,8 @@ def process_pdf_intelligently(
                         'method': 'vision',
                         'columns': columns,
                         'row_count': len(rows),
-                        'page_count': page_count
+                        'page_count': page_count,
+                        'table_description': table_description
                     }
                 elif vision_result.get('error'):
                     logger.warning(f"[SMART-PDF] Vision extraction failed: {vision_result.get('error')}")
@@ -1053,7 +1083,16 @@ def process_pdf_intelligently(
         if rows:
             update_status(f"Storing {len(rows)} rows to DuckDB...", 70)
             
-            duckdb_result = store_to_duckdb(rows, project, filename, project_id)
+            # Get table_description from analysis (Vision) or None
+            table_description = analysis.get('table_description', '')
+            
+            duckdb_result = store_to_duckdb(
+                rows, 
+                project, 
+                filename, 
+                project_id,
+                table_description=table_description
+            )
             result['duckdb_result'] = duckdb_result
             
             if duckdb_result.get('success'):

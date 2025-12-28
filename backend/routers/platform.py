@@ -312,20 +312,20 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
         if supabase:
             today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
             
-            # Active jobs
-            active = supabase.table("jobs").select("id", count="exact").in_("status", ["pending", "processing"]).execute()
+            # Active jobs (from processing_jobs table)
+            active = supabase.table("processing_jobs").select("id", count="exact").in_("status", ["queued", "processing"]).execute()
             response["jobs"]["active"] = active.count if hasattr(active, 'count') else len(active.data or [])
             
             # Completed today
-            completed = supabase.table("jobs").select("id", count="exact").eq("status", "completed").gte("completed_at", today.isoformat()).execute()
+            completed = supabase.table("processing_jobs").select("id", count="exact").eq("status", "completed").gte("completed_at", today.isoformat()).execute()
             response["jobs"]["completed_today"] = completed.count if hasattr(completed, 'count') else len(completed.data or [])
             
             # Failed today
-            failed = supabase.table("jobs").select("id", count="exact").eq("status", "failed").gte("updated_at", today.isoformat()).execute()
+            failed = supabase.table("processing_jobs").select("id", count="exact").eq("status", "failed").gte("updated_at", today.isoformat()).execute()
             response["jobs"]["failed_today"] = failed.count if hasattr(failed, 'count') else len(failed.data or [])
             
             # Recent jobs (last 10)
-            recent = supabase.table("jobs").select("id, job_type, status, created_at, completed_at").order("created_at", desc=True).limit(10).execute()
+            recent = supabase.table("processing_jobs").select("id, job_type, status, created_at, completed_at").order("created_at", desc=True).limit(10).execute()
             response["jobs"]["recent"] = [
                 {
                     "id": j["id"],

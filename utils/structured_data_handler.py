@@ -1341,7 +1341,7 @@ class StructuredDataHandler:
         - Max 60 characters
         """
         # Start with sheet name if it's meaningful
-        if sheet_name and sheet_name.lower() not in ('data', 'sheet1', 'sheet 1', ''):
+        if sheet_name and sheet_name.lower() not in ('data', 'sheet1', 'sheet 1', '', 'pdf'):
             base_name = sheet_name
         else:
             # Use filename without extension
