@@ -590,7 +590,7 @@ class StructuredDataHandler:
             except Exception as mig_e:
                 logger.warning(f"[MIGRATION] Column check/add for _column_profiles: {mig_e}")
             
-            # MIGRATION: Add display_name, truth_type, column_count to _schema_metadata
+            # MIGRATION: Add display_name, truth_type, column_count, domain to _schema_metadata
             try:
                 schema_cols = self.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()
                 schema_col_names = [c[1] for c in schema_cols]
@@ -610,6 +610,10 @@ class StructuredDataHandler:
                 if 'uploaded_by' not in schema_col_names:
                     logger.warning("[MIGRATION] Adding uploaded_by column to _schema_metadata")
                     self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN uploaded_by VARCHAR")
+                
+                if 'domain' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding domain column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN domain VARCHAR")
                 
                 # Backfill display_name for existing records (use file_name without extension)
                 self.conn.execute("""
