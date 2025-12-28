@@ -1108,17 +1108,31 @@ class ProjectIntelligenceService:
     def _persist_relationships(self) -> None:
         """Persist detected relationships to Supabase project_relationships table."""
         if not self.relationships:
-            logger.debug("[INTELLIGENCE] No relationships to persist")
+            logger.warning("[INTELLIGENCE] No relationships to persist")
             return
+        
+        logger.warning(f"[INTELLIGENCE] Persisting {len(self.relationships)} relationships to Supabase...")
         
         try:
             from utils.database.supabase_client import get_supabase
             supabase = get_supabase()
             if not supabase:
-                logger.warning("[INTELLIGENCE] No Supabase connection - skipping relationship persistence")
+                logger.error("[INTELLIGENCE] No Supabase connection - cannot persist relationships")
                 return
             
+            # First, clear existing auto-detected relationships for this project
+            # (keeps any user-confirmed ones with status='confirmed')
+            try:
+                supabase.table('project_relationships').delete().eq(
+                    'project_name', self.project
+                ).eq('status', 'detected').execute()
+                logger.info(f"[INTELLIGENCE] Cleared old detected relationships for {self.project}")
+            except Exception as e:
+                logger.warning(f"[INTELLIGENCE] Could not clear old relationships: {e}")
+            
+            # Insert all new relationships
             persisted = 0
+            failed = 0
             for rel in self.relationships:
                 try:
                     data = {
@@ -1132,21 +1146,25 @@ class ProjectIntelligenceService:
                         'method': 'auto_intelligence'
                     }
                     
-                    # Upsert to avoid duplicates
-                    supabase.table('project_relationships').upsert(
-                        data,
-                        on_conflict='project_name,source_table,source_column,target_table,target_column'
-                    ).execute()
-                    persisted += 1
+                    # Use insert instead of upsert - we cleared old ones above
+                    result = supabase.table('project_relationships').insert(data).execute()
+                    
+                    if result.data:
+                        persisted += 1
+                    else:
+                        logger.warning(f"[INTELLIGENCE] Insert returned no data for {rel.from_table}.{rel.from_column} -> {rel.to_table}.{rel.to_column}")
+                        failed += 1
                     
                 except Exception as e:
-                    logger.debug(f"[INTELLIGENCE] Failed to persist relationship {rel.from_table}->{rel.to_table}: {e}")
+                    failed += 1
+                    logger.warning(f"[INTELLIGENCE] Failed to persist relationship {rel.from_table}.{rel.from_column} -> {rel.to_table}.{rel.to_column}: {e}")
             
-            if persisted > 0:
-                logger.info(f"[INTELLIGENCE] Persisted {persisted} relationships to Supabase")
+            logger.warning(f"[INTELLIGENCE] Relationship persistence complete: {persisted} saved, {failed} failed")
                 
         except Exception as e:
-            logger.warning(f"[INTELLIGENCE] Relationship persistence failed: {e}")
+            logger.error(f"[INTELLIGENCE] Relationship persistence failed completely: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _check_orphan_records(self) -> None:
         """Check for orphan records based on detected relationships."""
