@@ -399,14 +399,16 @@ export default function MissionControl() {
     setLoading(true);
     const newAlerts = [];
     
-    // Health check
-    const health = await fetchJSON('/api/status/data-integrity');
-    if (health) {
+    // Single platform call replaces status/data-integrity, status/structured, status/documents
+    const platform = await fetchJSON('/api/platform');
+    if (platform) {
+      // Health from platform.health.services
+      const services = platform.health?.services || {};
       const sysStatus = {
-        DuckDB: { status: health.duckdb?.connected ? 'healthy' : 'error', latency: health.duckdb?.latency_ms || 0, uptime: 99.9 },
-        ChromaDB: { status: health.chromadb?.connected ? 'healthy' : 'error', latency: health.chromadb?.latency_ms || 0, uptime: 99.7 },
-        Supabase: { status: health.supabase?.connected ? 'healthy' : (health.supabase?.error ? 'degraded' : 'error'), latency: health.supabase?.latency_ms || 0, uptime: 98.5 },
-        Ollama: { status: health.ollama?.connected ? 'healthy' : 'error', latency: health.ollama?.latency_ms || 0, uptime: 99.8 },
+        DuckDB: { status: services.duckdb?.status || 'unknown', latency: services.duckdb?.latency_ms || 0, uptime: services.duckdb?.uptime_percent || 99.9 },
+        ChromaDB: { status: services.chromadb?.status || 'unknown', latency: services.chromadb?.latency_ms || 0, uptime: services.chromadb?.uptime_percent || 99.7 },
+        Supabase: { status: services.supabase?.status || 'unknown', latency: services.supabase?.latency_ms || 0, uptime: services.supabase?.uptime_percent || 98.5 },
+        Ollama: { status: services.ollama?.status || 'unknown', latency: services.ollama?.latency_ms || 0, uptime: services.ollama?.uptime_percent || 99.8 },
       };
       setSystems(sysStatus);
       Object.entries(sysStatus).forEach(([name, data]) => {
@@ -417,19 +419,26 @@ export default function MissionControl() {
       const degradedCount = Object.values(sysStatus).filter(s => s.status === 'degraded').length;
       setHealthScore(Math.round((healthyCount * 25) + (degradedCount * 10)));
       setHealthTrend(3);
+      
+      // Pipeline stats from platform.stats and platform.pipeline
+      setPipeline({
+        ingested: { count: platform.stats?.files || 0 },
+        processed: { count: platform.stats?.tables || 0 },
+        analyzed: { count: platform.stats?.rows || 0 },
+        insights: { count: platform.stats?.insights || 0 }
+      });
+      
+      // Value metrics from platform.value
+      if (platform.value) {
+        setValue(prev => ({
+          ...prev,
+          analysesCompleted: platform.value.analyses_this_month || 0,
+          hoursEquivalent: platform.value.hours_saved || 0,
+          dollarsSaved: platform.value.value_created_usd || 0,
+          accuracyRate: platform.value.accuracy_percent || 94.7
+        }));
+      }
     }
-    
-    // Structured data
-    const structured = await fetchJSON('/api/status/structured');
-    if (structured) {
-      const tables = structured.tables || [];
-      const totalRows = tables.reduce((sum, t) => sum + (t.row_count || 0), 0);
-      setPipeline(prev => ({ ...prev, analyzed: { count: totalRows }, processed: { count: tables.length } }));
-    }
-    
-    // Documents
-    const docs = await fetchJSON('/api/status/documents');
-    if (docs) setPipeline(prev => ({ ...prev, ingested: { count: (docs.total || 0) + (prev.processed?.count || 0) } }));
     
     // Jobs
     const jobs = await fetchJSON('/api/jobs');
