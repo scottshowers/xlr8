@@ -269,6 +269,7 @@ export function UploadProvider({ children }) {
       addUpload,
       removeUpload,
       clearCompleted,
+      clearAll,
       activeCount,
       hasActive,
       failedCount,
@@ -282,7 +283,7 @@ export function UploadProvider({ children }) {
  * UploadStatusIndicator - Shows in header when uploads are active
  */
 export function UploadStatusIndicator() {
-  const { uploads, hasActive, activeCount, failedCount, removeUpload, clearCompleted } = useUpload();
+  const { uploads, hasActive, activeCount, failedCount, removeUpload, clearCompleted, clearAll } = useUpload();
   const [expanded, setExpanded] = useState(false);
 
   if (uploads.length === 0) return null;
@@ -358,20 +359,39 @@ export function UploadStatusIndicator() {
             alignItems: 'center',
           }}>
             <span style={{ fontWeight: 600, color: '#2a3441' }}>Uploads</span>
-            {uploads.some(u => u.status === 'completed') && (
-              <button 
-                onClick={clearCompleted} 
-                style={{ 
-                  background: 'none', 
-                  border: 'none', 
-                  color: '#5f6c7b', 
-                  fontSize: '0.75rem', 
-                  cursor: 'pointer' 
-                }}
-              >
-                Clear completed
-              </button>
-            )}
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              {hasActive && (
+                <button 
+                  onClick={clearAll} 
+                  style={{ 
+                    background: '#ef444420', 
+                    border: '1px solid #ef444440', 
+                    color: '#ef4444', 
+                    fontSize: '0.75rem', 
+                    cursor: 'pointer',
+                    padding: '0.25rem 0.5rem',
+                    borderRadius: '4px',
+                    fontWeight: 500,
+                  }}
+                >
+                  Kill All
+                </button>
+              )}
+              {uploads.some(u => u.status === 'completed') && (
+                <button 
+                  onClick={clearCompleted} 
+                  style={{ 
+                    background: 'none', 
+                    border: 'none', 
+                    color: '#5f6c7b', 
+                    fontSize: '0.75rem', 
+                    cursor: 'pointer' 
+                  }}
+                >
+                  Clear completed
+                </button>
+              )}
+            </div>
           </div>
 
           {uploads.map(upload => (
