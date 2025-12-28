@@ -57,10 +57,20 @@ export default function DataModelPage({ embedded = false }) {
   const loadDataIntegrity = async () => {
     setIntegrityLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/status/data-integrity?project=${encodeURIComponent(activeProject?.id || '')}`);
+      // Use platform endpoint instead of status/data-integrity
+      const res = await fetch(`${API_BASE}/api/platform?project=${encodeURIComponent(activeProject?.id || '')}`);
       if (res.ok) {
         const data = await res.json();
-        setIntegrityData(data);
+        // Map platform response to expected integrity format
+        setIntegrityData({
+          duckdb: { connected: data.health?.services?.duckdb?.status === 'healthy', latency_ms: data.health?.services?.duckdb?.latency_ms },
+          chromadb: { connected: data.health?.services?.chromadb?.status === 'healthy', latency_ms: data.health?.services?.chromadb?.latency_ms },
+          supabase: { connected: data.health?.services?.supabase?.status === 'healthy', latency_ms: data.health?.services?.supabase?.latency_ms },
+          ollama: { connected: data.health?.services?.ollama?.status === 'healthy', latency_ms: data.health?.services?.ollama?.latency_ms },
+          tables: data.stats?.tables || 0,
+          rows: data.stats?.rows || 0,
+          chunks: data.stats?.chunks || 0
+        });
       }
     } catch (err) {
       console.error('Failed to load integrity:', err);
@@ -74,7 +84,8 @@ export default function DataModelPage({ embedded = false }) {
     
     setLoadingProfiles(prev => new Set([...prev, tableName]));
     try {
-      const res = await fetch(`${API_BASE}/api/status/table-profile/${encodeURIComponent(tableName)}`);
+      // Use classification endpoint instead of status/table-profile
+      const res = await fetch(`${API_BASE}/api/classification/table/${encodeURIComponent(tableName)}`);
       if (res.ok) {
         const data = await res.json();
         setTableProfiles(prev => ({ ...prev, [tableName]: data }));
