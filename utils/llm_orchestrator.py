@@ -14,12 +14,25 @@ Author: XLR8 Team
 import os
 import re
 import json
+import time
 import requests
 from requests.auth import HTTPBasicAuth
 from typing import List, Dict, Any, Tuple, Optional
 import logging
 
 logger = logging.getLogger(__name__)
+
+# Import MetricsService for LLM call tracking
+try:
+    from backend.utils.metrics_service import MetricsService
+    METRICS_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.metrics_service import MetricsService
+        METRICS_AVAILABLE = True
+    except ImportError:
+        METRICS_AVAILABLE = False
+        logger.debug("[LLM] MetricsService not available - LLM metrics will not be recorded")
 
 
 # =============================================================================
@@ -233,11 +246,13 @@ class LLMOrchestrator:
         logger.info(f"  Ollama: {self.ollama_url or 'NOT SET!'}")
         logger.info(f"  Claude: {'configured' if self.claude_api_key else 'NOT SET!'}")
     
-    def _call_ollama(self, model: str, prompt: str, system_prompt: str = None) -> Tuple[Optional[str], bool]:
-        """Call local Ollama instance"""
+    def _call_ollama(self, model: str, prompt: str, system_prompt: str = None, project_id: str = None, processor: str = "chat") -> Tuple[Optional[str], bool]:
+        """Call local Ollama instance with metrics tracking"""
         if not self.ollama_url:
             logger.error("LLM_ENDPOINT not configured!")
             return "LLM_ENDPOINT not configured", False
+        
+        start_time = time.time()
         
         try:
             url = f"{self.ollama_url}/api/generate"
@@ -266,28 +281,78 @@ class LLMOrchestrator:
             else:
                 response = requests.post(url, json=payload, timeout=60)
             
+            duration_ms = int((time.time() - start_time) * 1000)
+            
             if response.status_code != 200:
                 logger.error(f"Ollama error {response.status_code}: {response.text[:200]}")
+                # Record failed LLM call
+                if METRICS_AVAILABLE:
+                    MetricsService.record_llm_call(
+                        processor=processor,
+                        provider='ollama',
+                        model=model,
+                        duration_ms=duration_ms,
+                        success=False,
+                        error_message=f"HTTP {response.status_code}",
+                        project_id=project_id
+                    )
                 return f"Ollama error: {response.status_code}", False
             
             result = response.json().get("response", "")
-            logger.info(f"Ollama response: {len(result)} chars")
+            logger.info(f"Ollama response: {len(result)} chars in {duration_ms}ms")
+            
+            # Record successful LLM call
+            if METRICS_AVAILABLE:
+                MetricsService.record_llm_call(
+                    processor=processor,
+                    provider='ollama',
+                    model=model,
+                    duration_ms=duration_ms,
+                    tokens_in=len(full_prompt) // 4,  # Rough estimate
+                    tokens_out=len(result) // 4,
+                    success=True,
+                    project_id=project_id
+                )
+            
             return result, True
             
         except requests.exceptions.Timeout:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error("Ollama timeout")
+            if METRICS_AVAILABLE:
+                MetricsService.record_llm_call(
+                    processor=processor,
+                    provider='ollama',
+                    model=model,
+                    duration_ms=duration_ms,
+                    success=False,
+                    error_message="Timeout",
+                    project_id=project_id
+                )
             return None, False
         except Exception as e:
+            duration_ms = int((time.time() - start_time) * 1000)
             logger.error(f"Ollama error: {e}")
+            if METRICS_AVAILABLE:
+                MetricsService.record_llm_call(
+                    processor=processor,
+                    provider='ollama',
+                    model=model,
+                    duration_ms=duration_ms,
+                    success=False,
+                    error_message=str(e)[:200],
+                    project_id=project_id
+                )
             return str(e), False
     
     def _call_claude(self, prompt: str, system_prompt: str, project_id: str = None, operation: str = "chat") -> Tuple[str, bool]:
-        """Call Claude API with retry for rate limits"""
+        """Call Claude API with retry for rate limits and metrics tracking"""
         if not self.claude_api_key:
             return "Claude API key not configured", False
         
         import time
         max_retries = 3
+        start_time = time.time()
         
         for attempt in range(max_retries):
             try:
@@ -304,22 +369,44 @@ class LLMOrchestrator:
                 )
                 
                 result = response.content[0].text
-                logger.info(f"Claude response: {len(result)} chars")
+                duration_ms = int((time.time() - start_time) * 1000)
+                logger.info(f"Claude response: {len(result)} chars in {duration_ms}ms")
                 
-                # Log cost
+                # Get usage for metrics
+                usage = response.usage
+                tokens_in = usage.input_tokens if usage else 0
+                tokens_out = usage.output_tokens if usage else 0
+                
+                # Log cost (existing)
                 try:
-                    from backend.utils.cost_tracker import log_cost, CostService
-                    usage = response.usage
+                    from backend.utils.cost_tracker import log_cost, CostService, calculate_cost
                     log_cost(
                         service=CostService.CLAUDE,
                         operation=operation,
-                        tokens_in=usage.input_tokens if usage else 0,
-                        tokens_out=usage.output_tokens if usage else 0,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
                         project_id=project_id,
                         metadata={"model": self.claude_model}
                     )
+                    # Calculate cost for metrics
+                    cost_usd = calculate_cost(CostService.CLAUDE, tokens_in=tokens_in, tokens_out=tokens_out)
                 except Exception as cost_err:
                     logger.debug(f"Cost tracking failed: {cost_err}")
+                    cost_usd = 0
+                
+                # Record LLM call metrics (NEW)
+                if METRICS_AVAILABLE:
+                    MetricsService.record_llm_call(
+                        processor=operation,
+                        provider='claude',
+                        model=self.claude_model,
+                        duration_ms=duration_ms,
+                        tokens_in=tokens_in,
+                        tokens_out=tokens_out,
+                        cost_usd=cost_usd,
+                        success=True,
+                        project_id=project_id
+                    )
                 
                 return result, True
                 
@@ -329,10 +416,32 @@ class LLMOrchestrator:
                 if attempt < max_retries - 1:
                     time.sleep(wait_time)
                 else:
+                    duration_ms = int((time.time() - start_time) * 1000)
+                    if METRICS_AVAILABLE:
+                        MetricsService.record_llm_call(
+                            processor=operation,
+                            provider='claude',
+                            model=self.claude_model,
+                            duration_ms=duration_ms,
+                            success=False,
+                            error_message="Rate limit exceeded",
+                            project_id=project_id
+                        )
                     return f"Rate limit exceeded after {max_retries} retries. Please wait a minute and try again.", False
                     
             except Exception as e:
+                duration_ms = int((time.time() - start_time) * 1000)
                 logger.error(f"Claude error: {e}")
+                if METRICS_AVAILABLE:
+                    MetricsService.record_llm_call(
+                        processor=operation,
+                        provider='claude',
+                        model=self.claude_model,
+                        duration_ms=duration_ms,
+                        success=False,
+                        error_message=str(e)[:200],
+                        project_id=project_id
+                    )
                 return str(e), False
         
         return "Unknown error in Claude call", False
