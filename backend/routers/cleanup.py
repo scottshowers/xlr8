@@ -523,3 +523,174 @@ async def refresh_metrics(project: str = Query(None)):
     except Exception as e:
         logger.error(f"[CLEANUP] Metrics refresh failed: {e}")
         raise HTTPException(500, f"Refresh failed: {str(e)}")
+
+
+# =============================================================================
+# REFERENCES (Backward Compatibility)
+# =============================================================================
+
+def _get_rag_handler():
+    """Get RAG handler for reference document operations."""
+    try:
+        from utils.rag_handler import RAGHandler
+        return RAGHandler()
+    except ImportError:
+        try:
+            from backend.utils.rag_handler import RAGHandler
+            return RAGHandler()
+        except ImportError:
+            return None
+
+
+@router.get("/status/references")
+async def list_references():
+    """
+    List all reference library documents.
+    Backward compatible endpoint for ReferenceLibraryPage.
+    """
+    try:
+        rag = _get_rag_handler()
+        if not rag:
+            return {"files": [], "rules": [], "error": "RAG handler not available"}
+        
+        # Get collection and all documents
+        try:
+            coll = rag.client.get_collection(name="documents")
+            results = coll.get(include=["metadatas"])
+        except:
+            return {"files": [], "rules": [], "total": 0}
+        
+        # Aggregate by source document
+        doc_counts = {}
+        doc_metadata = {}
+        
+        for meta in results.get('metadatas', []):
+            if not meta:
+                continue
+            source = meta.get('source') or meta.get('filename')
+            project = meta.get('project_id') or meta.get('project')
+            
+            # Only include reference library docs (global/universal)
+            if project not in ['Global/Universal', 'Reference Library', None, '']:
+                continue
+                
+            if source:
+                doc_counts[source] = doc_counts.get(source, 0) + 1
+                if source not in doc_metadata:
+                    doc_metadata[source] = {
+                        'truth_type': meta.get('truth_type', 'reference'),
+                        'project': project or 'Global/Universal',
+                        'uploaded_at': meta.get('uploaded_at')
+                    }
+        
+        # Build response
+        ref_files = []
+        for filename, count in doc_counts.items():
+            meta = doc_metadata.get(filename, {})
+            ref_files.append({
+                "filename": filename,
+                "project": meta.get('project', 'Global/Universal'),
+                "chunk_count": count,
+                "truth_type": meta.get('truth_type', 'reference'),
+                "uploaded_at": meta.get('uploaded_at')
+            })
+        
+        return {
+            "files": ref_files,
+            "rules": [],  # Rules extracted from these docs (future)
+            "total": len(ref_files)
+        }
+        
+    except Exception as e:
+        logger.error(f"[REFERENCES] Error listing: {e}")
+        return {"files": [], "rules": [], "error": str(e)}
+
+
+@router.delete("/status/references/{filename:path}")
+async def delete_reference(
+    filename: str,
+    confirm: bool = Query(False, description="Must be true to delete")
+):
+    """Delete a single reference document."""
+    if not confirm:
+        raise HTTPException(400, "Add ?confirm=true to delete")
+    
+    try:
+        rag = _get_rag_handler()
+        if not rag:
+            raise HTTPException(503, "RAG handler not available")
+        
+        # Get collection
+        try:
+            coll = rag.client.get_collection(name="documents")
+        except:
+            raise HTTPException(503, "Documents collection not available")
+        
+        # Find and delete all chunks for this document
+        results = coll.get(include=["metadatas"], where={"source": filename})
+        
+        if not results.get('ids'):
+            # Try with filename field instead
+            results = coll.get(include=["metadatas"], where={"filename": filename})
+        
+        if not results.get('ids'):
+            raise HTTPException(404, f"Document not found: {filename}")
+        
+        # Delete the chunks
+        coll.delete(ids=results['ids'])
+        
+        logger.info(f"[REFERENCES] Deleted {len(results['ids'])} chunks for: {filename}")
+        return {"success": True, "deleted": filename, "chunks_removed": len(results['ids'])}
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[REFERENCES] Delete error: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/status/references")
+async def delete_all_references(
+    confirm: bool = Query(False, description="Must be true to delete all")
+):
+    """Delete ALL reference documents. Use with caution."""
+    if not confirm:
+        raise HTTPException(400, "Add ?confirm=true to delete all references")
+    
+    try:
+        rag = _get_rag_handler()
+        if not rag:
+            raise HTTPException(503, "RAG handler not available")
+        
+        # Get collection
+        try:
+            coll = rag.client.get_collection(name="documents")
+        except:
+            raise HTTPException(503, "Documents collection not available")
+        
+        # Get all reference docs (global/universal project)
+        results = coll.get(include=["metadatas"])
+        
+        ids_to_delete = []
+        for i, meta in enumerate(results.get('metadatas', [])):
+            if not meta:
+                continue
+            project = meta.get('project_id') or meta.get('project')
+            if project in ['Global/Universal', 'Reference Library', None, '']:
+                ids_to_delete.append(results['ids'][i])
+        
+        if ids_to_delete:
+            coll.delete(ids=ids_to_delete)
+        
+        logger.info(f"[REFERENCES] Cleared {len(ids_to_delete)} reference chunks")
+        return {
+            "success": True,
+            "files_processed": len(ids_to_delete),
+            "message": f"Deleted {len(ids_to_delete)} reference chunks"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[REFERENCES] Clear all error: {e}")
+        raise HTTPException(500, str(e))
