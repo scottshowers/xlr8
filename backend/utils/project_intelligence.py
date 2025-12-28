@@ -783,6 +783,9 @@ class ProjectIntelligenceService:
         # Detect relationships between tables
         self._detect_relationships(tables)
         
+        # Persist relationships to Supabase
+        self._persist_relationships()
+        
         # Check for orphan records
         self._check_orphan_records()
         
@@ -1094,6 +1097,49 @@ class ProjectIntelligenceService:
                                 
                     except Exception as e:
                         logger.debug(f"[INTELLIGENCE] Relationship detection failed: {e}")
+    
+    def _persist_relationships(self) -> None:
+        """Persist detected relationships to Supabase project_relationships table."""
+        if not self.relationships:
+            logger.debug("[INTELLIGENCE] No relationships to persist")
+            return
+        
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if not supabase:
+                logger.warning("[INTELLIGENCE] No Supabase connection - skipping relationship persistence")
+                return
+            
+            persisted = 0
+            for rel in self.relationships:
+                try:
+                    data = {
+                        'project_name': self.project,
+                        'source_table': rel.from_table,
+                        'source_column': rel.from_column,
+                        'target_table': rel.to_table,
+                        'target_column': rel.to_column,
+                        'confidence': rel.confidence,
+                        'status': 'detected',  # detected, confirmed, rejected
+                        'method': 'auto_intelligence'
+                    }
+                    
+                    # Upsert to avoid duplicates
+                    supabase.table('project_relationships').upsert(
+                        data,
+                        on_conflict='project_name,source_table,source_column,target_table,target_column'
+                    ).execute()
+                    persisted += 1
+                    
+                except Exception as e:
+                    logger.debug(f"[INTELLIGENCE] Failed to persist relationship {rel.from_table}->{rel.to_table}: {e}")
+            
+            if persisted > 0:
+                logger.info(f"[INTELLIGENCE] Persisted {persisted} relationships to Supabase")
+                
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Relationship persistence failed: {e}")
     
     def _check_orphan_records(self) -> None:
         """Check for orphan records based on detected relationships."""
