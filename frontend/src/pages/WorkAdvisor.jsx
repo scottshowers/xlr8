@@ -17,6 +17,7 @@ import {
   Compass,
   Bot
 } from 'lucide-react'
+import { Tooltip } from '../components/ui'
 
 /**
  * WorkAdvisor - Conversational guide to help users find the right approach
