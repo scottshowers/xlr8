@@ -10,7 +10,8 @@
 import React, { useState } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
-import { FolderOpen, Plus, Edit2, Trash2, Check, X } from 'lucide-react';
+import { FolderOpen, Plus, Edit2, Trash2, Check, X, Info } from 'lucide-react';
+import { Tooltip } from '../components/ui';
 
 // Mission Control Colors
 const colors = {
@@ -157,28 +158,40 @@ export default function ProjectsPage() {
           justifyContent: 'space-between',
           alignItems: 'center',
         }}>
-          <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text }}>
-            All Projects
-          </h3>
-          <button
-            onClick={() => setShowForm(true)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.4rem',
-              padding: '0.5rem 1rem',
-              background: colors.primary,
-              border: 'none',
-              borderRadius: 8,
-              color: 'white',
-              fontSize: '0.85rem',
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+          <Tooltip 
+            title="Project Management" 
+            detail="Projects organize your customer implementation work. Each project has its own data, playbooks, and analysis."
+            action="Select a project to work with its data"
           >
-            <Plus size={16} />
-            New Project
-          </button>
+            <h3 style={{ margin: 0, fontSize: '0.85rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+              All Projects
+            </h3>
+          </Tooltip>
+          <Tooltip 
+            title="Create New Project" 
+            detail="Set up a new customer project with name, company, product type, and assigned playbooks."
+            action="Projects isolate data between customers"
+          >
+            <button
+              onClick={() => setShowForm(true)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.5rem 1rem',
+                background: colors.primary,
+                border: 'none',
+                borderRadius: 8,
+                color: 'white',
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              <Plus size={16} />
+              New Project
+            </button>
+          </Tooltip>
         </div>
 
         {/* Form */}
