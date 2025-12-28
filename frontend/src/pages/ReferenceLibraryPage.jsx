@@ -11,6 +11,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
+import { Tooltip } from '../components/ui';
 import api from '../services/api';
 import {
   Upload, FileText, ListChecks, Search as SearchIcon,
@@ -51,10 +52,10 @@ export default function ReferenceLibraryPage() {
   const [activeTab, setActiveTab] = useState('documents');
 
   const tabs = [
-    { id: 'documents', label: 'Documents', icon: BookOpen },
-    { id: 'upload', label: 'Upload', icon: Upload },
-    { id: 'rules', label: 'Rules', icon: ListChecks },
-    { id: 'compliance', label: 'Compliance Check', icon: SearchIcon },
+    { id: 'documents', label: 'Documents', icon: BookOpen, tooltip: { title: 'Reference Documents', detail: 'Browse uploaded reference documents organized by category.', action: 'Click to expand and view details' } },
+    { id: 'upload', label: 'Upload', icon: Upload, tooltip: { title: 'Upload References', detail: 'Add new reference documents for best practices and compliance.', action: 'Supports PDF and DOCX' } },
+    { id: 'rules', label: 'Rules', icon: ListChecks, tooltip: { title: 'Extracted Rules', detail: 'AI-extracted rules from your reference documents.', action: 'Rules power compliance checks' } },
+    { id: 'compliance', label: 'Compliance Check', icon: SearchIcon, tooltip: { title: 'Run Compliance Check', detail: 'Check project data against reference rules.', action: 'Select a project first' } },
   ];
 
   return (
@@ -77,20 +78,21 @@ export default function ReferenceLibraryPage() {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.25rem',
-                  border: 'none', background: isActive ? colors.card : 'transparent',
-                  color: isActive ? colors.primary : colors.textMuted, fontWeight: 600, fontSize: '0.85rem',
-                  cursor: 'pointer', borderBottom: isActive ? `2px solid ${colors.primary}` : '2px solid transparent',
-                  marginBottom: '-1px', transition: 'all 0.15s ease',
-                }}
-              >
-                <Icon size={18} />
-                {tab.label}
-              </button>
+              <Tooltip key={tab.id} title={tab.tooltip.title} detail={tab.tooltip.detail} action={tab.tooltip.action}>
+                <button
+                  onClick={() => setActiveTab(tab.id)}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '1rem 1.25rem',
+                    border: 'none', background: isActive ? colors.card : 'transparent',
+                    color: isActive ? colors.primary : colors.textMuted, fontWeight: 600, fontSize: '0.85rem',
+                    cursor: 'pointer', borderBottom: isActive ? `2px solid ${colors.primary}` : '2px solid transparent',
+                    marginBottom: '-1px', transition: 'all 0.15s ease',
+                  }}
+                >
+                  <Icon size={18} />
+                  {tab.label}
+                </button>
+              </Tooltip>
             );
           })}
         </div>
