@@ -450,7 +450,14 @@ export default function DashboardPage() {
       
       // Health score from platform
       setHealthScore(platform.health?.score || 100);
-      setHealthTrend(3);
+      
+      // Health trend - calculate from raw metrics if available
+      const rawMetrics = platform.metrics?._raw || {};
+      const totalOps = (rawMetrics.upload_count || 0) + (rawMetrics.query_count || 0);
+      const errorRate = platform.metrics?.error_rate_percent || 0;
+      // Positive trend if we have activity and low errors
+      const calculatedTrend = totalOps > 0 ? (errorRate < 5 ? Math.min(5, Math.floor(totalOps / 10)) : -Math.floor(errorRate / 2)) : 0;
+      setHealthTrend(calculatedTrend);
       
       // Pipeline stats from platform.pipeline
       setPipeline({
@@ -491,31 +498,48 @@ export default function DashboardPage() {
         resolved: false 
       })));
       
-      // Throughput - generate from job data or use placeholder
-      const hours = ['6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
-      const jobsToday = platform.jobs?.completed_today || 0;
-      setThroughput(hours.map((hour, i) => ({ 
-        hour, 
-        uploads: Math.max(1, Math.floor(jobsToday / 8) + (i % 3)), 
-        queries: Math.max(5, Math.floor(jobsToday / 4) + (i * 2)), 
-        llm: Math.max(10, Math.floor(jobsToday / 2) + (i * 3))
-      })));
+      // Throughput - fetch REAL data from /api/metrics/throughput
+      try {
+        const throughputData = await fetchJSON('/api/metrics/throughput?hours=24');
+        if (throughputData?.data && throughputData.data.length > 0) {
+          // Format for chart - group into 8 display buckets
+          const data = throughputData.data;
+          const bucketSize = Math.ceil(data.length / 8);
+          const buckets = [];
+          for (let i = 0; i < data.length; i += bucketSize) {
+            const slice = data.slice(i, i + bucketSize);
+            const hour = slice[0]?.hour?.slice(11, 16) || `${Math.floor(i / bucketSize) * 3}:00`;
+            buckets.push({
+              hour: hour,
+              uploads: slice.reduce((sum, d) => sum + (d.uploads || 0), 0),
+              queries: slice.reduce((sum, d) => sum + (d.queries || 0), 0),
+              llm: slice.reduce((sum, d) => sum + (d.llm_calls || 0), 0)
+            });
+          }
+          setThroughput(buckets.length > 0 ? buckets : [{ hour: 'Now', uploads: 0, queries: 0, llm: 0 }]);
+        } else {
+          // No data yet - show empty state
+          setThroughput([{ hour: 'No data', uploads: 0, queries: 0, llm: 0 }]);
+        }
+      } catch (e) {
+        console.log('Throughput fetch failed, using empty state');
+        setThroughput([{ hour: 'No data', uploads: 0, queries: 0, llm: 0 }]);
+      }
       
     } else {
-      // Fallback: demo data when API unavailable
+      // Fallback: empty state when API unavailable
       setSystems({
-        DuckDB: { status: 'healthy', latency: 12, uptime: 99.9 },
-        ChromaDB: { status: 'healthy', latency: 8, uptime: 99.7 },
-        Supabase: { status: 'healthy', latency: 45, uptime: 98.5 },
-        Ollama: { status: 'healthy', latency: 150, uptime: 99.8 },
+        DuckDB: { status: 'unknown', latency: 0, uptime: 0 },
+        ChromaDB: { status: 'unknown', latency: 0, uptime: 0 },
+        Supabase: { status: 'unknown', latency: 0, uptime: 0 },
+        Ollama: { status: 'unknown', latency: 0, uptime: 0 },
       });
-      setHealthScore(100);
-      setHealthTrend(5);
+      setHealthScore(0);
+      setHealthTrend(0);
       setPipeline({ ingested: { count: 0 }, processed: { count: 0 }, analyzed: { count: 0 }, insights: { count: 0 } });
       setPerformance({ queryP50: 0, uploadAvg: 0, llmAvg: 0, errorRate: 0 });
-      setValue({ analysesCompleted: 0, hoursEquivalent: 0, dollarsSaved: 0, accuracyRate: 100, avgTimeToInsight: 0 });
-      const hours = ['6am', '8am', '10am', '12pm', '2pm', '4pm', '6pm', '8pm'];
-      setThroughput(hours.map(hour => ({ hour, uploads: 0, queries: 0, llm: 0 })));
+      setValue({ analysesCompleted: 0, hoursEquivalent: 0, dollarsSaved: 0, accuracyRate: 0, avgTimeToInsight: 0 });
+      setThroughput([{ hour: 'API Unavailable', uploads: 0, queries: 0, llm: 0 }]);
     }
     
     setAlerts(newAlerts);
