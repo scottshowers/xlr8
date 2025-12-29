@@ -360,50 +360,66 @@ function ThroughputChart({ data }) {
 }
 
 // ============================================================================
-// DAILY ACTIVITY CHART (Compact Spark chart)
+// DAILY ACTIVITY SPARKLINE
 // ============================================================================
 function DailyActivityChart() {
-  // Generate last 30 days of activity data
-  const today = new Date();
-  const data = Array.from({ length: 30 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - (29 - i));
-    return {
-      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      dayOfWeek: date.getDay(),
-      activity: Math.floor(Math.random() * 80) + 20 + (date.getDay() === 0 || date.getDay() === 6 ? -30 : 0)
-    };
-  }).map(d => ({ ...d, activity: Math.max(5, d.activity) }));
+  // Generate last 30 days of activity data for both structured and vector
+  const structuredData = Array.from({ length: 30 }, (_, i) => {
+    const dayOfWeek = (new Date().getDay() - (29 - i) + 35) % 7;
+    return Math.max(10, Math.floor(Math.random() * 60) + 30 + (dayOfWeek === 0 || dayOfWeek === 6 ? -20 : 0));
+  });
+  const vectorData = Array.from({ length: 30 }, (_, i) => {
+    const dayOfWeek = (new Date().getDay() - (29 - i) + 35) % 7;
+    return Math.max(5, Math.floor(Math.random() * 40) + 15 + (dayOfWeek === 0 || dayOfWeek === 6 ? -10 : 0));
+  });
   
-  const maxActivity = Math.max(...data.map(d => d.activity));
+  const allData = [...structuredData, ...vectorData];
+  const max = Math.max(...allData);
+  const min = Math.min(...allData);
+  
+  const width = 200;
+  const height = 50;
+  
+  const buildPath = (data) => {
+    return data.map((val, i) => {
+      const x = (i / (data.length - 1)) * width;
+      const y = height - ((val - min) / (max - min)) * (height - 8) - 4;
+      return { x, y, val };
+    });
+  };
+  
+  const structuredPoints = buildPath(structuredData);
+  const vectorPoints = buildPath(vectorData);
+  
+  const structuredPath = structuredPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+  const vectorPath = vectorPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+  
+  // Find highs/lows for each
+  const sMax = structuredData.indexOf(Math.max(...structuredData));
+  const sMin = structuredData.indexOf(Math.min(...structuredData));
+  const vMax = vectorData.indexOf(Math.max(...vectorData));
+  const vMin = vectorData.indexOf(Math.min(...vectorData));
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <BarChart3 size={16} color={colors.primary} /> Daily Activity
-        </h3>
-        <span style={{ fontSize: '11px', color: colors.textMuted }}>30 days</span>
+      <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <BarChart3 size={16} color={colors.primary} /> 30-Day Data Activity
+      </h3>
+      <div style={{ display: 'flex', gap: '16px', marginBottom: '8px', fontSize: '10px' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 12, height: 2, backgroundColor: colors.primary, display: 'inline-block' }} /> Structured</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 12, height: 2, backgroundColor: colors.royalPurple, display: 'inline-block' }} /> Vector</span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '48px' }}>
-        {data.map((d, idx) => (
-          <div
-            key={idx}
-            title={`${d.date}: ${d.activity} ops`}
-            style={{
-              flex: 1,
-              height: `${(d.activity / maxActivity) * 100}%`,
-              backgroundColor: d.activity > 60 ? colors.primary : d.activity > 30 ? colors.skyBlue : colors.iceFlow,
-              borderRadius: '1px',
-              minHeight: '3px',
-            }}
-          />
-        ))}
-      </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '9px', color: colors.textMuted }}>
-        <span>{data[0].date}</span>
-        <span>Today</span>
-      </div>
+      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+        {/* Structured line (green) */}
+        <path d={structuredPath} fill="none" stroke={colors.primary} strokeWidth="1.5" />
+        <circle cx={structuredPoints[sMax].x} cy={structuredPoints[sMax].y} r="3" fill={colors.primary} />
+        <circle cx={structuredPoints[sMin].x} cy={structuredPoints[sMin].y} r="3" fill={colors.scarletSage} />
+        
+        {/* Vector line (purple) */}
+        <path d={vectorPath} fill="none" stroke={colors.royalPurple} strokeWidth="1.5" />
+        <circle cx={vectorPoints[vMax].x} cy={vectorPoints[vMax].y} r="3" fill={colors.royalPurple} />
+        <circle cx={vectorPoints[vMin].x} cy={vectorPoints[vMin].y} r="3" fill={colors.scarletSage} />
+      </svg>
     </div>
   );
 }
