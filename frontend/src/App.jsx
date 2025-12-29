@@ -88,6 +88,9 @@ function AppRoutes() {
         {/* Intelligence Demo - Watch XLR8 Think */}
         <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
         
+        {/* Hype Video */}
+        <Route path="/hype" element={<HypeVideo />} />
+        
         {/* Architecture - Level 5 DFD */}
         <Route path="/architecture" element={<ArchitecturePage />} />
         
