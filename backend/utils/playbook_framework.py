@@ -732,6 +732,19 @@ class DocumentScanner:
         """Get all files associated with a project."""
         project_files = set()
         
+        # Look up project name from UUID for better matching
+        project_name = None
+        try:
+            from backend.utils.supabase_client import get_supabase_client
+            supabase = get_supabase_client()
+            if supabase:
+                result = supabase.table('projects').select('name').eq('id', project_id).execute()
+                if result.data:
+                    project_name = result.data[0].get('name')
+                    logger.debug(f"[SCAN] Resolved project: {project_id[:8]} -> {project_name}")
+        except Exception as e:
+            logger.debug(f"[SCAN] Project name lookup failed: {e}")
+        
         # Source 1: ChromaDB
         try:
             from utils.rag_handler import RAGHandler
@@ -744,7 +757,11 @@ class DocumentScanner:
                 doc_project_name = metadata.get("project") or ""
                 
                 is_global = doc_project_name.lower() in ('global', '__global__', 'global/universal')
-                is_this_project = doc_project == project_id or doc_project == project_id[:8]
+                is_this_project = (
+                    doc_project == project_id or 
+                    doc_project == project_id[:8] or
+                    (project_name and doc_project_name.lower() == project_name.lower())
+                )
                 
                 if is_global or is_this_project:
                     filename = metadata.get("source", metadata.get("filename", ""))
@@ -765,20 +782,45 @@ class DocumentScanner:
                 """).fetchone()
                 
                 if table_check and table_check[0] > 0:
-                    result = conn.execute("""
-                        SELECT DISTINCT source_file, project
-                        FROM _pdf_tables
-                        WHERE source_file IS NOT NULL
+                    # Check if project_id column exists
+                    cols = conn.execute("""
+                        SELECT column_name FROM information_schema.columns 
+                        WHERE table_name = '_pdf_tables'
                     """).fetchall()
+                    col_names = [c[0] for c in cols]
+                    has_project_id = 'project_id' in col_names
+                    
+                    if has_project_id:
+                        result = conn.execute("""
+                            SELECT DISTINCT source_file, project, project_id
+                            FROM _pdf_tables
+                            WHERE source_file IS NOT NULL
+                        """).fetchall()
+                    else:
+                        result = conn.execute("""
+                            SELECT DISTINCT source_file, project, NULL as project_id
+                            FROM _pdf_tables
+                            WHERE source_file IS NOT NULL
+                        """).fetchall()
+                    
+                    logger.warning(f"[SCAN] _pdf_tables has {len(result)} distinct files, looking for project {project_id[:8]}")
                     
                     for row in result:
-                        source_file, proj = row
+                        source_file, proj, proj_id = row
+                        logger.warning(f"[SCAN] _pdf_tables row: file={source_file}, proj={proj}, proj_id={proj_id}")
                         is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
-                        is_this_project = proj and project_id[:8].lower() in proj.lower()
+                        # Match on project_id (UUID) OR project name OR partial UUID in name
+                        is_this_project = (
+                            (proj_id and proj_id == project_id) or
+                            (proj_id and project_id[:8].lower() in (proj_id or '').lower()) or
+                            (proj and project_id[:8].lower() in proj.lower()) or
+                            (project_name and proj and proj.lower() == project_name.lower())
+                        )
                         
                         if is_global or is_this_project:
                             if source_file:
                                 project_files.add(source_file)
+                                logger.warning(f"[SCAN] ✓ Matched: {source_file}")
                 
                 conn.close()
         except Exception as e:
@@ -789,16 +831,37 @@ class DocumentScanner:
             from backend.utils.playbook_parser import get_duckdb_connection
             conn = get_duckdb_connection()
             if conn:
-                result = conn.execute("""
-                    SELECT DISTINCT file_name, project
-                    FROM _schema_metadata
-                    WHERE file_name IS NOT NULL
+                # Check if project_id column exists
+                cols = conn.execute("""
+                    SELECT column_name FROM information_schema.columns 
+                    WHERE table_name = '_schema_metadata'
                 """).fetchall()
+                col_names = [c[0] for c in cols]
+                has_project_id = 'project_id' in col_names
+                
+                if has_project_id:
+                    result = conn.execute("""
+                        SELECT DISTINCT file_name, project, project_id
+                        FROM _schema_metadata
+                        WHERE file_name IS NOT NULL
+                    """).fetchall()
+                else:
+                    result = conn.execute("""
+                        SELECT DISTINCT file_name, project, NULL as project_id
+                        FROM _schema_metadata
+                        WHERE file_name IS NOT NULL
+                    """).fetchall()
                 
                 for row in result:
-                    source_file, proj = row
+                    source_file, proj, proj_id = row
                     is_global = proj and proj.lower() in ('global', '__global__', 'global/universal')
-                    is_this_project = proj and project_id[:8].lower() in proj.lower()
+                    # Match on project_id (UUID) OR project name OR partial UUID in name
+                    is_this_project = (
+                        (proj_id and proj_id == project_id) or
+                        (proj_id and project_id[:8].lower() in (proj_id or '').lower()) or
+                        (proj and project_id[:8].lower() in proj.lower()) or
+                        (project_name and proj and proj.lower() == project_name.lower())
+                    )
                     
                     if is_global or is_this_project:
                         if source_file:
@@ -1273,12 +1336,14 @@ class PlaybookEngine:
         
         This is the main scan entry point.
         """
-        logger.info(f"[SCAN] {action_id} in project {project_id[:8]}")
+        logger.warning(f"[SCAN] ====== START {action_id} in project {project_id[:8]} ======")
         
         # Get action definition
         action = self.playbook.get_action(action_id)
         if not action:
             raise ValueError(f"Action {action_id} not found")
+        
+        logger.warning(f"[SCAN] Action reports_needed: {action.reports_needed}")
         
         # Get parent actions
         parent_actions = InheritanceManager.get_parent_actions(action_id, self.dependencies)
@@ -1305,11 +1370,13 @@ class PlaybookEngine:
         
         # Get project files
         project_files = DocumentScanner.get_project_files(project_id)
+        logger.warning(f"[SCAN] Found {len(project_files)} project files: {list(project_files)[:5]}")
         
         # Search by filename
         found_docs = DocumentScanner.search_by_filename(
             project_files, action.reports_needed
         )
+        logger.warning(f"[SCAN] Filename search found {len(found_docs)} docs: {[d.get('filename') for d in found_docs]}")
         seen_files = set(d['filename'] for d in found_docs)
         
         # Add inherited docs
@@ -1334,6 +1401,7 @@ class PlaybookEngine:
         semantic_results = DocumentScanner.search_semantic(
             project_id, action.reports_needed, action.description
         )
+        logger.warning(f"[SCAN] Semantic search returned {len(semantic_results)} results")
         
         seen_content = set()
         for result in semantic_results:
@@ -1364,7 +1432,12 @@ class PlaybookEngine:
         
         # Get structured data (DuckDB) - prioritize this
         duckdb_content = DocumentScanner.get_structured_data(project_files)
+        logger.warning(f"[SCAN] DuckDB structured data: {len(duckdb_content)} content blocks")
+        if duckdb_content:
+            logger.warning(f"[SCAN] First DuckDB block preview: {duckdb_content[0][:200] if duckdb_content[0] else 'empty'}...")
+        
         final_content = duckdb_content + all_content[:20]
+        logger.warning(f"[SCAN] Final content: {len(final_content)} blocks total")
         
         # Determine status and extract findings
         findings = None
