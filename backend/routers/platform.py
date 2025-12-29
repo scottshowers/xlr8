@@ -28,6 +28,7 @@ import logging
 from datetime import datetime, timedelta
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
@@ -46,27 +47,45 @@ _CACHE_TTL_SECONDS = 30  # Cache for 30 seconds - most data doesn't change that 
 @router.get("/platform")
 async def get_platform_status(
     project: Optional[str] = None,
-    force: bool = Query(False, description="Force cache refresh")
+    force: bool = Query(False, description="Force cache refresh"),
+    include: Optional[str] = Query(None, description="Comma-separated: files,relationships")
 ) -> Dict[str, Any]:
     """
     COMPREHENSIVE PLATFORM STATUS - ONE ENDPOINT FOR EVERYTHING.
     
     Returns all data needed by Mission Control, DataExplorer, and dashboards.
-    Call this instead of 50 different endpoints.
+    
+    By default returns lightweight data (health, stats, jobs, metrics, value).
+    Use 'include' to request heavy sections:
+    - ?include=files - Add file list (for DataPage)
+    - ?include=relationships - Add relationships (for DataExplorer)
+    - ?include=files,relationships - Add both
     
     Args:
         project: Optional project filter
         force: Force cache refresh (ignore cached data)
+        include: Comma-separated list of heavy sections to include
         
     Returns:
-        Complete platform state including health, stats, jobs, metrics
+        Platform state with requested sections
     """
+    # Parse include parameter
+    include_files = False
+    include_relationships = False
+    if include:
+        parts = [p.strip().lower() for p in include.split(',')]
+        include_files = 'files' in parts
+        include_relationships = 'relationships' in parts
+    
+    # Build cache key that includes the include parameter
+    cache_key = f"{project}:{include or 'none'}"
+    
     # Check cache first - return cached data if fresh enough
     now = time.time()
     if not force:
         with _platform_cache['lock']:
             if (_platform_cache['data'] is not None 
-                and _platform_cache['project'] == project
+                and _platform_cache['project'] == cache_key
                 and (now - _platform_cache['timestamp']) < _CACHE_TTL_SECONDS):
                 # Return cached data with updated timestamp
                 cached = _platform_cache['data'].copy()
@@ -294,344 +313,356 @@ async def get_platform_status(
     except Exception as e:
         logger.warning(f"DuckDB stats failed: {e}")
     
-    # Get document count from Supabase registry
-    try:
-        supabase = get_supabase()
-        if supabase:
-            # Document count
-            docs = supabase.table("document_registry").select("id", count="exact").execute()
-            response["stats"]["documents"] = docs.count if hasattr(docs, 'count') else len(docs.data or [])
-            
-            # If we have registry docs but no DuckDB files, use registry as file count
-            if response["stats"]["files"] == 0 and response["stats"]["documents"] > 0:
-                response["stats"]["files"] = response["stats"]["documents"]
-            
-            # Rules count
-            try:
-                rules = supabase.table("standards_rules").select("rule_id", count="exact").execute()
-                response["stats"]["rules"] = rules.count if hasattr(rules, 'count') else len(rules.data or [])
-            except:
-                pass
-            
-            # Insights count
-            try:
-                insights = supabase.table("intelligence_findings").select("id", count="exact").execute()
-                response["stats"]["insights"] = insights.count if hasattr(insights, 'count') else len(insights.data or [])
-            except:
-                pass
-            
-            # Relationships count
-            try:
-                if project:
-                    rels = supabase.table("project_relationships").select("id", count="exact").eq("project_name", project).execute()
-                else:
-                    rels = supabase.table("project_relationships").select("id", count="exact").execute()
-                response["stats"]["relationships"] = rels.count if hasattr(rels, 'count') else len(rels.data or [])
-            except:
-                pass
-                
-    except Exception as e:
-        logger.warning(f"Supabase stats failed: {e}")
-    
     # =========================================================================
-    # JOBS: Get active and recent jobs
+    # PARALLEL SUPABASE QUERIES: Stats, Jobs, Metrics
+    # Run all Supabase queries in parallel to reduce latency from ~10s to ~1s
     # =========================================================================
     try:
         supabase = get_supabase()
         if supabase:
             today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-            
-            # Active jobs (from processing_jobs table)
-            active = supabase.table("processing_jobs").select("id", count="exact").in_("status", ["queued", "processing"]).execute()
-            response["jobs"]["active"] = active.count if hasattr(active, 'count') else len(active.data or [])
-            
-            # Completed today
-            completed = supabase.table("processing_jobs").select("id", count="exact").eq("status", "completed").gte("completed_at", today.isoformat()).execute()
-            response["jobs"]["completed_today"] = completed.count if hasattr(completed, 'count') else len(completed.data or [])
-            
-            # Failed today
-            failed = supabase.table("processing_jobs").select("id", count="exact").eq("status", "failed").gte("updated_at", today.isoformat()).execute()
-            response["jobs"]["failed_today"] = failed.count if hasattr(failed, 'count') else len(failed.data or [])
-            
-            # Recent jobs (last 10)
-            recent = supabase.table("processing_jobs").select("id, job_type, status, created_at, completed_at").order("created_at", desc=True).limit(10).execute()
-            response["jobs"]["recent"] = [
-                {
-                    "id": j["id"],
-                    "type": j.get("job_type", "unknown"),
-                    "status": j.get("status", "unknown"),
-                    "created": j.get("created_at"),
-                    "completed": j.get("completed_at")
-                }
-                for j in (recent.data or [])
-            ]
-    except Exception as e:
-        logger.warning(f"Jobs stats failed: {e}")
-    
-    # =========================================================================
-    # METRICS: Performance metrics from platform_metrics table
-    # =========================================================================
-    try:
-        supabase = get_supabase()
-        if supabase:
             week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
             
-            # Query platform_metrics table (the ACTUAL table that MetricsService writes to)
-            try:
-                metrics_result = supabase.table("platform_metrics").select(
-                    "metric_type, duration_ms, success"
-                ).gte("created_at", week_ago).execute()
+            # Define all queries as functions
+            def get_doc_count():
+                return supabase.table("document_registry").select("id", count="exact").execute()
+            
+            def get_rules_count():
+                return supabase.table("standards_rules").select("rule_id", count="exact").execute()
+            
+            def get_insights_count():
+                return supabase.table("intelligence_findings").select("id", count="exact").execute()
+            
+            def get_rels_count():
+                if project:
+                    return supabase.table("project_relationships").select("id", count="exact").eq("project_name", project).execute()
+                return supabase.table("project_relationships").select("id", count="exact").execute()
+            
+            def get_active_jobs():
+                return supabase.table("processing_jobs").select("id", count="exact").in_("status", ["queued", "processing"]).execute()
+            
+            def get_completed_jobs():
+                return supabase.table("processing_jobs").select("id", count="exact").eq("status", "completed").gte("completed_at", today.isoformat()).execute()
+            
+            def get_failed_jobs():
+                return supabase.table("processing_jobs").select("id", count="exact").eq("status", "failed").gte("updated_at", today.isoformat()).execute()
+            
+            def get_recent_jobs():
+                return supabase.table("processing_jobs").select("id, job_type, status, created_at, completed_at").order("created_at", desc=True).limit(10).execute()
+            
+            def get_metrics():
+                return supabase.table("platform_metrics").select("metric_type, duration_ms, success").gte("created_at", week_ago).execute()
+            
+            # Run all queries in parallel
+            results = {}
+            with ThreadPoolExecutor(max_workers=9) as executor:
+                futures = {
+                    executor.submit(get_doc_count): 'docs',
+                    executor.submit(get_rules_count): 'rules',
+                    executor.submit(get_insights_count): 'insights',
+                    executor.submit(get_rels_count): 'rels',
+                    executor.submit(get_active_jobs): 'active',
+                    executor.submit(get_completed_jobs): 'completed',
+                    executor.submit(get_failed_jobs): 'failed',
+                    executor.submit(get_recent_jobs): 'recent',
+                    executor.submit(get_metrics): 'metrics',
+                }
                 
-                if metrics_result.data:
-                    # Separate by metric type
-                    uploads = [m for m in metrics_result.data if m.get("metric_type") == "upload"]
-                    queries = [m for m in metrics_result.data if m.get("metric_type") == "query"]
-                    llm_calls = [m for m in metrics_result.data if m.get("metric_type") == "llm_call"]
-                    errors = [m for m in metrics_result.data if m.get("metric_type") == "error"]
-                    
-                    # Upload speed (avg duration)
-                    upload_durations = [u["duration_ms"] for u in uploads if u.get("duration_ms")]
-                    if upload_durations:
-                        response["metrics"]["upload_speed_ms"] = int(sum(upload_durations) / len(upload_durations))
-                    
-                    # Query response time (avg duration)
-                    query_durations = [q["duration_ms"] for q in queries if q.get("duration_ms")]
-                    if query_durations:
-                        response["metrics"]["query_response_ms"] = int(sum(query_durations) / len(query_durations))
-                    
-                    # LLM latency (avg duration)
-                    llm_durations = [l["duration_ms"] for l in llm_calls if l.get("duration_ms")]
-                    if llm_durations:
-                        response["metrics"]["llm_latency_ms"] = int(sum(llm_durations) / len(llm_durations))
-                    
-                    # Error rate
-                    total_ops = len(uploads) + len(queries)
-                    if total_ops > 0:
-                        failed_ops = len([m for m in (uploads + queries) if not m.get("success")])
-                        response["metrics"]["error_rate_percent"] = round((failed_ops / total_ops) * 100, 1)
-                    
-                    # Store throughput data for frontend
-                    response["metrics"]["_raw"] = {
-                        "upload_count": len(uploads),
-                        "query_count": len(queries),
-                        "llm_count": len(llm_calls),
-                        "error_count": len(errors)
+                for future in as_completed(futures):
+                    key = futures[future]
+                    try:
+                        results[key] = future.result()
+                    except Exception as e:
+                        logger.debug(f"[PLATFORM] Query {key} failed: {e}")
+                        results[key] = None
+            
+            # Process results - STATS
+            if results.get('docs'):
+                docs = results['docs']
+                response["stats"]["documents"] = docs.count if hasattr(docs, 'count') else len(docs.data or [])
+                if response["stats"]["files"] == 0 and response["stats"]["documents"] > 0:
+                    response["stats"]["files"] = response["stats"]["documents"]
+            
+            if results.get('rules'):
+                rules = results['rules']
+                response["stats"]["rules"] = rules.count if hasattr(rules, 'count') else len(rules.data or [])
+            
+            if results.get('insights'):
+                insights = results['insights']
+                response["stats"]["insights"] = insights.count if hasattr(insights, 'count') else len(insights.data or [])
+            
+            if results.get('rels'):
+                rels = results['rels']
+                response["stats"]["relationships"] = rels.count if hasattr(rels, 'count') else len(rels.data or [])
+            
+            # Process results - JOBS
+            if results.get('active'):
+                active = results['active']
+                response["jobs"]["active"] = active.count if hasattr(active, 'count') else len(active.data or [])
+            
+            if results.get('completed'):
+                completed = results['completed']
+                response["jobs"]["completed_today"] = completed.count if hasattr(completed, 'count') else len(completed.data or [])
+            
+            if results.get('failed'):
+                failed = results['failed']
+                response["jobs"]["failed_today"] = failed.count if hasattr(failed, 'count') else len(failed.data or [])
+            
+            if results.get('recent'):
+                recent = results['recent']
+                response["jobs"]["recent"] = [
+                    {
+                        "id": j["id"],
+                        "type": j.get("job_type", "unknown"),
+                        "status": j.get("status", "unknown"),
+                        "created": j.get("created_at"),
+                        "completed": j.get("completed_at")
                     }
-            except Exception as metrics_e:
-                logger.debug(f"[PLATFORM] platform_metrics query: {metrics_e}")
+                    for j in (recent.data or [])
+                ]
+            
+            # Process results - METRICS
+            if results.get('metrics') and results['metrics'].data:
+                metrics_data = results['metrics'].data
+                uploads = [m for m in metrics_data if m.get("metric_type") == "upload"]
+                queries = [m for m in metrics_data if m.get("metric_type") == "query"]
+                llm_calls = [m for m in metrics_data if m.get("metric_type") == "llm_call"]
+                errors = [m for m in metrics_data if m.get("metric_type") == "error"]
+                
+                upload_durations = [u["duration_ms"] for u in uploads if u.get("duration_ms")]
+                if upload_durations:
+                    response["metrics"]["upload_speed_ms"] = int(sum(upload_durations) / len(upload_durations))
+                
+                query_durations = [q["duration_ms"] for q in queries if q.get("duration_ms")]
+                if query_durations:
+                    response["metrics"]["query_response_ms"] = int(sum(query_durations) / len(query_durations))
+                
+                llm_durations = [l["duration_ms"] for l in llm_calls if l.get("duration_ms")]
+                if llm_durations:
+                    response["metrics"]["llm_latency_ms"] = int(sum(llm_durations) / len(llm_durations))
+                
+                total_ops = len(uploads) + len(queries)
+                if total_ops > 0:
+                    failed_ops = len([m for m in (uploads + queries) if not m.get("success")])
+                    response["metrics"]["error_rate_percent"] = round((failed_ops / total_ops) * 100, 1)
+                
+                response["metrics"]["_raw"] = {
+                    "upload_count": len(uploads),
+                    "query_count": len(queries),
+                    "llm_count": len(llm_calls),
+                    "error_count": len(errors)
+                }
                 
     except Exception as e:
-        logger.warning(f"Metrics failed: {e}")
+        logger.warning(f"Parallel Supabase queries failed: {e}")
     
     # =========================================================================
     # FILES: Get file list for Data page
+    # ONLY fetched when ?include=files is specified (heavy operation)
     # Pull metadata from document_registry (source of truth), table info from DuckDB
     # =========================================================================
-    try:
-        handler = get_structured_handler()
-        files_dict = {}  # Dedupe by filename
-        
-        # STEP 1: Build registry lookup from document_registry (source of truth for provenance)
-        # This matches the pattern in /status/structured
-        registry_lookup = {}  # filename -> {uploaded_by, uploaded_at, truth_type}
+    if include_files:
         try:
-            from utils.database.models import DocumentRegistryModel
+            handler = get_structured_handler()
+            files_dict = {}  # Dedupe by filename
             
-            if project_filter:
-                from utils.database.models import ProjectModel
-                proj_record = ProjectModel.get_by_name(project_filter)
-                project_id = proj_record.get('id') if proj_record else None
-                registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
-            else:
-                registry_entries = DocumentRegistryModel.get_all()
-            
-            for entry in registry_entries:
-                filename = entry.get('filename', '')
-                if filename:
-                    registry_lookup[filename.lower()] = {
-                        'uploaded_by': entry.get('uploaded_by_email', ''),
-                        'uploaded_at': entry.get('created_at', ''),
-                        'truth_type': entry.get('truth_type', 'reality'),
-                        'domain': entry.get('content_domain', '')
-                    }
-        except Exception as reg_e:
-            logger.debug(f"[PLATFORM] Registry lookup: {reg_e}")
-        
-        # STEP 2: Query _schema_metadata for table structure only
-        try:
-            schema_files = handler.conn.execute("""
-                SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                FROM _schema_metadata 
-                WHERE is_current = TRUE
-                ORDER BY file_name, table_name
-            """).fetchall()
-            
-            for row in schema_files:
-                fname = row[0]
-                if not fname:
-                    continue
+            # STEP 1: Build registry lookup from document_registry (source of truth for provenance)
+            registry_lookup = {}  # filename -> {uploaded_by, uploaded_at, truth_type}
+            try:
+                from utils.database.models import DocumentRegistryModel
                 
-                # Get provenance from registry (source of truth)
-                provenance = registry_lookup.get(fname.lower(), {})
+                if project_filter:
+                    from utils.database.models import ProjectModel
+                    proj_record = ProjectModel.get_by_name(project_filter)
+                    project_id = proj_record.get('id') if proj_record else None
+                    registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+                else:
+                    registry_entries = DocumentRegistryModel.get_all()
+                
+                for entry in registry_entries:
+                    filename = entry.get('filename', '')
+                    if filename:
+                        registry_lookup[filename.lower()] = {
+                            'uploaded_by': entry.get('uploaded_by_email', ''),
+                            'uploaded_at': entry.get('created_at', ''),
+                            'truth_type': entry.get('truth_type', 'reality'),
+                            'domain': entry.get('content_domain', '')
+                        }
+            except Exception as reg_e:
+                logger.debug(f"[PLATFORM] Registry lookup: {reg_e}")
+            
+            # STEP 2: Query _schema_metadata for table structure only
+            try:
+                schema_files = handler.conn.execute("""
+                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    ORDER BY file_name, table_name
+                """).fetchall()
+                
+                for row in schema_files:
+                    fname = row[0]
+                    if not fname:
+                        continue
                     
-                if fname not in files_dict:
-                    files_dict[fname] = {
-                        "filename": fname,
-                        "project": row[1],
-                        "tables": 0,
-                        "rows": 0,
-                        "row_count": 0,  # Alias for frontend compatibility
-                        "loaded_at": str(row[6]) if row[6] else None,
-                        "uploaded_by": provenance.get('uploaded_by', ''),
-                        "uploaded_at": provenance.get('uploaded_at', ''),
-                        "truth_type": provenance.get('truth_type', ''),
-                        "domain": provenance.get('domain', ''),
-                        "type": "structured",
-                        "sheets": []
-                    }
-                
-                # Add this table to sheets
-                files_dict[fname]["sheets"].append({
-                    "table_name": row[2],  # Actual DuckDB table name
-                    "display_name": row[3] or row[2],
-                    "row_count": int(row[4] or 0),
-                    "column_count": int(row[5] or 0)
-                })
-                files_dict[fname]["tables"] += 1
-                files_dict[fname]["rows"] += int(row[4] or 0)
-                files_dict[fname]["row_count"] += int(row[4] or 0)
-        except Exception as e:
-            logger.debug(f"[PLATFORM] Schema metadata query: {e}")
-        
-        # From _pdf_tables - also get actual table names
-        try:
-            pdf_files = handler.conn.execute("""
-                SELECT source_file, project, table_name, row_count, created_at
-                FROM _pdf_tables
-                ORDER BY source_file, table_name
-            """).fetchall()
+                    provenance = registry_lookup.get(fname.lower(), {})
+                        
+                    if fname not in files_dict:
+                        files_dict[fname] = {
+                            "filename": fname,
+                            "project": row[1],
+                            "tables": 0,
+                            "rows": 0,
+                            "row_count": 0,
+                            "loaded_at": str(row[6]) if row[6] else None,
+                            "uploaded_by": provenance.get('uploaded_by', ''),
+                            "uploaded_at": provenance.get('uploaded_at', ''),
+                            "truth_type": provenance.get('truth_type', ''),
+                            "domain": provenance.get('domain', ''),
+                            "type": "structured",
+                            "sheets": []
+                        }
+                    
+                    files_dict[fname]["sheets"].append({
+                        "table_name": row[2],
+                        "display_name": row[3] or row[2],
+                        "row_count": int(row[4] or 0),
+                        "column_count": int(row[5] or 0)
+                    })
+                    files_dict[fname]["tables"] += 1
+                    files_dict[fname]["rows"] += int(row[4] or 0)
+                    files_dict[fname]["row_count"] += int(row[4] or 0)
+            except Exception as e:
+                logger.debug(f"[PLATFORM] Schema metadata query: {e}")
             
-            for row in pdf_files:
-                fname = row[0]
-                if not fname:
-                    continue
+            # STEP 3: From _pdf_tables
+            try:
+                pdf_files = handler.conn.execute("""
+                    SELECT source_file, project, table_name, row_count, created_at
+                    FROM _pdf_tables
+                    ORDER BY source_file, table_name
+                """).fetchall()
                 
-                # Get provenance from registry (source of truth)
-                provenance = registry_lookup.get(fname.lower(), {})
+                for row in pdf_files:
+                    fname = row[0]
+                    if not fname:
+                        continue
+                    
+                    provenance = registry_lookup.get(fname.lower(), {})
+                    
+                    if fname not in files_dict:
+                        files_dict[fname] = {
+                            "filename": fname,
+                            "project": row[1],
+                            "tables": 0,
+                            "rows": 0,
+                            "row_count": 0,
+                            "chunks": 0,
+                            "loaded_at": str(row[4]) if row[4] else None,
+                            "uploaded_by": provenance.get('uploaded_by', ''),
+                            "uploaded_at": provenance.get('uploaded_at', ''),
+                            "type": "structured",
+                            "sheets": [],
+                            "truth_type": provenance.get('truth_type', '')
+                        }
+                    
+                    files_dict[fname]["sheets"].append({
+                        "table_name": row[2],
+                        "display_name": row[2],
+                        "row_count": int(row[3] or 0),
+                        "column_count": 0
+                    })
+                    files_dict[fname]["tables"] += 1
+                    files_dict[fname]["rows"] += int(row[3] or 0)
+                    files_dict[fname]["row_count"] += int(row[3] or 0)
+            except Exception as e:
+                logger.debug(f"[PLATFORM] PDF tables query: {e}")
+            
+            # STEP 4: From Supabase registry (for unstructured docs AND to add chunk info)
+            try:
+                supabase = get_supabase()
+                if supabase:
+                    if project:
+                        from utils.database.models import ProjectModel
+                        proj_record = ProjectModel.get_by_name(project)
+                        project_id = proj_record.get('id') if proj_record else None
+                        registry = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
+                    else:
+                        registry = supabase.table("document_registry").select("*").execute()
+                    
+                    for doc in (registry.data or []):
+                        fname = doc.get("filename", "")
+                        if not fname:
+                            continue
+                        
+                        chunk_count = doc.get("chunk_count", 0)
+                        storage_type = doc.get("storage_type", "chromadb")
+                        
+                        if fname in files_dict:
+                            files_dict[fname]["chunks"] = chunk_count
+                            if chunk_count > 0:
+                                files_dict[fname]["type"] = "hybrid"
+                            if not files_dict[fname].get("truth_type"):
+                                files_dict[fname]["truth_type"] = doc.get("truth_type", "")
+                            if not files_dict[fname].get("uploaded_by"):
+                                files_dict[fname]["uploaded_by"] = doc.get("uploaded_by_email", "")
+                                files_dict[fname]["uploaded_at"] = doc.get("created_at", "")
+                        else:
+                            files_dict[fname] = {
+                                "filename": fname,
+                                "project": doc.get("project_name", ""),
+                                "tables": 0,
+                                "rows": 0,
+                                "chunks": chunk_count,
+                                "loaded_at": doc.get("created_at"),
+                                "uploaded_by": doc.get("uploaded_by_email", ""),
+                                "uploaded_at": doc.get("created_at", ""),
+                                "type": storage_type if chunk_count > 0 else "unknown",
+                                "truth_type": doc.get("truth_type", ""),
+                            }
+            except:
+                pass
+            
+            response["files"] = list(files_dict.values())
+            
+            if len(response["files"]) > response["stats"]["files"]:
+                response["stats"]["files"] = len(response["files"])
                 
-                if fname not in files_dict:
-                    files_dict[fname] = {
-                        "filename": fname,
-                        "project": row[1],
-                        "tables": 0,
-                        "rows": 0,
-                        "row_count": 0,
-                        "chunks": 0,  # Will be updated from document_registry if exists
-                        "loaded_at": str(row[4]) if row[4] else None,
-                        "uploaded_by": provenance.get('uploaded_by', ''),
-                        "uploaded_at": provenance.get('uploaded_at', ''),
-                        "type": "structured",  # Default to structured, may become hybrid
-                        "sheets": [],
-                        "truth_type": provenance.get('truth_type', '')
-                    }
-                
-                # Add this table to sheets
-                files_dict[fname]["sheets"].append({
-                    "table_name": row[2],  # Actual DuckDB table name
-                    "display_name": row[2],
-                    "row_count": int(row[3] or 0),
-                    "column_count": 0  # PDF tables don't store column_count in _pdf_tables
-                })
-                files_dict[fname]["tables"] += 1
-                files_dict[fname]["rows"] += int(row[3] or 0)
-                files_dict[fname]["row_count"] += int(row[3] or 0)
         except Exception as e:
-            logger.debug(f"[PLATFORM] PDF tables query: {e}")
-        
-        # From Supabase registry (for unstructured docs AND to add chunk info)
+            logger.warning(f"Files list failed: {e}")
+    else:
+        logger.debug("[PLATFORM] Skipping files list (not requested)")
+    
+    # =========================================================================
+    # RELATIONSHIPS: Get for Data Explorer
+    # ONLY fetched when ?include=relationships is specified (heavy operation)
+    # =========================================================================
+    if include_relationships:
         try:
             supabase = get_supabase()
             if supabase:
                 if project:
-                    from utils.database.models import ProjectModel
-                    proj_record = ProjectModel.get_by_name(project)
-                    project_id = proj_record.get('id') if proj_record else None
-                    registry = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
+                    rels = supabase.table("project_relationships").select("*").eq("project_name", project).limit(100).execute()
                 else:
-                    registry = supabase.table("document_registry").select("*").execute()
+                    rels = supabase.table("project_relationships").select("*").limit(100).execute()
                 
-                for doc in (registry.data or []):
-                    fname = doc.get("filename", "")
-                    if not fname:
-                        continue
-                    
-                    chunk_count = doc.get("chunk_count", 0)
-                    storage_type = doc.get("storage_type", "chromadb")
-                    
-                    if fname in files_dict:
-                        # File exists from DuckDB - MERGE the chunk info
-                        files_dict[fname]["chunks"] = chunk_count
-                        if chunk_count > 0:
-                            # Has both structured AND vector data
-                            files_dict[fname]["type"] = "hybrid"
-                        if not files_dict[fname].get("truth_type"):
-                            files_dict[fname]["truth_type"] = doc.get("truth_type", "")
-                        # Also merge uploaded_by if not set
-                        if not files_dict[fname].get("uploaded_by"):
-                            files_dict[fname]["uploaded_by"] = doc.get("uploaded_by_email", "")
-                            files_dict[fname]["uploaded_at"] = doc.get("created_at", "")
-                    else:
-                        # New file from registry only (unstructured/vector only)
-                        files_dict[fname] = {
-                            "filename": fname,
-                            "project": doc.get("project_name", ""),
-                            "tables": 0,
-                            "rows": 0,
-                            "chunks": chunk_count,
-                            "loaded_at": doc.get("created_at"),
-                            "uploaded_by": doc.get("uploaded_by_email", ""),
-                            "uploaded_at": doc.get("created_at", ""),
-                            "type": storage_type if chunk_count > 0 else "unknown",
-                            "truth_type": doc.get("truth_type", ""),
-                        }
-        except:
-            pass
-        
-        response["files"] = list(files_dict.values())
-        
-        # Update file count from actual files found
-        if len(response["files"]) > response["stats"]["files"]:
-            response["stats"]["files"] = len(response["files"])
-            
-    except Exception as e:
-        logger.warning(f"Files list failed: {e}")
-    
-    # =========================================================================
-    # RELATIONSHIPS: Get for Data Explorer
-    # =========================================================================
-    try:
-        supabase = get_supabase()
-        if supabase:
-            if project:
-                rels = supabase.table("project_relationships").select("*").eq("project_name", project).limit(100).execute()
-            else:
-                rels = supabase.table("project_relationships").select("*").limit(100).execute()
-            
-            response["relationships"] = [
-                {
-                    "id": r.get("id"),
-                    "source_table": r.get("source_table"),
-                    "source_column": r.get("source_column"),
-                    "target_table": r.get("target_table"),
-                    "target_column": r.get("target_column"),
-                    "confidence": r.get("confidence", 1),
-                    "confirmed": r.get("status") == "confirmed",
-                    "method": r.get("method", "auto")
-                }
-                for r in (rels.data or [])
-            ]
-    except Exception as e:
-        logger.warning(f"Relationships failed: {e}")
+                response["relationships"] = [
+                    {
+                        "id": r.get("id"),
+                        "source_table": r.get("source_table"),
+                        "source_column": r.get("source_column"),
+                        "target_table": r.get("target_table"),
+                        "target_column": r.get("target_column"),
+                        "confidence": r.get("confidence", 1),
+                        "confirmed": r.get("status") == "confirmed",
+                        "method": r.get("method", "auto")
+                    }
+                    for r in (rels.data or [])
+                ]
+        except Exception as e:
+            logger.warning(f"Relationships failed: {e}")
+    else:
+        logger.debug("[PLATFORM] Skipping relationships (not requested)")
     
     # =========================================================================
     # CLASSIFICATION: Summary stats
@@ -705,7 +736,7 @@ async def get_platform_status(
     with _platform_cache['lock']:
         _platform_cache['data'] = response.copy()
         _platform_cache['timestamp'] = time.time()
-        _platform_cache['project'] = project
+        _platform_cache['project'] = cache_key
     
     return response
 
