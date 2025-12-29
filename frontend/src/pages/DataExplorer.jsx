@@ -974,9 +974,9 @@ export default function DataExplorer() {
               onDelete={deleteRelationship}
               onUpdate={async (rel, updates) => {
                 try {
-                  await api.patch(`/relationships/${rel.id}`, updates);
+                  await api.patch(`/data-model/relationships/${rel.id}`, updates);
                   // Refresh relationships
-                  const resp = await api.get(`/relationships?project=${projectName}`);
+                  const resp = await api.get(`/data-model/relationships/${projectName}`);
                   if (resp.data?.relationships) setRelationships(resp.data.relationships);
                 } catch (err) {
                   console.error('Failed to update relationship:', err);
