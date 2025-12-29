@@ -181,7 +181,7 @@ export function AuthProvider({ children }) {
         let initialSession = null;
         try {
           const sessionTimeout = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('getSession timeout')), 5000)
+            setTimeout(() => reject(new Error('getSession timeout')), 10000)
           );
           const sessionPromise = supabase.auth.getSession();
           const result = await Promise.race([sessionPromise, sessionTimeout]);
