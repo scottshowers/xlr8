@@ -457,16 +457,40 @@ async def get_platform_status(
         logger.warning(f"Parallel Supabase queries failed: {e}")
     
     # =========================================================================
-    # FILES + RELATIONSHIPS: Parallelized heavy data fetching
-    # ONLY fetched when ?include=files or ?include=relationships is specified
+    # FILES + RELATIONSHIPS: Heavy data fetching
+    # DuckDB queries run sequentially (not thread-safe)
+    # Supabase queries run in parallel (network-bound)
     # =========================================================================
     if include_files or include_relationships:
         try:
             handler = get_structured_handler()
             
-            # Define queries as functions for parallel execution
+            # STEP 1: Run DuckDB queries SEQUENTIALLY (connection not thread-safe)
+            schema_results = []
+            pdf_results = []
+            
+            if include_files:
+                try:
+                    schema_results = handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE
+                        ORDER BY file_name, table_name
+                    """).fetchall()
+                except Exception as e:
+                    logger.debug(f"[PLATFORM] Schema metadata query: {e}")
+                
+                try:
+                    pdf_results = handler.conn.execute("""
+                        SELECT source_file, project, table_name, row_count, created_at
+                        FROM _pdf_tables
+                        ORDER BY source_file, table_name
+                    """).fetchall()
+                except Exception as e:
+                    logger.debug(f"[PLATFORM] PDF tables query: {e}")
+            
+            # STEP 2: Run Supabase queries IN PARALLEL (network-bound)
             def get_document_registry():
-                """Single query for both provenance AND chunk info"""
                 supabase = get_supabase()
                 if not supabase:
                     return []
@@ -482,31 +506,7 @@ async def get_platform_status(
                     result = supabase.table("document_registry").select("*").execute()
                 return result.data or []
             
-            def get_schema_metadata():
-                """DuckDB structured files"""
-                try:
-                    return handler.conn.execute("""
-                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                        FROM _schema_metadata 
-                        WHERE is_current = TRUE
-                        ORDER BY file_name, table_name
-                    """).fetchall()
-                except:
-                    return []
-            
-            def get_pdf_tables():
-                """DuckDB PDF tables"""
-                try:
-                    return handler.conn.execute("""
-                        SELECT source_file, project, table_name, row_count, created_at
-                        FROM _pdf_tables
-                        ORDER BY source_file, table_name
-                    """).fetchall()
-                except:
-                    return []
-            
             def get_relationships_data():
-                """Supabase relationships"""
                 if not include_relationships:
                     return []
                 supabase = get_supabase()
@@ -518,25 +518,22 @@ async def get_platform_status(
                     result = supabase.table("project_relationships").select("*").limit(100).execute()
                 return result.data or []
             
-            # Run all queries in parallel
-            results = {}
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                futures = {
-                    executor.submit(get_document_registry): 'registry',
-                    executor.submit(get_schema_metadata): 'schema',
-                    executor.submit(get_pdf_tables): 'pdf',
-                    executor.submit(get_relationships_data): 'rels',
-                }
-                for future in as_completed(futures):
-                    key = futures[future]
-                    try:
-                        results[key] = future.result()
-                    except Exception as e:
-                        logger.debug(f"[PLATFORM] Query {key} failed: {e}")
-                        results[key] = []
-            
-            # Build registry lookup from results
-            registry_data = results.get('registry', [])
+            # Run Supabase queries in parallel
+            registry_data = []
+            rels_data = []
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                registry_future = executor.submit(get_document_registry)
+                rels_future = executor.submit(get_relationships_data)
+                
+                try:
+                    registry_data = registry_future.result()
+                except Exception as e:
+                    logger.debug(f"[PLATFORM] Registry query failed: {e}")
+                
+                try:
+                    rels_data = rels_future.result()
+                except Exception as e:
+                    logger.debug(f"[PLATFORM] Relationships query failed: {e}")
             registry_lookup = {}
             registry_chunks = {}  # filename -> chunk info
             for entry in registry_data:
@@ -558,7 +555,7 @@ async def get_platform_status(
             # Build files dict from schema metadata
             files_dict = {}
             if include_files:
-                for row in results.get('schema', []):
+                for row in schema_results:
                     fname = row[0]
                     if not fname:
                         continue
@@ -594,7 +591,7 @@ async def get_platform_status(
                     files_dict[fname]["row_count"] += int(row[4] or 0)
                 
                 # Add PDF tables
-                for row in results.get('pdf', []):
+                for row in pdf_results:
                     fname = row[0]
                     if not fname:
                         continue
@@ -665,7 +662,7 @@ async def get_platform_status(
                         "confirmed": r.get("status") == "confirmed",
                         "method": r.get("method", "auto")
                     }
-                    for r in results.get('rels', [])
+                    for r in rels_data
                 ]
                 
         except Exception as e:
