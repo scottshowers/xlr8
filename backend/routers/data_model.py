@@ -359,6 +359,49 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.patch("/data-model/relationships/{rel_id}")
+async def update_relationship(rel_id: int, updates: dict):
+    """
+    Update a relationship's column mappings.
+    
+    Used when user wants to change from_column or to_column.
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        if not supabase:
+            raise HTTPException(status_code=500, detail="Database not available")
+        
+        # Build update payload
+        update_data = {}
+        if "from_column" in updates:
+            update_data["source_column"] = updates["from_column"]
+        if "to_column" in updates:
+            update_data["target_column"] = updates["to_column"]
+        
+        if not update_data:
+            return {"status": "no_changes"}
+        
+        # Update the relationship
+        result = supabase.table('project_relationships') \
+            .update(update_data) \
+            .eq('id', rel_id) \
+            .execute()
+        
+        if result.data:
+            logger.info(f"Relationship {rel_id} updated: {update_data}")
+            return {"status": "updated", "id": rel_id, "updates": update_data}
+        else:
+            raise HTTPException(status_code=404, detail="Relationship not found")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update relationship: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/data-model/relationships/{project_name}/create")
 async def create_relationship(project_name: str, relationship: RelationshipCreate):
     """
