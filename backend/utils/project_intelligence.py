@@ -1130,34 +1130,36 @@ class ProjectIntelligenceService:
             except Exception as e:
                 logger.warning(f"[INTELLIGENCE] Could not clear old relationships: {e}")
             
-            # Insert all new relationships
+            # Build batch data for all relationships
+            batch_data = []
+            for rel in self.relationships:
+                batch_data.append({
+                    'project_name': self.project,
+                    'source_table': rel.from_table,
+                    'source_column': rel.from_column,
+                    'target_table': rel.to_table,
+                    'target_column': rel.to_column,
+                    'confidence': rel.confidence,
+                    'status': 'detected',
+                    'method': 'auto_intelligence'
+                })
+            
+            # Batch insert in chunks of 100 (Supabase limit)
             persisted = 0
             failed = 0
-            for rel in self.relationships:
+            chunk_size = 100
+            
+            for i in range(0, len(batch_data), chunk_size):
+                chunk = batch_data[i:i + chunk_size]
                 try:
-                    data = {
-                        'project_name': self.project,
-                        'source_table': rel.from_table,
-                        'source_column': rel.from_column,
-                        'target_table': rel.to_table,
-                        'target_column': rel.to_column,
-                        'confidence': rel.confidence,
-                        'status': 'detected',  # detected, confirmed, rejected
-                        'method': 'auto_intelligence'
-                    }
-                    
-                    # Use insert instead of upsert - we cleared old ones above
-                    result = supabase.table('project_relationships').insert(data).execute()
-                    
+                    result = supabase.table('project_relationships').insert(chunk).execute()
                     if result.data:
-                        persisted += 1
+                        persisted += len(result.data)
                     else:
-                        logger.warning(f"[INTELLIGENCE] Insert returned no data for {rel.from_table}.{rel.from_column} -> {rel.to_table}.{rel.to_column}")
-                        failed += 1
-                    
+                        failed += len(chunk)
                 except Exception as e:
-                    failed += 1
-                    logger.warning(f"[INTELLIGENCE] Failed to persist relationship {rel.from_table}.{rel.from_column} -> {rel.to_table}.{rel.to_column}: {e}")
+                    failed += len(chunk)
+                    logger.warning(f"[INTELLIGENCE] Batch insert failed for chunk {i//chunk_size + 1}: {e}")
             
             logger.warning(f"[INTELLIGENCE] Relationship persistence complete: {persisted} saved, {failed} failed")
                 
