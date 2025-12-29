@@ -237,25 +237,22 @@ export default function CustomerGenome({ isOpen, onClose }) {
     setLoading(true);
     try {
       // Try to load real data from API
-      const projectParam = activeProject ? `&project_id=${activeProject.id}` : '';
+      const projectParam = activeProject ? `&project=${encodeURIComponent(activeProject.name || activeProject.id)}` : '';
       
-      const [registryRes, structuredRes, statsRes] = await Promise.all([
-        api.get(`/status/registry${activeProject ? `?project_id=${activeProject.id}` : ''}`).catch(() => ({ data: {} })),
+      const [structuredRes, statsRes] = await Promise.all([
         api.get(`/platform?include=files${projectParam}`).catch(() => ({ data: {} })),
         api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
       ]);
 
-      const registry = registryRes.data || {};
       const structured = structuredRes.data || {};
       const learning = statsRes.data || {};
       
-      const docs = registry.documents || [];
       const files = structured.files || [];
+      const totalDocs = structured.stats?.documents || 0;
       
       // Calculate traits from real data - show actual zeros when empty
-      const totalDocs = docs.length;
       const totalFiles = files.length;
-      const totalRows = files.reduce((sum, f) => sum + (f.total_rows || 0), 0);
+      const totalRows = files.reduce((sum, f) => sum + (f.rows || f.total_rows || 0), 0);
       const patterns = learning.patterns_count || learning.cached_queries || 0;
       const queries = learning.total_queries || 0;
       
@@ -263,7 +260,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
       const hasData = totalDocs > 0 || totalFiles > 0;
       
       const dataComplexity = hasData ? Math.min(95, Math.round(20 + (totalFiles * 8) + (totalRows / 10000))) : 0;
-      const relationships = structured.relationships_count || 0;
+      const relationships = structured.stats?.relationships || 0;
       const querySophistication = queries > 0 ? Math.min(95, Math.round(20 + (queries * 2) + (patterns * 5))) : 0;
       const standardsCoverage = hasData ? Math.min(98, Math.round(30 + (patterns * 3) + (totalDocs * 2))) : 0;
       const activityLevel = hasData ? Math.min(95, Math.round(30 + (totalDocs * 5) + (totalFiles * 3))) : 0;
