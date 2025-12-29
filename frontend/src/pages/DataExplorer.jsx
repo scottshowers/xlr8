@@ -155,7 +155,7 @@ export default function DataExplorer() {
     try {
       // SINGLE API CALL - /api/platform returns everything we need
       const projectName = activeProject?.name || activeProject?.id || 'default';
-      const res = await api.get(`/platform?project=${encodeURIComponent(projectName)}`);
+      const res = await api.get(`/platform?include=files,relationships&project=${encodeURIComponent(projectName)}`);
       const platform = res.data;
       
       // Get files and build tables from platform.files
@@ -208,7 +208,7 @@ export default function DataExplorer() {
       console.error('Failed to load tables:', err);
       // Fallback to old endpoints if /platform not available
       try {
-        const res = await api.get('/platform');
+        const res = await api.get('/platform?include=files,relationships');
         const files = res.data?.files || [];
         const allTables = [];
         files.forEach(file => {
