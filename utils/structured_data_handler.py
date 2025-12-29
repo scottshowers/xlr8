@@ -2500,15 +2500,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         sheet_info['column_profiles'] = {}
                         sheet_info['categorical_columns'] = []
             
-            # Detect relationships (85-90%)
-            report_progress(85, "Detecting table relationships...")
-            try:
-                relationships = self.detect_relationships(project)
-                results['relationships'] = relationships
-                logger.info(f"Detected {len(relationships)} table relationships")
-            except Exception as rel_e:
-                logger.warning(f"Relationship detection failed: {rel_e}")
-                results['relationships'] = []
+            # Note: Relationship detection is now handled by project_intelligence
+            # which runs after upload and stores to Supabase project_relationships
+            report_progress(85, "Preparing for intelligence analysis...")
+            results['relationships'] = []  # Will be populated by project_intelligence
             
             # Start background column inference (90-95%)
             report_progress(90, "Queueing column inference...")
