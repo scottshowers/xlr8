@@ -332,21 +332,31 @@ function ValueDelivered({ data }) {
 // THROUGHPUT CHART
 // ============================================================================
 function ThroughputChart({ data }) {
-  const maxValue = Math.max(...data.map(d => Math.max(d.uploads || 0, d.queries || 0, d.llm || 0)), 1);
+  // Always show 8 fixed time slots regardless of data
+  const hours = ['12AM', '3AM', '6AM', '9AM', '12PM', '3PM', '6PM', '9PM'];
+  
+  // Map incoming data to fixed slots, default to 0
+  const slots = hours.map((hour, idx) => {
+    const match = data.find(d => d.hour === hour);
+    return match || { hour, uploads: 0, queries: 0, llm: 0 };
+  });
+  
+  const maxValue = Math.max(...slots.map(d => Math.max(d.uploads || 0, d.queries || 0, d.llm || 0)), 1);
+  
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
       <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
         <BarChart3 size={16} color={colors.primary} /> Today's Throughput
       </h3>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '100px' }}>
-        {data.map((d, idx) => (
-          <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
-            <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end' }}>
+        {slots.map((d, idx) => (
+          <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flex: 1 }}>
+            <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '80px' }}>
               <div style={{ width: '10px', height: `${Math.max(4, ((d.uploads || 0) / maxValue) * 80)}px`, backgroundColor: colors.electricBlue, borderRadius: '2px 2px 0 0' }} />
               <div style={{ width: '10px', height: `${Math.max(4, ((d.queries || 0) / maxValue) * 80)}px`, backgroundColor: colors.success, borderRadius: '2px 2px 0 0' }} />
               <div style={{ width: '10px', height: `${Math.max(4, ((d.llm || 0) / maxValue) * 80)}px`, backgroundColor: colors.royalPurple, borderRadius: '2px 2px 0 0' }} />
             </div>
-            <span style={{ fontSize: '9px', color: colors.textMuted }}>{d.hour}</span>
+            <span style={{ fontSize: '8px', color: colors.textMuted }}>{d.hour}</span>
           </div>
         ))}
       </div>
@@ -360,65 +370,58 @@ function ThroughputChart({ data }) {
 }
 
 // ============================================================================
-// DAILY ACTIVITY SPARKLINE
+// DAILY UPLOADS SPARKLINE (Area chart)
 // ============================================================================
 function DailyActivityChart() {
-  // Generate last 30 days of activity data for both structured and vector
-  const structuredData = Array.from({ length: 30 }, (_, i) => {
-    const dayOfWeek = (new Date().getDay() - (29 - i) + 35) % 7;
-    return Math.max(10, Math.floor(Math.random() * 60) + 30 + (dayOfWeek === 0 || dayOfWeek === 6 ? -20 : 0));
-  });
-  const vectorData = Array.from({ length: 30 }, (_, i) => {
-    const dayOfWeek = (new Date().getDay() - (29 - i) + 35) % 7;
-    return Math.max(5, Math.floor(Math.random() * 40) + 15 + (dayOfWeek === 0 || dayOfWeek === 6 ? -10 : 0));
+  // Generate last 90 days of upload data
+  const today = new Date();
+  const data = Array.from({ length: 90 }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() - (89 - i));
+    const dayOfWeek = date.getDay();
+    return {
+      date: date,
+      label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      uploads: Math.max(1, Math.floor(Math.random() * 20) + 5 + (dayOfWeek === 0 || dayOfWeek === 6 ? -8 : 0))
+    };
   });
   
-  const allData = [...structuredData, ...vectorData];
-  const max = Math.max(...allData);
-  const min = Math.min(...allData);
+  const max = Math.max(...data.map(d => d.uploads));
   
-  const width = 200;
+  const width = 280;
   const height = 50;
+  const points = data.map((d, i) => {
+    const x = (i / (data.length - 1)) * width;
+    const y = height - (d.uploads / max) * (height - 4);
+    return { x, y, ...d };
+  });
   
-  const buildPath = (data) => {
-    return data.map((val, i) => {
-      const x = (i / (data.length - 1)) * width;
-      const y = height - ((val - min) / (max - min)) * (height - 8) - 4;
-      return { x, y, val };
-    });
-  };
+  // Line path
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
+  // Area path (close to bottom)
+  const areaPath = linePath + ` L${width},${height} L0,${height} Z`;
   
-  const structuredPoints = buildPath(structuredData);
-  const vectorPoints = buildPath(vectorData);
-  
-  const structuredPath = structuredPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
-  const vectorPath = vectorPoints.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
-  
-  // Find highs/lows for each
-  const sMax = structuredData.indexOf(Math.max(...structuredData));
-  const sMin = structuredData.indexOf(Math.min(...structuredData));
-  const vMax = vectorData.indexOf(Math.max(...vectorData));
-  const vMin = vectorData.indexOf(Math.min(...vectorData));
+  // Show 3 date labels: start, middle, end
+  const dateLabels = [points[0], points[Math.floor(data.length / 2)], points[data.length - 1]];
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 8px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
-        <BarChart3 size={16} color={colors.primary} /> 30-Day Data Activity
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Upload size={16} color={colors.electricBlue} /> Uploads (90 Days)
       </h3>
-      <div style={{ display: 'flex', gap: '16px', marginBottom: '8px', fontSize: '10px' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 12, height: 2, backgroundColor: colors.primary, display: 'inline-block' }} /> Structured</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ width: 12, height: 2, backgroundColor: colors.royalPurple, display: 'inline-block' }} /> Vector</span>
-      </div>
-      <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
-        {/* Structured line (green) */}
-        <path d={structuredPath} fill="none" stroke={colors.primary} strokeWidth="1.5" />
-        <circle cx={structuredPoints[sMax].x} cy={structuredPoints[sMax].y} r="3" fill={colors.primary} />
-        <circle cx={structuredPoints[sMin].x} cy={structuredPoints[sMin].y} r="3" fill={colors.scarletSage} />
-        
-        {/* Vector line (purple) */}
-        <path d={vectorPath} fill="none" stroke={colors.royalPurple} strokeWidth="1.5" />
-        <circle cx={vectorPoints[vMax].x} cy={vectorPoints[vMax].y} r="3" fill={colors.royalPurple} />
-        <circle cx={vectorPoints[vMin].x} cy={vectorPoints[vMin].y} r="3" fill={colors.scarletSage} />
+      <svg width="100%" height={height + 16} viewBox={`0 0 ${width} ${height + 16}`} preserveAspectRatio="xMidYMid meet">
+        <defs>
+          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={colors.electricBlue} stopOpacity="0.3" />
+            <stop offset="100%" stopColor={colors.electricBlue} stopOpacity="0.05" />
+          </linearGradient>
+        </defs>
+        <path d={areaPath} fill="url(#areaGradient)" />
+        <path d={linePath} fill="none" stroke={colors.electricBlue} strokeWidth="1.5" />
+        {/* Date labels */}
+        {dateLabels.map((p, i) => (
+          <text key={i} x={p.x} y={height + 12} fontSize="9" fill={colors.textMuted} textAnchor={i === 0 ? 'start' : i === dateLabels.length - 1 ? 'end' : 'middle'}>{p.label}</text>
+        ))}
       </svg>
     </div>
   );
