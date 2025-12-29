@@ -237,11 +237,11 @@ export default function CustomerGenome({ isOpen, onClose }) {
     setLoading(true);
     try {
       // Try to load real data from API
-      const projectParam = activeProject ? `?project_id=${activeProject.id}` : '';
+      const projectParam = activeProject ? `&project_id=${activeProject.id}` : '';
       
       const [registryRes, structuredRes, statsRes] = await Promise.all([
-        api.get(`/status/registry${projectParam}`).catch(() => ({ data: {} })),
-        api.get(`/platform${projectParam}`).catch(() => ({ data: {} })),
+        api.get(`/status/registry${activeProject ? `?project_id=${activeProject.id}` : ''}`).catch(() => ({ data: {} })),
+        api.get(`/platform?include=files${projectParam}`).catch(() => ({ data: {} })),
         api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
       ]);
 
