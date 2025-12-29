@@ -20,10 +20,6 @@ import { useOnboarding } from '../context/OnboardingContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
 import { SimpleTooltip } from './ui/Tooltip';
 
-// Sales/Demo page buttons for header
-function SalesButtons() {
-  const [hovered, setHovered] = useState(null);
-
 // Helper to derive display name from email if full_name not set
 const getDisplayName = (user) => {
   if (!user) return '';
@@ -41,6 +37,10 @@ const getDisplayName = (user) => {
   }
   return 'User';
 };
+
+// Sales/Demo page buttons for header
+function SalesButtons() {
+  const [hovered, setHovered] = useState(null);
   
   const buttons = [
     { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
