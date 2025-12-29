@@ -46,9 +46,9 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight,
+  Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
-  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye
+  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -111,6 +111,208 @@ function Tooltip({ children, title, detail, action }) {
             borderTop: `6px solid ${brandColors.text}` }} />
         </div>
       )}
+    </div>
+  );
+}
+
+// ============================================================================
+// RELATIONSHIP EDITOR - Collapsible connections with field dropdowns
+// ============================================================================
+function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onUpdate }) {
+  const [expandedConnections, setExpandedConnections] = useState({});
+  const [editingRel, setEditingRel] = useState(null);
+  const [editFromCol, setEditFromCol] = useState('');
+  const [editToCol, setEditToCol] = useState('');
+  
+  // Group relationships by connection (from_table → to_table)
+  const grouped = relationships.reduce((acc, rel) => {
+    const fromTable = rel.from_table || rel.source_table || '?';
+    const toTable = rel.to_table || rel.target_table || '?';
+    const key = `${fromTable}→${toTable}`;
+    if (!acc[key]) acc[key] = { fromTable, toTable, rels: [] };
+    acc[key].rels.push(rel);
+    return acc;
+  }, {});
+  
+  const toggleConnection = (key) => {
+    setExpandedConnections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+  
+  const startEdit = (rel) => {
+    setEditingRel(rel.id);
+    setEditFromCol(rel.from_column || rel.source_column || '');
+    setEditToCol(rel.to_column || rel.target_column || '');
+  };
+  
+  const cancelEdit = () => {
+    setEditingRel(null);
+    setEditFromCol('');
+    setEditToCol('');
+  };
+  
+  const saveEdit = (rel) => {
+    onUpdate(rel, { from_column: editFromCol, to_column: editToCol });
+    setEditingRel(null);
+  };
+  
+  const getColumns = (tableName) => {
+    const table = tables.find(t => t.table_name === tableName);
+    if (!table?.columns) return [];
+    return table.columns.map(col => typeof col === 'string' ? col : col.name);
+  };
+  
+  const getDisplayName = (tableName) => {
+    const table = tables.find(t => t.table_name === tableName);
+    return table?.display_name || tableName;
+  };
+  
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+      {Object.entries(grouped).map(([key, { fromTable, toTable, rels }]) => {
+        const isExpanded = expandedConnections[key];
+        const fromDisplay = getDisplayName(fromTable);
+        const toDisplay = getDisplayName(toTable);
+        const confirmedCount = rels.filter(r => r.confirmed).length;
+        
+        return (
+          <div key={key} style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
+            {/* Connection Header - Click to expand */}
+            <div
+              onClick={() => toggleConnection(key)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                padding: '0.75rem 1rem',
+                background: c.background,
+                cursor: 'pointer',
+                userSelect: 'none'
+              }}
+            >
+              {isExpanded ? <ChevronDown size={16} color={c.textMuted} /> : <ChevronRight size={16} color={c.textMuted} />}
+              <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontWeight: 600, color: c.primary, fontSize: '0.9rem' }}>{fromDisplay}</span>
+                <span style={{ color: c.textMuted }}>→</span>
+                <span style={{ fontWeight: 600, color: c.accent, fontSize: '0.9rem' }}>{toDisplay}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                <span style={{ fontSize: '0.75rem', color: c.textMuted }}>{rels.length} field{rels.length !== 1 ? 's' : ''}</span>
+                {confirmedCount > 0 && (
+                  <span style={{ fontSize: '0.7rem', padding: '0.15rem 0.4rem', background: `${c.success}15`, color: c.success, borderRadius: 4 }}>
+                    {confirmedCount} confirmed
+                  </span>
+                )}
+              </div>
+            </div>
+            
+            {/* Expanded: Show field mappings */}
+            {isExpanded && (
+              <div style={{ borderTop: `1px solid ${c.border}` }}>
+                {rels.map((rel, idx) => {
+                  const fromCol = rel.from_column || rel.source_column || '?';
+                  const toCol = rel.to_column || rel.target_column || '?';
+                  const isEditing = editingRel === rel.id;
+                  const fromCols = getColumns(fromTable);
+                  const toCols = getColumns(toTable);
+                  
+                  return (
+                    <div key={rel.id || idx} style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      padding: '0.6rem 1rem 0.6rem 2.5rem',
+                      borderBottom: idx < rels.length - 1 ? `1px solid ${c.border}` : 'none',
+                      background: rel.needs_review ? `${c.warning}05` : 'transparent'
+                    }}>
+                      {isEditing ? (
+                        <>
+                          {/* Editing mode with dropdowns */}
+                          <select
+                            value={editFromCol}
+                            onChange={(e) => setEditFromCol(e.target.value)}
+                            style={{
+                              padding: '0.35rem 0.5rem',
+                              fontSize: '0.8rem',
+                              border: `1px solid ${c.border}`,
+                              borderRadius: 4,
+                              background: c.cardBg,
+                              color: c.text,
+                              minWidth: 120
+                            }}
+                          >
+                            {fromCols.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                          <span style={{ color: c.textMuted }}>→</span>
+                          <select
+                            value={editToCol}
+                            onChange={(e) => setEditToCol(e.target.value)}
+                            style={{
+                              padding: '0.35rem 0.5rem',
+                              fontSize: '0.8rem',
+                              border: `1px solid ${c.border}`,
+                              borderRadius: 4,
+                              background: c.cardBg,
+                              color: c.text,
+                              minWidth: 120
+                            }}
+                          >
+                            {toCols.map(col => (
+                              <option key={col} value={col}>{col}</option>
+                            ))}
+                          </select>
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                            <button onClick={() => saveEdit(rel)} style={{ padding: '0.25rem 0.5rem', background: `${c.success}15`, border: `1px solid ${c.success}40`, borderRadius: 4, fontSize: '0.7rem', color: c.success, cursor: 'pointer' }}>Save</button>
+                            <button onClick={cancelEdit} style={{ padding: '0.25rem 0.5rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 4, fontSize: '0.7rem', color: c.textMuted, cursor: 'pointer' }}>Cancel</button>
+                          </div>
+                        </>
+                      ) : (
+                        <>
+                          {/* Display mode */}
+                          <code style={{ fontSize: '0.8rem', color: c.text, background: `${c.primary}10`, padding: '0.2rem 0.4rem', borderRadius: 3 }}>{fromCol}</code>
+                          <span style={{ color: c.textMuted, fontSize: '0.85rem' }}>→</span>
+                          <code style={{ fontSize: '0.8rem', color: c.text, background: `${c.accent}10`, padding: '0.2rem 0.4rem', borderRadius: 3 }}>{toCol}</code>
+                          
+                          {rel.confirmed && (
+                            <CheckCircle size={14} color={c.success} style={{ marginLeft: '0.25rem' }} />
+                          )}
+                          
+                          <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                            <button
+                              onClick={() => startEdit(rel)}
+                              style={{ padding: '0.25rem 0.4rem', background: 'transparent', border: `1px solid ${c.border}`, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              title="Edit mapping"
+                            >
+                              <Edit2 size={12} color={c.textMuted} />
+                            </button>
+                            {!rel.confirmed && (
+                              <button
+                                onClick={() => onConfirm(rel)}
+                                style={{ padding: '0.25rem 0.4rem', background: `${c.success}15`, border: `1px solid ${c.success}40`, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                                title="Confirm"
+                              >
+                                <CheckCircle size={12} color={c.success} />
+                              </button>
+                            )}
+                            <button
+                              onClick={() => onDelete(rel)}
+                              style={{ padding: '0.25rem 0.4rem', background: `${c.scarletSage}15`, border: `1px solid ${c.scarletSage}40`, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
+                              title="Delete"
+                            >
+                              <Trash2 size={12} color={c.scarletSage} />
+                            </button>
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -764,99 +966,23 @@ export default function DataExplorer() {
               <p style={{ fontSize: '0.85rem', margin: 0 }}>Upload related files to see FK/PK relationships.</p>
             </div>
           ) : (
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {relationships.map((rel, i) => {
-                // Handle both field name formats
-                const fromTableRaw = rel.from_table || rel.source_table || '?';
-                const toTableRaw = rel.to_table || rel.target_table || '?';
-                const fromCol = rel.from_column || rel.source_column || rel.column || '?';
-                const toCol = rel.to_column || rel.target_column || rel.column || '?';
-                const confidence = rel.confidence || rel.type || 'detected';
-                const isConfirmed = rel.confirmed;
-                const needsReview = rel.needs_review;
-                
-                // Look up display names from tables array
-                const fromTableObj = tables.find(t => t.table_name === fromTableRaw);
-                const toTableObj = tables.find(t => t.table_name === toTableRaw);
-                const fromTable = fromTableObj?.display_name || fromTableRaw;
-                const toTable = toTableObj?.display_name || toTableRaw;
-                
-                return (
-                  <div key={rel.id || i} style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '1rem',
-                    padding: '0.75rem 1rem',
-                    background: needsReview ? `${c.warning}08` : c.background,
-                    borderRadius: 8,
-                    border: `1px solid ${needsReview ? c.warning : c.border}`,
-                    overflow: 'hidden'
-                  }}>
-                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>From</div>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <code style={{ fontSize: '0.8rem', color: c.primary }}>{fromTable}</code>
-                        <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{fromCol}</code>
-                      </div>
-                    </div>
-                    <div style={{ color: c.textMuted, flexShrink: 0 }}>→</div>
-                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>To</div>
-                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        <code style={{ fontSize: '0.8rem', color: c.accent }}>{toTable}</code>
-                        <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{toCol}</code>
-                      </div>
-                    </div>
-                    <div style={{ 
-                      fontSize: '0.7rem', 
-                      padding: '0.25rem 0.5rem', 
-                      background: isConfirmed ? `${c.success}15` : `${c.textMuted}15`, 
-                      color: isConfirmed ? c.success : c.textMuted, 
-                      borderRadius: 4,
-                      flexShrink: 0,
-                      whiteSpace: 'nowrap'
-                    }}>
-                      {isConfirmed ? '✓ confirmed' : confidence}
-                    </div>
-                    {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
-                      {!isConfirmed && (
-                        <button
-                          onClick={() => confirmRelationship(rel)}
-                          style={{
-                            padding: '0.25rem 0.5rem',
-                            background: `${c.success}15`,
-                            border: `1px solid ${c.success}40`,
-                            borderRadius: 4,
-                            fontSize: '0.7rem',
-                            color: c.success,
-                            cursor: 'pointer'
-                          }}
-                          title="Confirm this relationship"
-                        >
-                          ✓
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deleteRelationship(rel)}
-                        style={{
-                          padding: '0.25rem 0.5rem',
-                          background: `${c.scarletSage}15`,
-                          border: `1px solid ${c.scarletSage}40`,
-                          borderRadius: 4,
-                          fontSize: '0.7rem',
-                          color: c.scarletSage,
-                          cursor: 'pointer'
-                        }}
-                        title="Delete this relationship"
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <RelationshipEditor 
+              relationships={relationships}
+              tables={tables}
+              c={c}
+              onConfirm={confirmRelationship}
+              onDelete={deleteRelationship}
+              onUpdate={async (rel, updates) => {
+                try {
+                  await api.patch(`/relationships/${rel.id}`, updates);
+                  // Refresh relationships
+                  const resp = await api.get(`/relationships?project=${projectName}`);
+                  if (resp.data?.relationships) setRelationships(resp.data.relationships);
+                } catch (err) {
+                  console.error('Failed to update relationship:', err);
+                }
+              }}
+            />
           )}
         </div>
       )}
