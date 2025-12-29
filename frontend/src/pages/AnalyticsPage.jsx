@@ -239,7 +239,7 @@ function AnalyticsPageInner() {
       if (!table) return // Skip null/undefined entries
       
       const truthType = table.truth_type || 'reality'
-      const domain = table.domain || inferDomain(table.table_name || table.name || '')
+      const domain = table.domain || inferDomain(table.full_name || table.name || '')
       
       if (!hierarchy[truthType]) {
         hierarchy[truthType] = {}
@@ -277,8 +277,8 @@ function AnalyticsPageInner() {
           label: domain || domainConfig.label,
           icon: domainConfig.icon,
           tables: tableList.sort((a, b) => {
-            const nameA = a?.display_name || a?.table_name || ''
-            const nameB = b?.display_name || b?.table_name || ''
+            const nameA = a?.display_name || a?.full_name || ''
+            const nameB = b?.display_name || b?.full_name || ''
             return nameA.localeCompare(nameB)
           })
         }
@@ -333,9 +333,14 @@ function AnalyticsPageInner() {
     setYAxis(null)
     setResults(null)
     setResultsError(null)
-    // Use table_name for SQL, display_name for display
-    const tableName = table?.table_name || table?.name || 'table'
-    setSqlText(`SELECT *\nFROM "${tableName}"\nLIMIT 100`)
+    // Use full_name for SQL - this is the actual DuckDB table name
+    const tableName = table?.full_name
+    if (tableName) {
+      setSqlText(`SELECT *\nFROM "${tableName}"\nLIMIT 100`)
+    } else {
+      console.error('Missing full_name on table:', table)
+      setSqlText(`-- ERROR: Missing full_name\nSELECT * FROM "unknown" LIMIT 100`)
+    }
   }
   
   const toggleTruthType = (truthType) => {
@@ -352,7 +357,7 @@ function AnalyticsPageInner() {
   // ===========================================
   
   const handleDragStart = (e, column) => {
-    setDraggedColumn({ ...column, table: selectedTable?.table_name })
+    setDraggedColumn({ ...column, table: selectedTable?.full_name })
     e.dataTransfer.effectAllowed = 'copy'
   }
   
@@ -460,6 +465,13 @@ function AnalyticsPageInner() {
   const generateSQL = () => {
     if (!selectedTable || !Array.isArray(columns) || columns.length === 0) return ''
     
+    // MUST use full_name for DuckDB - display_name/name will fail
+    const tableName = selectedTable.full_name
+    if (!tableName) {
+      console.error('Missing full_name on selectedTable:', selectedTable)
+      return ''
+    }
+    
     const selectCols = columns.map(c => {
       if (c?.aggregation) {
         const agg = c.aggregation === 'COUNT DISTINCT' ? 'COUNT(DISTINCT' : c.aggregation + '('
@@ -470,8 +482,6 @@ function AnalyticsPageInner() {
       return `"${c?.name || 'column'}"`
     }).join(',\n       ')
     
-    // Use table_name for actual DuckDB queries, not display_name
-    const tableName = selectedTable.table_name || selectedTable.name || 'table'
     let sql = `SELECT ${selectCols}\nFROM "${tableName}"`
     
     // WHERE clause
@@ -694,7 +704,7 @@ function AnalyticsPageInner() {
           ...domainGroup,
           tables: tables.filter(t => {
             if (!t) return false
-            const tableName = (t.table_name || t.name || '').toLowerCase()
+            const tableName = (t.full_name || t.name || '').toLowerCase()
             const displayName = (t.display_name || '').toLowerCase()
             const search = (catalogSearch || '').toLowerCase()
             const cols = Array.isArray(t.columns) ? t.columns : []
@@ -846,16 +856,16 @@ function AnalyticsPageInner() {
                                 if (!table) return null
                                 return (
                                   <button
-                                    key={table.table_name || table.name || table.full_name}
+                                    key={table.full_name || table.name}
                                     onClick={() => handleTableSelect(table)}
                                     className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
-                                      selectedTable?.table_name === table.table_name 
+                                      selectedTable?.full_name === table.full_name 
                                         ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
                                         : 'text-gray-600'
                                     }`}
                                   >
                                     <Table2 size={10} className="text-gray-400 flex-shrink-0" />
-                                    <span className="truncate flex-1">{table.display_name || table.table_name}</span>
+                                    <span className="truncate flex-1">{table.display_name || table.full_name}</span>
                                     <span className="text-xs text-gray-400 flex-shrink-0">
                                       {(table.row_count || table.rows) ? ((table.row_count || table.rows) >= 1000 ? ((table.row_count || table.rows) / 1000).toFixed(0) + 'k' : (table.row_count || table.rows)) : ''}
                                     </span>
@@ -883,7 +893,7 @@ function AnalyticsPageInner() {
         <div className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-semibold text-gray-800">
-              {selectedTable ? (selectedTable.display_name || selectedTable.table_name || 'Table') : 'Analytics'}
+              {selectedTable ? (selectedTable.display_name || selectedTable.full_name || 'Table') : 'Analytics'}
             </h1>
             {selectedTable && (
               <span className="text-xs text-gray-400">
@@ -966,7 +976,7 @@ function AnalyticsPageInner() {
                   value={nlQuery}
                   onChange={(e) => setNlQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && runNLQuery()}
-                  placeholder={selectedTable ? `Ask about ${selectedTable.display_name || selectedTable.table_name}...` : "Ask a question about your data..."}
+                  placeholder={selectedTable ? `Ask about ${selectedTable.display_name || selectedTable.full_name}...` : "Ask a question about your data..."}
                   className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
                 />
                 <button
@@ -1000,7 +1010,7 @@ function AnalyticsPageInner() {
                         runSQLQuery()
                       }
                     }}
-                    placeholder={`SELECT *\nFROM "${selectedTable?.table_name || 'table'}"\nLIMIT 100`}
+                    placeholder={`SELECT *\nFROM "${selectedTable?.full_name || 'table'}"\nLIMIT 100`}
                     className="w-full p-3 text-xs font-mono border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d] bg-gray-50 resize-none min-h-[140px]"
                     spellCheck={false}
                   />
@@ -1575,7 +1585,7 @@ function formatTooltipValue(val) {
 // =============================================================================
 
 function NLEmptyState({ selectedTable, onQuickQuery }) {
-  const tableName = selectedTable?.display_name || selectedTable?.table_name || 'table'
+  const tableName = selectedTable?.display_name || selectedTable?.full_name || 'table'
   const queries = selectedTable ? [
     { icon: Eye, label: 'Preview data', query: `Show first 20 rows of ${tableName}` },
     { icon: BarChart3, label: 'Summarize', query: `Summarize ${tableName} by the most common groupings` },
