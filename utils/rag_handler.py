@@ -565,7 +565,13 @@ class RAGHandler:
                 conditions = [{"truth_type": truth_type}]
                 
                 if project_id and project_id != "Global/Universal":
-                    conditions.append({"project_id": project_id})
+                    # Match full or short project_id
+                    conditions.append({
+                        "$or": [
+                            {"project_id": project_id},
+                            {"project_id": project_id[:8]}
+                        ]
+                    })
                 
                 if functional_areas:
                     conditions.append({"functional_area": {"$in": functional_areas}})
@@ -575,7 +581,7 @@ class RAGHandler:
                 else:
                     where_clause = {"$and": conditions}
                 
-                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id}")
+                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id} (and short)")
             
             # Legacy filter logic (kept for backward compatibility)
             elif project_id and functional_areas:
@@ -591,25 +597,28 @@ class RAGHandler:
                         "$and": [
                             {"$or": [
                                 {"project_id": project_id},
+                                {"project_id": project_id[:8]},
                                 {"project_id": "Global/Universal"}
                             ]},
                             {"functional_area": {"$in": functional_areas}}
                         ]
                     }
-                logger.info(f"[PROJECT] Filtering by project_id: {project_id} + Global/Universal")
+                logger.info(f"[PROJECT] Filtering by project_id: {project_id} (and short) + Global/Universal")
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
             elif project_id:
                 if project_id == "Global/Universal":
                     where_clause = {"project_id": "Global/Universal"}
                     logger.info(f"[PROJECT] Filtering search by Global/Universal only")
                 else:
+                    # Match full UUID, short UUID (8 chars), or Global
                     where_clause = {
                         "$or": [
                             {"project_id": project_id},
+                            {"project_id": project_id[:8]},
                             {"project_id": "Global/Universal"}
                         ]
                     }
-                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} + Global/Universal")
+                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} (and short: {project_id[:8]}) + Global/Universal")
             elif functional_areas:
                 where_clause = {"functional_area": {"$in": functional_areas}}
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
