@@ -372,21 +372,27 @@ function ThroughputChart({ data }) {
 // ============================================================================
 // DAILY UPLOADS SPARKLINE (Area chart)
 // ============================================================================
-function DailyActivityChart() {
-  // Generate last 90 days of upload data
-  const today = new Date();
-  const data = Array.from({ length: 90 }, (_, i) => {
-    const date = new Date(today);
-    date.setDate(date.getDate() - (89 - i));
-    const dayOfWeek = date.getDay();
-    return {
-      date: date,
-      label: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-      uploads: Math.max(1, Math.floor(Math.random() * 20) + 5 + (dayOfWeek === 0 || dayOfWeek === 6 ? -8 : 0))
-    };
-  });
+function DailyActivityChart({ data: uploadData }) {
+  // Use provided data or empty array
+  const data = uploadData.length > 0 ? uploadData.map(d => ({
+    date: new Date(d.date),
+    label: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+    uploads: d.uploads || d.count || 0
+  })) : [];
   
-  const max = Math.max(...data.map(d => d.uploads));
+  // If no data, show empty state
+  if (data.length === 0) {
+    return (
+      <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}`, textAlign: 'center' }}>
+        <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <Upload size={16} color={colors.electricBlue} /> Uploads (90 Days)
+        </h3>
+        <p style={{ color: colors.textMuted, fontSize: '12px', margin: 0 }}>No upload history available</p>
+      </div>
+    );
+  }
+  
+  const max = Math.max(...data.map(d => d.uploads), 1);
   
   const width = 280;
   const height = 50;
@@ -475,6 +481,7 @@ export default function DashboardPage() {
   const [value, setValue] = useState({ analysesCompleted: 0, hoursEquivalent: 0, dollarsSaved: 0, accuracyRate: 94.7, avgTimeToInsight: 0 });
   const [throughput, setThroughput] = useState([]);
   const [recentIssues, setRecentIssues] = useState([]);
+  const [uploadHistory, setUploadHistory] = useState([]);
   
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -600,6 +607,29 @@ export default function DashboardPage() {
         setThroughput([{ hour: 'No data', uploads: 0, queries: 0, llm: 0 }]);
       }
       
+      // Upload History - fetch daily upload counts for sparkline
+      try {
+        const historyData = await fetchJSON('/api/metrics/upload-history?days=90');
+        if (historyData?.data && historyData.data.length > 0) {
+          setUploadHistory(historyData.data);
+        } else {
+          // Generate placeholder based on platform stats
+          const today = new Date();
+          const placeholder = Array.from({ length: 90 }, (_, i) => {
+            const date = new Date(today);
+            date.setDate(date.getDate() - (89 - i));
+            return {
+              date: date.toISOString().split('T')[0],
+              uploads: 0
+            };
+          });
+          setUploadHistory(placeholder);
+        }
+      } catch (e) {
+        console.log('Upload history not available, using empty state');
+        setUploadHistory([]);
+      }
+      
     } else {
       // Fallback: empty state when API unavailable
       setSystems({
@@ -659,7 +689,7 @@ export default function DashboardPage() {
       <div style={{ marginBottom: '16px' }}><ValueDelivered data={value} /></div>
       <div style={{ marginBottom: '16px' }}><PerformanceMetrics data={performance} /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
-        <DailyActivityChart />
+        <DailyActivityChart data={uploadHistory} />
         <RecentIssues issues={recentIssues} />
       </div>
       
