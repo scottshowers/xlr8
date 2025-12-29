@@ -16,10 +16,10 @@
  * - /api/jobs
  * - /api/metrics
  * 
- * Updated: December 28, 2025 - Consolidated to single /api/platform endpoint
+ * Updated: December 29, 2025 - Fixed sparkline chart sizing
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   AlertTriangle, CheckCircle, TrendingUp, TrendingDown,
   Clock, Zap, Database, Upload, Cpu,
@@ -348,86 +348,154 @@ function ThroughputChart({ data }) {
       <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
         <BarChart3 size={16} color={colors.primary} /> Today's Throughput
       </h3>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '100px' }}>
-        {slots.map((d, idx) => (
-          <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px', flex: 1 }}>
-            <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '80px' }}>
-              <div style={{ width: '10px', height: `${Math.max(4, ((d.uploads || 0) / maxValue) * 80)}px`, backgroundColor: colors.electricBlue, borderRadius: '2px 2px 0 0' }} />
-              <div style={{ width: '10px', height: `${Math.max(4, ((d.queries || 0) / maxValue) * 80)}px`, backgroundColor: colors.success, borderRadius: '2px 2px 0 0' }} />
-              <div style={{ width: '10px', height: `${Math.max(4, ((d.llm || 0) / maxValue) * 80)}px`, backgroundColor: colors.royalPurple, borderRadius: '2px 2px 0 0' }} />
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '100px', paddingBottom: '20px', position: 'relative' }}>
+        {slots.map((d, idx) => {
+          const barHeight = (Math.max(d.uploads, d.queries, d.llm) / maxValue) * 80 || 2;
+          return (
+            <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flex: 1 }}>
+              <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end', height: '80px' }}>
+                <div style={{ width: '8px', height: `${(d.uploads / maxValue) * 80 || 2}px`, backgroundColor: colors.electricBlue, borderRadius: '2px 2px 0 0' }} title={`Uploads: ${d.uploads}`} />
+                <div style={{ width: '8px', height: `${(d.queries / maxValue) * 80 || 2}px`, backgroundColor: colors.primary, borderRadius: '2px 2px 0 0' }} title={`Queries: ${d.queries}`} />
+                <div style={{ width: '8px', height: `${(d.llm / maxValue) * 80 || 2}px`, backgroundColor: colors.royalPurple, borderRadius: '2px 2px 0 0' }} title={`LLM: ${d.llm}`} />
+              </div>
+              <div style={{ fontSize: '9px', color: colors.textMuted, marginTop: '4px' }}>{d.hour}</div>
             </div>
-            <span style={{ fontSize: '8px', color: colors.textMuted }}>{d.hour}</span>
-          </div>
-        ))}
+          );
+        })}
       </div>
-      <div style={{ display: 'flex', gap: '16px', marginTop: '10px', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.electricBlue, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>Uploads</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.success, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>Queries</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.royalPurple, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>LLM</span></div>
+      <div style={{ display: 'flex', justifyContent: 'center', gap: '16px', marginTop: '8px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: colors.textMuted }}>
+          <div style={{ width: '8px', height: '8px', backgroundColor: colors.electricBlue, borderRadius: '2px' }} /> Uploads
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: colors.textMuted }}>
+          <div style={{ width: '8px', height: '8px', backgroundColor: colors.primary, borderRadius: '2px' }} /> Queries
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '10px', color: colors.textMuted }}>
+          <div style={{ width: '8px', height: '8px', backgroundColor: colors.royalPurple, borderRadius: '2px' }} /> LLM
+        </div>
       </div>
     </div>
   );
 }
 
 // ============================================================================
-// DAILY UPLOADS SPARKLINE (Area chart)
+// DAILY ACTIVITY CHART - RESPONSIVE SPARKLINE
 // ============================================================================
-function DailyActivityChart({ data: uploadData }) {
-  // Use provided data or empty array
-  const data = uploadData.length > 0 ? uploadData.map(d => ({
-    date: new Date(d.date),
+function DailyActivityChart({ data }) {
+  const containerRef = useRef(null);
+  const [dimensions, setDimensions] = useState({ width: 600, height: 120 });
+  
+  // Measure container on mount and resize
+  useEffect(() => {
+    const updateDimensions = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setDimensions({ width: rect.width - 40, height: 120 }); // 40px for padding
+      }
+    };
+    updateDimensions();
+    window.addEventListener('resize', updateDimensions);
+    return () => window.removeEventListener('resize', updateDimensions);
+  }, []);
+  
+  // Normalize data
+  const chartData = Array.isArray(data) ? data.map(d => ({
     label: new Date(d.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
     uploads: d.uploads || d.count || 0
   })) : [];
   
   // If no data, show empty state
-  if (data.length === 0) {
+  if (chartData.length === 0) {
     return (
-      <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}`, textAlign: 'center' }}>
+      <div ref={containerRef} style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
         <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
           <Upload size={16} color={colors.electricBlue} /> Uploads (90 Days)
         </h3>
-        <p style={{ color: colors.textMuted, fontSize: '12px', margin: 0 }}>No upload history available</p>
+        <div style={{ height: '120px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <p style={{ color: colors.textMuted, fontSize: '13px', margin: 0 }}>No upload history available</p>
+        </div>
       </div>
     );
   }
   
-  const max = Math.max(...data.map(d => d.uploads), 1);
+  const { width, height } = dimensions;
+  const max = Math.max(...chartData.map(d => d.uploads), 1);
+  const padding = { top: 10, bottom: 24, left: 0, right: 0 };
+  const chartWidth = width - padding.left - padding.right;
+  const chartHeight = height - padding.top - padding.bottom;
   
-  const width = 280;
-  const height = 50;
-  const points = data.map((d, i) => {
-    const x = (i / (data.length - 1)) * width;
-    const y = height - (d.uploads / max) * (height - 4);
+  // Calculate points
+  const points = chartData.map((d, i) => {
+    const x = padding.left + (i / (chartData.length - 1)) * chartWidth;
+    const y = padding.top + chartHeight - (d.uploads / max) * chartHeight;
     return { x, y, ...d };
   });
   
-  // Line path
-  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x},${p.y}`).join(' ');
-  // Area path (close to bottom)
-  const areaPath = linePath + ` L${width},${height} L0,${height} Z`;
+  // Generate smooth curve path using cardinal spline
+  const linePath = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+  const areaPath = linePath + ` L${width},${height - padding.bottom} L0,${height - padding.bottom} Z`;
   
-  // Show 3 date labels: start, middle, end
-  const dateLabels = [points[0], points[Math.floor(data.length / 2)], points[data.length - 1]];
+  // Date labels: start, middle, end
+  const labelIndices = [0, Math.floor(chartData.length / 2), chartData.length - 1];
   
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+    <div ref={containerRef} style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
       <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
         <Upload size={16} color={colors.electricBlue} /> Uploads (90 Days)
+        <span style={{ marginLeft: 'auto', fontSize: '11px', color: colors.textMuted, fontWeight: 400 }}>
+          {chartData.reduce((sum, d) => sum + d.uploads, 0)} total
+        </span>
       </h3>
-      <svg width="100%" height={height + 16} viewBox={`0 0 ${width} ${height + 16}`} preserveAspectRatio="xMidYMid meet">
+      <svg width="100%" height={height} style={{ display: 'block' }}>
         <defs>
-          <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={colors.electricBlue} stopOpacity="0.3" />
+          <linearGradient id="uploadAreaGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor={colors.electricBlue} stopOpacity="0.4" />
             <stop offset="100%" stopColor={colors.electricBlue} stopOpacity="0.05" />
           </linearGradient>
         </defs>
-        <path d={areaPath} fill="url(#areaGradient)" />
-        <path d={linePath} fill="none" stroke={colors.electricBlue} strokeWidth="1.5" />
-        {/* Date labels */}
-        {dateLabels.map((p, i) => (
-          <text key={i} x={p.x} y={height + 12} fontSize="9" fill={colors.textMuted} textAnchor={i === 0 ? 'start' : i === dateLabels.length - 1 ? 'end' : 'middle'}>{p.label}</text>
+        
+        {/* Grid lines */}
+        {[0.25, 0.5, 0.75].map((pct, i) => (
+          <line 
+            key={i}
+            x1={0} 
+            y1={padding.top + chartHeight * (1 - pct)} 
+            x2={width} 
+            y2={padding.top + chartHeight * (1 - pct)} 
+            stroke={colors.border} 
+            strokeDasharray="4,4" 
+            opacity={0.5}
+          />
         ))}
+        
+        {/* Area fill */}
+        <path d={areaPath} fill="url(#uploadAreaGradient)" />
+        
+        {/* Line */}
+        <path d={linePath} fill="none" stroke={colors.electricBlue} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        
+        {/* Data points on hover highlights */}
+        {points.filter((_, i) => i % Math.ceil(points.length / 10) === 0 || i === points.length - 1).map((p, i) => (
+          <circle key={i} cx={p.x} cy={p.y} r="3" fill={colors.electricBlue} stroke={colors.cardBg} strokeWidth="2" />
+        ))}
+        
+        {/* Date labels */}
+        {labelIndices.map((idx, i) => {
+          const p = points[idx];
+          if (!p) return null;
+          return (
+            <text 
+              key={i} 
+              x={p.x} 
+              y={height - 4} 
+              fontSize="10" 
+              fill={colors.textMuted} 
+              textAnchor={i === 0 ? 'start' : i === labelIndices.length - 1 ? 'end' : 'middle'}
+            >
+              {p.label}
+            </text>
+          );
+        })}
       </svg>
     </div>
   );
