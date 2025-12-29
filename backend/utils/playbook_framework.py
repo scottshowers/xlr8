@@ -1453,14 +1453,21 @@ class PlaybookEngine:
                     "match_type": "semantic"
                 })
         
-        # Get structured data (DuckDB) - prioritize this
-        duckdb_content = DocumentScanner.get_structured_data(project_files)
-        logger.warning(f"[SCAN] DuckDB structured data: {len(duckdb_content)} content blocks")
+        # Get structured data (DuckDB) - ONLY for matched files, not all project files
+        duckdb_content = DocumentScanner.get_structured_data(seen_files)
+        logger.warning(f"[SCAN] DuckDB structured data: {len(duckdb_content)} content blocks for {len(seen_files)} matched files")
         if duckdb_content:
             logger.warning(f"[SCAN] First DuckDB block preview: {duckdb_content[0][:200] if duckdb_content[0] else 'empty'}...")
         
         final_content = duckdb_content + all_content[:20]
-        logger.warning(f"[SCAN] Final content: {len(final_content)} blocks total")
+        
+        # Log which files are represented in final content
+        files_in_content = set()
+        for block in final_content:
+            if block.startswith('[FILE:'):
+                file_name = block.split(']')[0].replace('[FILE:', '').strip()
+                files_in_content.add(file_name)
+        logger.warning(f"[SCAN] Final content: {len(final_content)} blocks from files: {files_in_content}")
         
         # Determine status and extract findings
         findings = None
