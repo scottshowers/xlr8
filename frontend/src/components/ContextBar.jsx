@@ -269,8 +269,8 @@ export default function ContextBar() {
               {getCustomerInitials(activeProject.customer)}
             </div>
             <div style={styles.projectInfo}>
-              <div style={styles.projectName}>{activeProject.name}</div>
-              <div style={styles.projectCustomer}>{activeProject.customer}</div>
+              <div style={styles.projectName}>{activeProject.customer}</div>
+              <div style={styles.projectCustomer}>{activeProject.name}</div>
             </div>
           </div>
         </div>
@@ -298,8 +298,8 @@ export default function ContextBar() {
                   {getCustomerInitials(activeProject.customer)}
                 </div>
                 <div style={styles.projectInfo}>
-                  <div style={styles.projectName}>{activeProject.name}</div>
-                  <div style={styles.projectCustomer}>{activeProject.customer}</div>
+                  <div style={styles.projectName}>{activeProject.customer}</div>
+                  <div style={styles.projectCustomer}>{activeProject.name}</div>
                 </div>
               </>
             ) : (
@@ -377,8 +377,8 @@ export default function ContextBar() {
                           {getCustomerInitials(project.customer)}
                         </div>
                         <div style={{ flex: 1 }}>
-                          <div style={styles.projectItemName}>{project.name}</div>
-                          <div style={styles.projectItemCustomer}>{project.customer}</div>
+                          <div style={styles.projectItemName}>{project.customer}</div>
+                          <div style={styles.projectItemCustomer}>{project.name}</div>
                         </div>
                         {activeProject?.id === project.id && (
                           <div style={styles.checkmark}>✓</div>
