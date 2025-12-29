@@ -1032,126 +1032,53 @@ class ProjectIntelligenceService:
             logger.debug(f"[INTELLIGENCE] Profile-based lookup detection failed: {e}")
     
     def _detect_relationships(self, tables: List[Dict]) -> None:
-        """Detect foreign key relationships between tables."""
+        """
+        Detect relationships between tables.
         
-        # Build column inventory
-        column_map: Dict[str, List[str]] = {}  # column_name -> [tables]
+        Fuzzy match on column names. AI figures out the rest.
+        """
+        from difflib import SequenceMatcher
+        
+        def similar(a: str, b: str) -> float:
+            """Return similarity ratio between two strings."""
+            return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+        
+        # Collect all columns from all tables
+        all_columns = []  # [(table_name, col_name)]
         for table_info in tables:
             table_name = table_info['table_name']
             for col in table_info.get('columns', []):
-                col_lower = col.lower()
-                if col_lower not in column_map:
-                    column_map[col_lower] = []
-                column_map[col_lower].append(table_name)
+                all_columns.append((table_name, col))
         
-        # Log column inventory for debugging
-        multi_table_cols = {k: v for k, v in column_map.items() if len(v) >= 2}
-        logger.warning(f"[INTELLIGENCE] Relationship detection: {len(tables)} tables, {len(column_map)} unique columns, {len(multi_table_cols)} columns in 2+ tables")
-        if multi_table_cols:
-            for col, tbls in list(multi_table_cols.items())[:5]:  # Show first 5
-                logger.warning(f"[INTELLIGENCE]   - '{col}' in: {tbls}")
+        logger.warning(f"[INTELLIGENCE] Relationship detection: {len(tables)} tables, {len(all_columns)} total columns")
         
-        # Skip generic columns that aren't meaningful relationships
-        skip_cols = {'id', 'name', 'description', 'date', 'created', 'updated', 'modified', 
-                     'status', 'notes', 'comments', 'type', 'value', 'amount', 'text'}
+        # Compare columns across different tables
+        seen_pairs = set()
+        for i, (table1, col1) in enumerate(all_columns):
+            for table2, col2 in all_columns[i+1:]:
+                # Skip same table
+                if table1 == table2:
+                    continue
+                
+                # Skip if we've already checked this table pair for these columns
+                pair_key = tuple(sorted([f"{table1}.{col1}", f"{table2}.{col2}"]))
+                if pair_key in seen_pairs:
+                    continue
+                seen_pairs.add(pair_key)
+                
+                # Fuzzy match
+                similarity = similar(col1, col2)
+                if similarity >= 0.6:  # 60% similar = relationship
+                    self.relationships.append(Relationship(
+                        from_table=table1,
+                        from_column=col1,
+                        to_table=table2,
+                        to_column=col2,
+                        relationship_type="inferred",
+                        confidence=similarity
+                    ))
         
-        # Columns that are likely keys (higher confidence)
-        key_patterns = ['_id', '_code', '_num', '_key', 'employee', 'company', 'dept', 
-                        'job', 'location', 'earn', 'deduct', 'tax', 'pay_group']
-        
-        # Find columns that appear in multiple tables (potential FK)
-        for col_name, table_list in column_map.items():
-            if len(table_list) < 2:
-                continue
-            
-            # Skip generic columns
-            if col_name in skip_cols:
-                continue
-            
-            # Calculate base confidence based on column name patterns
-            base_confidence = 0.5
-            if any(pattern in col_name for pattern in key_patterns):
-                base_confidence = 0.7
-            
-            # Check each pair of tables
-            for i, table1 in enumerate(table_list):
-                for table2 in table_list[i+1:]:
-                    try:
-                        # Get distinct counts and totals
-                        result1 = self.handler.conn.execute(f'''
-                            SELECT COUNT(DISTINCT "{col_name}") as dist, COUNT(*) as total
-                            FROM "{table1}"
-                        ''').fetchone()
-                        
-                        result2 = self.handler.conn.execute(f'''
-                            SELECT COUNT(DISTINCT "{col_name}") as dist, COUNT(*) as total  
-                            FROM "{table2}"
-                        ''').fetchone()
-                        
-                        if not result1 or not result2:
-                            continue
-                            
-                        dist1, total1 = result1
-                        dist2, total2 = result2
-                        
-                        # Skip if either table has no data
-                        if total1 == 0 or total2 == 0:
-                            continue
-                        
-                        # Calculate uniqueness ratios
-                        ratio1 = dist1 / total1 if total1 > 0 else 0
-                        ratio2 = dist2 / total2 if total2 > 0 else 0
-                        
-                        # Determine relationship type and direction
-                        confidence = base_confidence
-                        
-                        # Case 1: Clear master-detail (one side all unique)
-                        if dist1 == total1 and dist2 < total2:
-                            # table1 is master (lookup), table2 references it
-                            confidence = 0.9
-                            self.relationships.append(Relationship(
-                                from_table=table2,
-                                from_column=col_name,
-                                to_table=table1,
-                                to_column=col_name,
-                                relationship_type="many-to-one",
-                                confidence=confidence
-                            ))
-                        elif dist2 == total2 and dist1 < total1:
-                            # table2 is master (lookup), table1 references it
-                            confidence = 0.9
-                            self.relationships.append(Relationship(
-                                from_table=table1,
-                                from_column=col_name,
-                                to_table=table2,
-                                to_column=col_name,
-                                relationship_type="many-to-one",
-                                confidence=confidence
-                            ))
-                        # Case 2: Both have high uniqueness (possible many-to-many or shared reference)
-                        elif ratio1 > 0.8 and ratio2 > 0.8:
-                            confidence = base_confidence + 0.1
-                            self.relationships.append(Relationship(
-                                from_table=table1,
-                                from_column=col_name,
-                                to_table=table2,
-                                to_column=col_name,
-                                relationship_type="shared-key",
-                                confidence=confidence
-                            ))
-                        # Case 3: Shared column with moderate uniqueness - still worth tracking
-                        elif ratio1 > 0.3 or ratio2 > 0.3:
-                            self.relationships.append(Relationship(
-                                from_table=table1,
-                                from_column=col_name,
-                                to_table=table2,
-                                to_column=col_name,
-                                relationship_type="potential",
-                                confidence=base_confidence
-                            ))
-                                
-                    except Exception as e:
-                        logger.debug(f"[INTELLIGENCE] Relationship detection failed for {col_name}: {e}")
+        logger.warning(f"[INTELLIGENCE] Detected {len(self.relationships)} relationships")
     
     def _persist_relationships(self) -> None:
         """Persist detected relationships to Supabase project_relationships table."""
