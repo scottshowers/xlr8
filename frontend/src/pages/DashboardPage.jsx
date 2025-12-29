@@ -360,6 +360,69 @@ function ThroughputChart({ data }) {
 }
 
 // ============================================================================
+// DAILY ACTIVITY CHART (Spark chart)
+// ============================================================================
+function DailyActivityChart() {
+  // Generate last 30 days of activity data
+  const today = new Date();
+  const data = Array.from({ length: 30 }, (_, i) => {
+    const date = new Date(today);
+    date.setDate(date.getDate() - (29 - i));
+    return {
+      date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+      dayOfWeek: date.getDay(),
+      activity: Math.floor(Math.random() * 80) + 20 + (date.getDay() === 0 || date.getDay() === 6 ? -30 : 0) // Lower on weekends
+    };
+  }).map(d => ({ ...d, activity: Math.max(5, d.activity) }));
+  
+  const maxActivity = Math.max(...data.map(d => d.activity));
+  
+  return (
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
+      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <BarChart3 size={18} color={colors.primary} /> Daily Activity
+        <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.textMuted, fontWeight: 400 }}>Last 30 days</span>
+      </h3>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '80px' }}>
+        {data.map((d, idx) => (
+          <div
+            key={idx}
+            title={`${d.date}: ${d.activity} operations`}
+            style={{
+              flex: 1,
+              height: `${(d.activity / maxActivity) * 100}%`,
+              backgroundColor: d.activity > 60 ? colors.primary : d.activity > 30 ? colors.skyBlue : colors.iceFlow,
+              borderRadius: '2px',
+              minHeight: '4px',
+              transition: 'height 0.3s ease',
+              cursor: 'pointer',
+            }}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: colors.textMuted }}>
+        <span>{data[0].date}</span>
+        <span>Today</span>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', marginTop: '12px', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ width: '12px', height: '12px', backgroundColor: colors.primary, borderRadius: '2px' }} />
+          <span style={{ fontSize: '11px', color: colors.textMuted }}>High (60+)</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ width: '12px', height: '12px', backgroundColor: colors.skyBlue, borderRadius: '2px' }} />
+          <span style={{ fontSize: '11px', color: colors.textMuted }}>Medium (30-60)</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <div style={{ width: '12px', height: '12px', backgroundColor: colors.iceFlow, borderRadius: '2px' }} />
+          <span style={{ fontSize: '11px', color: colors.textMuted }}>Low (&lt;30)</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ============================================================================
 // RECENT ISSUES
 // ============================================================================
 function RecentIssues({ issues }) {
@@ -578,11 +641,14 @@ export default function DashboardPage() {
         </div>
       </div>
       
-      <div style={{ marginBottom: '24px' }}><PipelineFlow data={pipeline} /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+        <PipelineFlow data={pipeline} />
+        <ThroughputChart data={throughput} />
+      </div>
       <div style={{ marginBottom: '24px' }}><ValueDelivered data={value} /></div>
       <div style={{ marginBottom: '24px' }}><PerformanceMetrics data={performance} /></div>
       <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
-        <ThroughputChart data={throughput} />
+        <DailyActivityChart />
         <RecentIssues issues={recentIssues} />
       </div>
       
