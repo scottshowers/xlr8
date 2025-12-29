@@ -66,18 +66,18 @@ export function AuthProvider({ children }) {
     }
     
     try {
-      console.log('[Auth] Fetching profile for:', supabaseUser.email);
+      console.log('[Auth] Fetching profile for:', supabaseUser.email, 'auth_id:', supabaseUser.id);
       
       // Add timeout to prevent hanging forever (RLS issues can cause silent hangs)
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Profile fetch timeout')), 5000)
+        setTimeout(() => reject(new Error('Profile fetch timeout')), 10000)
       );
       
       const queryPromise = supabase
         .from('profiles')
         .select('*')
         .eq('id', supabaseUser.id)
-        .single();
+        .maybeSingle();  // maybeSingle returns null if no row, instead of error
       
       const { data: profile, error } = await Promise.race([queryPromise, timeoutPromise]);
 
@@ -92,6 +92,25 @@ export function AuthProvider({ children }) {
           project_id: null,
         });
         setPermissions(DEFAULT_PERMISSIONS.customer);
+        return;
+      }
+
+      // Handle case where no profile row exists
+      if (!profile) {
+        console.warn('[Auth] No profile found for auth_id:', supabaseUser.id);
+        // Check known admins
+        const knownAdmins = ['scott.showers@hcmpact.com', 'chan.lien@hcmpact.com', 'mike.nugent@hcmpact.com'];
+        const isKnownAdmin = knownAdmins.includes(supabaseUser.email?.toLowerCase());
+        const fallbackRole = isKnownAdmin ? 'admin' : 'customer';
+        
+        setUser({
+          id: supabaseUser.id,
+          email: supabaseUser.email,
+          full_name: supabaseUser.email,
+          role: fallbackRole,
+          project_id: null,
+        });
+        setPermissions(DEFAULT_PERMISSIONS[fallbackRole] || DEFAULT_PERMISSIONS.customer);
         return;
       }
 
