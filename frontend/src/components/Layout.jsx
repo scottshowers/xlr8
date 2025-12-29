@@ -12,17 +12,35 @@
 
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, Sun, Moon, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Rocket, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
-import { useTheme } from '../context/ThemeContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
+import { SimpleTooltip } from './ui/Tooltip';
 
 // Sales/Demo page buttons for header
 function SalesButtons() {
   const [hovered, setHovered] = useState(null);
+
+// Helper to derive display name from email if full_name not set
+const getDisplayName = (user) => {
+  if (!user) return '';
+  // If full_name is set and different from email, use it
+  if (user.full_name && user.full_name !== user.email) {
+    return user.full_name;
+  }
+  // Derive from email: scott.showers@hcmpact.com -> Scott Showers
+  if (user.email) {
+    const localPart = user.email.split('@')[0];
+    return localPart
+      .split(/[._-]/)
+      .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ');
+  }
+  return 'User';
+};
   
   const buttons = [
     { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
@@ -32,29 +50,29 @@ function SalesButtons() {
   return (
     <div style={{ display: 'flex', gap: '0.25rem' }}>
       {buttons.map(btn => (
-        <Link
-          key={btn.id}
-          to={btn.path}
-          onMouseEnter={() => setHovered(btn.id)}
-          onMouseLeave={() => setHovered(null)}
-          title={btn.title}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 32,
-            height: 32,
-            background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
-            border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
-            borderRadius: 6,
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            textDecoration: 'none',
-            fontSize: '0.9rem',
-          }}
-        >
-          {btn.icon}
-        </Link>
+        <SimpleTooltip key={btn.id} text={btn.title}>
+          <Link
+            to={btn.path}
+            onMouseEnter={() => setHovered(btn.id)}
+            onMouseLeave={() => setHovered(null)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 32,
+              height: 32,
+              background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
+              border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
+              borderRadius: 6,
+              cursor: 'pointer',
+              transition: 'all 0.15s ease',
+              textDecoration: 'none',
+              fontSize: '0.9rem',
+            }}
+          >
+            {btn.icon}
+          </Link>
+        </SimpleTooltip>
       ))}
     </div>
   );
@@ -131,7 +149,6 @@ const HLogoGreen = () => (
 function Navigation({ onOpenGenome }) {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
-  const { darkMode, toggle } = useTheme();
   const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
   const [adminExpanded, setAdminExpanded] = useState(false);
 
@@ -281,18 +298,6 @@ function Navigation({ onOpenGenome }) {
       color: COLORS.textLight,
       transition: 'all 0.2s ease',
     },
-    themeBtn: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.4rem',
-      padding: '0.4rem 0.75rem',
-      background: '#f8fafc',
-      border: '1px solid #e1e8ed',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      color: COLORS.textLight,
-      fontSize: '0.8rem',
-    },
     userMenu: {
       display: 'flex',
       alignItems: 'center',
@@ -342,16 +347,16 @@ function Navigation({ onOpenGenome }) {
             {/* Main Nav Items */}
             <div style={styles.navItems}>
               {mainItems.map((item) => (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  data-tour={getTourAttr(item.path)}
-                  style={styles.navLink(isActive(item.path))}
-                  title={item.tooltip}
-                >
-                  <span>{item.icon}</span>
-                  {item.label}
-                </Link>
+                <SimpleTooltip key={item.path} text={item.tooltip}>
+                  <Link
+                    to={item.path}
+                    data-tour={getTourAttr(item.path)}
+                    style={styles.navLink(isActive(item.path))}
+                  >
+                    <span>{item.icon}</span>
+                    {item.label}
+                  </Link>
+                </SimpleTooltip>
               ))}
             </div>
 
@@ -373,17 +378,17 @@ function Navigation({ onOpenGenome }) {
                   {adminExpanded && (
                     <div style={styles.adminDropdown}>
                       {adminItems.map((item) => (
-                        <Link
-                          key={item.path}
-                          to={item.path}
-                          style={styles.adminDropdownItem(isActive(item.path))}
-                          title={item.tooltip}
-                          onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
-                          onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
-                        >
-                          <span>{item.icon}</span>
-                          {item.label}
-                        </Link>
+                        <SimpleTooltip key={item.path} text={item.tooltip}>
+                          <Link
+                            to={item.path}
+                            style={styles.adminDropdownItem(isActive(item.path))}
+                            onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
+                            onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            <span>{item.icon}</span>
+                            {item.label}
+                          </Link>
+                        </SimpleTooltip>
                       ))}
                     </div>
                   )}
@@ -407,45 +412,37 @@ function Navigation({ onOpenGenome }) {
           <GenomeButton onClick={onOpenGenome} />
           
           {/* Tour Guide Toggle */}
-          <button
-            onClick={() => {
-              if (tourEnabled) {
-                setTourEnabled(false);
-              } else {
-                setTourEnabled(true);
-                startCurrentPageTour();
-              }
-            }}
-            style={{
-              ...styles.helpBtn,
-              background: tourEnabled ?COLORS.primary : '#f8fafc',
-              color: tourEnabled ? 'white' : COLORS.textLight,
-              borderColor: tourEnabled ?COLORS.primary : '#e1e8ed',
-            }}
-            title={tourEnabled ? 'Turn off guided tour' : 'Turn on guided tour - walks you through page features'}
-          >
-            <HelpCircle size={16} />
-          </button>
+          <SimpleTooltip text={tourEnabled ? 'Turn off guided tour' : 'Turn on guided tour'}>
+            <button
+              onClick={() => {
+                if (tourEnabled) {
+                  setTourEnabled(false);
+                } else {
+                  setTourEnabled(true);
+                  startCurrentPageTour();
+                }
+              }}
+              style={{
+                ...styles.helpBtn,
+                background: tourEnabled ? COLORS.primary : '#f8fafc',
+                color: tourEnabled ? 'white' : COLORS.textLight,
+                borderColor: tourEnabled ? COLORS.primary : '#e1e8ed',
+              }}
+            >
+              <HelpCircle size={16} />
+            </button>
+          </SimpleTooltip>
           
-          {/* Theme Toggle */}
-          <button
-            data-tour="theme-toggle"
-            onClick={toggle}
-            style={styles.themeBtn}
-            title={darkMode ? 'Switch to light mode' : 'Switch to dark mode'}
-          >
-            {darkMode ? <Sun size={14} /> : <Moon size={14} />}
-            {darkMode ? 'Light' : 'Dark'}
-          </button>
-
           {/* User menu */}
           {user && (
             <div style={styles.userMenu}>
               <div style={styles.userInfo}>
-                <div style={styles.userName}>{user.full_name || user.email}</div>
+                <div style={styles.userName}>{getDisplayName(user)}</div>
                 <div style={styles.userRole}>{user.role}</div>
               </div>
-              <button onClick={logout} style={styles.logoutBtn} title="Sign out of XLR8">Logout</button>
+              <SimpleTooltip text="Sign out of XLR8">
+                <button onClick={logout} style={styles.logoutBtn}>Logout</button>
+              </SimpleTooltip>
             </div>
           )}
         </div>
