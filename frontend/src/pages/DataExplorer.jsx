@@ -393,14 +393,14 @@ export default function DataExplorer() {
     return c.scarletSage;
   };
 
-  // UPDATED: Added classification tab
+  // UPDATED: Added classification tab with tooltips
   const tabs = [
-    { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet },
-    { id: 'classification', label: '🔍 Classification', icon: Eye },  // NEW
-    { id: 'relationships', label: '🔗 Relationships', icon: Link2 },
-    { id: 'health', label: '❤️ Data Health', icon: Heart },
-    { id: 'compliance', label: '✅ Compliance', icon: Shield },
-    { id: 'rules', label: '📜 Rules', icon: BookOpen },
+    { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
+    { id: 'classification', label: '🔍 Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
+    { id: 'relationships', label: '🔗 Relationships', icon: Link2, tooltip: 'View and manage detected joins between tables. Edit or rebuild relationships.' },
+    { id: 'health', label: '❤️ Data Health', icon: Heart, tooltip: 'Data integrity checks: missing values, format issues, and quality scores.' },
+    { id: 'compliance', label: '✅ Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
+    { id: 'rules', label: '📜 Rules', icon: BookOpen, tooltip: 'Extracted validation rules from regulatory documents. Used in compliance checks.' },
   ];
 
   const totalTables = tables.length;
@@ -451,20 +451,21 @@ export default function DataExplorer() {
       {/* Tabs */}
       <div style={{ display: 'flex', gap: '0.25rem', marginBottom: '1.5rem', background: c.border, padding: 4, borderRadius: 10, width: 'fit-content' }}>
         {tabs.map(tab => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            style={{
-              padding: '0.6rem 1.25rem', border: 'none',
-              background: activeTab === tab.id ? c.cardBg : 'transparent',
-              fontWeight: 500, fontSize: '0.85rem',
-              color: activeTab === tab.id ? c.primary : c.textMuted,
-              cursor: 'pointer', borderRadius: 8, transition: 'all 0.2s',
-              boxShadow: activeTab === tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
-            }}
-          >
-            {tab.label}
-          </button>
+          <Tooltip key={tab.id} title={tab.label.replace(/^[^\s]+\s/, '')} detail={tab.tooltip} action="Click to view">
+            <button
+              onClick={() => setActiveTab(tab.id)}
+              style={{
+                padding: '0.6rem 1.25rem', border: 'none',
+                background: activeTab === tab.id ? c.cardBg : 'transparent',
+                fontWeight: 500, fontSize: '0.85rem',
+                color: activeTab === tab.id ? c.primary : c.textMuted,
+                cursor: 'pointer', borderRadius: 8, transition: 'all 0.2s',
+                boxShadow: activeTab === tab.id ? '0 1px 3px rgba(0,0,0,0.1)' : 'none'
+              }}
+            >
+              {tab.label}
+            </button>
+          </Tooltip>
         ))}
       </div>
 
@@ -722,15 +723,45 @@ export default function DataExplorer() {
       {/* Relationships Tab */}
       {activeTab === 'relationships' && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
-          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
-            <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-            Detected Relationships ({relationships?.length || 0})
-          </h3>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
+              <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.accent }} />
+              Detected Relationships ({relationships?.length || 0})
+            </h3>
+            {relationships && relationships.length > 0 && (
+              <button
+                onClick={async () => {
+                  if (window.confirm('Rebuild all relationships? This will re-analyze your tables.')) {
+                    try {
+                      await api.post(`/status/relationships/rebuild/${activeProject?.id || 'default'}`);
+                      loadTables();
+                    } catch (e) {
+                      console.error('Failed to rebuild relationships:', e);
+                    }
+                  }
+                }}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: c.background,
+                  color: c.text,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  fontSize: '0.85rem'
+                }}
+              >
+                <RefreshCw size={14} /> Rebuild All
+              </button>
+            )}
+          </div>
           {(!relationships || relationships.length === 0) ? (
-            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
-              <Link2 size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-              <p>No relationships detected yet.</p>
-              <p style={{ fontSize: '0.85rem' }}>Upload related files to see FK/PK relationships.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem', color: c.textMuted }}>
+              <Link2 size={48} style={{ color: c.skyBlue, marginBottom: '1rem' }} />
+              <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>No relationships detected yet</p>
+              <p style={{ fontSize: '0.85rem', margin: 0 }}>Upload related files to see FK/PK relationships.</p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '0.75rem' }}>
@@ -821,13 +852,13 @@ export default function DataExplorer() {
       {activeTab === 'health' && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
           <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
-            <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+            <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.scarletSage }} />
             Data Health
           </h3>
           {(!healthIssues || healthIssues.length === 0) ? (
-            <div style={{ textAlign: 'center', padding: '2rem', color: c.success }}>
-              <CheckCircle size={48} style={{ marginBottom: '1rem' }} />
-              <p style={{ fontWeight: 600, margin: '0 0 0.5rem' }}>All data looks healthy!</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+              <CheckCircle size={48} style={{ color: c.success, marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600, margin: '0 0 0.5rem', color: c.success }}>All data looks healthy!</p>
               <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0 0 1rem' }}>
                 No integrity issues detected across {tables?.length || 0} table(s).
               </p>
@@ -837,7 +868,9 @@ export default function DataExplorer() {
                 borderRadius: 8, 
                 padding: '1rem',
                 fontSize: '0.8rem',
-                color: c.textMuted 
+                color: c.textMuted,
+                width: '100%',
+                maxWidth: '400px'
               }}>
                 <strong style={{ color: c.text }}>Checks performed:</strong>
                 <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
@@ -878,7 +911,7 @@ export default function DataExplorer() {
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
-              <Shield size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+              <Shield size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.success }} />
               Compliance Check
             </h3>
             <button
@@ -894,17 +927,19 @@ export default function DataExplorer() {
                   setComplianceRunning(false);
                 }
               }}
-              disabled={complianceRunning}
+              disabled={complianceRunning || !rules || rules.length === 0}
+              title={(!rules || rules.length === 0) ? 'Upload regulatory documents first to extract rules' : 'Run compliance check against your data'}
               style={{
                 padding: '0.5rem 1rem',
-                background: c.primary,
-                color: '#fff',
+                background: (!rules || rules.length === 0) ? c.border : c.primary,
+                color: (!rules || rules.length === 0) ? c.textMuted : '#fff',
                 border: 'none',
                 borderRadius: 6,
-                cursor: complianceRunning ? 'wait' : 'pointer',
+                cursor: (complianceRunning || !rules || rules.length === 0) ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '0.5rem'
+                gap: '0.5rem',
+                opacity: (!rules || rules.length === 0) ? 0.6 : 1
               }}
             >
               {complianceRunning ? <Loader2 size={16} className="spin" /> : <Play size={16} />}
@@ -940,10 +975,17 @@ export default function DataExplorer() {
                 </div>
               ))}
             </div>
+          ) : (rules && rules.length > 0) ? (
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+              <Shield size={48} style={{ color: c.primary, marginBottom: '1rem' }} />
+              <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>Ready to check compliance</p>
+              <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: 0 }}>Click "Run Check" to validate data against {rules.length} loaded rules.</p>
+            </div>
           ) : (
-            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
-              <Shield size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-              <p>Click "Run Check" to validate data against standards.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
+              <Shield size={48} style={{ color: c.iceFlow, marginBottom: '1rem' }} />
+              <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>No rules loaded yet</p>
+              <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: 0 }}>Upload standards documents in the Standards page to extract validation rules.</p>
             </div>
           )}
         </div>
@@ -954,44 +996,49 @@ export default function DataExplorer() {
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
             <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
-              <BookOpen size={18} style={{ marginRight: 8, verticalAlign: 'middle' }} />
+              <BookOpen size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.royalPurple }} />
               Extracted Rules ({rules?.length || 0})
             </h3>
-            <button
-              onClick={async () => {
-                setLoadingRules(true);
-                try {
-                  const res = await api.get('/standards/rules');
-                  setRules(res.data?.rules || []);
-                } catch (e) {
-                  console.error('Failed to load rules:', e);
-                } finally {
-                  setLoadingRules(false);
-                }
-              }}
-              disabled={loadingRules}
-              style={{
-                padding: '0.5rem 1rem',
-                background: c.background,
-                color: c.text,
-                border: `1px solid ${c.border}`,
-                borderRadius: 6,
-                cursor: loadingRules ? 'wait' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem'
-              }}
-            >
-              {loadingRules ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-              Load Rules
-            </button>
+            {rules?.length > 0 && (
+              <button
+                onClick={async () => {
+                  setLoadingRules(true);
+                  try {
+                    const res = await api.get('/standards/rules');
+                    setRules(res.data?.rules || []);
+                  } catch (e) {
+                    console.error('Failed to load rules:', e);
+                  } finally {
+                    setLoadingRules(false);
+                  }
+                }}
+                disabled={loadingRules}
+                style={{
+                  padding: '0.5rem 1rem',
+                  background: c.background,
+                  color: c.text,
+                  border: `1px solid ${c.border}`,
+                  borderRadius: 6,
+                  cursor: loadingRules ? 'wait' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem'
+                }}
+              >
+                {loadingRules ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+                Refresh
+              </button>
+            )}
           </div>
           
           {(!rules || rules.length === 0) ? (
-            <div style={{ textAlign: 'center', padding: '3rem', color: c.textMuted }}>
-              <BookOpen size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
-              <p>No rules extracted yet.</p>
-              <p style={{ fontSize: '0.85rem' }}>Upload standards documents to extract validation rules.</p>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem', color: c.textMuted }}>
+              <BookOpen size={48} style={{ color: c.royalPurple, opacity: 0.5, marginBottom: '1rem' }} />
+              <p style={{ fontWeight: 600, margin: '0 0 0.5rem', color: c.text }}>No rules extracted yet</p>
+              <p style={{ fontSize: '0.85rem', margin: 0, textAlign: 'center' }}>
+                Upload regulatory or standards documents in the Data page.<br />
+                Rules will be automatically extracted for compliance checks.
+              </p>
             </div>
           ) : (
             <div style={{ display: 'grid', gap: '0.75rem' }}>
