@@ -959,21 +959,25 @@ class DocumentScanner:
             if not conn:
                 return content
             
-            # Check if _pdf_tables exists
+            # Use _schema_metadata (where all tables including PDFs are tracked)
             table_check = conn.execute("""
                 SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = '_pdf_tables'
+                WHERE table_name = '_schema_metadata'
             """).fetchone()
             
             if not table_check or table_check[0] == 0:
+                logger.warning(f"[SCAN] _schema_metadata table not found")
                 conn.close()
                 return content
             
-            # Get all tables
+            # Get all tables from _schema_metadata
             all_tables = conn.execute("""
-                SELECT table_name, columns, source_file
-                FROM _pdf_tables
+                SELECT table_name, columns, file_name
+                FROM _schema_metadata
+                WHERE is_current = TRUE
             """).fetchall()
+            
+            logger.warning(f"[SCAN] _schema_metadata has {len(all_tables)} current tables")
             
             seen_tables = set()
             
@@ -981,35 +985,54 @@ class DocumentScanner:
                 if not filename:
                     continue
                 
-                filename_norm = filename.lower().replace("'", "").replace("'", "").replace(".pdf", "")
+                filename_norm = filename.lower().replace("'", "").replace("'", "").replace(".pdf", "").replace(".xlsx", "").replace(".csv", "")
                 
                 for table_name, columns_json, source_file in all_tables:
                     if not source_file or table_name in seen_tables:
                         continue
-                    source_norm = source_file.lower().replace("'", "").replace("'", "").replace(".pdf", "")
+                    source_norm = source_file.lower().replace("'", "").replace("'", "").replace(".pdf", "").replace(".xlsx", "").replace(".csv", "")
                     
                     if filename_norm in source_norm or source_norm in filename_norm:
                         seen_tables.add(table_name)
+                        logger.warning(f"[SCAN] Matched table '{table_name}' for file '{filename}'")
                         try:
                             data = conn.execute(f'SELECT * FROM "{table_name}"').fetchall()
-                            columns = json.loads(columns_json) if columns_json else []
+                            # Parse columns from JSON
+                            if columns_json:
+                                try:
+                                    columns_data = json.loads(columns_json)
+                                    # Handle both formats: list of strings or list of dicts
+                                    if columns_data and isinstance(columns_data[0], dict):
+                                        columns = [c.get('name', f'col_{i}') for i, c in enumerate(columns_data)]
+                                    else:
+                                        columns = columns_data
+                                except:
+                                    columns = []
+                            else:
+                                columns = []
                             
-                            if data and columns:
+                            if data:
+                                # If no columns from metadata, get from table
+                                if not columns:
+                                    col_info = conn.execute(f'SELECT column_name FROM information_schema.columns WHERE table_name = ?', [table_name]).fetchall()
+                                    columns = [c[0] for c in col_info]
+                                
                                 content_lines = [f"[FILE: {filename}] [TABLE: {table_name}] [{len(data)} rows]"]
                                 content_lines.append("|".join(columns))
                                 
-                                for row in data:
-                                    row_vals = [str(row[i]) if row[i] else "" for i in range(min(len(columns), len(row)))]
+                                for row in data[:500]:  # Limit to first 500 rows
+                                    row_vals = [str(row[i]) if i < len(row) and row[i] else "" for i in range(len(columns))]
                                     content_lines.append("|".join(row_vals))
                                 
                                 content.append("\n".join(content_lines))
-                        except Exception:
-                            pass
+                                logger.warning(f"[SCAN] Added {len(data)} rows from '{table_name}'")
+                        except Exception as e:
+                            logger.warning(f"[SCAN] Failed to read table '{table_name}': {e}")
             
             conn.close()
             
         except Exception as e:
-            logger.debug(f"[SCAN] Structured data query failed: {e}")
+            logger.warning(f"[SCAN] Structured data query failed: {e}")
         
         return content
 
