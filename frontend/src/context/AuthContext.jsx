@@ -5,19 +5,11 @@
  * 
  * FIXED: Proper error handling so loading always resolves
  * FIXED: Proper cleanup function registration
+ * FIXED: Uses single shared Supabase client (no more multiple GoTrueClient)
  */
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
-
-// Supabase client
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-
-console.log('[Auth] Supabase URL configured:', !!supabaseUrl);
-console.log('[Auth] Supabase Key configured:', !!supabaseKey);
-
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
+import supabase from '../services/supabaseClient';
 
 if (!supabase) {
   console.warn('[Auth] Supabase client not initialized');
