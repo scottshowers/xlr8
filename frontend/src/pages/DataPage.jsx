@@ -208,7 +208,7 @@ export default function DataPage() {
                 display: 'flex', alignItems: 'center', gap: '0.5rem',
                 padding: '0.5rem 1rem', background: `${c.accent}15`, border: `1px solid ${c.accent}40`,
                 borderRadius: 8, color: c.accent, fontSize: '0.85rem', textDecoration: 'none',
-                transition: 'all 0.2s', fontWeight: 500
+                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap'
               }}
             >
               <Search size={16} />
@@ -222,7 +222,7 @@ export default function DataPage() {
                 display: 'flex', alignItems: 'center', gap: '0.5rem',
                 padding: '0.5rem 1rem', background: `${c.primary}15`, border: `1px solid ${c.primary}40`,
                 borderRadius: 8, color: c.primary, fontSize: '0.85rem', textDecoration: 'none',
-                transition: 'all 0.2s', fontWeight: 500
+                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap'
               }}
             >
               <Sparkles size={16} />
