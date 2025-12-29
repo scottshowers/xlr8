@@ -13,7 +13,7 @@ This file contains:
 The framework handles everything else.
 
 Author: XLR8 Team
-Version: 1.0.0
+Version: 1.1.0 - Schema-aware prompts
 Date: December 2025
 """
 
@@ -24,161 +24,195 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# SCHEMA-AWARE PREAMBLE - Prepended to all consultative prompts
+# =============================================================================
+# This enables domain-agnostic analysis - AI learns the data structure first
+
+SCHEMA_ANALYSIS_PREAMBLE = """
+STEP 1 - UNDERSTAND THE DATA STRUCTURE:
+Before analyzing, examine the column headers in each data block.
+- Identify columns that contain: IDs, rates/percentages, names, codes, dates, amounts, types/categories
+- Note the patterns in the data (e.g., state abbreviations, percentage values, tax codes)
+- Understand how rows relate to each other (e.g., one row per tax jurisdiction, per employee, per code)
+
+STEP 2 - APPLY DOMAIN EXPERTISE:
+Use your knowledge to interpret what each column likely represents.
+Then analyze against the requirements below.
+
+STEP 3 - CITE SPECIFIC VALUES:
+Always include actual values from the data in your findings.
+Example: "Found SUI rate of 2.7% for Texas" not "SUI rates were reviewed"
+
+"""
+
+
+# =============================================================================
 # CONSULTATIVE PROMPTS - Expert analysis guidance per action
 # =============================================================================
 
 YEAR_END_CONSULTATIVE_PROMPTS: Dict[str, str] = {
-    "2A": """
-CONSULTANT ANALYSIS - Apply your UKG/Payroll expertise:
+    "2A": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: Company Tax Verification & Master Profile
 
-DATA STRUCTURE GUIDE:
-- Tax rates are in the 'contribution_rate_percent' column
-- Tax types (SUI, FUTA, FIT, SIT, etc.) are in the 'type_of_tax' column
-- Jurisdictions are in 'tax_jurisdiction' column
-- Tax IDs are in 'id_number' column
-- Look for rows where type_of_tax contains 'SUI', 'SUTA', 'FUTA', 'FIT', etc.
+VALIDATE THESE ELEMENTS:
 
-1. FEIN VALIDATION:
-   - Valid format: XX-XXXXXXX (9 digits with hyphen after 2)
-   - Check id_number column for federal tax entries
-   - Flag if missing or malformed
+1. FEDERAL EMPLOYER ID (FEIN):
+   - Format should be XX-XXXXXXX (9 digits, hyphen after first 2)
+   - Look for columns containing federal IDs or tax identification numbers
+   - Flag if missing, malformed, or inconsistent between documents
 
-2. SUI/SUTA RATES:
-   - Filter rows where type_of_tax contains 'SUI' or 'SUTA'
-   - Check contribution_rate_percent for each state in tax_jurisdiction
-   - Typical range: 0.1% to 12% depending on state
-   - Flag if outside normal range or missing
+2. STATE UNEMPLOYMENT (SUI/SUTA) RATES:
+   - Look for rate/percentage columns associated with state tax types
+   - Normal range: 0.1% to 12% depending on state and employer history
+   - New employers often start at higher "new employer" rates
+   - Flag rates outside normal ranges or missing for states with activity
 
-3. FUTA RATE:
-   - Filter rows where type_of_tax = 'FUTA'
-   - Standard rate: 6.0% (0.6% after credit)
-   - Credit reduction states have higher effective rates
+3. FEDERAL UNEMPLOYMENT (FUTA) RATE:
+   - Standard rate: 6.0% gross (0.6% after state credit)
+   - Credit reduction states (if any) will show higher effective rates
+   - Flag if rate doesn't match expected values
 
-4. COMPANY PROFILE:
-   - Verify legal name matches exactly (case, punctuation)
-   - Address should be complete with ZIP+4 if available
-   - Note any multiple locations or DBAs
+4. COMPANY INFORMATION:
+   - Legal company name should be consistent across documents
+   - Address should be complete (street, city, state, ZIP)
+   - Note any discrepancies between documents
 
-Return specific findings with ACTUAL VALUES from the documents.
-Include the specific rates you find (e.g., "Texas SUI rate: 2.7%").
+5. CROSS-DOCUMENT VALIDATION:
+   - Compare Tax Verification data against Master Profile
+   - Flag any mismatches in company info, tax IDs, or rates
+   - Identify any jurisdictions in one document but not the other
+
+Report specific values found. If data for a required check is not present, note what's missing.
 """,
 
-    "2C": """
-CONSULTANT ANALYSIS - Tax Code Verification:
+    "2C": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: Tax Code Verification
+
+VALIDATE THESE ELEMENTS:
 
 1. STATE TAX REGISTRATIONS:
-   - Every state with employees needs registration
-   - Verify state tax IDs are in correct format per state
-   - Flag missing registrations for states with payroll activity
+   - Every state with employees needs a registration
+   - State tax IDs have state-specific formats
+   - Flag missing registrations for states showing payroll activity
 
-2. TAX RATE UPDATES:
-   - SUI rates change annually - verify current year rates
+2. TAX RATE CURRENCY:
+   - SUI rates change annually - rates should reflect current year
    - Local tax rates vary by jurisdiction
-   - Flag any rates that seem outdated
+   - Flag any rates that appear outdated or placeholder values
 
-3. RECIPROCITY AGREEMENTS:
-   - Check for proper handling of multi-state employees
-   - Verify resident vs work state tax handling
+3. MULTI-STATE HANDLING:
+   - Check for reciprocity agreement handling
+   - Verify resident vs work state tax configurations
+   - Flag employees who may need corrections
 
-Focus on actionable issues that need resolution before year-end.
+Focus on actionable issues requiring resolution before year-end.
 """,
 
-    "3A": """
-CONSULTANT ANALYSIS - Employee Data Validation:
+    "3A": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: Employee Data Validation
 
-1. SSN VALIDATION:
-   - Format: XXX-XX-XXXX (9 digits)
-   - Flag: 000-XX-XXXX, XXX-00-XXXX, XXX-XX-0000 (invalid patterns)
-   - Flag: 9XX-XX-XXXX (ITINs - may need special handling)
+VALIDATE THESE ELEMENTS:
 
-2. NAME MATCHING:
-   - Must match SSA records exactly for W-2
-   - Flag special characters, extra spaces, Jr/Sr/III issues
+1. SOCIAL SECURITY NUMBERS:
+   - Format: XXX-XX-XXXX (9 digits with hyphens)
+   - Invalid patterns: 000-XX-XXXX, XXX-00-XXXX, XXX-XX-0000
+   - ITINs (9XX-XX-XXXX) may need special handling
+   - Flag any invalid or missing SSNs
+
+2. EMPLOYEE NAMES:
+   - Must match SSA records exactly for W-2 filing
+   - Flag: special characters, extra spaces, Jr/Sr/III formatting issues
    - Check for legal name vs preferred name confusion
 
-3. ADDRESS VERIFICATION:
-   - Complete address needed for W-2 delivery
-   - Flag PO Boxes for certain states
-   - Identify deceased employees (need special handling)
+3. ADDRESSES:
+   - Complete address required for W-2 delivery
+   - Flag incomplete addresses or PO Boxes where problematic
+   - Identify any obviously invalid addresses
 
-4. YEAR-END SPECIFIC:
-   - Identify employees with multiple SSNs in system
-   - Flag terminated employees still on active payroll
-   - Check for rehires with different data
+4. DATA QUALITY:
+   - Look for duplicate employees or multiple SSNs
+   - Flag terminated employees still showing as active
+   - Identify rehires with inconsistent data
 
 Report specific counts and examples where possible.
 """,
 
-    "4A": """
-CONSULTANT ANALYSIS - Benefits & Deductions:
+    "4A": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: Benefits & Deductions Review
+
+VALIDATE THESE ELEMENTS:
 
 1. PRE-TAX DEDUCTIONS:
-   - Section 125 (cafeteria) plans
-   - HSA contributions (annual limits apply)
+   - Section 125 (cafeteria) plan deductions
+   - HSA contributions - check against annual limits
    - FSA elections
-   - Verify proper tax treatment
+   - Verify deductions coded for correct tax treatment
 
 2. POST-TAX DEDUCTIONS:
-   - Roth contributions
-   - After-tax benefits
-   - Garnishments and levies
+   - Roth 401k/403b contributions
+   - After-tax benefit deductions
+   - Garnishments and tax levies
 
-3. W-2 IMPLICATIONS:
-   - Box 12 codes for various benefits
-   - Box 14 for informational items
-   - Verify coding matches deduction setup
+3. W-2 BOX MAPPING:
+   - Box 12 codes for retirement, HSA, etc.
+   - Box 14 informational items
+   - Verify deduction codes will produce correct W-2 reporting
 
-Flag any deductions that may have incorrect W-2 treatment.
+Flag deductions with potentially incorrect tax treatment or W-2 coding.
 """,
 
-    "5A": """
-CONSULTANT ANALYSIS - Earnings Review:
+    "5A": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: Earnings Code Review
 
-1. EARNINGS CODES:
-   - Regular, overtime, bonus, commission
-   - Verify tax treatment per code
-   - Check for supplemental wage handling
+VALIDATE THESE ELEMENTS:
+
+1. STANDARD EARNINGS:
+   - Regular pay, overtime, bonus, commission codes
+   - Verify tax treatment is correct per code
+   - Check supplemental wage handling (flat rate vs aggregate)
 
 2. SPECIAL EARNINGS:
-   - Fringe benefits (personal use of vehicle, etc.)
-   - Third-party sick pay
-   - Group term life over $50k
+   - Fringe benefits (personal use of company vehicle, etc.)
+   - Third-party sick pay handling
+   - Group term life insurance over $50k
 
 3. YTD RECONCILIATION:
-   - Verify totals match quarterly reports
-   - Check for timing differences
-   - Identify any out-of-period adjustments
+   - Earnings totals should tie to quarterly 941 reports
+   - Look for timing differences or adjustments
+   - Identify any out-of-period corrections
 
-Focus on earnings that affect W-2 reporting.
+Focus on earnings codes that affect W-2 reporting accuracy.
 """,
 
-    "6A": """
-CONSULTANT ANALYSIS - W-2 Preview:
+    "6A": SCHEMA_ANALYSIS_PREAMBLE + """
+ANALYSIS FOCUS: W-2 Preview & Verification
 
-1. BOX VERIFICATION:
-   - Box 1 (wages) ties to 941s
-   - Box 2 (federal tax) ties to deposits
-   - Box 3/4 (Social Security) - check wage base
-   - Box 5/6 (Medicare) - no wage limit
+VALIDATE THESE ELEMENTS:
+
+1. FEDERAL BOXES:
+   - Box 1 (wages) should reconcile to quarterly 941s
+   - Box 2 (federal withholding) should tie to tax deposits
+   - Box 3/4 (Social Security) - verify wage base limits applied
+   - Box 5/6 (Medicare) - no wage limit applies
 
 2. STATE BOXES:
-   - Verify each state has correct totals
-   - Check for reciprocity handling
-   - Multiple states require multiple entries
+   - Each state should show correct wage and tax totals
+   - Reciprocity states handled correctly
+   - Multiple state employees have proper allocations
 
 3. BOX 12 CODES:
    - C: Group term life over $50k
-   - D/E: 401k/403b contributions
-   - DD: Health coverage cost (ACA)
-   - W: HSA contributions
+   - D/E: 401k/403b elective deferrals
+   - DD: Healthcare coverage cost (ACA reporting)
+   - W: HSA employer contributions
 
-4. COMMON ERRORS:
-   - Negative amounts
-   - Missing state data
-   - Incorrect Box 12 codes
-   - W-2c needed for prior year
+4. COMMON W-2 ERRORS:
+   - Negative amounts in any box
+   - Missing state tax data
+   - Incorrect or missing Box 12 codes
+   - Prior year corrections needing W-2c
 
-Flag any W-2s that will need correction before filing.
+Flag any W-2s requiring correction before filing.
 """,
 }
 
