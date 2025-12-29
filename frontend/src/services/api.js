@@ -1,12 +1,7 @@
 import axios from 'axios';
-import { createClient } from '@supabase/supabase-js';
+import supabase from './supabaseClient';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
-
-// Supabase client for auth
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || '';
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || '';
-const supabase = supabaseUrl && supabaseKey ? createClient(supabaseUrl, supabaseKey) : null;
 
 const api = axios.create({
   baseURL: `${API_URL}/api`,
