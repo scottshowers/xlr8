@@ -767,13 +767,19 @@ export default function DataExplorer() {
             <div style={{ display: 'grid', gap: '0.75rem' }}>
               {relationships.map((rel, i) => {
                 // Handle both field name formats
-                const fromTable = rel.from_table || rel.source_table || '?';
-                const toTable = rel.to_table || rel.target_table || '?';
+                const fromTableRaw = rel.from_table || rel.source_table || '?';
+                const toTableRaw = rel.to_table || rel.target_table || '?';
                 const fromCol = rel.from_column || rel.source_column || rel.column || '?';
                 const toCol = rel.to_column || rel.target_column || rel.column || '?';
                 const confidence = rel.confidence || rel.type || 'detected';
                 const isConfirmed = rel.confirmed;
                 const needsReview = rel.needs_review;
+                
+                // Look up display names from tables array
+                const fromTableObj = tables.find(t => t.table_name === fromTableRaw);
+                const toTableObj = tables.find(t => t.table_name === toTableRaw);
+                const fromTable = fromTableObj?.display_name || fromTableRaw;
+                const toTable = toTableObj?.display_name || toTableRaw;
                 
                 return (
                   <div key={rel.id || i} style={{ 
@@ -783,30 +789,37 @@ export default function DataExplorer() {
                     padding: '0.75rem 1rem',
                     background: needsReview ? `${c.warning}08` : c.background,
                     borderRadius: 8,
-                    border: `1px solid ${needsReview ? c.warning : c.border}`
+                    border: `1px solid ${needsReview ? c.warning : c.border}`,
+                    overflow: 'hidden'
                   }}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                       <div style={{ fontSize: '0.7rem', color: c.textMuted }}>From</div>
-                      <code style={{ fontSize: '0.8rem', color: c.primary }}>{fromTable}</code>
-                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{fromCol}</code>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ fontSize: '0.8rem', color: c.primary }}>{fromTable}</code>
+                        <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{fromCol}</code>
+                      </div>
                     </div>
-                    <div style={{ color: c.textMuted }}>→</div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: c.textMuted, flexShrink: 0 }}>→</div>
+                    <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                       <div style={{ fontSize: '0.7rem', color: c.textMuted }}>To</div>
-                      <code style={{ fontSize: '0.8rem', color: c.accent }}>{toTable}</code>
-                      <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{toCol}</code>
+                      <div style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        <code style={{ fontSize: '0.8rem', color: c.accent }}>{toTable}</code>
+                        <code style={{ fontSize: '0.75rem', color: c.textMuted }}>.{toCol}</code>
+                      </div>
                     </div>
                     <div style={{ 
                       fontSize: '0.7rem', 
                       padding: '0.25rem 0.5rem', 
                       background: isConfirmed ? `${c.success}15` : `${c.textMuted}15`, 
                       color: isConfirmed ? c.success : c.textMuted, 
-                      borderRadius: 4 
+                      borderRadius: 4,
+                      flexShrink: 0,
+                      whiteSpace: 'nowrap'
                     }}>
                       {isConfirmed ? '✓ confirmed' : confidence}
                     </div>
                     {/* Action buttons */}
-                    <div style={{ display: 'flex', gap: '0.25rem' }}>
+                    <div style={{ display: 'flex', gap: '0.25rem', flexShrink: 0 }}>
                       {!isConfirmed && (
                         <button
                           onClick={() => confirmRelationship(rel)}
