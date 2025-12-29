@@ -234,72 +234,151 @@ async def delete_jobs_in_range(
 @router.delete("/status/structured/{project_id}/{filename:path}")
 async def delete_structured_file(project_id: str, filename: str):
     """
-    Delete a structured data file (drops DuckDB table).
+    Delete a structured data file - CASCADE to all storage systems.
     
-    FIXED: Now also cleans _schema_metadata and _pdf_tables
+    Per ARCHITECTURE.md: "Not cascading deletes to all storage systems" is a mistake.
+    This endpoint now cleans:
+    1. DuckDB tables
+    2. DuckDB metadata (_schema_metadata, _pdf_tables)
+    3. ChromaDB chunks (if any exist for this file)
+    4. document_registry entry
     """
-    logger.info(f"[CLEANUP] Deleting structured file: {filename} from {project_id}")
+    logger.info(f"[CLEANUP] Deleting file (cascade): {filename} from {project_id}")
     
+    result = {
+        "success": True,
+        "filename": filename,
+        "project": project_id,
+        "tables_dropped": [],
+        "chunks_removed": 0,
+        "registry_removed": False,
+        "metadata_cleaned": True
+    }
+    
+    # 1. DUCKDB - Drop tables and clean metadata
     conn = _get_duckdb(project_id)
-    if not conn:
-        return {"success": True, "message": f"Project database not found, file considered deleted"}
+    if conn:
+        try:
+            # Convert filename to table name pattern
+            table_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+            table_name = table_name.lower().replace(' ', '_').replace('-', '_')
+            table_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
+            
+            # Get existing tables
+            tables = conn.execute("SHOW TABLES").fetchall()
+            table_names = [t[0] for t in tables]
+            
+            # Find matching table(s) - might have multiple sheets from same file
+            matched_tables = []
+            
+            # Exact match
+            if table_name in table_names:
+                matched_tables.append(table_name)
+            
+            # Partial match (for sheets: filename__sheet1, filename__sheet2, etc.)
+            for t in table_names:
+                t_lower = t.lower()
+                # Match by prefix (handles multi-sheet files)
+                if t_lower.startswith(table_name + '__') or t_lower.startswith(table_name[:30]):
+                    if t not in matched_tables:
+                        matched_tables.append(t)
+                # Match by filename component
+                if filename.lower().replace('.', '_').replace(' ', '_') in t_lower:
+                    if t not in matched_tables:
+                        matched_tables.append(t)
+            
+            # Drop all matched tables
+            for matched_table in matched_tables:
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{matched_table}"')
+                    result['tables_dropped'].append(matched_table)
+                    logger.info(f"[CLEANUP] Dropped table: {matched_table}")
+                    
+                    # Clean metadata for this specific table
+                    _clean_metadata_tables(conn, table_name=matched_table)
+                    
+                except Exception as drop_e:
+                    logger.warning(f"[CLEANUP] Failed to drop {matched_table}: {drop_e}")
+            
+            # Also clean by filename pattern
+            _clean_metadata_tables(conn, filename=filename)
+            
+        except Exception as e:
+            logger.warning(f"[CLEANUP] DuckDB cleanup error: {e}")
     
-    try:
-        # Convert filename to table name
-        table_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
-        table_name = table_name.lower().replace(' ', '_').replace('-', '_')
-        table_name = ''.join(c if c.isalnum() or c == '_' else '_' for c in table_name)
-        
-        # Get existing tables
-        tables = conn.execute("SHOW TABLES").fetchall()
-        table_names = [t[0] for t in tables]
-        
-        # Find matching table(s) - might have multiple sheets from same file
-        matched_tables = []
-        
-        # Exact match
-        if table_name in table_names:
-            matched_tables.append(table_name)
-        
-        # Partial match (for sheets: filename__sheet1, filename__sheet2, etc.)
-        for t in table_names:
-            t_lower = t.lower()
-            # Match by prefix (handles multi-sheet files)
-            if t_lower.startswith(table_name + '__') or t_lower.startswith(table_name[:30]):
-                if t not in matched_tables:
-                    matched_tables.append(t)
-            # Match by filename component
-            if filename.lower().replace('.', '_').replace(' ', '_') in t_lower:
-                if t not in matched_tables:
-                    matched_tables.append(t)
-        
-        # Drop all matched tables
-        dropped = []
-        for matched_table in matched_tables:
-            try:
-                conn.execute(f'DROP TABLE IF EXISTS "{matched_table}"')
-                dropped.append(matched_table)
-                logger.info(f"[CLEANUP] Dropped table: {matched_table}")
+    # 2. CHROMADB - Delete any chunks for this file (cascade)
+    collection = _get_chromadb()
+    if collection:
+        try:
+            chunks_deleted = 0
+            seen_ids = set()
+            
+            # Try multiple metadata field patterns
+            for where_filter in [
+                {"source": filename},
+                {"filename": filename},
+            ]:
+                try:
+                    results = collection.get(where=where_filter)
+                    if results and results['ids']:
+                        new_ids = [id for id in results['ids'] if id not in seen_ids]
+                        if new_ids:
+                            collection.delete(ids=new_ids)
+                            seen_ids.update(new_ids)
+                            chunks_deleted += len(new_ids)
+                except:
+                    continue
+            
+            # Try with project filter
+            for where_filter in [
+                {"$and": [{"source": filename}, {"project_id": project_id}]},
+                {"$and": [{"source": filename}, {"project_id": project_id[:8]}]},
+            ]:
+                try:
+                    results = collection.get(where=where_filter)
+                    if results and results['ids']:
+                        new_ids = [id for id in results['ids'] if id not in seen_ids]
+                        if new_ids:
+                            collection.delete(ids=new_ids)
+                            seen_ids.update(new_ids)
+                            chunks_deleted += len(new_ids)
+                except:
+                    continue
+            
+            if chunks_deleted > 0:
+                result['chunks_removed'] = chunks_deleted
+                logger.info(f"[CLEANUP] Deleted {chunks_deleted} ChromaDB chunks for {filename}")
                 
-                # Clean metadata for this specific table
-                _clean_metadata_tables(conn, table_name=matched_table)
-                
-            except Exception as drop_e:
-                logger.warning(f"[CLEANUP] Failed to drop {matched_table}: {drop_e}")
-        
-        # Also clean by filename pattern
-        _clean_metadata_tables(conn, filename=filename)
-        
-        return {
-            "success": True, 
-            "message": f"Deleted {filename}", 
-            "tables_dropped": dropped,
-            "metadata_cleaned": True
-        }
-        
-    except Exception as e:
-        logger.error(f"[CLEANUP] Delete structured failed: {e}")
-        raise HTTPException(500, f"Failed to delete: {str(e)}")
+        except Exception as e:
+            logger.warning(f"[CLEANUP] ChromaDB cleanup error: {e}")
+    
+    # 3. DOCUMENT REGISTRY - Remove entry (cascade)
+    supabase = _get_supabase()
+    if supabase:
+        try:
+            del_result = supabase.table('document_registry').delete().eq(
+                'filename', filename
+            ).eq('project_id', project_id).execute()
+            
+            if del_result.data:
+                result['registry_removed'] = True
+                logger.info(f"[CLEANUP] Removed {filename} from document_registry")
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Registry cleanup error: {e}")
+    
+    # Build message
+    parts = []
+    if result['tables_dropped']:
+        parts.append(f"DuckDB ({len(result['tables_dropped'])} tables)")
+    if result['chunks_removed'] > 0:
+        parts.append(f"ChromaDB ({result['chunks_removed']} chunks)")
+    if result['registry_removed']:
+        parts.append("Registry")
+    
+    result['message'] = f"Deleted from: {', '.join(parts)}" if parts else f"Deleted {filename}"
+    
+    logger.info(f"[CLEANUP] Cascade delete complete: {result}")
+    return result
 
 
 @router.delete("/status/structured/table/{table_name}")
@@ -339,43 +418,79 @@ async def delete_structured_table(table_name: str, project: str = Query(None)):
 # =============================================================================
 
 @router.delete("/status/documents/{filename:path}")
-async def delete_document(filename: str):
-    """Delete a document's chunks from ChromaDB."""
-    logger.info(f"[CLEANUP] Deleting document: {filename}")
+async def delete_document(filename: str, project_id: str = Query(None)):
+    """
+    Delete a document's chunks from ChromaDB - CASCADE to registry.
     
+    Per ARCHITECTURE.md: All deletes must cascade to all storage systems.
+    """
+    logger.info(f"[CLEANUP] Deleting document (cascade): {filename}")
+    
+    result = {
+        "success": True,
+        "filename": filename,
+        "deleted_chunks": 0,
+        "registry_removed": False
+    }
+    
+    # 1. CHROMADB - Delete chunks
     collection = _get_chromadb()
-    if not collection:
-        return {"success": True, "message": "Document store not available, considered deleted"}
-    
-    try:
-        # Try different metadata field names
-        for field in ['filename', 'source', 'file']:
-            try:
-                results = collection.get(where={field: filename})
-                if results and results['ids']:
-                    collection.delete(ids=results['ids'])
-                    logger.info(f"[CLEANUP] Deleted {len(results['ids'])} chunks for {filename}")
-                    return {"success": True, "deleted_chunks": len(results['ids']), "filename": filename}
-            except Exception as e:
-                logger.debug(f"[CLEANUP] Field {field} not found: {e}")
-                continue
-        
-        # Try partial match on IDs
+    if collection:
         try:
-            all_docs = collection.get()
-            matching_ids = [id for id in all_docs['ids'] if filename.lower() in id.lower()]
-            if matching_ids:
-                collection.delete(ids=matching_ids)
-                logger.info(f"[CLEANUP] Deleted {len(matching_ids)} chunks by ID match for {filename}")
-                return {"success": True, "deleted_chunks": len(matching_ids), "filename": filename}
+            # Try different metadata field names
+            for field in ['filename', 'source', 'file']:
+                try:
+                    results = collection.get(where={field: filename})
+                    if results and results['ids']:
+                        collection.delete(ids=results['ids'])
+                        result['deleted_chunks'] += len(results['ids'])
+                        logger.info(f"[CLEANUP] Deleted {len(results['ids'])} chunks for {filename}")
+                        break
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] Field {field} not found: {e}")
+                    continue
+            
+            # Try partial match on IDs if nothing found
+            if result['deleted_chunks'] == 0:
+                try:
+                    all_docs = collection.get()
+                    matching_ids = [id for id in all_docs['ids'] if filename.lower() in id.lower()]
+                    if matching_ids:
+                        collection.delete(ids=matching_ids)
+                        result['deleted_chunks'] = len(matching_ids)
+                        logger.info(f"[CLEANUP] Deleted {len(matching_ids)} chunks by ID match for {filename}")
+                except Exception as e:
+                    logger.debug(f"Suppressed: {e}")
+                    
         except Exception as e:
-            logger.debug(f"Suppressed: {e}")
-        
-        return {"success": True, "message": "Document not found or already deleted", "filename": filename}
-        
-    except Exception as e:
-        logger.error(f"[CLEANUP] Delete document failed: {e}")
-        raise HTTPException(500, f"Failed to delete: {str(e)}")
+            logger.warning(f"[CLEANUP] ChromaDB delete error: {e}")
+    
+    # 2. DOCUMENT REGISTRY - Remove entry (cascade)
+    supabase = _get_supabase()
+    if supabase:
+        try:
+            query = supabase.table('document_registry').delete().eq('filename', filename)
+            if project_id:
+                query = query.eq('project_id', project_id)
+            del_result = query.execute()
+            
+            if del_result.data:
+                result['registry_removed'] = True
+                logger.info(f"[CLEANUP] Removed {filename} from document_registry")
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Registry cleanup error: {e}")
+    
+    if result['deleted_chunks'] == 0 and not result['registry_removed']:
+        result['message'] = "Document not found or already deleted"
+    else:
+        parts = []
+        if result['deleted_chunks'] > 0:
+            parts.append(f"ChromaDB ({result['deleted_chunks']} chunks)")
+        if result['registry_removed']:
+            parts.append("Registry")
+        result['message'] = f"Deleted from: {', '.join(parts)}"
+    
+    return result
 
 
 # =============================================================================
@@ -611,42 +726,71 @@ async def delete_reference(
     filename: str,
     confirm: bool = Query(False, description="Must be true to delete")
 ):
-    """Delete a single reference document."""
+    """
+    Delete a single reference document - CASCADE to registry.
+    
+    Per ARCHITECTURE.md: All deletes must cascade to all storage systems.
+    """
     if not confirm:
         raise HTTPException(400, "Add ?confirm=true to delete")
     
+    result = {
+        "success": True,
+        "deleted": filename,
+        "chunks_removed": 0,
+        "registry_removed": False
+    }
+    
+    # 1. CHROMADB - Delete chunks
     try:
         rag = _get_rag_handler()
-        if not rag:
-            raise HTTPException(503, "RAG handler not available")
-        
-        # Get collection
-        try:
-            coll = rag.client.get_collection(name="documents")
-        except:
-            raise HTTPException(503, "Documents collection not available")
-        
-        # Find and delete all chunks for this document
-        results = coll.get(include=["metadatas"], where={"source": filename})
-        
-        if not results.get('ids'):
-            # Try with filename field instead
-            results = coll.get(include=["metadatas"], where={"filename": filename})
-        
-        if not results.get('ids'):
-            raise HTTPException(404, f"Document not found: {filename}")
-        
-        # Delete the chunks
-        coll.delete(ids=results['ids'])
-        
-        logger.info(f"[REFERENCES] Deleted {len(results['ids'])} chunks for: {filename}")
-        return {"success": True, "deleted": filename, "chunks_removed": len(results['ids'])}
-            
-    except HTTPException:
-        raise
+        if rag:
+            try:
+                coll = rag.client.get_collection(name="documents")
+                
+                # Find and delete all chunks for this document
+                results = coll.get(include=["metadatas"], where={"source": filename})
+                
+                if not results.get('ids'):
+                    # Try with filename field instead
+                    results = coll.get(include=["metadatas"], where={"filename": filename})
+                
+                if results.get('ids'):
+                    coll.delete(ids=results['ids'])
+                    result['chunks_removed'] = len(results['ids'])
+                    logger.info(f"[REFERENCES] Deleted {len(results['ids'])} chunks for: {filename}")
+            except Exception as e:
+                logger.warning(f"[REFERENCES] ChromaDB error: {e}")
     except Exception as e:
-        logger.error(f"[REFERENCES] Delete error: {e}")
-        raise HTTPException(500, str(e))
+        logger.warning(f"[REFERENCES] RAG handler error: {e}")
+    
+    # 2. DOCUMENT REGISTRY - Remove entry (cascade)
+    # Reference docs typically have project_id = 'Global/Universal' or similar
+    supabase = _get_supabase()
+    if supabase:
+        try:
+            del_result = supabase.table('document_registry').delete().eq(
+                'filename', filename
+            ).execute()
+            
+            if del_result.data:
+                result['registry_removed'] = True
+                logger.info(f"[REFERENCES] Removed {filename} from document_registry")
+        except Exception as e:
+            logger.warning(f"[REFERENCES] Registry cleanup error: {e}")
+    
+    if result['chunks_removed'] == 0 and not result['registry_removed']:
+        raise HTTPException(404, f"Document not found: {filename}")
+    
+    # Build message
+    parts = []
+    if result['chunks_removed'] > 0:
+        parts.append(f"ChromaDB ({result['chunks_removed']} chunks)")
+    if result['registry_removed']:
+        parts.append("Registry")
+    result['message'] = f"Deleted from: {', '.join(parts)}"
+    
+    return result
 
 
 @router.delete("/status/references")
