@@ -218,11 +218,11 @@ function PipelineFlow({ data }) {
   ];
   
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <GitBranch size={18} color={colors.primary} />
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <GitBranch size={16} color={colors.primary} />
         Processing Pipeline
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.success, fontWeight: 500 }}>● Live</span>
+        <span style={{ marginLeft: 'auto', fontSize: '11px', color: colors.success, fontWeight: 500 }}>● Live</span>
       </h3>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         {stages.map((stage, idx) => {
@@ -232,16 +232,16 @@ function PipelineFlow({ data }) {
             <React.Fragment key={stage.key}>
               <Tooltip title={stage.label} detail={stage.tooltip.detail} action={stage.tooltip.action}>
                 <div style={{ textAlign: 'center', cursor: 'help' }}>
-                  <div style={{ width: '72px', height: '72px', borderRadius: '16px', backgroundColor: `${stage.color}12`, border: `2px solid ${stage.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
-                    <Icon size={28} color={stage.color} />
+                  <div style={{ width: '56px', height: '56px', borderRadius: '12px', backgroundColor: `${stage.color}12`, border: `2px solid ${stage.color}`, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 8px' }}>
+                    <Icon size={22} color={stage.color} />
                   </div>
-                  <div style={{ fontSize: '24px', fontWeight: 700, color: colors.text }}>
+                  <div style={{ fontSize: '20px', fontWeight: 700, color: colors.text }}>
                     {typeof stageData.count === 'number' ? (stageData.count >= 1000000 ? (stageData.count / 1000000).toFixed(1) + 'M' : stageData.count >= 1000 ? (stageData.count / 1000).toFixed(0) + 'K' : stageData.count) : stageData.count}
                   </div>
-                  <div style={{ fontSize: '12px', color: colors.textMuted }}>{stage.label}</div>
+                  <div style={{ fontSize: '11px', color: colors.textMuted }}>{stage.label}</div>
                 </div>
               </Tooltip>
-              {idx < stages.length - 1 && <ArrowRight size={20} color={colors.silver} />}
+              {idx < stages.length - 1 && <ArrowRight size={18} color={colors.silver} />}
             </React.Fragment>
           );
         })}
@@ -262,24 +262,24 @@ function PerformanceMetrics({ data }) {
   ];
   
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Gauge size={18} color={colors.primary} /> Performance Metrics
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Gauge size={16} color={colors.primary} /> Performance Metrics
       </h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
         {metrics.map((m) => {
           const value = data[m.key] || 0;
           const isGood = value <= m.target;
           return (
             <Tooltip key={m.key} title={m.label} detail={m.tooltip.detail} action={m.tooltip.action}>
-              <div style={{ padding: '16px', backgroundColor: colors.background, borderRadius: '10px', cursor: 'help' }}>
-                <div style={{ fontSize: '12px', color: colors.textMuted, marginBottom: '8px' }}>{m.label}</div>
-                <div style={{ display: 'flex', alignItems: 'baseline', gap: '4px' }}>
-                  <span style={{ fontSize: '28px', fontWeight: 700, color: isGood ? colors.text : colors.warning }}>{value}</span>
-                  <span style={{ fontSize: '14px', color: colors.textMuted }}>{m.unit}</span>
+              <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', cursor: 'help' }}>
+                <div style={{ fontSize: '11px', color: colors.textMuted, marginBottom: '6px' }}>{m.label}</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: '3px' }}>
+                  <span style={{ fontSize: '22px', fontWeight: 700, color: isGood ? colors.text : colors.warning }}>{value}</span>
+                  <span style={{ fontSize: '12px', color: colors.textMuted }}>{m.unit}</span>
                 </div>
-                <div style={{ fontSize: '10px', color: colors.silver, marginTop: '4px' }}>Target: &lt;{m.target}{m.unit}</div>
-                <div style={{ marginTop: '8px', height: '4px', backgroundColor: colors.iceFlow, borderRadius: '2px' }}>
+                <div style={{ fontSize: '9px', color: colors.silver, marginTop: '3px' }}>Target: &lt;{m.target}{m.unit}</div>
+                <div style={{ marginTop: '6px', height: '3px', backgroundColor: colors.iceFlow, borderRadius: '2px' }}>
                   <div style={{ width: `${Math.min(100, (value / m.target) * 100)}%`, height: '100%', backgroundColor: isGood ? colors.success : colors.warning, borderRadius: '2px' }} />
                 </div>
               </div>
@@ -306,20 +306,20 @@ function ValueDelivered({ data }) {
   
   return (
     <div style={{ 
-      background: 'linear-gradient(135deg, #6b9b5a 0%, #83b16d 50%, #6b9b5a 100%)', 
+      background: `${colors.primary}12`, 
       borderRadius: '12px', 
-      padding: '24px', 
-      color: colors.white 
+      padding: '16px 20px', 
+      border: `2px solid ${colors.primary}`
     }}>
-      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <Award size={18} /> Value Delivered This Month
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <Award size={16} color={colors.primary} /> Value Delivered This Month
       </h3>
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '16px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '12px' }}>
         {stats.map((s) => (
           <Tooltip key={s.key} title={s.label} detail={s.tooltip.detail} action={s.tooltip.action}>
             <div style={{ cursor: 'help', textAlign: 'center' }}>
-              <div style={{ fontSize: '32px', fontWeight: 700, color: s.format === 'currency' ? colors.success : colors.white }}>{formatValue(data[s.key] || 0, s.format)}</div>
-              <div style={{ fontSize: '12px', opacity: 0.8 }}>{s.label}</div>
+              <div style={{ fontSize: '26px', fontWeight: 700, color: colors.primary }}>{formatValue(data[s.key] || 0, s.format)}</div>
+              <div style={{ fontSize: '11px', color: colors.textMuted }}>{s.label}</div>
             </div>
           </Tooltip>
         ))}
@@ -334,33 +334,33 @@ function ValueDelivered({ data }) {
 function ThroughputChart({ data }) {
   const maxValue = Math.max(...data.map(d => Math.max(d.uploads || 0, d.queries || 0, d.llm || 0)), 1);
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <BarChart3 size={18} color={colors.primary} /> Today's Throughput
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <BarChart3 size={16} color={colors.primary} /> Today's Throughput
       </h3>
-      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '140px' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', height: '100px' }}>
         {data.map((d, idx) => (
           <div key={idx} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '4px' }}>
             <div style={{ display: 'flex', gap: '2px', alignItems: 'flex-end' }}>
-              <div style={{ width: '12px', height: `${Math.max(4, ((d.uploads || 0) / maxValue) * 100)}px`, backgroundColor: colors.electricBlue, borderRadius: '2px 2px 0 0' }} />
-              <div style={{ width: '12px', height: `${Math.max(4, ((d.queries || 0) / maxValue) * 100)}px`, backgroundColor: colors.success, borderRadius: '2px 2px 0 0' }} />
-              <div style={{ width: '12px', height: `${Math.max(4, ((d.llm || 0) / maxValue) * 100)}px`, backgroundColor: colors.royalPurple, borderRadius: '2px 2px 0 0' }} />
+              <div style={{ width: '10px', height: `${Math.max(4, ((d.uploads || 0) / maxValue) * 80)}px`, backgroundColor: colors.electricBlue, borderRadius: '2px 2px 0 0' }} />
+              <div style={{ width: '10px', height: `${Math.max(4, ((d.queries || 0) / maxValue) * 80)}px`, backgroundColor: colors.success, borderRadius: '2px 2px 0 0' }} />
+              <div style={{ width: '10px', height: `${Math.max(4, ((d.llm || 0) / maxValue) * 80)}px`, backgroundColor: colors.royalPurple, borderRadius: '2px 2px 0 0' }} />
             </div>
             <span style={{ fontSize: '9px', color: colors.textMuted }}>{d.hour}</span>
           </div>
         ))}
       </div>
-      <div style={{ display: 'flex', gap: '20px', marginTop: '16px', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '12px', backgroundColor: colors.electricBlue, borderRadius: '2px' }} /><span style={{ fontSize: '11px', color: colors.textMuted }}>Uploads</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '12px', backgroundColor: colors.success, borderRadius: '2px' }} /><span style={{ fontSize: '11px', color: colors.textMuted }}>Queries</span></div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}><div style={{ width: '12px', height: '12px', backgroundColor: colors.royalPurple, borderRadius: '2px' }} /><span style={{ fontSize: '11px', color: colors.textMuted }}>LLM</span></div>
+      <div style={{ display: 'flex', gap: '16px', marginTop: '10px', justifyContent: 'center' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.electricBlue, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>Uploads</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.success, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>Queries</span></div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}><div style={{ width: '10px', height: '10px', backgroundColor: colors.royalPurple, borderRadius: '2px' }} /><span style={{ fontSize: '10px', color: colors.textMuted }}>LLM</span></div>
       </div>
     </div>
   );
 }
 
 // ============================================================================
-// DAILY ACTIVITY CHART (Spark chart)
+// DAILY ACTIVITY CHART (Compact Spark chart)
 // ============================================================================
 function DailyActivityChart() {
   // Generate last 30 days of activity data
@@ -371,52 +371,38 @@ function DailyActivityChart() {
     return {
       date: date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
       dayOfWeek: date.getDay(),
-      activity: Math.floor(Math.random() * 80) + 20 + (date.getDay() === 0 || date.getDay() === 6 ? -30 : 0) // Lower on weekends
+      activity: Math.floor(Math.random() * 80) + 20 + (date.getDay() === 0 || date.getDay() === 6 ? -30 : 0)
     };
   }).map(d => ({ ...d, activity: Math.max(5, d.activity) }));
   
   const maxActivity = Math.max(...data.map(d => d.activity));
   
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 20px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <BarChart3 size={18} color={colors.primary} /> Daily Activity
-        <span style={{ marginLeft: 'auto', fontSize: '12px', color: colors.textMuted, fontWeight: 400 }}>Last 30 days</span>
-      </h3>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '3px', height: '80px' }}>
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <BarChart3 size={16} color={colors.primary} /> Daily Activity
+        </h3>
+        <span style={{ fontSize: '11px', color: colors.textMuted }}>30 days</span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '48px' }}>
         {data.map((d, idx) => (
           <div
             key={idx}
-            title={`${d.date}: ${d.activity} operations`}
+            title={`${d.date}: ${d.activity} ops`}
             style={{
               flex: 1,
               height: `${(d.activity / maxActivity) * 100}%`,
               backgroundColor: d.activity > 60 ? colors.primary : d.activity > 30 ? colors.skyBlue : colors.iceFlow,
-              borderRadius: '2px',
-              minHeight: '4px',
-              transition: 'height 0.3s ease',
-              cursor: 'pointer',
+              borderRadius: '1px',
+              minHeight: '3px',
             }}
           />
         ))}
       </div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '8px', fontSize: '10px', color: colors.textMuted }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '6px', fontSize: '9px', color: colors.textMuted }}>
         <span>{data[0].date}</span>
         <span>Today</span>
-      </div>
-      <div style={{ display: 'flex', gap: '16px', marginTop: '12px', justifyContent: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', backgroundColor: colors.primary, borderRadius: '2px' }} />
-          <span style={{ fontSize: '11px', color: colors.textMuted }}>High (60+)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', backgroundColor: colors.skyBlue, borderRadius: '2px' }} />
-          <span style={{ fontSize: '11px', color: colors.textMuted }}>Medium (30-60)</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <div style={{ width: '12px', height: '12px', backgroundColor: colors.iceFlow, borderRadius: '2px' }} />
-          <span style={{ fontSize: '11px', color: colors.textMuted }}>Low (&lt;30)</span>
-        </div>
       </div>
     </div>
   );
@@ -427,22 +413,22 @@ function DailyActivityChart() {
 // ============================================================================
 function RecentIssues({ issues }) {
   return (
-    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '24px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px 0', fontSize: '16px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <AlertTriangle size={18} color={colors.primary} /> Recent Issues
-        {issues.length === 0 && <span style={{ marginLeft: 'auto', fontSize: '11px', padding: '4px 10px', backgroundColor: `${colors.success}15`, color: colors.success, borderRadius: '20px' }}>All Clear</span>}
+    <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px 20px', border: `1px solid ${colors.border}` }}>
+      <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <AlertTriangle size={16} color={colors.warning} /> Recent Issues
+        {issues.length === 0 && <span style={{ marginLeft: 'auto', fontSize: '10px', padding: '3px 8px', backgroundColor: `${colors.success}15`, color: colors.success, borderRadius: '12px' }}>All Clear</span>}
       </h3>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {issues.length === 0 ? (
-          <div style={{ padding: '20px', textAlign: 'center', color: colors.textMuted }}>No recent issues</div>
+          <div style={{ padding: '16px', textAlign: 'center', color: colors.textMuted, fontSize: '12px' }}>No recent issues</div>
         ) : issues.map((issue, idx) => (
-          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px', backgroundColor: colors.background, borderRadius: '8px' }}>
-            <Clock size={16} color={colors.warning} />
+          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px', backgroundColor: colors.background, borderRadius: '6px' }}>
+            <Clock size={14} color={colors.warning} />
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: '13px', fontWeight: 500, color: colors.text }}>{issue.message}</div>
-              <div style={{ fontSize: '11px', color: colors.textMuted }}>{issue.detail} • {issue.time}</div>
+              <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text }}>{issue.message}</div>
+              <div style={{ fontSize: '10px', color: colors.textMuted }}>{issue.detail} • {issue.time}</div>
             </div>
-            {issue.resolved && <CheckCircle size={16} color={colors.success} />}
+            {issue.resolved && <CheckCircle size={14} color={colors.success} />}
           </div>
         ))}
       </div>
@@ -571,9 +557,15 @@ export default function DashboardPage() {
           const buckets = [];
           for (let i = 0; i < data.length; i += bucketSize) {
             const slice = data.slice(i, i + bucketSize);
-            const hour = slice[0]?.hour?.slice(11, 16) || `${Math.floor(i / bucketSize) * 3}:00`;
+            // Convert to 12hr format with AM/PM
+            const rawHour = slice[0]?.hour?.slice(11, 16) || `${Math.floor(i / bucketSize) * 3}:00`;
+            const [h, m] = rawHour.split(':');
+            const hour24 = parseInt(h, 10);
+            const hour12 = hour24 === 0 ? 12 : hour24 > 12 ? hour24 - 12 : hour24;
+            const ampm = hour24 >= 12 ? 'PM' : 'AM';
+            const formattedHour = `${hour12}${ampm}`;
             buckets.push({
-              hour: hour,
+              hour: formattedHour,
               uploads: slice.reduce((sum, d) => sum + (d.uploads || 0), 0),
               queries: slice.reduce((sum, d) => sum + (d.queries || 0), 0),
               llm: slice.reduce((sum, d) => sum + (d.llm_calls || 0), 0)
@@ -629,25 +621,25 @@ export default function DashboardPage() {
         </button>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '24px', marginBottom: '24px' }}>
-        <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '220px 1fr', gap: '16px', marginBottom: '16px' }}>
+        <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '16px', border: `1px solid ${colors.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <HealthScoreRing score={healthScore} trend={healthTrend} />
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <AlertBanner alerts={alerts} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
             {Object.entries(systems).map(([name, data]) => <SystemCard key={name} name={name} data={data} />)}
           </div>
         </div>
       </div>
       
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '24px', marginBottom: '24px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px', marginBottom: '16px' }}>
         <PipelineFlow data={pipeline} />
         <ThroughputChart data={throughput} />
       </div>
-      <div style={{ marginBottom: '24px' }}><ValueDelivered data={value} /></div>
-      <div style={{ marginBottom: '24px' }}><PerformanceMetrics data={performance} /></div>
-      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '24px' }}>
+      <div style={{ marginBottom: '16px' }}><ValueDelivered data={value} /></div>
+      <div style={{ marginBottom: '16px' }}><PerformanceMetrics data={performance} /></div>
+      <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '16px' }}>
         <DailyActivityChart />
         <RecentIssues issues={recentIssues} />
       </div>
