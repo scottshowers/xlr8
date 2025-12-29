@@ -1,49 +1,19 @@
 /**
- * DataExplorer.jsx - INTEGRATION UPDATE
- * ======================================
+ * DataExplorer.jsx - COMPLETE FIX
+ * ================================
  * 
- * This file contains the changes needed to integrate ClassificationPanel
- * into the existing DataExplorer.jsx
+ * Fixed: Relationship editor dropdowns now properly fetch and display columns.
  * 
- * CHANGES REQUIRED:
+ * The core issue was that `tables` array was loaded with `columns: []` and
+ * never populated. Now:
+ * 1. Added `tableSchemas` state to cache column data
+ * 2. RelationshipEditor fetches columns on-demand when expanding/editing
+ * 3. Dropdowns populate from cached schema data
  * 
- * 1. Add import at top:
- *    import ClassificationPanel, { ChunkPanel } from '../components/ClassificationPanel';
- * 
- * 2. Add state for showing classification panel (around line 98):
- *    const [showClassification, setShowClassification] = useState(false);
- * 
- * 3. Add new tab to tabs array (around line 407):
- *    { id: 'classification', label: '🔍 Classification', icon: Eye },
- * 
- * 4. Add tab content after the tables tab (around line 656):
- *    {activeTab === 'classification' && selectedTable && (
- *      <ClassificationPanel tableName={selectedTable} />
- *    )}
- * 
- * 5. Add "View Classification" button in table detail header (around line 577):
- *    <button
- *      onClick={() => setActiveTab('classification')}
- *      style={{
- *        padding: '0.25rem 0.6rem',
- *        background: `${c.royalPurple}15`,
- *        border: `1px solid ${c.royalPurple}40`,
- *        borderRadius: 6,
- *        fontSize: '0.75rem',
- *        color: c.royalPurple,
- *        cursor: 'pointer',
- *        display: 'flex',
- *        alignItems: 'center',
- *        gap: '0.35rem'
- *      }}
- *    >
- *      <Eye size={14} /> Classification
- *    </button>
- * 
- * Below is the complete updated file with all changes integrated:
+ * Updated: December 29, 2025
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight, ChevronUp,
@@ -116,13 +86,14 @@ function Tooltip({ children, title, detail, action }) {
 }
 
 // ============================================================================
-// RELATIONSHIP EDITOR - Collapsible connections with field dropdowns
+// RELATIONSHIP EDITOR - Collapsible connections with WORKING field dropdowns
 // ============================================================================
-function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onUpdate }) {
+function RelationshipEditor({ relationships, tables, tableSchemas, c, onConfirm, onDelete, onUpdate, onFetchColumns }) {
   const [expandedConnections, setExpandedConnections] = useState({});
   const [editingRel, setEditingRel] = useState(null);
   const [editFromCol, setEditFromCol] = useState('');
   const [editToCol, setEditToCol] = useState('');
+  const [loadingSchemas, setLoadingSchemas] = useState({});
   
   // Group relationships by connection (from_table → to_table)
   const grouped = relationships.reduce((acc, rel) => {
@@ -134,11 +105,34 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
     return acc;
   }, {});
   
-  const toggleConnection = (key) => {
-    setExpandedConnections(prev => ({ ...prev, [key]: !prev[key] }));
+  const toggleConnection = async (key, fromTable, toTable) => {
+    const willExpand = !expandedConnections[key];
+    setExpandedConnections(prev => ({ ...prev, [key]: willExpand }));
+    
+    // Fetch columns for both tables when expanding
+    if (willExpand) {
+      const tablesToFetch = [];
+      if (!tableSchemas[fromTable]) tablesToFetch.push(fromTable);
+      if (!tableSchemas[toTable]) tablesToFetch.push(toTable);
+      
+      if (tablesToFetch.length > 0) {
+        setLoadingSchemas(prev => ({ ...prev, [key]: true }));
+        await Promise.all(tablesToFetch.map(t => onFetchColumns(t)));
+        setLoadingSchemas(prev => ({ ...prev, [key]: false }));
+      }
+    }
   };
   
-  const startEdit = (rel) => {
+  const startEdit = async (rel, fromTable, toTable) => {
+    // Ensure we have columns for both tables before editing
+    const tablesToFetch = [];
+    if (!tableSchemas[fromTable]) tablesToFetch.push(fromTable);
+    if (!tableSchemas[toTable]) tablesToFetch.push(toTable);
+    
+    if (tablesToFetch.length > 0) {
+      await Promise.all(tablesToFetch.map(t => onFetchColumns(t)));
+    }
+    
     setEditingRel(rel.id);
     setEditFromCol(rel.from_column || rel.source_column || '');
     setEditToCol(rel.to_column || rel.target_column || '');
@@ -151,20 +145,34 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
   };
   
   const saveEdit = (rel) => {
-    onUpdate(rel, { from_column: editFromCol, to_column: editToCol });
+    onUpdate(rel, { 
+      source_column: editFromCol, 
+      target_column: editToCol 
+    });
     setEditingRel(null);
   };
   
+  // Get columns from tableSchemas (the cached column data)
   const getColumns = (tableName) => {
-    const table = tables.find(t => t.table_name === tableName);
-    if (!table?.columns) return [];
-    return table.columns.map(col => typeof col === 'string' ? col : col.name);
+    const schema = tableSchemas[tableName];
+    if (!schema?.columns) return [];
+    return schema.columns.map(col => typeof col === 'string' ? col : col.name);
   };
   
   const getDisplayName = (tableName) => {
     const table = tables.find(t => t.table_name === tableName);
     return table?.display_name || tableName;
   };
+  
+  if (Object.keys(grouped).length === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem', color: c.textMuted }}>
+        <Link2 size={48} style={{ color: c.skyBlue, marginBottom: '1rem' }} />
+        <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>No relationships detected yet</p>
+        <p style={{ fontSize: '0.85rem', margin: 0 }}>Upload related files to see FK/PK relationships.</p>
+      </div>
+    );
+  }
   
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -173,12 +181,13 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
         const fromDisplay = getDisplayName(fromTable);
         const toDisplay = getDisplayName(toTable);
         const confirmedCount = rels.filter(r => r.confirmed).length;
+        const isLoadingSchema = loadingSchemas[key];
         
         return (
           <div key={key} style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
             {/* Connection Header - Click to expand */}
             <div
-              onClick={() => toggleConnection(key)}
+              onClick={() => toggleConnection(key, fromTable, toTable)}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -189,7 +198,13 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
                 userSelect: 'none'
               }}
             >
-              {isExpanded ? <ChevronDown size={16} color={c.textMuted} /> : <ChevronRight size={16} color={c.textMuted} />}
+              {isLoadingSchema ? (
+                <Loader2 size={16} style={{ color: c.textMuted, animation: 'spin 1s linear infinite' }} />
+              ) : isExpanded ? (
+                <ChevronDown size={16} color={c.textMuted} />
+              ) : (
+                <ChevronRight size={16} color={c.textMuted} />
+              )}
               <div style={{ flex: 1, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                 <span style={{ fontWeight: 600, color: c.primary, fontSize: '0.9rem' }}>{fromDisplay}</span>
                 <span style={{ color: c.textMuted }}>→</span>
@@ -237,12 +252,17 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
                               borderRadius: 4,
                               background: c.cardBg,
                               color: c.text,
-                              minWidth: 120
+                              minWidth: 140
                             }}
                           >
-                            {fromCols.map(col => (
-                              <option key={col} value={col}>{col}</option>
-                            ))}
+                            <option value="">-- Select column --</option>
+                            {fromCols.length === 0 ? (
+                              <option disabled>Loading columns...</option>
+                            ) : (
+                              fromCols.map(col => (
+                                <option key={col} value={col}>{col}</option>
+                              ))
+                            )}
                           </select>
                           <span style={{ color: c.textMuted }}>→</span>
                           <select
@@ -255,15 +275,34 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
                               borderRadius: 4,
                               background: c.cardBg,
                               color: c.text,
-                              minWidth: 120
+                              minWidth: 140
                             }}
                           >
-                            {toCols.map(col => (
-                              <option key={col} value={col}>{col}</option>
-                            ))}
+                            <option value="">-- Select column --</option>
+                            {toCols.length === 0 ? (
+                              <option disabled>Loading columns...</option>
+                            ) : (
+                              toCols.map(col => (
+                                <option key={col} value={col}>{col}</option>
+                              ))
+                            )}
                           </select>
                           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                            <button onClick={() => saveEdit(rel)} style={{ padding: '0.25rem 0.5rem', background: `${c.success}15`, border: `1px solid ${c.success}40`, borderRadius: 4, fontSize: '0.7rem', color: c.success, cursor: 'pointer' }}>Save</button>
+                            <button 
+                              onClick={() => saveEdit(rel)} 
+                              disabled={!editFromCol || !editToCol}
+                              style={{ 
+                                padding: '0.25rem 0.5rem', 
+                                background: (!editFromCol || !editToCol) ? c.border : `${c.success}15`, 
+                                border: `1px solid ${(!editFromCol || !editToCol) ? c.border : c.success}40`, 
+                                borderRadius: 4, 
+                                fontSize: '0.7rem', 
+                                color: (!editFromCol || !editToCol) ? c.textMuted : c.success, 
+                                cursor: (!editFromCol || !editToCol) ? 'not-allowed' : 'pointer' 
+                              }}
+                            >
+                              Save
+                            </button>
                             <button onClick={cancelEdit} style={{ padding: '0.25rem 0.5rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 4, fontSize: '0.7rem', color: c.textMuted, cursor: 'pointer' }}>Cancel</button>
                           </div>
                         </>
@@ -280,7 +319,7 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
                           
                           <div style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
                             <button
-                              onClick={() => startEdit(rel)}
+                              onClick={() => startEdit(rel, fromTable, toTable)}
                               style={{ padding: '0.25rem 0.4rem', background: 'transparent', border: `1px solid ${c.border}`, borderRadius: 4, cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                               title="Edit mapping"
                             >
@@ -313,6 +352,8 @@ function RelationshipEditor({ relationships, tables, c, onConfirm, onDelete, onU
           </div>
         );
       })}
+      
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
@@ -333,6 +374,9 @@ export default function DataExplorer() {
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   
+  // NEW: Cache for table schemas (columns) - used by RelationshipEditor
+  const [tableSchemas, setTableSchemas] = useState({});
+  
   // Compliance state
   const [complianceRunning, setComplianceRunning] = useState(false);
   const [complianceResults, setComplianceResults] = useState(null);
@@ -346,6 +390,32 @@ export default function DataExplorer() {
   const [generatingSQL, setGeneratingSQL] = useState(null);
   
   const c = { ...colors, ...brandColors };
+  
+  const projectName = activeProject?.name || activeProject?.id || 'default';
+
+  // NEW: Fetch columns for a specific table and cache them
+  const fetchTableColumns = useCallback(async (tableName) => {
+    // Skip if already cached
+    if (tableSchemas[tableName]) return tableSchemas[tableName];
+    
+    try {
+      const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
+      const schema = {
+        table_name: tableName,
+        columns: res.data?.columns || [],
+        row_count: res.data?.row_count || 0
+      };
+      
+      setTableSchemas(prev => ({ ...prev, [tableName]: schema }));
+      return schema;
+    } catch (err) {
+      console.error(`Failed to fetch columns for ${tableName}:`, err);
+      // Return empty schema on error
+      const emptySchema = { table_name: tableName, columns: [], row_count: 0 };
+      setTableSchemas(prev => ({ ...prev, [tableName]: emptySchema }));
+      return emptySchema;
+    }
+  }, [tableSchemas]);
 
   // Load tables
   useEffect(() => {
@@ -356,7 +426,6 @@ export default function DataExplorer() {
     setLoading(true);
     try {
       // SINGLE API CALL - /api/platform returns everything we need
-      const projectName = activeProject?.name || activeProject?.id || 'default';
       const res = await api.get(`/platform?include=files,relationships&project=${encodeURIComponent(projectName)}`);
       const platform = res.data;
       
@@ -372,7 +441,7 @@ export default function DataExplorer() {
               display_name: sheet.display_name || sheet.table_name,
               row_count: sheet.row_count || 0,
               column_count: sheet.column_count || 0,
-              columns: [],  // Will be populated on table select
+              columns: sheet.columns || [],  // May be populated
               filename: file.filename,
               project: file.project,
               truth_type: file.truth_type
@@ -468,11 +537,21 @@ export default function DataExplorer() {
     
     try {
       const res = await api.get(`/status/table-profile/${encodeURIComponent(tableName)}`);
-      // Use API for column details, but always use list row count (more reliable)
-      setTableDetails({
+      const details = {
         ...res.data,
         row_count: knownRowCount // Always use the count from table list
-      });
+      };
+      setTableDetails(details);
+      
+      // Also cache this in tableSchemas for RelationshipEditor
+      setTableSchemas(prev => ({
+        ...prev,
+        [tableName]: {
+          table_name: tableName,
+          columns: res.data?.columns || [],
+          row_count: knownRowCount
+        }
+      }));
     } catch (err) {
       // Build details from tables list
       setTableDetails({
@@ -491,7 +570,6 @@ export default function DataExplorer() {
 
   // Relationship handlers
   const confirmRelationship = async (rel) => {
-    const projectName = activeProject?.name || activeProject?.id || 'default';
     const sourceTable = rel.source_table || rel.from_table;
     const sourceCol = rel.source_column || rel.from_column;
     const targetTable = rel.target_table || rel.to_table;
@@ -522,7 +600,6 @@ export default function DataExplorer() {
     
     if (!confirm(`Delete relationship ${sourceTable}.${sourceCol} → ${targetTable}.${targetCol}?`)) return;
     
-    const projectName = activeProject?.name || activeProject?.id || 'default';
     try {
       await api.delete(`/data-model/relationships/${encodeURIComponent(projectName)}`, {
         params: {
@@ -541,45 +618,16 @@ export default function DataExplorer() {
     }
   };
 
-  // Generate mock relationships from common columns
-  const generateMockRelationships = (allTables) => {
-    const rels = [];
-    const idColumns = ['employee_id', 'emp_id', 'company_code', 'location_code', 'department_code', 'job_code'];
-    
-    for (const table of allTables) {
-      if (!table.columns) continue;
-      
-      for (const col of table.columns) {
-        const colName = typeof col === 'string' ? col : col.name;
-        if (!colName) continue;
-        
-        const colLower = colName.toLowerCase();
-        
-        // Check for ID-like columns
-        for (const idCol of idColumns) {
-          if (colLower.includes(idCol) || colLower === idCol) {
-            // Look for potential parent table
-            for (const otherTable of allTables) {
-              if (otherTable.table_name === table.table_name) continue;
-              
-              const otherCols = otherTable.columns?.map(c => (typeof c === 'string' ? c : c.name).toLowerCase()) || [];
-              if (otherCols.includes(colLower) || otherCols.includes('id')) {
-                rels.push({
-                  from_table: table.table_name,
-                  to_table: otherTable.table_name,
-                  column: colName,
-                  type: 'N:1'
-                });
-                break;
-              }
-            }
-            break;
-          }
-        }
-      }
+  const updateRelationship = async (rel, updates) => {
+    try {
+      await api.patch(`/data-model/relationships/${rel.id}`, updates);
+      // Refresh relationships
+      const resp = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
+      if (resp.data?.relationships) setRelationships(resp.data.relationships);
+    } catch (err) {
+      console.error('Failed to update relationship:', err);
+      alert('Failed to update relationship');
     }
-    
-    return rels;
   };
 
   const getTableHealth = (tableName) => {
@@ -703,65 +751,61 @@ export default function DataExplorer() {
           </div>
         </Tooltip>
         
-        <Tooltip title="Health Issues" detail="Data quality issues that may affect analysis." action="Review and fix for better results">
-          <div style={{ 
-            background: totalIssues > 0 ? `${c.warning}10` : c.cardBg, 
-            border: `1px solid ${totalIssues > 0 ? c.warning : c.border}`, 
-            borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' 
-          }}>
-            <span style={{ fontSize: '1.5rem' }}>{totalIssues > 0 ? '⚠️' : '✅'}</span>
+        <Tooltip title="Data Health" detail="Number of data quality issues detected." action="Check the Health tab for details">
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
+            <span style={{ fontSize: '1.5rem' }}>{totalIssues === 0 ? '✅' : '⚠️'}</span>
             <div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: totalIssues > 0 ? c.warning : c.text }}>{totalIssues}</div>
+              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: totalIssues === 0 ? c.success : c.warning }}>{totalIssues}</div>
               <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Issues</div>
             </div>
           </div>
         </Tooltip>
       </div>
 
-      {/* Tab Content */}
+      {/* Tables Tab */}
       {activeTab === 'tables' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1rem' }}>
           {/* Table List */}
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ padding: '0.875rem 1rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem', maxHeight: '70vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
+              <Database size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
               Tables ({tables.length})
-            </div>
-            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              {tables.map((table, i) => {
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              {tables.map(table => {
                 const health = getTableHealth(table.table_name);
-                const displayName = table.display_name || table.table_name;
-                const uploadedAt = table.created_at ? new Date(table.created_at).toLocaleDateString() : null;
-                const uploadedBy = table.uploaded_by;
+                const healthColor = health === 'good' ? c.success : health === 'warning' ? c.warning : c.scarletSage;
+                
                 return (
                   <div
-                    key={i}
+                    key={table.table_name}
                     onClick={() => setSelectedTable(table.table_name)}
-                    title={table.table_name}
                     style={{
-                      padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
-                      background: selectedTable === table.table_name ? `${c.primary}15` : 'transparent',
-                      borderLeft: selectedTable === table.table_name ? `3px solid ${c.primary}` : '3px solid transparent',
+                      padding: '0.6rem 0.75rem',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      background: selectedTable === table.table_name ? `${c.primary}10` : 'transparent',
+                      border: selectedTable === table.table_name ? `1px solid ${c.primary}40` : '1px solid transparent',
                       transition: 'all 0.15s'
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 500, fontSize: '0.85rem', color: c.text }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      <FileSpreadsheet size={14} color={c.primary} />
                       <span style={{ 
-                        width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
-                        background: health === 'good' ? c.accent : health === 'warning' ? c.warning : c.scarletSage
-                      }} />
-                      <span style={{ 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis', 
+                        fontSize: '0.85rem', 
+                        fontWeight: selectedTable === table.table_name ? 600 : 400,
+                        color: c.text,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
                         whiteSpace: 'nowrap',
-                        maxWidth: '200px'
+                        flex: 1
                       }}>
-                        {displayName}
+                        {table.display_name || table.table_name}
                       </span>
+                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: healthColor }} title={`Health: ${health}`} />
                     </div>
-                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.25rem' }}>
-                      {(table.row_count || 0).toLocaleString()} rows • {table.column_count || table.columns?.length || 0} columns
-                      {uploadedAt && ` • ${uploadedAt}`}
-                      {uploadedBy && ` • by ${uploadedBy}`}
+                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.2rem', marginLeft: '1.25rem' }}>
+                      {table.row_count?.toLocaleString() || 0} rows
                     </div>
                   </div>
                 );
@@ -770,82 +814,74 @@ export default function DataExplorer() {
           </div>
 
           {/* Table Detail */}
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.25rem' }}>
             {loadingDetails ? (
-              <div style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>
-                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '200px', color: c.textMuted }}>
+                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', marginRight: '0.5rem' }} />
+                Loading...
               </div>
             ) : tableDetails ? (
               <>
-                <div style={{ padding: '1rem 1.25rem', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontWeight: 600, fontSize: '1.1rem', color: c.text }}>
-                      🗄️ {tableDetails.display_name || tableDetails.table_name}
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: c.text }}>
+                      {tableDetails.display_name || tableDetails.table_name}
+                    </h3>
+                    <div style={{ fontSize: '0.8rem', color: c.textMuted, marginTop: '0.25rem' }}>
+                      {tableDetails.row_count?.toLocaleString() || 0} rows • {tableDetails.columns?.length || 0} columns
                     </div>
-                    {tableDetails.display_name && tableDetails.display_name !== tableDetails.table_name && (
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted, fontFamily: 'monospace' }}>
-                        {tableDetails.table_name}
-                      </div>
-                    )}
                   </div>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    {/* NEW: View Classification button */}
-                    <button
-                      onClick={() => setActiveTab('classification')}
-                      style={{
-                        padding: '0.25rem 0.6rem',
-                        background: `${c.royalPurple}15`,
-                        border: `1px solid ${c.royalPurple}40`,
-                        borderRadius: 6,
-                        fontSize: '0.75rem',
-                        color: c.royalPurple,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '0.35rem'
-                      }}
-                    >
-                      <Eye size={14} /> Classification
-                    </button>
-                    <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.25rem 0.6rem', borderRadius: 6, fontSize: '0.75rem', fontWeight: 500 }}>
-                      {(tableDetails.row_count || 0).toLocaleString()} rows
-                    </span>
-                  </div>
+                  <button
+                    onClick={() => setActiveTab('classification')}
+                    style={{
+                      padding: '0.25rem 0.6rem',
+                      background: `${c.royalPurple}15`,
+                      border: `1px solid ${c.royalPurple}40`,
+                      borderRadius: 6,
+                      fontSize: '0.75rem',
+                      color: c.royalPurple,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem'
+                    }}
+                  >
+                    <Eye size={14} /> Classification
+                  </button>
                 </div>
                 
-                <div style={{ padding: '1.25rem' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                {/* Columns Grid */}
+                <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
                     <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Column</th>
-                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Type</th>
-                        <th style={{ textAlign: 'left', padding: '0.6rem 0.75rem', background: c.background, fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, textTransform: 'uppercase', letterSpacing: '0.05em', borderBottom: `1px solid ${c.border}` }}>Fill Rate</th>
+                      <tr style={{ borderBottom: `2px solid ${c.border}` }}>
+                        <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Column</th>
+                        <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Type</th>
+                        <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Fill Rate</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {tableDetails.columns?.map((col, i) => {
+                      {(tableDetails.columns || []).map((col, idx) => {
                         const colName = typeof col === 'string' ? col : col.name;
-                        const colType = typeof col === 'string' ? 'VARCHAR' : (col.type || 'VARCHAR');
-                        const fillRate = typeof col === 'string' ? 100 : (col.fill_rate ?? 100);
-                        const isKey = colName.toLowerCase().includes('_id') || colName.toLowerCase() === 'id';
+                        const colType = typeof col === 'string' ? 'VARCHAR' : col.type || 'VARCHAR';
+                        const fillRate = typeof col === 'string' ? 100 : col.fill_rate || 100;
                         
                         return (
-                          <tr key={i}>
-                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}`, fontSize: '0.85rem' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 500, color: c.text }}>
-                                {isKey && <Key size={12} style={{ color: c.warning }} />}
+                          <tr key={idx} style={{ borderBottom: `1px solid ${c.border}` }}>
+                            <td style={{ padding: '0.5rem 0.75rem', color: c.text }}>
+                              <code style={{ fontSize: '0.8rem', background: c.background, padding: '0.15rem 0.35rem', borderRadius: 3 }}>
                                 {colName}
-                              </div>
+                              </code>
                             </td>
-                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}` }}>
-                              <span style={{ fontSize: '0.75rem', color: c.textMuted, fontFamily: 'monospace' }}>{colType}</span>
-                            </td>
-                            <td style={{ padding: '0.6rem 0.75rem', borderBottom: `1px solid ${c.border}` }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                                <div style={{ width: 60, height: 6, background: c.border, borderRadius: 3, overflow: 'hidden' }}>
-                                  <div style={{ height: '100%', width: `${fillRate}%`, background: getFillRateColor(fillRate), borderRadius: 3 }} />
+                            <td style={{ padding: '0.5rem 0.75rem', color: c.textMuted, fontSize: '0.8rem' }}>{colType}</td>
+                            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                <div style={{ width: '60px', height: '6px', background: c.background, borderRadius: 3, overflow: 'hidden' }}>
+                                  <div style={{ width: `${fillRate}%`, height: '100%', background: getFillRateColor(fillRate), borderRadius: 3 }} />
                                 </div>
-                                <span style={{ fontSize: '0.8rem', color: getFillRateColor(fillRate) }}>{fillRate}%</span>
+                                <span style={{ fontSize: '0.75rem', color: getFillRateColor(fillRate), fontWeight: 500, minWidth: '35px' }}>
+                                  {fillRate}%
+                                </span>
                               </div>
                             </td>
                           </tr>
@@ -856,49 +892,45 @@ export default function DataExplorer() {
                 </div>
               </>
             ) : (
-              <div style={{ padding: '3rem', textAlign: 'center', color: c.textMuted }}>
-                Select a table to view details
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '200px', color: c.textMuted }}>
+                <FileSpreadsheet size={40} style={{ marginBottom: '0.75rem', opacity: 0.5 }} />
+                <p>Select a table to view columns</p>
               </div>
             )}
           </div>
         </div>
       )}
 
-      {/* NEW: Classification Tab */}
+      {/* Classification Tab */}
       {activeTab === 'classification' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', gap: '1.5rem' }}>
-          {/* Table List */}
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-            <div style={{ padding: '0.875rem 1rem', background: c.background, borderBottom: `1px solid ${c.border}`, fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
-              Select Table
-            </div>
-            <div style={{ maxHeight: '500px', overflowY: 'auto' }}>
-              {tables.map((table, i) => {
-                const displayName = table.display_name || table.table_name;
-                const uploadedAt = table.created_at ? new Date(table.created_at).toLocaleDateString() : null;
-                const uploadedBy = table.uploaded_by;
-                return (
-                  <div
-                    key={i}
-                    onClick={() => setSelectedTable(table.table_name)}
-                    title={table.table_name}
-                    style={{
-                      padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}`, cursor: 'pointer',
-                      background: selectedTable === table.table_name ? `${c.royalPurple}15` : 'transparent',
-                      borderLeft: selectedTable === table.table_name ? `3px solid ${c.royalPurple}` : '3px solid transparent',
-                    }}
-                  >
-                    <div style={{ fontWeight: 500, fontSize: '0.85rem', color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {displayName}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.15rem' }}>
-                      {(table.row_count || 0).toLocaleString()} rows
-                      {uploadedAt && ` • ${uploadedAt}`}
-                      {uploadedBy && ` • by ${uploadedBy}`}
-                    </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1rem' }}>
+          {/* Table List - same as Tables tab */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem', maxHeight: '70vh', overflowY: 'auto' }}>
+            <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
+              <Database size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+              Tables ({tables.length})
+            </h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              {tables.map(table => (
+                <div
+                  key={table.table_name}
+                  onClick={() => setSelectedTable(table.table_name)}
+                  style={{
+                    padding: '0.6rem 0.75rem',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    background: selectedTable === table.table_name ? `${c.primary}10` : 'transparent',
+                    border: selectedTable === table.table_name ? `1px solid ${c.primary}40` : '1px solid transparent'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <Eye size={14} color={c.royalPurple} />
+                    <span style={{ fontSize: '0.85rem', fontWeight: selectedTable === table.table_name ? 600 : 400, color: c.text }}>
+                      {table.display_name || table.table_name}
+                    </span>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
           </div>
 
@@ -959,31 +991,17 @@ export default function DataExplorer() {
               </button>
             )}
           </div>
-          {(!relationships || relationships.length === 0) ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem', color: c.textMuted }}>
-              <Link2 size={48} style={{ color: c.skyBlue, marginBottom: '1rem' }} />
-              <p style={{ margin: '0 0 0.5rem', fontWeight: 500, color: c.text }}>No relationships detected yet</p>
-              <p style={{ fontSize: '0.85rem', margin: 0 }}>Upload related files to see FK/PK relationships.</p>
-            </div>
-          ) : (
-            <RelationshipEditor 
-              relationships={relationships}
-              tables={tables}
-              c={c}
-              onConfirm={confirmRelationship}
-              onDelete={deleteRelationship}
-              onUpdate={async (rel, updates) => {
-                try {
-                  await api.patch(`/data-model/relationships/${rel.id}`, updates);
-                  // Refresh relationships
-                  const resp = await api.get(`/data-model/relationships/${projectName}`);
-                  if (resp.data?.relationships) setRelationships(resp.data.relationships);
-                } catch (err) {
-                  console.error('Failed to update relationship:', err);
-                }
-              }}
-            />
-          )}
+          
+          <RelationshipEditor 
+            relationships={relationships}
+            tables={tables}
+            tableSchemas={tableSchemas}
+            c={c}
+            onConfirm={confirmRelationship}
+            onDelete={deleteRelationship}
+            onUpdate={updateRelationship}
+            onFetchColumns={fetchTableColumns}
+          />
         </div>
       )}
 
