@@ -22,7 +22,7 @@
  * FIXED: Comprehensive null safety for API responses
  */
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Component } from 'react'
 import { useProject } from '../context/ProjectContext'
 import api from '../services/api'
 import {
@@ -36,6 +36,51 @@ import {
   Calendar, FileText, MessageSquare, Sparkles, Send, Filter, Loader2,
   AlertCircle, RefreshCw
 } from 'lucide-react'
+
+// =============================================================================
+// ERROR BOUNDARY - Catches render crashes
+// =============================================================================
+
+class AnalyticsErrorBoundary extends Component {
+  constructor(props) {
+    super(props)
+    this.state = { hasError: false, error: null }
+  }
+
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error }
+  }
+
+  componentDidCatch(error, errorInfo) {
+    console.error('Analytics page error:', error, errorInfo)
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="h-full flex items-center justify-center bg-gray-50">
+          <div className="text-center p-8 max-w-md">
+            <AlertCircle size={48} className="mx-auto text-red-400 mb-4" />
+            <h2 className="text-xl font-semibold text-gray-700 mb-2">Something went wrong</h2>
+            <p className="text-gray-500 mb-4 text-sm">{this.state.error?.message || 'An unexpected error occurred'}</p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null })
+                window.location.reload()
+              }}
+              className="px-4 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#729c5e] transition-colors"
+            >
+              <RefreshCw size={14} className="inline mr-2" />
+              Reload Page
+            </button>
+          </div>
+        </div>
+      )
+    }
+
+    return this.props.children
+  }
+}
 
 // =============================================================================
 // CONSTANTS
@@ -88,7 +133,7 @@ const DOMAIN_CONFIG = {
 // MAIN COMPONENT
 // =============================================================================
 
-export default function AnalyticsPage() {
+function AnalyticsPageInner() {
   const { projectName } = useProject()
   
   // Catalog state
@@ -470,9 +515,15 @@ export default function AnalyticsPage() {
     
     setResultsLoading(true)
     setResultsError(null)
+    setResults(null)
     
     try {
       const sql = generateSQL()
+      if (!sql) {
+        setResultsError('Could not generate SQL query')
+        return
+      }
+      
       const response = await api.post('/bi/query', {
         project: projectName,
         sql: sql,
@@ -482,7 +533,8 @@ export default function AnalyticsPage() {
       // NULL SAFETY: Defensive access to response data
       const data = response?.data || {}
       const resultData = Array.isArray(data.data) ? data.data : []
-      const resultColumns = Array.isArray(data.columns) ? data.columns : []
+      const resultColumns = Array.isArray(data.columns) ? data.columns : 
+        (resultData.length > 0 ? Object.keys(resultData[0]) : [])
       
       setResults({
         data: resultData,
@@ -492,7 +544,12 @@ export default function AnalyticsPage() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(err?.response?.data?.detail || err?.message || 'Query failed')
+      const errorMsg = err?.response?.data?.detail || 
+                       err?.response?.data?.message ||
+                       err?.message || 
+                       'Query failed - check console for details'
+      setResultsError(errorMsg)
+      setResults(null)
     } finally {
       setResultsLoading(false)
     }
@@ -503,6 +560,7 @@ export default function AnalyticsPage() {
     
     setResultsLoading(true)
     setResultsError(null)
+    setResults(null)
     
     try {
       const response = await api.post('/bi/query', {
@@ -514,7 +572,8 @@ export default function AnalyticsPage() {
       // NULL SAFETY: Defensive access to response data
       const data = response?.data || {}
       const resultData = Array.isArray(data.data) ? data.data : []
-      const resultColumns = Array.isArray(data.columns) ? data.columns : []
+      const resultColumns = Array.isArray(data.columns) ? data.columns :
+        (resultData.length > 0 ? Object.keys(resultData[0]) : [])
       
       setResults({
         data: resultData,
@@ -524,7 +583,12 @@ export default function AnalyticsPage() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(err?.response?.data?.detail || err?.message || 'Query failed')
+      const errorMsg = err?.response?.data?.detail || 
+                       err?.response?.data?.message ||
+                       err?.message || 
+                       'Query failed - check console for details'
+      setResultsError(errorMsg)
+      setResults(null)
     } finally {
       setResultsLoading(false)
     }
@@ -1689,5 +1753,17 @@ function NLMessageBubble({ message }) {
         )}
       </div>
     </div>
+  )
+}
+
+// =============================================================================
+// WRAPPED EXPORT - With error boundary
+// =============================================================================
+
+export default function AnalyticsPage() {
+  return (
+    <AnalyticsErrorBoundary>
+      <AnalyticsPageInner />
+    </AnalyticsErrorBoundary>
   )
 }
