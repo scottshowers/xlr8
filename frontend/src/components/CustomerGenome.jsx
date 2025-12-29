@@ -226,35 +226,32 @@ export default function CustomerGenome({ isOpen, onClose }) {
   
   const [genomeData, setGenomeData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const projectId = activeProject?.id;
 
   useEffect(() => {
     if (isOpen) {
       loadGenomeData();
     }
-  }, [isOpen, activeProject]);
+  }, [isOpen, projectId]);  // Use primitive value, not object reference
 
   const loadGenomeData = async () => {
     setLoading(true);
     try {
-      // Try to load real data from API
+      // Load platform data (fast, ~1s)
       const projectParam = activeProject ? `&project=${encodeURIComponent(activeProject.name || activeProject.id)}` : '';
+      const structuredRes = await api.get(`/platform?include=files${projectParam}`).catch(() => ({ data: {} }));
       
-      const [structuredRes, statsRes] = await Promise.all([
-        api.get(`/platform?include=files${projectParam}`).catch(() => ({ data: {} })),
-        api.get('/chat/intelligent/learning/stats').catch(() => ({ data: {} })),
-      ]);
-
       const structured = structuredRes.data || {};
-      const learning = statsRes.data || {};
-      
       const files = structured.files || [];
       const totalDocs = structured.stats?.documents || 0;
       
       // Calculate traits from real data - show actual zeros when empty
       const totalFiles = files.length;
       const totalRows = files.reduce((sum, f) => sum + (f.rows || f.total_rows || 0), 0);
-      const patterns = learning.patterns_count || learning.cached_queries || 0;
-      const queries = learning.total_queries || 0;
+      
+      // Default learning stats - will update async if available
+      let patterns = 0;
+      let queries = 0;
       
       // Only show real metrics, not inflated random values
       const hasData = totalDocs > 0 || totalFiles > 0;
@@ -276,7 +273,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
       const dnaColors = [colors.primary, colors.dustyBlue, colors.taupe, colors.amber];
       
       setGenomeData({
-        name: activeProject?.name || 'Platform Overview',
+        name: activeProject?.customer || activeProject?.name || 'Platform Overview',
         id: activeProject?.id ? `GENOME-${activeProject.id.slice(0, 8).toUpperCase()}` : 'GENOME-PLATFORM',
         score: Math.round((dataComplexity + querySophistication + standardsCoverage + activityLevel) / 4),
         traits: {
