@@ -506,6 +506,18 @@ function AnalyticsPageInner() {
     return sql
   }
   
+  // Helper to extract error message from various API error formats
+  const extractErrorMessage = (err) => {
+    const detail = err?.response?.data?.detail
+    if (typeof detail === 'string') return detail
+    if (Array.isArray(detail) && detail.length > 0) {
+      return detail.map(d => d?.msg || JSON.stringify(d)).join('; ')
+    }
+    if (err?.response?.data?.message) return err.response.data.message
+    if (err?.message) return err.message
+    return 'Query failed - check console for details'
+  }
+  
   // ===========================================
   // QUERY EXECUTION
   // ===========================================
@@ -524,10 +536,10 @@ function AnalyticsPageInner() {
         return
       }
       
-      const response = await api.post('/bi/query', {
+      // Use /bi/execute for direct SQL execution
+      const response = await api.post('/bi/execute', {
         project: projectName,
-        sql: sql,
-        mode: 'sql'
+        sql: sql
       })
       
       // NULL SAFETY: Defensive access to response data
@@ -544,11 +556,7 @@ function AnalyticsPageInner() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      const errorMsg = err?.response?.data?.detail || 
-                       err?.response?.data?.message ||
-                       err?.message || 
-                       'Query failed - check console for details'
-      setResultsError(errorMsg)
+      setResultsError(extractErrorMessage(err))
       setResults(null)
     } finally {
       setResultsLoading(false)
@@ -563,10 +571,10 @@ function AnalyticsPageInner() {
     setResults(null)
     
     try {
-      const response = await api.post('/bi/query', {
+      // Use /bi/execute for direct SQL execution
+      const response = await api.post('/bi/execute', {
         project: projectName,
-        sql: sqlText.trim(),
-        mode: 'sql'
+        sql: sqlText.trim()
       })
       
       // NULL SAFETY: Defensive access to response data
@@ -583,11 +591,7 @@ function AnalyticsPageInner() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      const errorMsg = err?.response?.data?.detail || 
-                       err?.response?.data?.message ||
-                       err?.message || 
-                       'Query failed - check console for details'
-      setResultsError(errorMsg)
+      setResultsError(extractErrorMessage(err))
       setResults(null)
     } finally {
       setResultsLoading(false)
@@ -603,11 +607,10 @@ function AnalyticsPageInner() {
     setIsAnalyzing(true)
     
     try {
+      // Use /bi/query for natural language processing
       const response = await api.post('/bi/query', {
         project: projectName,
-        query: query,
-        mode: 'natural',
-        context: selectedTable?.name
+        query: query
       })
       
       // NULL SAFETY: Defensive access to response data
@@ -627,7 +630,7 @@ function AnalyticsPageInner() {
       console.error('NL Query error:', err)
       setNlMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Sorry, I couldn't process that query: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
+        content: `Sorry, I couldn't process that query: ${extractErrorMessage(err)}`,
         isError: true
       }])
     } finally {
