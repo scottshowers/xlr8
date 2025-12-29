@@ -1051,21 +1051,33 @@ class ProjectIntelligenceService:
             for col, tbls in list(multi_table_cols.items())[:5]:  # Show first 5
                 logger.warning(f"[INTELLIGENCE]   - '{col}' in: {tbls}")
         
+        # Skip generic columns that aren't meaningful relationships
+        skip_cols = {'id', 'name', 'description', 'date', 'created', 'updated', 'modified', 
+                     'status', 'notes', 'comments', 'type', 'value', 'amount', 'text'}
+        
+        # Columns that are likely keys (higher confidence)
+        key_patterns = ['_id', '_code', '_num', '_key', 'employee', 'company', 'dept', 
+                        'job', 'location', 'earn', 'deduct', 'tax', 'pay_group']
+        
         # Find columns that appear in multiple tables (potential FK)
         for col_name, table_list in column_map.items():
             if len(table_list) < 2:
                 continue
             
             # Skip generic columns
-            skip_cols = ['id', 'name', 'date', 'created', 'updated', 'modified', 'status']
             if col_name in skip_cols:
                 continue
             
-            # Find the master (one) side - typically the one with unique values
+            # Calculate base confidence based on column name patterns
+            base_confidence = 0.5
+            if any(pattern in col_name for pattern in key_patterns):
+                base_confidence = 0.7
+            
+            # Check each pair of tables
             for i, table1 in enumerate(table_list):
                 for table2 in table_list[i+1:]:
                     try:
-                        # Get distinct counts
+                        # Get distinct counts and totals
                         result1 = self.handler.conn.execute(f'''
                             SELECT COUNT(DISTINCT "{col_name}") as dist, COUNT(*) as total
                             FROM "{table1}"
@@ -1076,34 +1088,70 @@ class ProjectIntelligenceService:
                             FROM "{table2}"
                         ''').fetchone()
                         
-                        if result1 and result2:
-                            dist1, total1 = result1
-                            dist2, total2 = result2
+                        if not result1 or not result2:
+                            continue
                             
-                            # If one has unique values and other has repeats, it's a relationship
-                            if dist1 == total1 and dist2 < total2:
-                                # table1 is master, table2 is transaction
-                                self.relationships.append(Relationship(
-                                    from_table=table2,
-                                    from_column=col_name,
-                                    to_table=table1,
-                                    to_column=col_name,
-                                    relationship_type="many-to-one",
-                                    confidence=0.7
-                                ))
-                            elif dist2 == total2 and dist1 < total1:
-                                # table2 is master, table1 is transaction
-                                self.relationships.append(Relationship(
-                                    from_table=table1,
-                                    from_column=col_name,
-                                    to_table=table2,
-                                    to_column=col_name,
-                                    relationship_type="many-to-one",
-                                    confidence=0.7
-                                ))
+                        dist1, total1 = result1
+                        dist2, total2 = result2
+                        
+                        # Skip if either table has no data
+                        if total1 == 0 or total2 == 0:
+                            continue
+                        
+                        # Calculate uniqueness ratios
+                        ratio1 = dist1 / total1 if total1 > 0 else 0
+                        ratio2 = dist2 / total2 if total2 > 0 else 0
+                        
+                        # Determine relationship type and direction
+                        confidence = base_confidence
+                        
+                        # Case 1: Clear master-detail (one side all unique)
+                        if dist1 == total1 and dist2 < total2:
+                            # table1 is master (lookup), table2 references it
+                            confidence = 0.9
+                            self.relationships.append(Relationship(
+                                from_table=table2,
+                                from_column=col_name,
+                                to_table=table1,
+                                to_column=col_name,
+                                relationship_type="many-to-one",
+                                confidence=confidence
+                            ))
+                        elif dist2 == total2 and dist1 < total1:
+                            # table2 is master (lookup), table1 references it
+                            confidence = 0.9
+                            self.relationships.append(Relationship(
+                                from_table=table1,
+                                from_column=col_name,
+                                to_table=table2,
+                                to_column=col_name,
+                                relationship_type="many-to-one",
+                                confidence=confidence
+                            ))
+                        # Case 2: Both have high uniqueness (possible many-to-many or shared reference)
+                        elif ratio1 > 0.8 and ratio2 > 0.8:
+                            confidence = base_confidence + 0.1
+                            self.relationships.append(Relationship(
+                                from_table=table1,
+                                from_column=col_name,
+                                to_table=table2,
+                                to_column=col_name,
+                                relationship_type="shared-key",
+                                confidence=confidence
+                            ))
+                        # Case 3: Shared column with moderate uniqueness - still worth tracking
+                        elif ratio1 > 0.3 or ratio2 > 0.3:
+                            self.relationships.append(Relationship(
+                                from_table=table1,
+                                from_column=col_name,
+                                to_table=table2,
+                                to_column=col_name,
+                                relationship_type="potential",
+                                confidence=base_confidence
+                            ))
                                 
                     except Exception as e:
-                        logger.debug(f"[INTELLIGENCE] Relationship detection failed: {e}")
+                        logger.debug(f"[INTELLIGENCE] Relationship detection failed for {col_name}: {e}")
     
     def _persist_relationships(self) -> None:
         """Persist detected relationships to Supabase project_relationships table."""
