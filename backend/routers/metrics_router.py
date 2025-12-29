@@ -390,6 +390,65 @@ async def get_throughput(hours: int = Query(default=24, ge=1, le=168)):
         return {"error": str(e), "data": []}
 
 
+@router.get("/upload-history")
+async def get_upload_history(days: int = Query(default=90, ge=1, le=365)):
+    """
+    Get daily upload counts for sparkline chart.
+    
+    Returns daily upload counts for the last N days.
+    Used by Dashboard upload sparkline.
+    
+    Args:
+        days: Number of days to look back (1-365, default 90)
+    """
+    try:
+        from utils.database.supabase_client import get_supabase
+        from datetime import datetime, timedelta
+        
+        supabase = get_supabase()
+        if not supabase:
+            return {"error": "Supabase not available", "data": []}
+        
+        cutoff = (datetime.utcnow() - timedelta(days=days)).isoformat()
+        
+        result = supabase.table("platform_metrics").select(
+            "created_at"
+        ).eq("metric_type", "upload").gte("created_at", cutoff).order("created_at").execute()
+        
+        records = result.data or []
+        
+        # Bucket by day
+        daily = {}
+        for r in records:
+            ts = r.get("created_at", "")[:10]  # "2025-12-28"
+            if not ts:
+                continue
+            if ts not in daily:
+                daily[ts] = {"date": ts, "uploads": 0}
+            daily[ts]["uploads"] += 1
+        
+        # Fill in missing days with zero uploads
+        today = datetime.utcnow().date()
+        all_days = []
+        for i in range(days):
+            day = today - timedelta(days=days - 1 - i)
+            day_str = day.isoformat()
+            if day_str in daily:
+                all_days.append(daily[day_str])
+            else:
+                all_days.append({"date": day_str, "uploads": 0})
+        
+        return {
+            "period_days": days,
+            "data": all_days,
+            "total_uploads": sum(d["uploads"] for d in all_days)
+        }
+        
+    except Exception as e:
+        logger.error(f"Upload history query failed: {e}")
+        return {"error": str(e), "data": []}
+
+
 @router.get("/activity")
 async def get_activity(limit: int = Query(default=50, ge=1, le=200)):
     """
