@@ -24,6 +24,7 @@ import SystemMonitor from '../components/SystemMonitor';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
 import { PageHeader, EmptyState } from '../components/ui';
+import { SimpleTooltip } from '../components/ui/Tooltip';
 
 const COLORS = {
   primary: '#83b16d',
@@ -247,14 +248,14 @@ export default function AdminPage() {
   const { hasPermission, isAdmin } = useAuth();
 
   const ALL_TABS = [
-    { id: 'system', label: 'System', icon: '📊', permission: Permissions.OPS_CENTER },
-    { id: 'personas', label: 'Personas', icon: '🎭', permission: null },
-    { id: 'security', label: 'Security', icon: '🔒', permission: Permissions.SECURITY_SETTINGS },
-    { id: 'users', label: 'Users', icon: '👥', permission: Permissions.USER_MANAGEMENT },
-    { id: 'permissions', label: 'Permissions', icon: '🛡️', permission: Permissions.ROLE_PERMISSIONS },
-    { id: 'integrations', label: 'Integrations', icon: '🔌', permission: Permissions.OPS_CENTER },
-    { id: 'cleanup', label: 'Data Cleanup', icon: '🗑️', permission: Permissions.OPS_CENTER },
-    { id: 'endpoints', label: 'Endpoints', icon: '🔧', permission: Permissions.OPS_CENTER },
+    { id: 'system', label: 'System', icon: '📊', permission: Permissions.OPS_CENTER, tooltip: 'Platform health, database status, and system monitoring' },
+    { id: 'personas', label: 'Personas', icon: '🎭', permission: null, tooltip: 'Create and manage AI personas for different consulting contexts' },
+    { id: 'security', label: 'Security', icon: '🔒', permission: Permissions.SECURITY_SETTINGS, tooltip: 'Security settings, MFA, and access controls' },
+    { id: 'users', label: 'Users', icon: '👥', permission: Permissions.USER_MANAGEMENT, tooltip: 'Manage user accounts, roles, and project assignments' },
+    { id: 'permissions', label: 'Permissions', icon: '🛡️', permission: Permissions.ROLE_PERMISSIONS, tooltip: 'Configure role-based permissions and access levels' },
+    { id: 'integrations', label: 'Integrations', icon: '🔌', permission: Permissions.OPS_CENTER, tooltip: 'Connect to external systems like UKG APIs' },
+    { id: 'cleanup', label: 'Data Cleanup', icon: '🗑️', permission: Permissions.OPS_CENTER, tooltip: 'Mass delete files and cleanup orphaned data' },
+    { id: 'endpoints', label: 'Endpoints', icon: '🔧', permission: Permissions.OPS_CENTER, tooltip: 'Test and debug API endpoints directly' },
   ];
 
   const visibleTabs = ALL_TABS.filter(tab => {
@@ -306,15 +307,16 @@ export default function AdminPage() {
       <div style={styles.card}>
         <div style={styles.tabs}>
           {visibleTabs.map(tab => (
-            <button
-              key={tab.id}
-              data-tour={`admin-tab-${tab.id}`}
-              style={styles.tab(activeTab === tab.id)}
-              onClick={() => setActiveTab(tab.id)}
-            >
-              <span>{tab.icon}</span>
-              {tab.label}
-            </button>
+            <SimpleTooltip key={tab.id} text={tab.tooltip}>
+              <button
+                data-tour={`admin-tab-${tab.id}`}
+                style={styles.tab(activeTab === tab.id)}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                <span>{tab.icon}</span>
+                {tab.label}
+              </button>
+            </SimpleTooltip>
           ))}
         </div>
 
