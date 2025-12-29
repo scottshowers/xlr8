@@ -201,30 +201,34 @@ export default function DataPage() {
         </div>
         
         <div style={{ display: 'flex', gap: '0.75rem' }}>
-          <Link 
-            to="/data/explorer" 
-            style={{ 
-              display: 'flex', alignItems: 'center', gap: '0.5rem',
-              padding: '0.5rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`,
-              borderRadius: 8, color: c.text, fontSize: '0.85rem', textDecoration: 'none',
-              transition: 'all 0.2s'
-            }}
-          >
-            <Search size={16} style={{ color: c.accent }} />
-            Data Explorer
-          </Link>
-          <Link 
-            to="/vacuum" 
-            style={{ 
-              display: 'flex', alignItems: 'center', gap: '0.5rem',
-              padding: '0.5rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`,
-              borderRadius: 8, color: c.text, fontSize: '0.85rem', textDecoration: 'none',
-              transition: 'all 0.2s'
-            }}
-          >
-            <Sparkles size={16} style={{ color: c.primary }} />
-            Register Extractor
-          </Link>
+          <Tooltip title="Data Explorer" detail="Explore tables, columns, relationships, and data health across your project." action="View classifications and run compliance checks">
+            <Link 
+              to="/data/explorer" 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.5rem 1rem', background: `${c.accent}15`, border: `1px solid ${c.accent}40`,
+                borderRadius: 8, color: c.accent, fontSize: '0.85rem', textDecoration: 'none',
+                transition: 'all 0.2s', fontWeight: 500
+              }}
+            >
+              <Search size={16} />
+              Data Explorer
+            </Link>
+          </Tooltip>
+          <Tooltip title="Register Extractor" detail="Extract structured data from PDF registers like payroll reports and tax documents." action="Upload PDFs to create queryable tables">
+            <Link 
+              to="/vacuum" 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.5rem 1rem', background: `${c.primary}15`, border: `1px solid ${c.primary}40`,
+                borderRadius: 8, color: c.primary, fontSize: '0.85rem', textDecoration: 'none',
+                transition: 'all 0.2s', fontWeight: 500
+              }}
+            >
+              <Sparkles size={16} />
+              Register Extractor
+            </Link>
+          </Tooltip>
         </div>
       </div>
 
@@ -507,12 +511,13 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
                 width: '100%',
                 padding: '0.6rem 0.75rem',
                 borderRadius: 8,
-                border: `1px solid ${c.border}`,
-                background: c.background,
+                border: `2px solid ${selectedDomain === 'auto' ? c.primary : c.border}`,
+                background: selectedDomain === 'auto' ? `${c.primary}20` : c.background,
                 color: c.text,
                 fontSize: '0.85rem',
                 cursor: 'pointer',
-                marginBottom: '0.5rem'
+                marginBottom: '0.5rem',
+                fontWeight: 600
               }}
             >
               {builtInDomains.map(d => (
@@ -530,17 +535,19 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
               onClick={() => setShowDomainModal(true)}
               style={{
                 width: '100%',
-                padding: '0.5rem',
-                borderRadius: 6,
-                border: `1px dashed ${c.border}`,
-                background: 'transparent',
-                color: c.textMuted,
-                fontSize: '0.8rem',
+                padding: '0.6rem',
+                borderRadius: 8,
+                border: `2px solid ${c.accent}`,
+                background: `${c.accent}`,
+                color: c.white,
+                fontSize: '0.85rem',
+                fontWeight: 600,
                 cursor: 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                gap: '0.35rem'
+                gap: '0.35rem',
+                transition: 'all 0.2s'
               }}
             >
               <Sparkles size={14} /> Create Custom Domain
