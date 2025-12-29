@@ -31,27 +31,36 @@ YEAR_END_CONSULTATIVE_PROMPTS: Dict[str, str] = {
     "2A": """
 CONSULTANT ANALYSIS - Apply your UKG/Payroll expertise:
 
+DATA STRUCTURE GUIDE:
+- Tax rates are in the 'contribution_rate_percent' column
+- Tax types (SUI, FUTA, FIT, SIT, etc.) are in the 'type_of_tax' column
+- Jurisdictions are in 'tax_jurisdiction' column
+- Tax IDs are in 'id_number' column
+- Look for rows where type_of_tax contains 'SUI', 'SUTA', 'FUTA', 'FIT', etc.
+
 1. FEIN VALIDATION:
    - Valid format: XX-XXXXXXX (9 digits with hyphen after 2)
+   - Check id_number column for federal tax entries
    - Flag if missing or malformed
-   - Cross-reference against IRS database format
 
 2. SUI/SUTA RATES:
+   - Filter rows where type_of_tax contains 'SUI' or 'SUTA'
+   - Check contribution_rate_percent for each state in tax_jurisdiction
    - Typical range: 0.1% to 12% depending on state
-   - Flag if outside normal range
-   - Note: New employers often start at higher rates
+   - Flag if outside normal range or missing
 
 3. FUTA RATE:
+   - Filter rows where type_of_tax = 'FUTA'
    - Standard rate: 6.0% (0.6% after credit)
    - Credit reduction states have higher effective rates
-   - Flag if not 6.0% or doesn't match credit reduction list
 
 4. COMPANY PROFILE:
    - Verify legal name matches exactly (case, punctuation)
    - Address should be complete with ZIP+4 if available
    - Note any multiple locations or DBAs
 
-Return specific findings with values from the documents.
+Return specific findings with ACTUAL VALUES from the documents.
+Include the specific rates you find (e.g., "Texas SUI rate: 2.7%").
 """,
 
     "2C": """
