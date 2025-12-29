@@ -457,56 +457,115 @@ async def get_platform_status(
         logger.warning(f"Parallel Supabase queries failed: {e}")
     
     # =========================================================================
-    # FILES: Get file list for Data page
-    # ONLY fetched when ?include=files is specified (heavy operation)
-    # Pull metadata from document_registry (source of truth), table info from DuckDB
+    # FILES + RELATIONSHIPS: Parallelized heavy data fetching
+    # ONLY fetched when ?include=files or ?include=relationships is specified
     # =========================================================================
-    if include_files:
+    if include_files or include_relationships:
         try:
             handler = get_structured_handler()
-            files_dict = {}  # Dedupe by filename
             
-            # STEP 1: Build registry lookup from document_registry (source of truth for provenance)
-            registry_lookup = {}  # filename -> {uploaded_by, uploaded_at, truth_type}
-            try:
-                from utils.database.models import DocumentRegistryModel
-                
+            # Define queries as functions for parallel execution
+            def get_document_registry():
+                """Single query for both provenance AND chunk info"""
+                supabase = get_supabase()
+                if not supabase:
+                    return []
                 if project_filter:
                     from utils.database.models import ProjectModel
                     proj_record = ProjectModel.get_by_name(project_filter)
                     project_id = proj_record.get('id') if proj_record else None
-                    registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+                    if project_id:
+                        result = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
+                    else:
+                        result = supabase.table("document_registry").select("*").execute()
                 else:
-                    registry_entries = DocumentRegistryModel.get_all()
-                
-                for entry in registry_entries:
-                    filename = entry.get('filename', '')
-                    if filename:
-                        registry_lookup[filename.lower()] = {
-                            'uploaded_by': entry.get('uploaded_by_email', ''),
-                            'uploaded_at': entry.get('created_at', ''),
-                            'truth_type': entry.get('truth_type', 'reality'),
-                            'domain': entry.get('content_domain', '')
-                        }
-            except Exception as reg_e:
-                logger.debug(f"[PLATFORM] Registry lookup: {reg_e}")
+                    result = supabase.table("document_registry").select("*").execute()
+                return result.data or []
             
-            # STEP 2: Query _schema_metadata for table structure only
-            try:
-                schema_files = handler.conn.execute("""
-                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE
-                    ORDER BY file_name, table_name
-                """).fetchall()
-                
-                for row in schema_files:
+            def get_schema_metadata():
+                """DuckDB structured files"""
+                try:
+                    return handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE
+                        ORDER BY file_name, table_name
+                    """).fetchall()
+                except:
+                    return []
+            
+            def get_pdf_tables():
+                """DuckDB PDF tables"""
+                try:
+                    return handler.conn.execute("""
+                        SELECT source_file, project, table_name, row_count, created_at
+                        FROM _pdf_tables
+                        ORDER BY source_file, table_name
+                    """).fetchall()
+                except:
+                    return []
+            
+            def get_relationships_data():
+                """Supabase relationships"""
+                if not include_relationships:
+                    return []
+                supabase = get_supabase()
+                if not supabase:
+                    return []
+                if project_filter:
+                    result = supabase.table("project_relationships").select("*").eq("project_name", project_filter).limit(100).execute()
+                else:
+                    result = supabase.table("project_relationships").select("*").limit(100).execute()
+                return result.data or []
+            
+            # Run all queries in parallel
+            results = {}
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(get_document_registry): 'registry',
+                    executor.submit(get_schema_metadata): 'schema',
+                    executor.submit(get_pdf_tables): 'pdf',
+                    executor.submit(get_relationships_data): 'rels',
+                }
+                for future in as_completed(futures):
+                    key = futures[future]
+                    try:
+                        results[key] = future.result()
+                    except Exception as e:
+                        logger.debug(f"[PLATFORM] Query {key} failed: {e}")
+                        results[key] = []
+            
+            # Build registry lookup from results
+            registry_data = results.get('registry', [])
+            registry_lookup = {}
+            registry_chunks = {}  # filename -> chunk info
+            for entry in registry_data:
+                filename = entry.get('filename', '')
+                if filename:
+                    fn_lower = filename.lower()
+                    registry_lookup[fn_lower] = {
+                        'uploaded_by': entry.get('uploaded_by_email', ''),
+                        'uploaded_at': entry.get('created_at', ''),
+                        'truth_type': entry.get('truth_type', 'reality'),
+                        'domain': entry.get('content_domain', '')
+                    }
+                    registry_chunks[fn_lower] = {
+                        'chunk_count': entry.get('chunk_count', 0),
+                        'storage_type': entry.get('storage_type', 'chromadb'),
+                        'project_name': entry.get('project_name', '')
+                    }
+            
+            # Build files dict from schema metadata
+            files_dict = {}
+            if include_files:
+                for row in results.get('schema', []):
                     fname = row[0]
                     if not fname:
                         continue
                     
                     provenance = registry_lookup.get(fname.lower(), {})
-                        
+                    chunks_info = registry_chunks.get(fname.lower(), {})
+                    
                     if fname not in files_dict:
                         files_dict[fname] = {
                             "filename": fname,
@@ -514,12 +573,13 @@ async def get_platform_status(
                             "tables": 0,
                             "rows": 0,
                             "row_count": 0,
+                            "chunks": chunks_info.get('chunk_count', 0),
                             "loaded_at": str(row[6]) if row[6] else None,
                             "uploaded_by": provenance.get('uploaded_by', ''),
                             "uploaded_at": provenance.get('uploaded_at', ''),
                             "truth_type": provenance.get('truth_type', ''),
                             "domain": provenance.get('domain', ''),
-                            "type": "structured",
+                            "type": "hybrid" if chunks_info.get('chunk_count', 0) > 0 else "structured",
                             "sheets": []
                         }
                     
@@ -532,23 +592,15 @@ async def get_platform_status(
                     files_dict[fname]["tables"] += 1
                     files_dict[fname]["rows"] += int(row[4] or 0)
                     files_dict[fname]["row_count"] += int(row[4] or 0)
-            except Exception as e:
-                logger.debug(f"[PLATFORM] Schema metadata query: {e}")
-            
-            # STEP 3: From _pdf_tables
-            try:
-                pdf_files = handler.conn.execute("""
-                    SELECT source_file, project, table_name, row_count, created_at
-                    FROM _pdf_tables
-                    ORDER BY source_file, table_name
-                """).fetchall()
                 
-                for row in pdf_files:
+                # Add PDF tables
+                for row in results.get('pdf', []):
                     fname = row[0]
                     if not fname:
                         continue
                     
                     provenance = registry_lookup.get(fname.lower(), {})
+                    chunks_info = registry_chunks.get(fname.lower(), {})
                     
                     if fname not in files_dict:
                         files_dict[fname] = {
@@ -557,11 +609,11 @@ async def get_platform_status(
                             "tables": 0,
                             "rows": 0,
                             "row_count": 0,
-                            "chunks": 0,
+                            "chunks": chunks_info.get('chunk_count', 0),
                             "loaded_at": str(row[4]) if row[4] else None,
                             "uploaded_by": provenance.get('uploaded_by', ''),
                             "uploaded_at": provenance.get('uploaded_at', ''),
-                            "type": "structured",
+                            "type": "hybrid" if chunks_info.get('chunk_count', 0) > 0 else "structured",
                             "sheets": [],
                             "truth_type": provenance.get('truth_type', '')
                         }
@@ -575,77 +627,33 @@ async def get_platform_status(
                     files_dict[fname]["tables"] += 1
                     files_dict[fname]["rows"] += int(row[3] or 0)
                     files_dict[fname]["row_count"] += int(row[3] or 0)
-            except Exception as e:
-                logger.debug(f"[PLATFORM] PDF tables query: {e}")
-            
-            # STEP 4: From Supabase registry (for unstructured docs AND to add chunk info)
-            try:
-                supabase = get_supabase()
-                if supabase:
-                    if project:
-                        from utils.database.models import ProjectModel
-                        proj_record = ProjectModel.get_by_name(project)
-                        project_id = proj_record.get('id') if proj_record else None
-                        registry = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
-                    else:
-                        registry = supabase.table("document_registry").select("*").execute()
+                
+                # Add unstructured-only docs from registry
+                for entry in registry_data:
+                    fname = entry.get('filename', '')
+                    if not fname or fname in files_dict:
+                        continue
                     
-                    for doc in (registry.data or []):
-                        fname = doc.get("filename", "")
-                        if not fname:
-                            continue
-                        
-                        chunk_count = doc.get("chunk_count", 0)
-                        storage_type = doc.get("storage_type", "chromadb")
-                        
-                        if fname in files_dict:
-                            files_dict[fname]["chunks"] = chunk_count
-                            if chunk_count > 0:
-                                files_dict[fname]["type"] = "hybrid"
-                            if not files_dict[fname].get("truth_type"):
-                                files_dict[fname]["truth_type"] = doc.get("truth_type", "")
-                            if not files_dict[fname].get("uploaded_by"):
-                                files_dict[fname]["uploaded_by"] = doc.get("uploaded_by_email", "")
-                                files_dict[fname]["uploaded_at"] = doc.get("created_at", "")
-                        else:
-                            files_dict[fname] = {
-                                "filename": fname,
-                                "project": doc.get("project_name", ""),
-                                "tables": 0,
-                                "rows": 0,
-                                "chunks": chunk_count,
-                                "loaded_at": doc.get("created_at"),
-                                "uploaded_by": doc.get("uploaded_by_email", ""),
-                                "uploaded_at": doc.get("created_at", ""),
-                                "type": storage_type if chunk_count > 0 else "unknown",
-                                "truth_type": doc.get("truth_type", ""),
-                            }
-            except:
-                pass
-            
-            response["files"] = list(files_dict.values())
-            
-            if len(response["files"]) > response["stats"]["files"]:
-                response["stats"]["files"] = len(response["files"])
+                    chunk_count = entry.get('chunk_count', 0)
+                    files_dict[fname] = {
+                        "filename": fname,
+                        "project": entry.get('project_name', ''),
+                        "tables": 0,
+                        "rows": 0,
+                        "chunks": chunk_count,
+                        "loaded_at": entry.get('created_at'),
+                        "uploaded_by": entry.get('uploaded_by_email', ''),
+                        "uploaded_at": entry.get('created_at', ''),
+                        "type": entry.get('storage_type', 'chromadb') if chunk_count > 0 else "unknown",
+                        "truth_type": entry.get('truth_type', ''),
+                    }
                 
-        except Exception as e:
-            logger.warning(f"Files list failed: {e}")
-    else:
-        logger.debug("[PLATFORM] Skipping files list (not requested)")
-    
-    # =========================================================================
-    # RELATIONSHIPS: Get for Data Explorer
-    # ONLY fetched when ?include=relationships is specified (heavy operation)
-    # =========================================================================
-    if include_relationships:
-        try:
-            supabase = get_supabase()
-            if supabase:
-                if project:
-                    rels = supabase.table("project_relationships").select("*").eq("project_name", project).limit(100).execute()
-                else:
-                    rels = supabase.table("project_relationships").select("*").limit(100).execute()
-                
+                response["files"] = list(files_dict.values())
+                if len(response["files"]) > response["stats"]["files"]:
+                    response["stats"]["files"] = len(response["files"])
+            
+            # Set relationships from parallel results
+            if include_relationships:
                 response["relationships"] = [
                     {
                         "id": r.get("id"),
@@ -657,12 +665,13 @@ async def get_platform_status(
                         "confirmed": r.get("status") == "confirmed",
                         "method": r.get("method", "auto")
                     }
-                    for r in (rels.data or [])
+                    for r in results.get('rels', [])
                 ]
+                
         except Exception as e:
-            logger.warning(f"Relationships failed: {e}")
+            logger.warning(f"Files/relationships fetch failed: {e}")
     else:
-        logger.debug("[PLATFORM] Skipping relationships (not requested)")
+        logger.debug("[PLATFORM] Skipping files and relationships (not requested)")
     
     # =========================================================================
     # CLASSIFICATION: Summary stats
