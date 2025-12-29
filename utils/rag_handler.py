@@ -819,6 +819,61 @@ class RAGHandler:
             logger.error(f"Error getting collection count: {str(e)}")
             return 0
 
+    def delete_document(self, filename: str, project_id: str = None) -> int:
+        """
+        Delete all chunks for a document from ChromaDB.
+        
+        Args:
+            filename: The filename to delete
+            project_id: Optional project ID filter
+            
+        Returns:
+            Number of chunks deleted
+        """
+        try:
+            collection = self.get_collection()
+            if not collection:
+                return 0
+            
+            deleted = 0
+            
+            # Build search filters
+            search_attempts = [
+                {"source": filename},
+                {"filename": filename},
+            ]
+            
+            if project_id:
+                search_attempts.extend([
+                    {"$and": [{"source": filename}, {"project_id": project_id}]},
+                    {"$and": [{"source": filename}, {"project_id": project_id[:8]}]},
+                    {"$and": [{"filename": filename}, {"project_id": project_id}]},
+                ])
+            
+            seen_ids = set()
+            
+            for where_filter in search_attempts:
+                try:
+                    results = collection.get(where=where_filter)
+                    if results and results['ids']:
+                        new_ids = [id for id in results['ids'] if id not in seen_ids]
+                        if new_ids:
+                            collection.delete(ids=new_ids)
+                            seen_ids.update(new_ids)
+                            deleted += len(new_ids)
+                except Exception as e:
+                    logger.debug(f"[RAG] Delete attempt with {where_filter} failed: {e}")
+                    continue
+            
+            if deleted > 0:
+                logger.info(f"[RAG] Deleted {deleted} chunks for document: {filename}")
+            
+            return deleted
+            
+        except Exception as e:
+            logger.error(f"[RAG] Error deleting document {filename}: {e}")
+            return 0
+
     def delete_collection(self, collection_name: str) -> bool:
         """Delete a collection."""
         try:
