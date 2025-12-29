@@ -40,11 +40,14 @@ _platform_cache = {
     'project': None,
     'lock': threading.Lock()
 }
-_CACHE_TTL_SECONDS = 5  # Cache for 5 seconds
+_CACHE_TTL_SECONDS = 30  # Cache for 30 seconds - most data doesn't change that fast
 
 
 @router.get("/platform")
-async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
+async def get_platform_status(
+    project: Optional[str] = None,
+    force: bool = Query(False, description="Force cache refresh")
+) -> Dict[str, Any]:
     """
     COMPREHENSIVE PLATFORM STATUS - ONE ENDPOINT FOR EVERYTHING.
     
@@ -53,21 +56,25 @@ async def get_platform_status(project: Optional[str] = None) -> Dict[str, Any]:
     
     Args:
         project: Optional project filter
+        force: Force cache refresh (ignore cached data)
         
     Returns:
         Complete platform state including health, stats, jobs, metrics
     """
     # Check cache first - return cached data if fresh enough
     now = time.time()
-    with _platform_cache['lock']:
-        if (_platform_cache['data'] is not None 
-            and _platform_cache['project'] == project
-            and (now - _platform_cache['timestamp']) < _CACHE_TTL_SECONDS):
-            # Return cached data with updated timestamp
-            cached = _platform_cache['data'].copy()
-            cached['_cached'] = True
-            cached['_cache_age_ms'] = int((now - _platform_cache['timestamp']) * 1000)
-            return cached
+    if not force:
+        with _platform_cache['lock']:
+            if (_platform_cache['data'] is not None 
+                and _platform_cache['project'] == project
+                and (now - _platform_cache['timestamp']) < _CACHE_TTL_SECONDS):
+                # Return cached data with updated timestamp
+                cached = _platform_cache['data'].copy()
+                cached['_cached'] = True
+                cached['_cache_age_ms'] = int((now - _platform_cache['timestamp']) * 1000)
+                return cached
+    
+    project_filter = project  # Rename for clarity in code below
     
     start_time = time.time()
     
