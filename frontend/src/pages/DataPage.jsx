@@ -742,7 +742,7 @@ function FilesPanel({ c, project, targetScope }) {
       // Use /api/platform for structured data and stats, keep references separate (not in platform yet)
       const projectName = project?.name || project?.id || '';
       const [platformRes, refRes] = await Promise.all([
-        api.get(`/platform${projectName ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
+        api.get(`/platform?include=files${projectName ? `&project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
