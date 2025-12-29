@@ -306,48 +306,27 @@ async def delete_structured_file(project_id: str, filename: str):
         except Exception as e:
             logger.warning(f"[CLEANUP] DuckDB cleanup error: {e}")
     
-    # 2. CHROMADB - Delete any chunks for this file (cascade)
+    # 2. CHROMADB - Delete any chunks for this file (cascade, case-insensitive)
     collection = _get_chromadb()
     if collection:
         try:
-            chunks_deleted = 0
-            seen_ids = set()
+            filename_lower = filename.lower()
             
-            # Try multiple metadata field patterns
-            for where_filter in [
-                {"source": filename},
-                {"filename": filename},
-            ]:
-                try:
-                    results = collection.get(where=where_filter)
-                    if results and results['ids']:
-                        new_ids = [id for id in results['ids'] if id not in seen_ids]
-                        if new_ids:
-                            collection.delete(ids=new_ids)
-                            seen_ids.update(new_ids)
-                            chunks_deleted += len(new_ids)
-                except:
+            # Fetch all and do case-insensitive match
+            all_docs = collection.get(include=["metadatas"])
+            ids_to_delete = []
+            
+            for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                if not metadata:
                     continue
+                doc_name = metadata.get("source") or metadata.get("filename") or ""
+                if doc_name.lower() == filename_lower:
+                    ids_to_delete.append(all_docs["ids"][i])
             
-            # Try with project filter
-            for where_filter in [
-                {"$and": [{"source": filename}, {"project_id": project_id}]},
-                {"$and": [{"source": filename}, {"project_id": project_id[:8]}]},
-            ]:
-                try:
-                    results = collection.get(where=where_filter)
-                    if results and results['ids']:
-                        new_ids = [id for id in results['ids'] if id not in seen_ids]
-                        if new_ids:
-                            collection.delete(ids=new_ids)
-                            seen_ids.update(new_ids)
-                            chunks_deleted += len(new_ids)
-                except:
-                    continue
-            
-            if chunks_deleted > 0:
-                result['chunks_removed'] = chunks_deleted
-                logger.info(f"[CLEANUP] Deleted {chunks_deleted} ChromaDB chunks for {filename}")
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                result['chunks_removed'] = len(ids_to_delete)
+                logger.info(f"[CLEANUP] Deleted {len(ids_to_delete)} ChromaDB chunks for {filename}")
                 
         except Exception as e:
             logger.warning(f"[CLEANUP] ChromaDB cleanup error: {e}")
@@ -423,6 +402,7 @@ async def delete_document(filename: str, project_id: str = Query(None)):
     Delete a document's chunks from ChromaDB - CASCADE to registry.
     
     Per ARCHITECTURE.md: All deletes must cascade to all storage systems.
+    Uses case-insensitive matching.
     """
     logger.info(f"[CLEANUP] Deleting document (cascade): {filename}")
     
@@ -433,42 +413,37 @@ async def delete_document(filename: str, project_id: str = Query(None)):
         "registry_removed": False
     }
     
-    # 1. CHROMADB - Delete chunks
+    filename_lower = filename.lower()
+    
+    # 1. CHROMADB - Delete chunks (case-insensitive)
     collection = _get_chromadb()
     if collection:
         try:
-            # Try different metadata field names
-            for field in ['filename', 'source', 'file']:
-                try:
-                    results = collection.get(where={field: filename})
-                    if results and results['ids']:
-                        collection.delete(ids=results['ids'])
-                        result['deleted_chunks'] += len(results['ids'])
-                        logger.info(f"[CLEANUP] Deleted {len(results['ids'])} chunks for {filename}")
-                        break
-                except Exception as e:
-                    logger.debug(f"[CLEANUP] Field {field} not found: {e}")
-                    continue
+            # Fetch all and do case-insensitive match on metadata
+            all_docs = collection.get(include=["metadatas"])
+            ids_to_delete = []
             
-            # Try partial match on IDs if nothing found
-            if result['deleted_chunks'] == 0:
-                try:
-                    all_docs = collection.get()
-                    matching_ids = [id for id in all_docs['ids'] if filename.lower() in id.lower()]
-                    if matching_ids:
-                        collection.delete(ids=matching_ids)
-                        result['deleted_chunks'] = len(matching_ids)
-                        logger.info(f"[CLEANUP] Deleted {len(matching_ids)} chunks by ID match for {filename}")
-                except Exception as e:
-                    logger.debug(f"Suppressed: {e}")
+            for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                if not metadata:
+                    continue
+                # Check source, filename, file fields - case insensitive
+                doc_name = metadata.get("source") or metadata.get("filename") or metadata.get("file") or ""
+                if doc_name.lower() == filename_lower:
+                    ids_to_delete.append(all_docs["ids"][i])
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                result['deleted_chunks'] = len(ids_to_delete)
+                logger.info(f"[CLEANUP] Deleted {len(ids_to_delete)} chunks for {filename}")
                     
         except Exception as e:
             logger.warning(f"[CLEANUP] ChromaDB delete error: {e}")
     
-    # 2. DOCUMENT REGISTRY - Remove entry (cascade)
+    # 2. DOCUMENT REGISTRY - Remove entry (cascade, case-insensitive)
     supabase = _get_supabase()
     if supabase:
         try:
+            # Try exact match first
             query = supabase.table('document_registry').delete().eq('filename', filename)
             if project_id:
                 query = query.eq('project_id', project_id)
@@ -477,6 +452,15 @@ async def delete_document(filename: str, project_id: str = Query(None)):
             if del_result.data:
                 result['registry_removed'] = True
                 logger.info(f"[CLEANUP] Removed {filename} from document_registry")
+            else:
+                # Try case-insensitive via ilike
+                query = supabase.table('document_registry').delete().ilike('filename', filename)
+                if project_id:
+                    query = query.eq('project_id', project_id)
+                del_result = query.execute()
+                if del_result.data:
+                    result['registry_removed'] = True
+                    logger.info(f"[CLEANUP] Removed {filename} from document_registry (case-insensitive)")
         except Exception as e:
             logger.warning(f"[CLEANUP] Registry cleanup error: {e}")
     
