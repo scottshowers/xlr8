@@ -264,10 +264,19 @@ function AnalyticsPageInner() {
     
     // Group by truth_type -> domain -> tables
     const hierarchy = {}
+    const globalTableSeen = new Set() // Track all table assignments
     
     uniqueTables.forEach(table => {
       const truthType = table.truth_type || 'reality'
       const domain = table.domain || inferDomain(table.full_name || table.name || '')
+      const tableKey = table.full_name || table.name
+      
+      // Check for global duplicates
+      if (globalTableSeen.has(tableKey)) {
+        console.warn('[Analytics] DUPLICATE ASSIGNMENT:', tableKey, 'to', truthType, domain)
+        return // Skip duplicate
+      }
+      globalTableSeen.add(tableKey)
       
       if (!hierarchy[truthType]) {
         hierarchy[truthType] = {}
@@ -323,7 +332,17 @@ function AnalyticsPageInner() {
     })
     
     // Sort by table count descending
-    return result.sort((a, b) => (b.tableCount || 0) - (a.tableCount || 0))
+    const sorted = result.sort((a, b) => (b.tableCount || 0) - (a.tableCount || 0))
+    
+    // Log final structure
+    sorted.forEach(tt => {
+      console.log(`[Analytics] ${tt.truthType}: ${tt.tableCount} tables across ${tt.domains.length} domains`)
+      tt.domains.forEach(d => {
+        console.log(`  - ${d.domain}: ${d.tables.length} tables`)
+      })
+    })
+    
+    return sorted
   }
   
   const inferDomain = (tableName) => {
@@ -757,16 +776,16 @@ function AnalyticsPageInner() {
   // ===========================================
   
   return (
-    <div className="h-full flex bg-gray-100 text-sm overflow-hidden">
+    <div className="flex bg-gray-100 text-sm overflow-hidden" style={{ height: 'calc(100vh - 56px)' }}>
       {/* ================================================================
           LEFT PANEL: Data Catalog
           ================================================================ */}
-      <div className="w-96 bg-white border-r flex flex-col shadow-sm min-h-0 overflow-hidden">
+      <div className="w-96 bg-white border-r flex flex-col shadow-sm overflow-hidden">
         {/* Header */}
         <div className="p-3 border-b bg-gray-50 flex-shrink-0">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
             <Layers size={14} className="text-[#83b16d]" />
-            Data Catalog <span className="text-xs text-gray-400 ml-1">v4.2</span>
+            Data Catalog <span className="text-xs text-gray-400 ml-1">v4.4</span>
           </h2>
           {Array.isArray(catalog) && catalog.length > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
@@ -791,6 +810,7 @@ function AnalyticsPageInner() {
         
         {/* Catalog List - scrolls independently */}
         <div className="flex-1 overflow-y-auto min-h-0">
+          {console.log('[Analytics] Rendering catalog, filteredCatalog length:', filteredCatalog?.length)}
           {catalogLoading && (
             <div className="p-4 text-center text-gray-400">
               <Loader2 size={20} className="animate-spin mx-auto mb-2" />
@@ -874,8 +894,11 @@ function AnalyticsPageInner() {
                               {tables.reduce((acc, table) => {
                                 if (!table) return acc
                                 const tableKey = table.full_name || table.name
-                                // Skip if already rendered (dedup)
-                                if (acc.seen.has(tableKey)) return acc
+                                // Skip if already rendered in this domain
+                                if (acc.seen.has(tableKey)) {
+                                  console.log('[Analytics] Duplicate in domain:', tableKey, domainGroup.domain)
+                                  return acc
+                                }
                                 acc.seen.add(tableKey)
                                 acc.elements.push(
                                   <button
