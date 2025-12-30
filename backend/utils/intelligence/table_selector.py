@@ -344,12 +344,16 @@ class TableSelector:
         This finds tables where query words appear in actual data values,
         not just column names. Critical for questions like "show me SUI rates"
         where "SUI" is a value in the tax_type column.
+        
+        IMPORTANT: Capped at one match per table (+80) to prevent tables
+        with many matching values from dominating.
         """
         if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
             return 0
         
         score = 0
         table_name = table.get('table_name', '')
+        value_match_found = False  # Cap at one match per table
         
         try:
             # Get distinct values from column profiles
@@ -362,6 +366,8 @@ class TableSelector:
             """, [table_name]).fetchall()
             
             for col_name, distinct_values_json in value_profiles:
+                if value_match_found:  # Cap at one match
+                    break
                 if not distinct_values_json:
                     continue
                 
@@ -369,6 +375,9 @@ class TableSelector:
                     distinct_values = json.loads(distinct_values_json)
                     
                     for val_info in distinct_values:
+                        if value_match_found:  # Cap at one match
+                            break
+                        
                         val = str(val_info.get('value', '')).lower().strip() \
                               if isinstance(val_info, dict) else str(val_info).lower().strip()
                         
@@ -388,6 +397,7 @@ class TableSelector:
                                 score += 80
                                 logger.warning(f"[TABLE-SEL] VALUE MATCH: '{word}' → '{val}' "
                                              f"in {table_name[-40:]}.{col_name} (+80)")
+                                value_match_found = True  # Only one per table
                                 break
                                 
                 except (json.JSONDecodeError, TypeError):
