@@ -66,19 +66,13 @@ from .gatherers import (
     RealityGatherer,
 )
 
-# Main engine - import from legacy file for now during migration
-# TODO: Replace with new modular engine once refactor is complete
-try:
-    from backend.utils.intelligence_engine import IntelligenceEngine
-except ImportError:
-    try:
-        from utils.intelligence_engine import IntelligenceEngine
-    except ImportError:
-        # Placeholder until refactor is complete
-        IntelligenceEngine = None
-
-# New modular engine (V2)
+# Modular engine (V2) - THE engine going forward
 from .engine import IntelligenceEngineV2
+
+# Legacy alias - IntelligenceEngine now points to IntelligenceEngineV2
+# The old monolith (intelligence_engine.py) is archived in:
+# archive/2025-12-30-intelligence-engine-monolith/
+IntelligenceEngine = IntelligenceEngineV2
 
 __all__ = [
     # Core types
