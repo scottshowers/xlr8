@@ -246,13 +246,21 @@ SELECT"""
                     return {
                         'sql': sql,
                         'table': short_alias,
-                        'query_type': 'simple',
+                        'query_type': 'list',
                         'all_columns': valid_columns
                     }
                 else:
                     logger.warning(f"[SQL-GEN] Invalid columns: {invalid}")
         
-        return None
+        # FALLBACK: When LLM fails, do simple SELECT * to at least get data
+        logger.warning(f"[SQL-GEN] LLM failed, using SELECT * fallback for {table_name[-40:]}")
+        fallback_sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+        return {
+            'sql': fallback_sql,
+            'table': short_alias,
+            'query_type': 'list',
+            'all_columns': valid_columns
+        }
     
     def _generate_complex(self, question: str, tables: List[Dict],
                          orchestrator, q_lower: str) -> Optional[Dict]:
