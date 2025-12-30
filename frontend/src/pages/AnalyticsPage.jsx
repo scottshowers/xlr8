@@ -766,7 +766,7 @@ function AnalyticsPageInner() {
         <div className="p-3 border-b bg-gray-50 flex-shrink-0">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
             <Layers size={14} className="text-[#83b16d]" />
-            Data Catalog
+            Data Catalog <span className="text-xs text-gray-400 ml-1">v4.2</span>
           </h2>
           {Array.isArray(catalog) && catalog.length > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
@@ -871,10 +871,13 @@ function AnalyticsPageInner() {
                           {/* Tables within Domain */}
                           {isDomainExpanded && (
                             <div className="pb-1 bg-white">
-                              {tables.map(table => {
-                                if (!table) return null
+                              {tables.reduce((acc, table) => {
+                                if (!table) return acc
                                 const tableKey = table.full_name || table.name
-                                return (
+                                // Skip if already rendered (dedup)
+                                if (acc.seen.has(tableKey)) return acc
+                                acc.seen.add(tableKey)
+                                acc.elements.push(
                                   <button
                                     key={tableKey}
                                     onClick={() => handleTableSelect(table)}
@@ -891,7 +894,8 @@ function AnalyticsPageInner() {
                                     </span>
                                   </button>
                                 )
-                              })}
+                                return acc
+                              }, { seen: new Set(), elements: [] }).elements}
                             </div>
                           )}
                         </div>
