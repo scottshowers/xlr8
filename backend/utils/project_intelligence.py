@@ -731,7 +731,7 @@ class ProjectIntelligenceService:
                     config_target=row[10]
                 ))
             
-            logger.info(f"[INTELLIGENCE] Loaded {len(self.tables)} table classifications")
+            logger.warning(f"[INTELLIGENCE] Loaded {len(self.tables)} table classifications from DB")
             return len(self.tables) > 0
             
         except Exception as e:
