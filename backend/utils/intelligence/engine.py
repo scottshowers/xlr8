@@ -1,28 +1,27 @@
 """
-XLR8 Intelligence Engine - Main Orchestrator
-=============================================
+XLR8 Intelligence Engine v2 - Main Orchestrator
+================================================
 
-The brain of XLR8. This is the thin orchestrator that coordinates:
-- Table selection
-- SQL generation
+The brain of XLR8. Thin orchestrator that coordinates:
+- Question analysis and mode detection
+- Clarification handling (employee status, filters)
 - Truth gathering (Reality, Intent, Configuration, Reference, Regulatory)
+- Conflict detection
 - Response synthesis
 
-This is the NEW modular engine. It uses the refactored components:
-- TableSelector for smart table selection
-- SQLGenerator for LLM-based SQL generation
-- Gatherers for each Truth type
-- Synthesizer for response generation
+This is the NEW modular engine replacing the 6000-line monolith.
 
 Deploy to: backend/utils/intelligence/engine.py
 """
 
+import re
+import os
 import logging
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 
 from .types import (
     Truth, Conflict, Insight, SynthesizedAnswer, IntelligenceMode,
-    TruthType, TRUTH_ROUTING
+    TruthType
 )
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
@@ -31,32 +30,62 @@ from .gatherers import RealityGatherer
 
 logger = logging.getLogger(__name__)
 
-# Version
-__version__ = "6.0.0"
+__version__ = "6.1.0"
+
+# Try to load ConsultativeSynthesizer
+SYNTHESIS_AVAILABLE = False
+ConsultativeSynthesizer = None
+try:
+    from backend.utils.consultative_synthesis import ConsultativeSynthesizer
+    SYNTHESIS_AVAILABLE = True
+    logger.info("[ENGINE-V2] ConsultativeSynthesizer loaded")
+except ImportError:
+    try:
+        from utils.consultative_synthesis import ConsultativeSynthesizer
+        SYNTHESIS_AVAILABLE = True
+        logger.info("[ENGINE-V2] ConsultativeSynthesizer loaded (alt path)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] ConsultativeSynthesizer not available")
 
 
 class IntelligenceEngineV2:
     """
     The brain of XLR8 - modular edition.
     
-    This is a thin orchestrator that coordinates the Five Truths:
+    Orchestrates the Five Truths:
     1. REALITY - What the data actually shows (DuckDB)
     2. INTENT - What the customer says they want (ChromaDB)
     3. CONFIGURATION - How they've configured the system (DuckDB)
     4. REFERENCE - Product docs, implementation standards (ChromaDB)
     5. REGULATORY - Laws, compliance requirements (ChromaDB)
     
-    Each Truth has its own gatherer. The engine:
-    1. Analyzes the question
-    2. Selects relevant tables
-    3. Gathers from each Truth type
-    4. Synthesizes a consultative response
-    
     Usage:
         engine = IntelligenceEngineV2("PROJECT123")
         engine.load_context(structured_handler=handler, schema=schema)
         answer = engine.ask("How many active employees?")
     """
+    
+    # Question patterns that indicate config/validation (not employee data)
+    CONFIG_DOMAINS = [
+        'workers comp', 'work comp', 'sui ', 'suta', 'futa', 'tax rate',
+        'withholding', 'wc rate', 'workers compensation', 'local tax',
+        'earnings', 'earning code', 'pay code', 'earning setup',
+        'deduction', 'benefit plan', 'deduction setup', 'deductions',
+        'gl', 'general ledger', 'gl mapping', 'account mapping',
+        'tax jurisdiction', 'jurisdiction setup', 'state setup',
+    ]
+    
+    VALIDATION_KEYWORDS = [
+        'correct', 'valid', 'right', 'properly', 'configured',
+        'issue', 'problem', 'check', 'verify', 'audit', 'review',
+        'accurate', 'wrong', 'error', 'mistake', 'setup', 'setting'
+    ]
+    
+    EMPLOYEE_INDICATORS = [
+        'employee', 'worker', 'staff', 'personnel', 'headcount',
+        'how many', 'count of', 'list of', 'show me', 'who',
+        'terminated', 'active', 'hired', 'tenure'
+    ]
     
     def __init__(self, project_name: str, project_id: str = None):
         """
@@ -69,7 +98,7 @@ class IntelligenceEngineV2:
         self.project = project_name
         self.project_id = project_id
         
-        # Data handlers (set via load_context)
+        # Data handlers
         self.structured_handler = None
         self.rag_handler = None
         self.schema: Dict = {}
@@ -79,18 +108,35 @@ class IntelligenceEngineV2:
         self.filter_candidates: Dict = {}
         self.confirmed_facts: Dict = {}
         
-        # Components (initialized in load_context)
+        # Components
         self.table_selector: Optional[TableSelector] = None
         self.sql_generator: Optional[SQLGenerator] = None
         self.synthesizer: Optional[Synthesizer] = None
-        
-        # Gatherers
         self.reality_gatherer: Optional[RealityGatherer] = None
+        
+        # Pattern cache for learning
+        self.pattern_cache = None
         
         # State tracking
         self.last_executed_sql: Optional[str] = None
+        self.conversation_history: List[Dict] = []
+        self._pending_clarification = None
+        self._last_validation_export = None
         
-        logger.info(f"[ENGINE-V2] Initialized for project={project_name}")
+        # Initialize LLM synthesizer
+        self._llm_synthesizer = None
+        if SYNTHESIS_AVAILABLE and ConsultativeSynthesizer:
+            try:
+                self._llm_synthesizer = ConsultativeSynthesizer(
+                    ollama_host=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+                    claude_api_key=os.getenv("CLAUDE_API_KEY"),
+                    model_preference="auto"
+                )
+                logger.info("[ENGINE-V2] ConsultativeSynthesizer initialized")
+            except Exception as e:
+                logger.warning(f"[ENGINE-V2] ConsultativeSynthesizer init failed: {e}")
+        
+        logger.info(f"[ENGINE-V2] Initialized v{__version__} for project={project_name}")
     
     def load_context(
         self,
@@ -101,20 +147,27 @@ class IntelligenceEngineV2:
         filter_candidates: Dict = None
     ):
         """
-        Load context for the engine.
+        Load context and initialize components.
         
         Args:
             structured_handler: DuckDB handler
             rag_handler: ChromaDB/RAG handler
             schema: Schema metadata (tables, columns)
             relationships: Detected table relationships
-            filter_candidates: Filter candidate columns
+            filter_candidates: Filter candidate columns by category (optional, extracted from schema if not provided)
         """
         self.structured_handler = structured_handler
         self.rag_handler = rag_handler
         self.schema = schema or {}
         self.relationships = relationships or []
-        self.filter_candidates = filter_candidates or {}
+        
+        # Extract filter candidates from schema if not provided explicitly
+        self.filter_candidates = filter_candidates or self.schema.get('filter_candidates', {})
+        if self.filter_candidates:
+            logger.warning(f"[ENGINE-V2] Filter candidates loaded: {list(self.filter_candidates.keys())}")
+        
+        # Initialize pattern cache
+        self._init_pattern_cache()
         
         # Initialize components
         self.table_selector = TableSelector(
@@ -132,35 +185,57 @@ class IntelligenceEngineV2:
         )
         
         self.synthesizer = Synthesizer(
+            llm_synthesizer=self._llm_synthesizer,
             confirmed_facts=self.confirmed_facts,
             filter_candidates=self.filter_candidates,
             schema=self.schema
         )
         
-        # Initialize gatherers
         self.reality_gatherer = RealityGatherer(
             project_name=self.project,
             project_id=self.project_id,
             structured_handler=structured_handler,
             schema=self.schema,
-            sql_generator=self.sql_generator
+            sql_generator=self.sql_generator,
+            pattern_cache=self.pattern_cache
         )
         
-        logger.info(f"[ENGINE-V2] Context loaded: {len(self.schema.get('tables', []))} tables")
+        logger.info(f"[ENGINE-V2] Context loaded: {len(self.schema.get('tables', []))} tables, "
+                   f"{len(self.filter_candidates)} filter categories")
     
-    def ask(self, question: str, context: Dict = None) -> SynthesizedAnswer:
+    def _init_pattern_cache(self):
+        """Initialize SQL pattern cache for learning."""
+        try:
+            try:
+                from utils.sql_pattern_cache import initialize_patterns
+            except ImportError:
+                from backend.utils.sql_pattern_cache import initialize_patterns
+            
+            if self.project and self.schema:
+                self.pattern_cache = initialize_patterns(self.project, self.schema)
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Pattern cache not available: {e}")
+    
+    # =========================================================================
+    # MAIN ENTRY POINT
+    # =========================================================================
+    
+    def ask(self, question: str, mode: IntelligenceMode = None,
+            context: Dict = None) -> SynthesizedAnswer:
         """
         Answer a question using all Five Truths.
         
         This is the main entry point. It:
         1. Analyzes the question to detect mode and domains
-        2. Gathers from each relevant Truth type
-        3. Detects conflicts between truths
-        4. Synthesizes a consultative response
+        2. Handles clarification requests if needed
+        3. Gathers from each relevant Truth type
+        4. Detects conflicts between truths
+        5. Synthesizes a consultative response
         
         Args:
             question: The user's question
-            context: Optional additional context (clarification answers, etc.)
+            mode: Optional explicit mode
+            context: Optional additional context
             
         Returns:
             SynthesizedAnswer with full provenance
@@ -168,40 +243,74 @@ class IntelligenceEngineV2:
         context = context or {}
         q_lower = question.lower()
         
-        logger.warning(f"[ENGINE-V2] Processing: {question[:60]}...")
+        logger.warning(f"[ENGINE-V2] Question: {question[:80]}...")
+        logger.warning(f"[ENGINE-V2] confirmed_facts: {self.confirmed_facts}")
         
-        # Merge any clarification answers into confirmed_facts
-        if context.get('clarification_answers'):
-            self.confirmed_facts.update(context['clarification_answers'])
-            self.sql_generator.confirmed_facts = self.confirmed_facts
+        # Check for export request
+        export_result = self._handle_export_request(question, q_lower)
+        if export_result:
+            return export_result
         
         # Analyze question
-        mode = self._detect_mode(q_lower)
-        domains = self._detect_domains(q_lower)
+        mode = mode or self._detect_mode(q_lower)
+        is_employee_question = self._is_employee_question(q_lower)
+        is_validation = self._is_validation_question(q_lower)
+        is_config = self._is_config_domain(q_lower)
         
+        # Override employee detection for config/validation questions
+        if is_validation and is_config:
+            is_employee_question = False
+            logger.warning("[ENGINE-V2] Config validation - skipping employee clarification")
+        
+        # Handle filter clarification for employee questions
+        if is_employee_question:
+            clarification = self._check_clarification_needed(question, q_lower)
+            if clarification:
+                return clarification
+        
+        logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, facts={self.confirmed_facts}")
+        
+        # Build analysis context
         analysis = {
             'mode': mode,
-            'domains': domains,
+            'domains': self._detect_domains(q_lower),
+            'is_employee_question': is_employee_question,
+            'is_validation': is_validation,
+            'is_config': is_config,
             'question': question,
             'q_lower': q_lower
         }
         
         # Gather from each Truth type
         reality = self._gather_reality(question, analysis)
-        intent = self._gather_intent(question, analysis)
-        configuration = self._gather_configuration(question, analysis)
-        reference, regulatory, compliance = self._gather_reference_library(question, analysis)
         
-        # Detect conflicts
-        conflicts = self._detect_conflicts(
-            reality, intent, configuration, reference, regulatory, compliance
-        )
+        # Check for pending clarification from reality gathering
+        if context.get('pending_clarification') or self._pending_clarification:
+            clarification = context.get('pending_clarification') or self._pending_clarification
+            self._pending_clarification = None
+            return clarification
+        
+        # For validation questions, skip other truths (they pull irrelevant docs)
+        if is_validation:
+            intent = []
+            configuration = []
+            reference, regulatory, compliance = [], [], []
+            conflicts = []
+        else:
+            intent = self._gather_intent(question, analysis)
+            configuration = self._gather_configuration(question, analysis)
+            reference, regulatory, compliance = self._gather_reference_library(question, analysis)
+            conflicts = self._detect_conflicts(
+                reality, intent, configuration, reference, regulatory, compliance
+            )
         
         # Run proactive checks
         insights = self._run_proactive_checks(analysis)
         
-        # Check compliance
-        compliance_check = self._check_compliance(reality, configuration, regulatory)
+        # Compliance check
+        compliance_check = None
+        if regulatory:
+            compliance_check = self._check_compliance(reality, configuration, regulatory)
         
         # Synthesize answer
         answer = self.synthesizer.synthesize(
@@ -224,17 +333,25 @@ class IntelligenceEngineV2:
             self.last_executed_sql = self.reality_gatherer.last_executed_sql
             answer.executed_sql = self.last_executed_sql
         
-        logger.info(f"[ENGINE-V2] Answer generated: {len(answer.answer)} chars, "
+        # Update history
+        self.conversation_history.append({
+            'question': question,
+            'mode': mode.value if mode else 'search',
+            'answer_length': len(answer.answer),
+            'confidence': answer.confidence
+        })
+        
+        logger.info(f"[ENGINE-V2] Answer: {len(answer.answer)} chars, "
                    f"confidence={answer.confidence:.0%}")
         
         return answer
     
     # =========================================================================
-    # ANALYSIS METHODS
+    # QUESTION ANALYSIS
     # =========================================================================
     
     def _detect_mode(self, q_lower: str) -> IntelligenceMode:
-        """Detect the intelligence mode from the question."""
+        """Detect intelligence mode from question."""
         if any(w in q_lower for w in ['correct', 'valid', 'check', 'verify', 'audit']):
             return IntelligenceMode.VALIDATE
         if any(w in q_lower for w in ['compare', 'versus', 'vs', 'difference']):
@@ -248,7 +365,7 @@ class IntelligenceEngineV2:
         return IntelligenceMode.SEARCH
     
     def _detect_domains(self, q_lower: str) -> List[str]:
-        """Detect relevant domains from the question."""
+        """Detect relevant domains from question."""
         domains = []
         
         domain_keywords = {
@@ -258,6 +375,7 @@ class IntelligenceEngineV2:
             'time': ['time', 'hours', 'attendance', 'schedule', 'pto'],
             'hr': ['employee', 'hire', 'termination', 'job', 'position'],
             'gl': ['gl', 'general ledger', 'account', 'mapping'],
+            'earnings': ['earnings', 'earning', 'pay code'],
         }
         
         for domain, keywords in domain_keywords.items():
@@ -266,36 +384,172 @@ class IntelligenceEngineV2:
         
         return domains or ['general']
     
+    def _is_employee_question(self, q_lower: str) -> bool:
+        """Check if question is about employee data."""
+        return any(ind in q_lower for ind in self.EMPLOYEE_INDICATORS)
+    
+    def _is_validation_question(self, q_lower: str) -> bool:
+        """Check if question is a validation/audit question."""
+        return any(kw in q_lower for kw in self.VALIDATION_KEYWORDS)
+    
+    def _is_config_domain(self, q_lower: str) -> bool:
+        """Check if question is about config (not employee data)."""
+        return any(cd in q_lower for cd in self.CONFIG_DOMAINS)
+    
     # =========================================================================
-    # GATHERER METHODS
+    # CLARIFICATION HANDLING
+    # =========================================================================
+    
+    def _check_clarification_needed(self, question: str, 
+                                    q_lower: str) -> Optional[SynthesizedAnswer]:
+        """Check if clarification is needed for employee questions."""
+        # Status is the most important filter
+        if 'status' not in self.confirmed_facts:
+            if 'status' in self.filter_candidates:
+                return self._build_status_clarification(question)
+        
+        return None
+    
+    def _build_status_clarification(self, question: str) -> SynthesizedAnswer:
+        """Build status clarification request."""
+        options = [
+            {'id': 'active', 'label': 'Active employees only'},
+            {'id': 'termed', 'label': 'Terminated employees only'},
+            {'id': 'all', 'label': 'All employees (active + terminated)'}
+        ]
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer="",
+            confidence=0.0,
+            structured_output={
+                'type': 'clarification_needed',
+                'questions': [{
+                    'id': 'status',
+                    'question': 'Which employees would you like to include?',
+                    'type': 'radio',
+                    'options': options
+                }],
+                'original_question': question
+            },
+            reasoning=['Need to clarify employee status filter']
+        )
+    
+    def _handle_export_request(self, question: str, 
+                               q_lower: str) -> Optional[SynthesizedAnswer]:
+        """Handle export/download requests."""
+        export_keywords = ['export', 'download', 'excel', 'csv', 'spreadsheet']
+        is_export = any(kw in q_lower for kw in export_keywords)
+        
+        if is_export and self._last_validation_export:
+            export_data = self._last_validation_export
+            return SynthesizedAnswer(
+                question=question,
+                answer=f"📥 **Export Ready**\n\n{export_data['total_records']} records prepared.",
+                confidence=0.95,
+                structured_output={
+                    'type': 'export_ready',
+                    'export_data': export_data
+                },
+                reasoning=['Export requested']
+            )
+        
+        return None
+    
+    # =========================================================================
+    # TRUTH GATHERING
     # =========================================================================
     
     def _gather_reality(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather Reality truths from DuckDB."""
         if not self.reality_gatherer:
             return []
-        return self.reality_gatherer.gather(question, analysis)
+        
+        truths = self.reality_gatherer.gather(question, analysis)
+        
+        # Check for pending clarification
+        if analysis.get('pending_clarification'):
+            self._pending_clarification = analysis['pending_clarification']
+        
+        return truths
     
     def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather Intent truths from customer documents."""
-        # TODO: Implement with IntentGatherer
-        return []
+        if not self.rag_handler:
+            return []
+        
+        truths = []
+        try:
+            results = self.rag_handler.search(
+                query=question,
+                n_results=5,
+                where={"project_id": self.project_id, "truth_type": "intent"}
+            )
+            
+            for i, doc in enumerate(results.get('documents', [[]])[0]):
+                metadata = results.get('metadatas', [[]])[0][i] if results.get('metadatas') else {}
+                truths.append(Truth(
+                    source_type='intent',
+                    source_name=metadata.get('filename', 'Customer Document'),
+                    content={'text': doc, 'metadata': metadata},
+                    confidence=0.85,
+                    location=metadata.get('source', 'Unknown')
+                ))
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Intent gathering error: {e}")
+        
+        return truths
     
     def _gather_configuration(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather Configuration truths from config tables."""
-        # TODO: Implement with ConfigurationGatherer
-        return []
+        """Gather Configuration truths from config tables/docs."""
+        if not self.rag_handler:
+            return []
+        
+        truths = []
+        try:
+            results = self.rag_handler.search(
+                query=question,
+                n_results=10,
+                where={"project_id": self.project_id, "truth_type": "configuration"}
+            )
+            
+            for i, doc in enumerate(results.get('documents', [[]])[0]):
+                metadata = results.get('metadatas', [[]])[0][i] if results.get('metadatas') else {}
+                truths.append(Truth(
+                    source_type='configuration',
+                    source_name=metadata.get('filename', 'Config Document'),
+                    content={'text': doc, 'metadata': metadata},
+                    confidence=0.90,
+                    location=metadata.get('source', 'Unknown')
+                ))
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Configuration gathering error: {e}")
+        
+        return truths
     
-    def _gather_reference_library(self, question: str, analysis: Dict) -> tuple:
-        """Gather Reference Library truths (Reference, Regulatory, Compliance)."""
-        # TODO: Implement with respective gatherers
-        return [], [], []
+    def _gather_reference_library(self, question: str, 
+                                  analysis: Dict) -> Tuple[List[Truth], List[Truth], List[Truth]]:
+        """Gather Reference Library truths."""
+        reference = []
+        regulatory = []
+        compliance = []
+        
+        if not self.rag_handler:
+            return reference, regulatory, compliance
+        
+        # TODO: Implement reference library gathering
+        # This would search for:
+        # - reference: Product docs, best practices
+        # - regulatory: Laws, IRS rules
+        # - compliance: Standards, audit requirements
+        
+        return reference, regulatory, compliance
     
     # =========================================================================
-    # ANALYSIS METHODS
+    # ANALYSIS
     # =========================================================================
     
-    def _detect_conflicts(self, reality, intent, configuration, 
+    def _detect_conflicts(self, reality, intent, configuration,
                          reference, regulatory, compliance) -> List[Conflict]:
         """Detect conflicts between truths."""
         conflicts = []
@@ -308,18 +562,18 @@ class IntelligenceEngineV2:
         # TODO: Implement proactive checks
         return insights
     
-    def _check_compliance(self, reality, configuration, 
+    def _check_compliance(self, reality, configuration,
                          regulatory) -> Optional[Dict]:
         """Check compliance against regulatory rules."""
         # TODO: Implement compliance checking
         return None
     
     # =========================================================================
-    # UTILITY METHODS
+    # FILTER MANAGEMENT
     # =========================================================================
     
     def confirm_filter(self, category: str, value: str):
-        """Confirm a filter selection (from clarification)."""
+        """Confirm a filter selection."""
         self.confirmed_facts[category] = value
         if self.sql_generator:
             self.sql_generator.confirmed_facts = self.confirmed_facts
@@ -331,3 +585,17 @@ class IntelligenceEngineV2:
         if self.sql_generator:
             self.sql_generator.confirmed_facts = {}
         logger.info("[ENGINE-V2] Filters cleared")
+    
+    def get_filter_options(self, category: str) -> List[Dict]:
+        """Get available options for a filter category."""
+        if category not in self.filter_candidates:
+            return []
+        
+        candidates = self.filter_candidates[category]
+        if not candidates:
+            return []
+        
+        # Return unique values from first candidate
+        best = candidates[0]
+        values = best.get('value_distribution', {})
+        return [{'id': v, 'label': v, 'count': c} for v, c in values.items()]
