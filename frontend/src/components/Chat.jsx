@@ -965,7 +965,6 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
       background: colors.card,
       borderRadius: 12,
       border: `1px solid ${colors.divider}`,
-      overflow: 'hidden',
       maxWidth: 640,
     }}>
       {/* Auto-Applied Banner */}
