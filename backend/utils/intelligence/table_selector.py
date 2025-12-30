@@ -1,14 +1,20 @@
 """
-XLR8 Intelligence Engine - Table Selector
-==========================================
+XLR8 Intelligence Engine - Table Selector v2.0
+===============================================
 
 Handles table scoring and selection for SQL generation.
 Given a question and available tables, selects the most relevant ones.
 
+v2.0 CHANGES:
+- Uses TableClassification metadata instead of hardcoded domain boosts
+- Scoring based on table_type and domain from project_intelligence
+- Removes canonical matches hack (+250) in favor of metadata-driven selection
+- Removes VALUE MATCH cap - replaced by proper domain scoring
+
 Key features:
-- Direct name matching (highest priority)
+- Metadata-driven domain matching (highest priority)
+- Direct name matching
 - Column value matching (finds tables with matching data)
-- Domain-specific boosts (tax, earnings, deductions, etc.)
 - Lookup/checklist deprioritization
 
 Deploy to: backend/utils/intelligence/table_selector.py
@@ -18,8 +24,22 @@ import re
 import json
 import logging
 from typing import Dict, List, Optional, Set, Any
+from enum import Enum
 
 from .types import LOOKUP_INDICATORS
+
+# Import table classification types
+try:
+    from utils.project_intelligence import (
+        TableClassification, TableType, TableDomain, 
+        get_table_classifications
+    )
+except ImportError:
+    # Fallback for when running standalone
+    TableClassification = None
+    TableType = None
+    TableDomain = None
+    get_table_classifications = None
 
 logger = logging.getLogger(__name__)
 
@@ -37,32 +57,6 @@ SKIP_WORDS = {
     'currently', 'please', 'can', 'you', 'me', 'about'
 }
 
-# Table name patterns → question keywords that should boost them
-TABLE_KEYWORDS = {
-    'personal': ['employee', 'employees', 'person', 'people', 'who', 'name', 'ssn', 
-                 'birth', 'hire', 'termination', 'termed', 'terminated', 'active', 
-                 'location', 'state', 'city', 'address'],
-    'company': ['company', 'organization', 'org', 'entity', 'legal'],
-    'job': ['job', 'position', 'title', 'department', 'dept'],
-    'earnings': ['earn', 'earning', 'pay code', 'salary', 'wage', 'compensation', 
-                 'earning code', 'earnings setup', 'earnings configured', 'earnigs', 'earings'],
-    'deductions': ['deduction', 'benefit', '401k', 'insurance', 'health', 
-                   'benefit plan', 'deduction code', 'deduction setup'],
-    'tax': ['tax', 'sui', 'suta', 'futa', 'fein', 'ein', 'withhold', 'federal', 
-            'state tax', 'fica', 'w2', 'w-2', '941', '940'],
-    'workers_comp': ['workers comp', 'work comp', 'wc', 'workers compensation', 
-                     'wcb', 'class code', 'experience mod'],
-    'general_ledger': ['gl', 'general ledger', 'ledger', 'account mapping', 
-                       'gl mapping', 'chart of accounts', 'gl rules'],
-    'gl_': ['gl', 'general ledger', 'account', 'ledger mapping'],
-    'time': ['time', 'hours', 'attendance', 'schedule'],
-    'address': ['address', 'zip', 'postal'],
-    'rate': ['rate', 'rates', 'percentage', 'percent'],
-    'config': ['config', 'configuration', 'setup', 'setting', 'correct', 'valid', 'validation'],
-    'master': ['master', 'setup', 'configuration'],
-    'jurisdiction': ['jurisdiction', 'tax jurisdiction', 'state setup', 'registration'],
-}
-
 # Columns that indicate location data
 LOCATION_COLUMNS = ['stateprovince', 'state', 'city', 'location', 'region', 
                     'site', 'work_location', 'home_state']
@@ -70,6 +64,31 @@ LOCATION_COLUMNS = ['stateprovince', 'state', 'city', 'location', 'region',
 # Tables to heavily deprioritize (guides, not config data)
 CHECKLIST_INDICATORS = ['checklist', 'step_', '_step', 'document', 
                         'before_final', 'year_end', 'yearend']
+
+# =============================================================================
+# DOMAIN KEYWORD MAPPING (for question → domain detection)
+# =============================================================================
+
+# Question keywords that indicate a domain
+# This maps question words to TableDomain values for matching
+DOMAIN_KEYWORDS = {
+    'earnings': ['earnings', 'earning', 'pay code', 'paycode', 'compensation', 
+                 'salary', 'wage', 'earings', 'earnigs'],  # Common typos
+    'deductions': ['deduction', 'deductions', 'benefit plan', 'benefits', 
+                   '401k', 'insurance', 'health plan'],
+    'taxes': ['tax', 'taxes', 'sui', 'suta', 'futa', 'fein', 'ein', 
+              'withholding', 'w2', 'w-2', '941', '940', 'fica'],
+    'time': ['time', 'hours', 'attendance', 'schedule', 'pto', 'accrual'],
+    'demographics': ['employee', 'employees', 'person', 'people', 'worker',
+                     'associate', 'staff', 'personal'],
+    'locations': ['location', 'locations', 'site', 'address', 'region'],
+    'benefits': ['benefit', 'benefits', 'enrollment', 'coverage'],
+    'gl': ['gl', 'general ledger', 'ledger', 'account mapping', 
+           'chart of accounts', 'gl mapping'],
+    'jobs': ['job', 'jobs', 'position', 'title', 'role'],
+    'workers_comp': ['workers comp', 'work comp', 'wc', 'wcb', 
+                     'workers compensation', 'class code'],
+}
 
 
 # =============================================================================
@@ -80,23 +99,115 @@ class TableSelector:
     """
     Selects relevant tables for a given question.
     
+    v2.0: Uses table classification metadata for domain-aware selection.
+    
     Uses a scoring system that considers:
-    - Direct name matches (e.g., "earnings" in question matches "earnings" table)
-    - Column value matches (e.g., "SUI" matches value in tax_type column)
-    - Domain-specific boosts (tax questions boost tax tables)
+    - Domain matching via classifications (highest priority)
+    - Table type (CONFIG tables boost for setup questions)
+    - Direct name matches
+    - Column value matches
     - Penalties for lookup/checklist tables
     """
     
-    def __init__(self, structured_handler=None, filter_candidates: Dict = None):
+    def __init__(self, structured_handler=None, filter_candidates: Dict = None,
+                 project: str = None):
         """
         Initialize the table selector.
         
         Args:
             structured_handler: DuckDB handler for value lookups
             filter_candidates: Dict of filter category → candidate columns
+            project: Project name for loading classifications
         """
         self.structured_handler = structured_handler
         self.filter_candidates = filter_candidates or {}
+        self.project = project
+        
+        # Cache for table classifications
+        self._classifications: Dict[str, TableClassification] = {}
+        self._classifications_loaded = False
+    
+    def _load_classifications(self) -> None:
+        """Load table classifications from database."""
+        if self._classifications_loaded:
+            return
+        
+        if not self.project or not self.structured_handler:
+            self._classifications_loaded = True
+            return
+        
+        try:
+            # Try to load classifications using the helper function
+            if get_table_classifications:
+                classifications = get_table_classifications(
+                    self.project, self.structured_handler
+                )
+                for c in classifications:
+                    self._classifications[c.table_name.lower()] = c
+                logger.info(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications")
+            else:
+                # Fallback: load directly from database
+                self._load_classifications_direct()
+                
+        except Exception as e:
+            logger.warning(f"[TABLE-SEL] Failed to load classifications: {e}")
+        
+        self._classifications_loaded = True
+    
+    def _load_classifications_direct(self) -> None:
+        """Load classifications directly from DuckDB (fallback)."""
+        if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
+            return
+        
+        try:
+            # Check if table exists
+            tables = self.structured_handler.conn.execute("SHOW TABLES").fetchall()
+            table_names = [t[0] for t in tables]
+            
+            if '_table_classifications' not in table_names:
+                return
+            
+            results = self.structured_handler.conn.execute("""
+                SELECT table_name, table_type, domain, primary_entity, confidence,
+                       row_count, column_count, config_target
+                FROM _table_classifications
+                WHERE project_name = ?
+            """, [self.project]).fetchall()
+            
+            for row in results:
+                table_name = row[0]
+                self._classifications[table_name.lower()] = {
+                    'table_name': table_name,
+                    'table_type': row[1],
+                    'domain': row[2],
+                    'primary_entity': row[3],
+                    'confidence': row[4],
+                    'row_count': row[5],
+                    'column_count': row[6],
+                    'config_target': row[7]
+                }
+            
+            logger.info(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications (direct)")
+            
+        except Exception as e:
+            logger.debug(f"[TABLE-SEL] Direct classification load failed: {e}")
+    
+    def _get_classification(self, table_name: str) -> Optional[Dict]:
+        """Get classification for a table."""
+        self._load_classifications()
+        return self._classifications.get(table_name.lower())
+    
+    def _detect_question_domain(self, q_lower: str) -> Optional[str]:
+        """
+        Detect the domain a question is asking about.
+        
+        Returns:
+            Domain string (e.g., 'earnings', 'taxes') or None
+        """
+        for domain, keywords in DOMAIN_KEYWORDS.items():
+            if any(kw in q_lower for kw in keywords):
+                return domain
+        return None
     
     def select(self, tables: List[Dict], question: str, max_tables: int = 5) -> List[Dict]:
         """
@@ -116,13 +227,27 @@ class TableSelector:
         q_lower = question.lower()
         words = re.findall(r'\b[a-z]+\b', q_lower)
         
+        # Detect what domain the question is about
+        question_domain = self._detect_question_domain(q_lower)
+        if question_domain:
+            logger.info(f"[TABLE-SEL] Detected question domain: {question_domain}")
+        
+        # Check if this is a config/setup question
+        is_config_question = any(term in q_lower for term in [
+            'configured', 'setup', 'set up', 'valid', 'correct', 
+            'configuration', 'settings', 'how many', 'what', 'list'
+        ])
+        
         # Identify tables that contain filter_candidate columns
         filter_candidate_tables = self._get_filter_candidate_tables()
         
         # Score each table
         scored_tables = []
         for table in tables:
-            score = self._score_table(table, q_lower, words, filter_candidate_tables)
+            score = self._score_table(
+                table, q_lower, words, filter_candidate_tables,
+                question_domain, is_config_question
+            )
             scored_tables.append((score, table))
         
         # Sort by score descending
@@ -130,7 +255,15 @@ class TableSelector:
         
         # Log top candidates
         for score, t in scored_tables[:5]:
-            logger.warning(f"[TABLE-SEL] Candidate: {t.get('table_name', '')[-45:]} score={score}")
+            table_name = t.get('table_name', '')
+            classification = self._get_classification(table_name)
+            domain_info = ""
+            if classification:
+                if isinstance(classification, dict):
+                    domain_info = f" [type={classification.get('table_type')}, domain={classification.get('domain')}]"
+                else:
+                    domain_info = f" [type={classification.table_type.value}, domain={classification.domain.value}]"
+            logger.warning(f"[TABLE-SEL] Candidate: {table_name[-45:]} score={score}{domain_info}")
         
         # Take top N tables with positive scores
         relevant = [t for score, t in scored_tables[:max_tables] if score > 0]
@@ -154,9 +287,13 @@ class TableSelector:
         return tables
     
     def _score_table(self, table: Dict, q_lower: str, words: List[str], 
-                     filter_candidate_tables: Set[str]) -> int:
+                     filter_candidate_tables: Set[str],
+                     question_domain: Optional[str],
+                     is_config_question: bool) -> int:
         """
         Score a table's relevance to the question.
+        
+        v2.0: Uses classification metadata for domain matching.
         
         Returns an integer score where higher = more relevant.
         """
@@ -167,12 +304,17 @@ class TableSelector:
         score = 0
         
         # =====================================================================
-        # 1. DIRECT NAME MATCHING (highest priority)
+        # 1. METADATA-BASED DOMAIN MATCHING (highest priority - v2.0)
+        # =====================================================================
+        score += self._score_metadata_match(table_name, question_domain, is_config_question)
+        
+        # =====================================================================
+        # 2. DIRECT NAME MATCHING
         # =====================================================================
         score += self._score_name_match(table_name, words)
         
         # =====================================================================
-        # 2. PENALTIES - Apply before boosts
+        # 3. PENALTIES - Apply before boosts
         # =====================================================================
         
         # Lookup table penalty
@@ -192,29 +334,14 @@ class TableSelector:
             score -= 20
         
         # =====================================================================
-        # 3. FILTER CANDIDATE BOOST
+        # 4. FILTER CANDIDATE BOOST
         # =====================================================================
         if table_name in filter_candidate_tables:
             score += 50
             logger.debug(f"[TABLE-SEL] Filter candidate boost: {table_name[-40:]} (+50)")
         
         # =====================================================================
-        # 4. KEYWORD PATTERN MATCHING
-        # =====================================================================
-        for pattern, keywords in TABLE_KEYWORDS.items():
-            if pattern in table_name:
-                if any(kw in q_lower for kw in keywords):
-                    score += 10
-                else:
-                    score += 1
-        
-        # =====================================================================
-        # 5. DOMAIN-SPECIFIC BOOSTS
-        # =====================================================================
-        score += self._score_domain_boosts(table_name, q_lower)
-        
-        # =====================================================================
-        # 6. ROW COUNT SCORING
+        # 5. ROW COUNT SCORING
         # =====================================================================
         if row_count > 1000:
             score += 10
@@ -224,7 +351,7 @@ class TableSelector:
             score -= 5
         
         # =====================================================================
-        # 7. COLUMN COUNT SCORING
+        # 6. COLUMN COUNT SCORING
         # =====================================================================
         if len(columns) > 15:
             score += 10
@@ -232,7 +359,7 @@ class TableSelector:
             score += 5
         
         # =====================================================================
-        # 8. LOCATION COLUMN BOOST
+        # 7. LOCATION COLUMN BOOST
         # =====================================================================
         if any(loc in q_lower for loc in ['location', 'state', 'by state', 'by location', 'geographic']):
             col_names = [c.get('name', '').lower() if isinstance(c, dict) else str(c).lower() 
@@ -242,51 +369,71 @@ class TableSelector:
                 logger.debug(f"[TABLE-SEL] Location columns boost: {table_name[-40:]} (+40)")
         
         # =====================================================================
-        # 9. COLUMN VALUE MATCHING
+        # 8. COLUMN VALUE MATCHING (kept but not capped artificially)
         # =====================================================================
         score += self._score_value_match(table, words)
+        
+        return score
+    
+    def _score_metadata_match(self, table_name: str, question_domain: Optional[str],
+                               is_config_question: bool) -> int:
+        """
+        Score based on table classification metadata.
+        
+        v2.0: This replaces the hardcoded domain boosts with metadata-driven scoring.
+        
+        Returns:
+            Score adjustment based on metadata match
+        """
+        classification = self._get_classification(table_name)
+        if not classification:
+            return 0
+        
+        score = 0
+        
+        # Extract domain and type from classification (handle both dict and object)
+        if isinstance(classification, dict):
+            table_domain = classification.get('domain', 'general')
+            table_type = classification.get('table_type', 'unknown')
+            config_target = classification.get('config_target')
+        else:
+            table_domain = classification.domain.value if hasattr(classification.domain, 'value') else str(classification.domain)
+            table_type = classification.table_type.value if hasattr(classification.table_type, 'value') else str(classification.table_type)
+            config_target = classification.config_target
+        
+        # =====================================================================
+        # DOMAIN MATCHING
+        # If question is about earnings and table's domain is earnings, big boost
+        # =====================================================================
+        if question_domain and table_domain == question_domain:
+            score += 100  # Strong boost for domain match
+            logger.warning(f"[TABLE-SEL] DOMAIN MATCH: {table_name[-40:]} domain={table_domain} (+100)")
+        
+        # =====================================================================
+        # CONFIG TABLE BOOST
+        # If this is a "what's configured" question and table is CONFIG type
+        # =====================================================================
+        if is_config_question and table_type == 'config':
+            score += 80  # Strong boost for CONFIG tables on setup questions
+            logger.warning(f"[TABLE-SEL] CONFIG TYPE MATCH: {table_name[-40:]} (+80)")
+            
+            # Extra boost if config_target matches question domain
+            if config_target and question_domain and config_target == question_domain:
+                score += 50  # Very strong - this is THE config table for this domain
+                logger.warning(f"[TABLE-SEL] CONFIG TARGET MATCH: {table_name[-40:]} target={config_target} (+50)")
+        
+        # =====================================================================
+        # MASTER TABLE BOOST for "how many" questions
+        # =====================================================================
+        if 'how many' in table_name or any(w in ['count', 'total'] for w in table_name.split('_')):
+            if table_type == 'master':
+                score += 40  # Master tables are good for counting entities
         
         return score
     
     def _score_name_match(self, table_name: str, words: List[str]) -> int:
         """Score based on direct name matching."""
         score = 0
-        
-        # =====================================================================
-        # CANONICAL TABLE MATCHING
-        # When user asks about a domain, prefer the "primary" table for that domain
-        # This prevents helper/grouping tables from winning over the real data
-        # =====================================================================
-        canonical_matches = {
-            # Domain term → canonical table patterns (in priority order)
-            'earnings': ['earnings_codes', 'earning_code', 'pay_codes'],
-            'earning': ['earnings_codes', 'earning_code', 'pay_codes'],
-            'deductions': ['deduction_benefit_plans', 'deduction_plans', 'ded_plans'],
-            'deduction': ['deduction_benefit_plans', 'deduction_plans', 'ded_plans'],
-            'benefits': ['deduction_benefit_plans', 'benefit_plans'],
-            'benefit': ['deduction_benefit_plans', 'benefit_plans'],
-            'taxes': ['tax_information', 'tax_groups', 'tax_setup'],
-            'tax': ['tax_information', 'tax_groups', 'tax_setup'],
-            'locations': ['locations_locations', 'location_setup'],
-            'location': ['locations_locations', 'location_setup'],
-            'employees': ['employee_master', 'employee_data', 'personal_'],
-            'employee': ['employee_master', 'employee_data', 'personal_'],
-            'jobs': ['job_codes', 'job_family', 'position'],
-            'job': ['job_codes', 'job_family', 'position'],
-            'banks': ['banks', 'bank_setup'],
-            'bank': ['banks', 'bank_setup'],
-            'pto': ['pto', 'time_off', 'accrual'],
-            'accruals': ['pto', 'accrual', 'time_off'],
-        }
-        
-        for word in words:
-            word_lower = word.lower()
-            if word_lower in canonical_matches:
-                for pattern in canonical_matches[word_lower]:
-                    if pattern in table_name:
-                        score += 250  # Strong boost to beat helper tables with VALUE MATCH + config
-                        logger.warning(f"[TABLE-SEL] CANONICAL MATCH: '{word_lower}' → '{pattern}' in {table_name[-45:]} (+250)")
-                        break  # Only one canonical boost per word
         
         # =====================================================================
         # STANDARD NAME MATCHING
@@ -326,56 +473,6 @@ class TableSelector:
         
         return score
     
-    def _score_domain_boosts(self, table_name: str, q_lower: str) -> int:
-        """Apply domain-specific scoring boosts."""
-        score = 0
-        
-        # Tax questions
-        tax_terms = ['sui', 'suta', 'futa', 'fein', 'ein', 'tax rate', 'withholding', 
-                     'w2', 'w-2', '941', '940']
-        if any(term in q_lower for term in tax_terms):
-            if 'tax' in table_name:
-                score += 60
-                logger.warning(f"[TABLE-SEL] Tax boost: {table_name[-40:]} (+60)")
-        
-        # Workers Comp questions
-        wc_terms = ['workers comp', 'work comp', 'wc rate', 'workers compensation', 'wcb']
-        if any(term in q_lower for term in wc_terms):
-            if any(wc in table_name for wc in ['workers_comp', 'work_comp', 'wc_']):
-                score += 70
-                logger.warning(f"[TABLE-SEL] Workers Comp boost: {table_name[-40:]} (+70)")
-        
-        # Earnings questions
-        earnings_terms = ['earnings', 'earning code', 'pay code', 'earning setup', 
-                          'earnings configured', 'earnigs', 'earings', 'earning']
-        if any(term in q_lower for term in earnings_terms):
-            if any(e in table_name for e in ['earnings', 'earning', 'pay_code']):
-                score += 70
-                logger.warning(f"[TABLE-SEL] Earnings boost: {table_name[-40:]} (+70)")
-        
-        # Deduction questions
-        deduction_terms = ['deduction', 'benefit plan', 'deduction setup', 'deductions configured']
-        if any(term in q_lower for term in deduction_terms):
-            if any(d in table_name for d in ['deduction', 'benefit', 'ded_']):
-                score += 70
-                logger.warning(f"[TABLE-SEL] Deduction boost: {table_name[-40:]} (+70)")
-        
-        # GL questions
-        gl_terms = ['gl', 'general ledger', 'gl mapping', 'account mapping', 'chart of accounts']
-        if any(term in q_lower for term in gl_terms):
-            if any(g in table_name for g in ['general_ledger', 'gl_', 'account_map', 'ledger']):
-                score += 70
-                logger.warning(f"[TABLE-SEL] GL boost: {table_name[-40:]} (+70)")
-        
-        # Config/validation questions
-        config_terms = ['correct', 'configured', 'valid', 'setup', 'setting', 'configuration']
-        if any(term in q_lower for term in config_terms):
-            if any(cfg in table_name for cfg in ['config', 'validation', 'master', 'setting']):
-                score += 50
-                logger.warning(f"[TABLE-SEL] Config boost: {table_name[-40:]} (+50)")
-        
-        return score
-    
     def _score_value_match(self, table: Dict, words: List[str]) -> int:
         """
         Score based on column VALUE matching.
@@ -384,15 +481,16 @@ class TableSelector:
         not just column names. Critical for questions like "show me SUI rates"
         where "SUI" is a value in the tax_type column.
         
-        IMPORTANT: Capped at one match per table (+80) to prevent tables
-        with many matching values from dominating.
+        v2.0: Removed artificial cap now that domain metadata provides 
+        proper prioritization.
         """
         if not self.structured_handler or not hasattr(self.structured_handler, 'conn'):
             return 0
         
         score = 0
         table_name = table.get('table_name', '')
-        value_match_found = False  # Cap at one match per table
+        matches_found = 0
+        max_matches = 3  # Reasonable limit, but not artificially capped at 1
         
         try:
             # Get distinct values from column profiles
@@ -405,7 +503,7 @@ class TableSelector:
             """, [table_name]).fetchall()
             
             for col_name, distinct_values_json in value_profiles:
-                if value_match_found:  # Cap at one match
+                if matches_found >= max_matches:
                     break
                 if not distinct_values_json:
                     continue
@@ -414,7 +512,7 @@ class TableSelector:
                     distinct_values = json.loads(distinct_values_json)
                     
                     for val_info in distinct_values:
-                        if value_match_found:  # Cap at one match
+                        if matches_found >= max_matches:
                             break
                         
                         val = str(val_info.get('value', '')).lower().strip() \
@@ -431,12 +529,11 @@ class TableSelector:
                             # Match if:
                             # 1. Exact match
                             # 2. Word is significant substring of value (4+ chars)
-                            # FIXED: Removed reverse match (val in word) which caused "ar" to match "earnings"
                             if word == val or (len(word) >= 4 and word in val):
-                                score += 80
-                                logger.warning(f"[TABLE-SEL] VALUE MATCH: '{word}' → '{val}' "
-                                             f"in {table_name[-40:]}.{col_name} (+80)")
-                                value_match_found = True  # Only one per table
+                                score += 60  # Value match bonus
+                                matches_found += 1
+                                logger.info(f"[TABLE-SEL] VALUE MATCH: '{word}' → '{val}' "
+                                             f"in {table_name[-40:]}.{col_name} (+60)")
                                 break
                                 
                 except (json.JSONDecodeError, TypeError):
@@ -446,3 +543,30 @@ class TableSelector:
             logger.debug(f"[TABLE-SEL] Value match check failed for {table_name}: {e}")
         
         return score
+
+
+# =============================================================================
+# CONVENIENCE FUNCTIONS
+# =============================================================================
+
+def select_tables(tables: List[Dict], question: str, 
+                  structured_handler=None, project: str = None,
+                  max_tables: int = 5) -> List[Dict]:
+    """
+    Convenience function to select tables for a question.
+    
+    Args:
+        tables: List of table metadata
+        question: User's question
+        structured_handler: DuckDB handler
+        project: Project name
+        max_tables: Maximum tables to return
+        
+    Returns:
+        List of selected tables
+    """
+    selector = TableSelector(
+        structured_handler=structured_handler,
+        project=project
+    )
+    return selector.select(tables, question, max_tables)
