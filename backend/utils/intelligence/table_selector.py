@@ -30,16 +30,22 @@ from .types import LOOKUP_INDICATORS
 
 # Import table classification types
 try:
-    from utils.project_intelligence import (
+    from backend.utils.project_intelligence import (
         TableClassification, TableType, TableDomain, 
         get_table_classifications
     )
 except ImportError:
-    # Fallback for when running standalone
-    TableClassification = None
-    TableType = None
-    TableDomain = None
-    get_table_classifications = None
+    try:
+        from utils.project_intelligence import (
+            TableClassification, TableType, TableDomain, 
+            get_table_classifications
+        )
+    except ImportError:
+        # Fallback for when running standalone
+        TableClassification = None
+        TableType = None
+        TableDomain = None
+        get_table_classifications = None
 
 logger = logging.getLogger(__name__)
 
