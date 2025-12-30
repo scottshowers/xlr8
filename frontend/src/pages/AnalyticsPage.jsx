@@ -22,7 +22,7 @@
  * FIXED: Comprehensive null safety for API responses
  */
 
-import { useState, useEffect, Component } from 'react'
+import React, { useState, useEffect, Component } from 'react'
 import { useProject } from '../context/ProjectContext'
 import api from '../services/api'
 import {
@@ -177,13 +177,19 @@ function AnalyticsPageInner() {
   // LOAD CATALOG
   // ===========================================
   
+  // Track if we're currently loading to prevent double-fetch
+  const loadingRef = React.useRef(false)
+  
   useEffect(() => {
-    if (projectName) {
+    if (projectName && !loadingRef.current) {
       loadCatalog()
     }
   }, [projectName])
   
   const loadCatalog = async () => {
+    if (loadingRef.current) return
+    loadingRef.current = true
+    
     setCatalogLoading(true)
     setCatalogError(null)
     
@@ -193,8 +199,11 @@ function AnalyticsPageInner() {
       const data = response?.data || {}
       const tables = Array.isArray(data.tables) ? data.tables : []
       
+      console.log(`[Analytics] Loaded ${tables.length} tables for ${projectName}`)
+      
       // Organize tables by truth_type -> domain
       const organized = organizeTables(tables)
+      console.log(`[Analytics] Organized into ${organized.length} truth types`)
       setCatalog(organized)
       
       // Auto-expand first non-empty truth type
@@ -223,6 +232,7 @@ function AnalyticsPageInner() {
       setCatalogError(err?.message || 'Failed to load data catalog')
     } finally {
       setCatalogLoading(false)
+      loadingRef.current = false
     }
   }
   
@@ -232,12 +242,23 @@ function AnalyticsPageInner() {
       return []
     }
     
+    // Deduplicate tables by full_name
+    const seen = new Set()
+    const uniqueTables = tables.filter(table => {
+      if (!table) return false
+      const key = table.full_name || table.name
+      if (seen.has(key)) {
+        console.warn('Duplicate table filtered out:', key)
+        return false
+      }
+      seen.add(key)
+      return true
+    })
+    
     // Group by truth_type -> domain -> tables
     const hierarchy = {}
     
-    tables.forEach(table => {
-      if (!table) return // Skip null/undefined entries
-      
+    uniqueTables.forEach(table => {
       const truthType = table.truth_type || 'reality'
       const domain = table.domain || inferDomain(table.full_name || table.name || '')
       
@@ -829,7 +850,7 @@ function AnalyticsPageInner() {
                       const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
                       
                       return (
-                        <div key={domainGroup.domain} className="border-t border-gray-100">
+                        <div key={`${truthTypeGroup.truthType}-${domainGroup.domain || 'general'}`} className="border-t border-gray-100">
                           {/* Domain Header */}
                           <button
                             onClick={() => toggleDomain(truthTypeGroup.truthType, domainGroup.domain)}
