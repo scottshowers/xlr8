@@ -41,6 +41,8 @@ const getColors = (dark) => ({
   warningLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
   red: '#993c44',
   redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
+  success: '#10b981',
+  successLight: dark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
   divider: dark ? '#2d3548' : '#e2e8f0',
   inputBg: dark ? '#1a1f2e' : '#f8fafc',
   messageBg: dark ? '#2d3548' : '#f1f5f9',
@@ -73,6 +75,9 @@ export default function Chat({ functionalAreas = [] }) {
   const [sessionId, setSessionId] = useState(null)
   const [pendingClarification, setPendingClarification] = useState(null)
   const [learningStats, setLearningStats] = useState(null)
+  
+  // Experimental: Use new modular engine
+  const [useEngineV2, setUseEngineV2] = useState(false)
   
   // Persona state
   const [debugInfo, setDebugInfo] = useState(null)
@@ -202,7 +207,8 @@ export default function Chat({ functionalAreas = [] }) {
         clarifications: clarifications,
         include_citations: true,
         include_quality_alerts: true,
-        include_follow_ups: true
+        include_follow_ups: true,
+        use_engine_v2: useEngineV2
       })
 
       const data = response.data
@@ -375,6 +381,31 @@ export default function Chat({ functionalAreas = [] }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          {/* Engine V2 Toggle (experimental) */}
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.375rem',
+              padding: '0.375rem 0.5rem',
+              fontSize: '0.75rem',
+              borderRadius: 6,
+              cursor: 'pointer',
+              background: useEngineV2 ? colors.successLight : colors.inputBg,
+              border: `1px solid ${useEngineV2 ? colors.success : colors.divider}`,
+              color: useEngineV2 ? colors.success : colors.textMuted,
+            }}
+            title="Experimental: Use new modular intelligence engine"
+          >
+            <input
+              type="checkbox"
+              checked={useEngineV2}
+              onChange={(e) => setUseEngineV2(e.target.checked)}
+              style={{ margin: 0, cursor: 'pointer' }}
+            />
+            V2
+          </label>
+          
           {/* Scope Selector */}
           <select
             value={scope}
