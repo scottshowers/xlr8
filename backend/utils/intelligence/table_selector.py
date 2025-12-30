@@ -252,6 +252,45 @@ class TableSelector:
         """Score based on direct name matching."""
         score = 0
         
+        # =====================================================================
+        # CANONICAL TABLE MATCHING
+        # When user asks about a domain, prefer the "primary" table for that domain
+        # This prevents helper/grouping tables from winning over the real data
+        # =====================================================================
+        canonical_matches = {
+            # Domain term → canonical table patterns (in priority order)
+            'earnings': ['earnings_codes', 'earning_code', 'pay_codes'],
+            'earning': ['earnings_codes', 'earning_code', 'pay_codes'],
+            'deductions': ['deduction_benefit_plans', 'deduction_plans', 'ded_plans'],
+            'deduction': ['deduction_benefit_plans', 'deduction_plans', 'ded_plans'],
+            'benefits': ['deduction_benefit_plans', 'benefit_plans'],
+            'benefit': ['deduction_benefit_plans', 'benefit_plans'],
+            'taxes': ['tax_information', 'tax_groups', 'tax_setup'],
+            'tax': ['tax_information', 'tax_groups', 'tax_setup'],
+            'locations': ['locations_locations', 'location_setup'],
+            'location': ['locations_locations', 'location_setup'],
+            'employees': ['employee_master', 'employee_data', 'personal_'],
+            'employee': ['employee_master', 'employee_data', 'personal_'],
+            'jobs': ['job_codes', 'job_family', 'position'],
+            'job': ['job_codes', 'job_family', 'position'],
+            'banks': ['banks', 'bank_setup'],
+            'bank': ['banks', 'bank_setup'],
+            'pto': ['pto', 'time_off', 'accrual'],
+            'accruals': ['pto', 'accrual', 'time_off'],
+        }
+        
+        for word in words:
+            word_lower = word.lower()
+            if word_lower in canonical_matches:
+                for pattern in canonical_matches[word_lower]:
+                    if pattern in table_name:
+                        score += 150  # Massive boost for canonical table match
+                        logger.warning(f"[TABLE-SEL] CANONICAL MATCH: '{word_lower}' → '{pattern}' in {table_name[-45:]} (+150)")
+                        break  # Only one canonical boost per word
+        
+        # =====================================================================
+        # STANDARD NAME MATCHING
+        # =====================================================================
         for i, word in enumerate(words):
             if len(word) < 3 or word in SKIP_WORDS:
                 continue
