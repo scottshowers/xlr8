@@ -104,11 +104,11 @@ def generate_display_name(table_name: str, sheet: str = None, filename: str = No
 # =============================================================================
 
 try:
-    from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+    from utils.intelligence import IntelligenceEngine, IntelligenceMode
     INTELLIGENCE_AVAILABLE = True
 except ImportError:
     try:
-        from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+        from backend.utils.intelligence import IntelligenceEngine, IntelligenceMode
         INTELLIGENCE_AVAILABLE = True
     except ImportError:
         INTELLIGENCE_AVAILABLE = False
