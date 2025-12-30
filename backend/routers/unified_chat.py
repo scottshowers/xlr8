@@ -97,29 +97,36 @@ router = APIRouter(tags=["unified-chat"])
 # IMPORTS - Graceful degradation for all dependencies
 # =============================================================================
 
-# Intelligence Engine
-# V2 Engine toggle - set USE_ENGINE_V2=1 to use new modular engine
+# Intelligence Engine - import both for runtime selection
 import os
-USE_ENGINE_V2 = os.environ.get('USE_ENGINE_V2', '0') == '1'
 
+# Old engine (default)
+IntelligenceEngine = None
+INTELLIGENCE_AVAILABLE = False
 try:
-    if USE_ENGINE_V2:
-        from utils.intelligence import IntelligenceEngineV2 as IntelligenceEngine, IntelligenceMode
-        logger.warning("[UNIFIED] Using IntelligenceEngineV2 (modular)")
-    else:
-        from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+    from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
     INTELLIGENCE_AVAILABLE = True
 except ImportError:
     try:
-        if USE_ENGINE_V2:
-            from backend.utils.intelligence import IntelligenceEngineV2 as IntelligenceEngine, IntelligenceMode
-            logger.warning("[UNIFIED] Using IntelligenceEngineV2 (modular)")
-        else:
-            from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+        from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
         INTELLIGENCE_AVAILABLE = True
     except ImportError:
-        INTELLIGENCE_AVAILABLE = False
         logger.warning("[UNIFIED] Intelligence engine not available")
+
+# New modular engine (V2)
+IntelligenceEngineV2 = None
+ENGINE_V2_AVAILABLE = False
+try:
+    from utils.intelligence import IntelligenceEngineV2
+    ENGINE_V2_AVAILABLE = True
+    logger.info("[UNIFIED] IntelligenceEngineV2 available")
+except ImportError:
+    try:
+        from backend.utils.intelligence import IntelligenceEngineV2
+        ENGINE_V2_AVAILABLE = True
+        logger.info("[UNIFIED] IntelligenceEngineV2 available")
+    except ImportError:
+        logger.warning("[UNIFIED] IntelligenceEngineV2 not available")
 
 # Learning Module
 try:
@@ -285,6 +292,7 @@ class UnifiedChatRequest(BaseModel):
         include_quality_alerts: Whether to run data quality checks
         include_follow_ups: Whether to suggest follow-up questions
         include_citations: Whether to include full audit trail
+        use_engine_v2: Whether to use the new modular engine (experimental)
     """
     message: str
     project: Optional[str] = None
@@ -298,6 +306,9 @@ class UnifiedChatRequest(BaseModel):
     include_quality_alerts: Optional[bool] = True
     include_follow_ups: Optional[bool] = True
     include_citations: Optional[bool] = True
+    
+    # Engine toggle (experimental)
+    use_engine_v2: Optional[bool] = False
 
 
 class ClarificationAnswer(BaseModel):
@@ -1758,15 +1769,28 @@ async def unified_chat(request: UnifiedChatRequest):
             except Exception as e:
                 logger.warning(f"[UNIFIED] Could not resolve project_id: {e}")
         
+        # Determine which engine to use
+        use_v2 = getattr(request, 'use_engine_v2', False)
+        session_engine_type = session.get('engine_type', 'v1')
+        
         # Get or create intelligence engine
-        if session['engine']:
+        # If engine type changed, create new engine
+        engine_type_changed = (use_v2 and session_engine_type != 'v2') or (not use_v2 and session_engine_type == 'v2')
+        
+        if session['engine'] and not engine_type_changed:
             engine = session['engine']
             # Ensure project_id is set on existing engines
             if project_id and not getattr(engine, 'project_id', None):
                 engine.project_id = project_id
+        elif use_v2 and ENGINE_V2_AVAILABLE:
+            logger.warning("[UNIFIED] Creating IntelligenceEngineV2 (modular)")
+            engine = IntelligenceEngineV2(project or 'default', project_id=project_id)
+            session['engine'] = engine
+            session['engine_type'] = 'v2'
         elif INTELLIGENCE_AVAILABLE:
             engine = IntelligenceEngine(project or 'default', project_id=project_id)
             session['engine'] = engine
+            session['engine_type'] = 'v1'
         else:
             return {
                 "session_id": session_id,
