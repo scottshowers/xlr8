@@ -142,6 +142,7 @@ function AnalyticsPageInner() {
   const [catalogError, setCatalogError] = useState(null)
   const [catalogSearch, setCatalogSearch] = useState('')
   const [expandedTruthTypes, setExpandedTruthTypes] = useState({})
+  const [expandedFiles, setExpandedFiles] = useState({})
   const [expandedDomains, setExpandedDomains] = useState({})
   const [selectedTable, setSelectedTable] = useState(null)
   
@@ -246,43 +247,26 @@ function AnalyticsPageInner() {
       return []
     }
     
-    // DEDUP: Track tables by full_name to prevent duplicates
-    const seen = new Set()
-    const uniqueTables = tables.filter(table => {
-      if (!table) return false
-      const key = table.full_name || table.name
-      if (!key) return false
-      if (seen.has(key)) {
-        console.warn('[Analytics] Duplicate table filtered:', key)
-        return false
-      }
-      seen.add(key)
-      return true
-    })
+    console.log(`[Analytics] Organizing ${tables.length} tables`)
     
-    console.log(`[Analytics] After dedup: ${uniqueTables.length} tables (from ${tables.length})`)
-    
-    // Group by truth_type -> domain -> tables
+    // Group by truth_type -> file -> domain -> tables
     const hierarchy = {}
-    const globalTableSeen = new Set() // Track all table assignments
     
-    uniqueTables.forEach(table => {
-      const truthType = table.truth_type || 'reality'
-      const domain = table.domain || inferDomain(table.full_name || table.name || '')
-      const tableKey = table.full_name || table.name
+    tables.forEach(table => {
+      if (!table) return
       
-      // Check for global duplicates
-      if (globalTableSeen.has(tableKey)) {
-        console.warn('[Analytics] DUPLICATE ASSIGNMENT:', tableKey, 'to', truthType, domain)
-        return // Skip duplicate
-      }
-      globalTableSeen.add(tableKey)
+      const truthType = table.truth_type || 'reality'
+      const file = table.file || 'Unknown Source'
+      const domain = table.domain || inferDomain(table.full_name || table.name || '')
       
       if (!hierarchy[truthType]) {
         hierarchy[truthType] = {}
       }
-      if (!hierarchy[truthType][domain]) {
-        hierarchy[truthType][domain] = []
+      if (!hierarchy[truthType][file]) {
+        hierarchy[truthType][file] = {}
+      }
+      if (!hierarchy[truthType][file][domain]) {
+        hierarchy[truthType][file][domain] = []
       }
       
       // Normalize columns to have type info
@@ -297,37 +281,54 @@ function AnalyticsPageInner() {
         return { name: String(col || ''), type: 'string' }
       })
       
-      hierarchy[truthType][domain].push({
+      hierarchy[truthType][file][domain].push({
         ...table,
         columns: normalizedColumns
       })
     })
     
     // Convert to array structure for rendering
-    const result = Object.entries(hierarchy).map(([truthType, domains]) => {
+    // Structure: truthTypes[] -> files[] -> domains[] -> tables[]
+    const result = Object.entries(hierarchy).map(([truthType, files]) => {
       const config = TRUTH_TYPE_CONFIG[truthType] || TRUTH_TYPE_CONFIG.reality
-      const domainList = Object.entries(domains).map(([domain, tables]) => {
-        const domainConfig = DOMAIN_CONFIG[domain] || DOMAIN_CONFIG.general
-        const tableList = Array.isArray(tables) ? tables : []
+      
+      const fileList = Object.entries(files).map(([fileName, domains]) => {
+        const domainList = Object.entries(domains).map(([domain, tables]) => {
+          const domainConfig = DOMAIN_CONFIG[domain] || DOMAIN_CONFIG.general
+          return {
+            domain,
+            label: domainConfig.label || domain,
+            icon: domainConfig.icon,
+            tables: tables.sort((a, b) => {
+              const nameA = a?.display_name || a?.name || ''
+              const nameB = b?.display_name || b?.name || ''
+              return nameA.localeCompare(nameB)
+            })
+          }
+        }).sort((a, b) => (b.tables?.length || 0) - (a.tables?.length || 0))
+        
+        const tableCount = domainList.reduce((sum, d) => sum + d.tables.length, 0)
+        
+        // Shorten filename for display
+        const shortName = fileName.length > 40 
+          ? fileName.substring(0, 37) + '...' 
+          : fileName
+        
         return {
-          domain,
-          label: domain || domainConfig.label,
-          icon: domainConfig.icon,
-          tables: tableList.sort((a, b) => {
-            const nameA = a?.display_name || a?.name || ''
-            const nameB = b?.display_name || b?.name || ''
-            return nameA.localeCompare(nameB)
-          })
+          fileName,
+          shortName,
+          domains: domainList,
+          tableCount
         }
-      }).sort((a, b) => (b.tables?.length || 0) - (a.tables?.length || 0))
+      }).sort((a, b) => a.fileName.localeCompare(b.fileName))
       
       return {
         truthType,
         label: config.label,
         icon: config.icon,
         color: config.color,
-        domains: domainList,
-        tableCount: domainList.reduce((sum, d) => sum + (d.tables?.length || 0), 0)
+        files: fileList,
+        tableCount: fileList.reduce((sum, f) => sum + f.tableCount, 0)
       }
     })
     
@@ -336,10 +337,7 @@ function AnalyticsPageInner() {
     
     // Log final structure
     sorted.forEach(tt => {
-      console.log(`[Analytics] ${tt.truthType}: ${tt.tableCount} tables across ${tt.domains.length} domains`)
-      tt.domains.forEach(d => {
-        console.log(`  - ${d.domain}: ${d.tables.length} tables`)
-      })
+      console.log(`[Analytics] ${tt.truthType}: ${tt.tableCount} tables across ${tt.files.length} files`)
     })
     
     return sorted
@@ -389,8 +387,13 @@ function AnalyticsPageInner() {
     setExpandedTruthTypes(prev => ({ ...prev, [truthType]: !prev[truthType] }))
   }
   
-  const toggleDomain = (truthType, domain) => {
-    const key = `${truthType}:${domain}`
+  const toggleFile = (truthType, fileName) => {
+    const key = `${truthType}:${fileName}`
+    setExpandedFiles(prev => ({ ...prev, [key]: !prev[key] }))
+  }
+  
+  const toggleDomain = (truthType, fileName, domain) => {
+    const key = `${truthType}:${fileName}:${domain}`
     setExpandedDomains(prev => ({ ...prev, [key]: !prev[key] }))
   }
   
@@ -728,32 +731,42 @@ function AnalyticsPageInner() {
     }
   }
   
-  // Filter catalog by search (searches across truth types and domains)
-  // NULL SAFETY: Comprehensive null checking throughout
+  // Filter catalog by search
+  // Structure: truthTypes[] -> files[] -> domains[] -> tables[]
   const filteredCatalog = Array.isArray(catalog) ? catalog.map(truthTypeGroup => {
     if (!truthTypeGroup) return null
-    const domains = Array.isArray(truthTypeGroup.domains) ? truthTypeGroup.domains : []
-    return {
-      ...truthTypeGroup,
-      domains: domains.map(domainGroup => {
+    const files = Array.isArray(truthTypeGroup.files) ? truthTypeGroup.files : []
+    
+    const filteredFiles = files.map(fileGroup => {
+      if (!fileGroup) return null
+      const domains = Array.isArray(fileGroup.domains) ? fileGroup.domains : []
+      
+      const filteredDomains = domains.map(domainGroup => {
         if (!domainGroup) return null
         const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
-        return {
-          ...domainGroup,
-          tables: tables.filter(t => {
-            if (!t) return false
-            const name = (t.name || '').toLowerCase()
-            const displayName = (t.display_name || '').toLowerCase()
-            const search = (catalogSearch || '').toLowerCase()
-            const cols = Array.isArray(t.columns) ? t.columns : []
-            return name.includes(search) ||
-              displayName.includes(search) ||
-              cols.some(c => (c?.name || '').toLowerCase().includes(search))
-          })
-        }
-      }).filter(d => d && Array.isArray(d.tables) && d.tables.length > 0)
-    }
-  }).filter(t => t && Array.isArray(t.domains) && t.domains.length > 0) : []
+        
+        const filteredTables = tables.filter(t => {
+          if (!t) return false
+          const search = (catalogSearch || '').toLowerCase()
+          if (!search) return true
+          const name = (t.name || '').toLowerCase()
+          const displayName = (t.display_name || '').toLowerCase()
+          const cols = Array.isArray(t.columns) ? t.columns : []
+          return name.includes(search) ||
+            displayName.includes(search) ||
+            cols.some(c => (c?.name || '').toLowerCase().includes(search))
+        })
+        
+        return { ...domainGroup, tables: filteredTables }
+      }).filter(d => d && d.tables.length > 0)
+      
+      const tableCount = filteredDomains.reduce((sum, d) => sum + d.tables.length, 0)
+      return { ...fileGroup, domains: filteredDomains, tableCount }
+    }).filter(f => f && f.domains.length > 0)
+    
+    const tableCount = filteredFiles.reduce((sum, f) => sum + f.tableCount, 0)
+    return { ...truthTypeGroup, files: filteredFiles, tableCount }
+  }).filter(t => t && t.files && t.files.length > 0) : []
   
   // ===========================================
   // RENDER: No Project
@@ -785,7 +798,7 @@ function AnalyticsPageInner() {
         <div className="p-3 border-b bg-gray-50 flex-shrink-0">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
             <Layers size={14} className="text-[#83b16d]" />
-            Data Catalog <span className="text-xs text-gray-400 ml-1">v4.4</span>
+            Data Catalog <span className="text-xs text-gray-400 ml-1">v5.0</span>
           </h2>
           {Array.isArray(catalog) && catalog.length > 0 && (
             <p className="text-xs text-gray-400 mt-0.5">
@@ -834,8 +847,7 @@ function AnalyticsPageInner() {
           {Array.isArray(filteredCatalog) && filteredCatalog.map(truthTypeGroup => {
             if (!truthTypeGroup) return null
             const isTruthExpanded = expandedTruthTypes[truthTypeGroup.truthType]
-            const domains = Array.isArray(truthTypeGroup.domains) ? truthTypeGroup.domains : []
-            const totalTables = domains.reduce((sum, d) => sum + (Array.isArray(d?.tables) ? d.tables.length : 0), 0)
+            const files = Array.isArray(truthTypeGroup.files) ? truthTypeGroup.files : []
             
             return (
               <div key={truthTypeGroup.truthType} className="border-b border-gray-200">
@@ -848,7 +860,7 @@ function AnalyticsPageInner() {
                   <span className="text-base">{truthTypeGroup.icon}</span>
                   <div className="flex-1 text-left min-w-0">
                     <div className="text-sm font-semibold text-gray-800">{truthTypeGroup.label}</div>
-                    <div className="text-xs text-gray-400">{totalTables} tables</div>
+                    <div className="text-xs text-gray-400">{truthTypeGroup.tableCount} tables • {files.length} files</div>
                   </div>
                   {isTruthExpanded ? (
                     <ChevronDown size={14} className="text-gray-400" />
@@ -857,68 +869,96 @@ function AnalyticsPageInner() {
                   )}
                 </button>
                 
-                {/* Domains within Truth Type */}
+                {/* Files within Truth Type */}
                 {isTruthExpanded && (
                   <div className="bg-gray-50/50">
-                    {domains.map(domainGroup => {
-                      if (!domainGroup) return null
-                      const Icon = domainGroup.icon || Database
-                      const domainKey = `${truthTypeGroup.truthType}:${domainGroup.domain}`
-                      const isDomainExpanded = expandedDomains[domainKey]
-                      const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
+                    {files.map(fileGroup => {
+                      if (!fileGroup) return null
+                      const fileKey = `${truthTypeGroup.truthType}:${fileGroup.fileName}`
+                      const isFileExpanded = expandedFiles[fileKey]
+                      const domains = Array.isArray(fileGroup.domains) ? fileGroup.domains : []
                       
                       return (
-                        <div key={domainGroup.domain} className="border-t border-gray-100">
-                          {/* Domain Header */}
+                        <div key={fileGroup.fileName} className="border-t border-gray-100">
+                          {/* File Header */}
                           <button
-                            onClick={() => toggleDomain(truthTypeGroup.truthType, domainGroup.domain)}
+                            onClick={() => toggleFile(truthTypeGroup.truthType, fileGroup.fileName)}
                             className="w-full px-3 py-2 pl-6 flex items-center gap-2 hover:bg-gray-100 transition-colors"
                           >
                             <div className="w-5 h-5 rounded flex items-center justify-center bg-white border border-gray-200">
-                              <Icon size={10} className="text-gray-500" />
+                              <FileText size={10} className="text-gray-500" />
                             </div>
                             <div className="flex-1 text-left min-w-0">
-                              <div className="text-xs font-medium text-gray-700">{domainGroup.label || 'General'}</div>
-                              <div className="text-xs text-gray-400">{tables.length} tables</div>
+                              <div className="text-xs font-medium text-gray-700 truncate" title={fileGroup.fileName}>
+                                {fileGroup.shortName}
+                              </div>
+                              <div className="text-xs text-gray-400">{fileGroup.tableCount} tables</div>
                             </div>
-                            {isDomainExpanded ? (
+                            {isFileExpanded ? (
                               <ChevronDown size={12} className="text-gray-400" />
                             ) : (
                               <ChevronRight size={12} className="text-gray-400" />
                             )}
                           </button>
                           
-                          {/* Tables within Domain */}
-                          {isDomainExpanded && (
-                            <div className="pb-1 bg-white">
-                              {tables.reduce((acc, table) => {
-                                if (!table) return acc
-                                const tableKey = table.full_name || table.name
-                                // Skip if already rendered in this domain
-                                if (acc.seen.has(tableKey)) {
-                                  console.log('[Analytics] Duplicate in domain:', tableKey, domainGroup.domain)
-                                  return acc
-                                }
-                                acc.seen.add(tableKey)
-                                acc.elements.push(
-                                  <button
-                                    key={tableKey}
-                                    onClick={() => handleTableSelect(table)}
-                                    className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
-                                      selectedTable?.full_name === table.full_name 
-                                        ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
-                                        : 'text-gray-600'
-                                    }`}
-                                  >
-                                    <Table2 size={10} className="text-gray-400 flex-shrink-0" />
-                                    <span className="truncate flex-1">{table.display_name || table.name}</span>
-                                    <span className="text-xs text-gray-400 flex-shrink-0">
-                                      {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
-                                    </span>
-                                  </button>
+                          {/* Domains within File */}
+                          {isFileExpanded && (
+                            <div className="bg-white/50">
+                              {domains.map(domainGroup => {
+                                if (!domainGroup) return null
+                                const Icon = domainGroup.icon || Database
+                                const domainKey = `${truthTypeGroup.truthType}:${fileGroup.fileName}:${domainGroup.domain}`
+                                const isDomainExpanded = expandedDomains[domainKey]
+                                const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
+                                
+                                return (
+                                  <div key={domainGroup.domain} className="border-t border-gray-50">
+                                    {/* Domain Header */}
+                                    <button
+                                      onClick={() => toggleDomain(truthTypeGroup.truthType, fileGroup.fileName, domainGroup.domain)}
+                                      className="w-full px-3 py-1.5 pl-10 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+                                    >
+                                      <Icon size={10} className="text-gray-400" />
+                                      <div className="flex-1 text-left min-w-0">
+                                        <span className="text-xs text-gray-600">{domainGroup.label}</span>
+                                        <span className="text-xs text-gray-400 ml-2">{tables.length}</span>
+                                      </div>
+                                      {isDomainExpanded ? (
+                                        <ChevronDown size={10} className="text-gray-400" />
+                                      ) : (
+                                        <ChevronRight size={10} className="text-gray-400" />
+                                      )}
+                                    </button>
+                                    
+                                    {/* Tables within Domain */}
+                                    {isDomainExpanded && (
+                                      <div className="pb-1 bg-white">
+                                        {tables.map(table => {
+                                          if (!table) return null
+                                          const tableKey = table.full_name || table.name
+                                          return (
+                                            <button
+                                              key={tableKey}
+                                              onClick={() => handleTableSelect(table)}
+                                              className={`w-full px-3 py-1.5 pl-14 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
+                                                selectedTable?.full_name === table.full_name 
+                                                  ? 'bg-[rgba(131,177,109,0.1)] text-[#83b16d] font-medium' 
+                                                  : 'text-gray-600'
+                                              }`}
+                                            >
+                                              <Table2 size={10} className="text-gray-400 flex-shrink-0" />
+                                              <span className="truncate flex-1">{table.display_name || table.name}</span>
+                                              <span className="text-xs text-gray-400 flex-shrink-0">
+                                                {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
+                                              </span>
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
                                 )
-                                return acc
-                              }, { seen: new Set(), elements: [] }).elements}
+                              })}
                             </div>
                           )}
                         </div>
