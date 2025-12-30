@@ -250,9 +250,20 @@ class Synthesizer:
         """
         Generate the response text.
         
-        Tries LLM synthesis first, falls back to template formatting.
+        Uses template for config listing questions (more reliable),
+        LLM synthesis for complex analytical questions.
         """
-        # Try LLM synthesis first
+        q_lower = question.lower()
+        
+        # For config listing questions, use template (more reliable formatting)
+        if self._is_config_listing_question(q_lower):
+            logger.info("[SYNTHESIZE] Config listing detected - using template")
+            return self._generate_template_response(
+                question, data_info, doc_context, reflib_context,
+                insights, conflicts, compliance_check
+            )
+        
+        # Try LLM synthesis for complex questions
         if self.llm_synthesizer:
             try:
                 structured_data = {
@@ -311,6 +322,7 @@ class Synthesizer:
         result_columns = data_info.get('result_columns', [])
         
         status_filter = self.confirmed_facts.get('status', '')
+        q_lower = question.lower()
         
         # REALITY section
         if query_type == 'count' and result_value is not None:
@@ -339,9 +351,20 @@ class Synthesizer:
                 parts.append(f"\n*Showing top 15 of {len(result_rows):,} groups*")
         
         elif result_rows:
-            parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
-            parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
-            if len(result_rows) > 12:
+            # Check if this is a config listing question
+            if self._is_config_listing_question(q_lower):
+                config_response = self._format_config_listing(q_lower, result_rows, result_columns)
+                if config_response:
+                    parts.append(config_response)
+                else:
+                    # Fallback to table
+                    parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
+                    parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
+            else:
+                parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
+                parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
+            
+            if len(result_rows) > 12 and not self._is_config_listing_question(q_lower):
                 parts.append(f"\n*Showing first 12 of {len(result_rows):,} results*")
         else:
             parts.append("📊 **Reality:** No data found matching your criteria.")
@@ -377,6 +400,150 @@ class Synthesizer:
                     parts.append(f"   → *{conflict.recommendation}*")
         
         return "\n".join(parts)
+    
+    def _is_config_listing_question(self, q_lower: str) -> bool:
+        """Detect if this is a configuration listing question."""
+        listing_triggers = [
+            'what', 'show', 'list', 'display', 'give me',
+            'setup', 'configured', 'available', 'currently'
+        ]
+        config_domains = [
+            'earning', 'deduction', 'benefit', 'tax', 'location',
+            'job', 'pay group', 'bank', 'pto', 'accrual', 'gl',
+            'organization', 'company', 'code'
+        ]
+        
+        has_listing = any(t in q_lower for t in listing_triggers)
+        has_domain = any(d in q_lower for d in config_domains)
+        
+        return has_listing and has_domain
+    
+    def _format_config_listing(self, q_lower: str, rows: List[Dict], 
+                               columns: List[str]) -> Optional[str]:
+        """
+        Format configuration data consultatively.
+        
+        Identifies code, description, and category columns,
+        then groups and formats like a senior consultant would.
+        """
+        if not rows or not columns:
+            return None
+        
+        # Identify key columns
+        code_col = self._find_column(columns, ['code', 'earnings_code', 'earning_code', 
+                                                'deduction_code', 'ded_code', 'name', 'id'])
+        desc_col = self._find_column(columns, ['description', 'desc', 'code_description',
+                                                'earning_description', 'name', 'label'])
+        category_col = self._find_column(columns, ['type', 'category', 'group', 'class',
+                                                    'tax_category', 'earnings_group',
+                                                    'calculation_rule', 'earning_type'])
+        
+        # Determine what we're listing
+        domain = self._detect_domain(q_lower)
+        domain_label = domain.title() if domain else "Configuration"
+        
+        # Build consultative response
+        parts = []
+        total = len(rows)
+        
+        # Header with count
+        parts.append(f"You have **{total}** {domain_label.lower()} codes configured:\n")
+        
+        # If we have a category column, group by it
+        if category_col and code_col:
+            grouped = self._group_by_category(rows, category_col, code_col, desc_col)
+            
+            for category, items in grouped.items():
+                cat_display = category if category else "Uncategorized"
+                parts.append(f"\n**{cat_display}** ({len(items)})")
+                
+                # Show up to 8 items per category
+                for item in items[:8]:
+                    code = item.get('code', '')
+                    desc = item.get('desc', '')
+                    if desc and desc != code:
+                        parts.append(f"- `{code}` - {desc[:50]}")
+                    else:
+                        parts.append(f"- `{code}`")
+                
+                if len(items) > 8:
+                    parts.append(f"- *...and {len(items) - 8} more*")
+        
+        elif code_col:
+            # No category, just list codes
+            codes = [str(row.get(code_col, ''))[:20] for row in rows[:30]]
+            
+            # Show in organized chunks
+            parts.append("\n**Configured codes:**")
+            for i in range(0, min(len(codes), 30), 10):
+                chunk = codes[i:i+10]
+                parts.append(f"- {', '.join(f'`{c}`' for c in chunk if c)}")
+            
+            if total > 30:
+                parts.append(f"\n*Showing 30 of {total} total codes*")
+        
+        else:
+            # Can't identify structure, return None to fall back to table
+            return None
+        
+        return "\n".join(parts)
+    
+    def _find_column(self, columns: List[str], patterns: List[str]) -> Optional[str]:
+        """Find a column matching any of the patterns."""
+        cols_lower = {c.lower(): c for c in columns}
+        
+        # Exact match first
+        for pattern in patterns:
+            if pattern in cols_lower:
+                return cols_lower[pattern]
+        
+        # Partial match
+        for pattern in patterns:
+            for col_lower, col_orig in cols_lower.items():
+                if pattern in col_lower:
+                    return col_orig
+        
+        return None
+    
+    def _detect_domain(self, q_lower: str) -> str:
+        """Detect the configuration domain from the question."""
+        domains = {
+            'earning': ['earning', 'earnings', 'pay code'],
+            'deduction': ['deduction', 'deductions', 'benefit plan'],
+            'tax': ['tax', 'taxes', 'sui', 'futa'],
+            'location': ['location', 'locations', 'site'],
+            'job': ['job', 'jobs', 'position'],
+            'bank': ['bank', 'banks'],
+            'pto': ['pto', 'accrual', 'time off'],
+            'gl': ['gl', 'general ledger', 'account'],
+        }
+        
+        for domain, triggers in domains.items():
+            if any(t in q_lower for t in triggers):
+                return domain
+        
+        return "configuration"
+    
+    def _group_by_category(self, rows: List[Dict], category_col: str,
+                          code_col: str, desc_col: Optional[str]) -> Dict[str, List[Dict]]:
+        """Group rows by category."""
+        from collections import defaultdict
+        
+        grouped = defaultdict(list)
+        
+        for row in rows:
+            category = str(row.get(category_col, 'Other'))[:30]
+            code = str(row.get(code_col, ''))
+            desc = str(row.get(desc_col, '')) if desc_col else ''
+            
+            if code:  # Only include if we have a code
+                grouped[category].append({
+                    'code': code,
+                    'desc': desc
+                })
+        
+        # Sort categories by count (most first)
+        return dict(sorted(grouped.items(), key=lambda x: -len(x[1])))
     
     def _format_table(self, rows: List[Dict], columns: List[str]) -> List[str]:
         """Format rows as a markdown table."""
