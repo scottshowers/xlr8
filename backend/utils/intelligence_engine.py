@@ -136,7 +136,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.21.1 CHECKLIST DEBUG ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.21.2 VALUE MATCH CAP ======")
 
 # CONSULTATIVE SYNTHESIS - Import the synthesizer
 try:
@@ -3327,9 +3327,6 @@ class IntelligenceEngine:
             
             score = 0
             
-            # DEBUG: Log every table being scored
-            logger.warning(f"[SQL-GEN] SCORING TABLE: {table_name[-60:]}")
-            
             # ============================================================
             # CRITICAL: DIRECT NAME MATCH - Highest priority boost
             # If user asks about "ale group" and table contains "ale_group",
@@ -3401,10 +3398,6 @@ class IntelligenceEngine:
             # DEPRIORITIZE checklist/document/procedural tables - these are guides, not config data
             checklist_indicators = ['checklist', 'step_', '_step', 'document', 'before_final', 'year_end', 'yearend']
             is_checklist = any(indicator in table_name for indicator in checklist_indicators)
-            # DEBUG: Log all tables being checked
-            matched_indicators = [ind for ind in checklist_indicators if ind in table_name]
-            if matched_indicators:
-                logger.warning(f"[SQL-GEN] CHECKLIST CHECK: {table_name[-50:]} matched {matched_indicators}")
             if is_checklist:
                 score -= 100  # Heavy penalty - these should almost never be selected for config questions
                 logger.warning(f"[SQL-GEN] Deprioritizing checklist/document table: {table_name[-40:]} (-100)")
@@ -3501,6 +3494,7 @@ class IntelligenceEngine:
             # This is what allows "show me SUI rates" to find the tax table
             # even though "SUI" is a VALUE in type_of_tax, not a column name
             # =================================================================
+            value_match_found = False  # Only allow ONE value match per table
             try:
                 if self.structured_handler and self.structured_handler.conn:
                     # Get distinct values from column profiles for this table
@@ -3514,12 +3508,16 @@ class IntelligenceEngine:
                     """, [table.get('table_name', '')]).fetchall()
                     
                     for col_name, distinct_values_json in value_profiles:
+                        if value_match_found:  # Cap at one match per table
+                            break
                         if not distinct_values_json:
                             continue
                         try:
                             distinct_values = json.loads(distinct_values_json)
                             # Check if any query word matches a column value
                             for val_info in distinct_values:
+                                if value_match_found:  # Cap at one match per table
+                                    break
                                 val = str(val_info.get('value', '')).lower().strip() if isinstance(val_info, dict) else str(val_info).lower().strip()
                                 # Skip short values (state codes, single chars) - they cause false matches
                                 if not val or len(val) < 3:
@@ -3534,6 +3532,7 @@ class IntelligenceEngine:
                                         if word == val or (len(word) >= 4 and word in val):
                                             score += 80  # MAJOR boost - query matches a column value
                                             logger.warning(f"[SQL-GEN] VALUE MATCH: '{word}' matches value '{val}' in {table_name[-40:]}.{col_name} (+80)")
+                                            value_match_found = True  # Only one per table
                                             break
                         except (json.JSONDecodeError, TypeError):
                             pass
