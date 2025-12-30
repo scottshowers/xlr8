@@ -22,7 +22,7 @@
  * FIXED: Comprehensive null safety for API responses
  */
 
-import React, { useState, useEffect, Component } from 'react'
+import React, { useState, useEffect, useRef, Component } from 'react'
 import { useProject } from '../context/ProjectContext'
 import api from '../services/api'
 import {
@@ -177,8 +177,7 @@ function AnalyticsPageInner() {
   // LOAD CATALOG
   // ===========================================
   
-  // Track if we're currently loading to prevent double-fetch
-  const loadingRef = React.useRef(false)
+  const loadingRef = useRef(false)
   
   useEffect(() => {
     if (projectName && !loadingRef.current) {
@@ -187,7 +186,10 @@ function AnalyticsPageInner() {
   }, [projectName])
   
   const loadCatalog = async () => {
-    if (loadingRef.current) return
+    if (loadingRef.current) {
+      console.log('[Analytics] Skipping duplicate load')
+      return
+    }
     loadingRef.current = true
     
     setCatalogLoading(true)
@@ -195,15 +197,17 @@ function AnalyticsPageInner() {
     
     try {
       const response = await api.get(`/bi/schema/${projectName}`)
-      // NULL SAFETY: Check response.data exists before accessing properties
       const data = response?.data || {}
       const tables = Array.isArray(data.tables) ? data.tables : []
       
-      console.log(`[Analytics] Loaded ${tables.length} tables for ${projectName}`)
+      console.log(`[Analytics] API returned ${tables.length} tables`)
       
       // Organize tables by truth_type -> domain
       const organized = organizeTables(tables)
-      console.log(`[Analytics] Organized into ${organized.length} truth types`)
+      
+      const totalOrganized = organized.reduce((sum, t) => sum + (t?.tableCount || 0), 0)
+      console.log(`[Analytics] Organized into ${organized.length} truth types, ${totalOrganized} total tables`)
+      
       setCatalog(organized)
       
       // Auto-expand first non-empty truth type
@@ -242,18 +246,21 @@ function AnalyticsPageInner() {
       return []
     }
     
-    // Deduplicate tables by full_name
+    // DEDUP: Track tables by full_name to prevent duplicates
     const seen = new Set()
     const uniqueTables = tables.filter(table => {
       if (!table) return false
       const key = table.full_name || table.name
+      if (!key) return false
       if (seen.has(key)) {
-        console.warn('Duplicate table filtered out:', key)
+        console.warn('[Analytics] Duplicate table filtered:', key)
         return false
       }
       seen.add(key)
       return true
     })
+    
+    console.log(`[Analytics] After dedup: ${uniqueTables.length} tables (from ${tables.length})`)
     
     // Group by truth_type -> domain -> tables
     const hierarchy = {}
@@ -298,8 +305,8 @@ function AnalyticsPageInner() {
           label: domain || domainConfig.label,
           icon: domainConfig.icon,
           tables: tableList.sort((a, b) => {
-            const nameA = a?.display_name || a?.full_name || ''
-            const nameB = b?.display_name || b?.full_name || ''
+            const nameA = a?.display_name || a?.name || ''
+            const nameB = b?.display_name || b?.name || ''
             return nameA.localeCompare(nameB)
           })
         }
@@ -354,14 +361,9 @@ function AnalyticsPageInner() {
     setYAxis(null)
     setResults(null)
     setResultsError(null)
-    // Use full_name for SQL - this is the actual DuckDB table name
-    const tableName = table?.full_name
-    if (tableName) {
-      setSqlText(`SELECT *\nFROM "${tableName}"\nLIMIT 100`)
-    } else {
-      console.error('Missing full_name on table:', table)
-      setSqlText(`-- ERROR: Missing full_name\nSELECT * FROM "unknown" LIMIT 100`)
-    }
+    // Use full_name for SQL (actual DuckDB table name)
+    const tableName = table?.full_name || table?.name || 'table'
+    setSqlText(`SELECT *\nFROM "${tableName}"\nLIMIT 100`)
   }
   
   const toggleTruthType = (truthType) => {
@@ -486,10 +488,10 @@ function AnalyticsPageInner() {
   const generateSQL = () => {
     if (!selectedTable || !Array.isArray(columns) || columns.length === 0) return ''
     
-    // MUST use full_name for DuckDB - display_name/name will fail
-    const tableName = selectedTable.full_name
+    // Use full_name for DuckDB table name
+    const tableName = selectedTable.full_name || selectedTable.name
     if (!tableName) {
-      console.error('Missing full_name on selectedTable:', selectedTable)
+      console.error('[Analytics] No table name available:', selectedTable)
       return ''
     }
     
@@ -541,18 +543,6 @@ function AnalyticsPageInner() {
     return sql
   }
   
-  // Helper to extract error message from various API error formats
-  const extractErrorMessage = (err) => {
-    const detail = err?.response?.data?.detail
-    if (typeof detail === 'string') return detail
-    if (Array.isArray(detail) && detail.length > 0) {
-      return detail.map(d => d?.msg || JSON.stringify(d)).join('; ')
-    }
-    if (err?.response?.data?.message) return err.response.data.message
-    if (err?.message) return err.message
-    return 'Query failed - check console for details'
-  }
-  
   // ===========================================
   // QUERY EXECUTION
   // ===========================================
@@ -591,7 +581,11 @@ function AnalyticsPageInner() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(extractErrorMessage(err))
+      const errorMsg = err?.response?.data?.detail || 
+                       err?.response?.data?.message ||
+                       err?.message || 
+                       'Query failed - check console for details'
+      setResultsError(errorMsg)
       setResults(null)
     } finally {
       setResultsLoading(false)
@@ -626,7 +620,11 @@ function AnalyticsPageInner() {
       })
     } catch (err) {
       console.error('Query error:', err)
-      setResultsError(extractErrorMessage(err))
+      const errorMsg = err?.response?.data?.detail || 
+                       err?.response?.data?.message ||
+                       err?.message || 
+                       'Query failed - check console for details'
+      setResultsError(errorMsg)
       setResults(null)
     } finally {
       setResultsLoading(false)
@@ -642,7 +640,7 @@ function AnalyticsPageInner() {
     setIsAnalyzing(true)
     
     try {
-      // Use /bi/query for natural language processing
+      // /bi/query expects: query, project (and optional filters, session_id)
       const response = await api.post('/bi/query', {
         project: projectName,
         query: query
@@ -665,7 +663,7 @@ function AnalyticsPageInner() {
       console.error('NL Query error:', err)
       setNlMessages(prev => [...prev, {
         role: 'assistant',
-        content: `Sorry, I couldn't process that query: ${extractErrorMessage(err)}`,
+        content: `Sorry, I couldn't process that query: ${err?.response?.data?.detail || err?.message || 'Unknown error'}`,
         isError: true
       }])
     } finally {
@@ -725,11 +723,11 @@ function AnalyticsPageInner() {
           ...domainGroup,
           tables: tables.filter(t => {
             if (!t) return false
-            const tableName = (t.full_name || t.name || '').toLowerCase()
+            const name = (t.name || '').toLowerCase()
             const displayName = (t.display_name || '').toLowerCase()
             const search = (catalogSearch || '').toLowerCase()
             const cols = Array.isArray(t.columns) ? t.columns : []
-            return tableName.includes(search) ||
+            return name.includes(search) ||
               displayName.includes(search) ||
               cols.some(c => (c?.name || '').toLowerCase().includes(search))
           })
@@ -759,13 +757,13 @@ function AnalyticsPageInner() {
   // ===========================================
   
   return (
-    <div className="h-full flex bg-gray-100 text-sm">
+    <div className="h-full flex bg-gray-100 text-sm overflow-hidden">
       {/* ================================================================
           LEFT PANEL: Data Catalog
           ================================================================ */}
-      <div className="w-96 bg-white border-r flex flex-col shadow-sm">
+      <div className="w-96 bg-white border-r flex flex-col shadow-sm min-h-0 overflow-hidden">
         {/* Header */}
-        <div className="p-3 border-b bg-gray-50">
+        <div className="p-3 border-b bg-gray-50 flex-shrink-0">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
             <Layers size={14} className="text-[#83b16d]" />
             Data Catalog
@@ -778,7 +776,7 @@ function AnalyticsPageInner() {
         </div>
         
         {/* Search */}
-        <div className="p-2 border-b">
+        <div className="p-2 border-b flex-shrink-0">
           <div className="relative">
             <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
             <input
@@ -791,8 +789,8 @@ function AnalyticsPageInner() {
           </div>
         </div>
         
-        {/* Catalog List */}
-        <div className="flex-1 overflow-auto">
+        {/* Catalog List - scrolls independently */}
+        <div className="flex-1 overflow-y-auto min-h-0">
           {catalogLoading && (
             <div className="p-4 text-center text-gray-400">
               <Loader2 size={20} className="animate-spin mx-auto mb-2" />
@@ -850,7 +848,7 @@ function AnalyticsPageInner() {
                       const tables = Array.isArray(domainGroup.tables) ? domainGroup.tables : []
                       
                       return (
-                        <div key={`${truthTypeGroup.truthType}-${domainGroup.domain || 'general'}`} className="border-t border-gray-100">
+                        <div key={domainGroup.domain} className="border-t border-gray-100">
                           {/* Domain Header */}
                           <button
                             onClick={() => toggleDomain(truthTypeGroup.truthType, domainGroup.domain)}
@@ -875,9 +873,10 @@ function AnalyticsPageInner() {
                             <div className="pb-1 bg-white">
                               {tables.map(table => {
                                 if (!table) return null
+                                const tableKey = table.full_name || table.name
                                 return (
                                   <button
-                                    key={table.full_name || table.name}
+                                    key={tableKey}
                                     onClick={() => handleTableSelect(table)}
                                     className={`w-full px-3 py-1.5 pl-12 text-left text-xs hover:bg-gray-50 flex items-center gap-1.5 transition-colors ${
                                       selectedTable?.full_name === table.full_name 
@@ -886,9 +885,9 @@ function AnalyticsPageInner() {
                                     }`}
                                   >
                                     <Table2 size={10} className="text-gray-400 flex-shrink-0" />
-                                    <span className="truncate flex-1">{table.display_name || table.full_name}</span>
+                                    <span className="truncate flex-1">{table.display_name || table.name}</span>
                                     <span className="text-xs text-gray-400 flex-shrink-0">
-                                      {(table.row_count || table.rows) ? ((table.row_count || table.rows) >= 1000 ? ((table.row_count || table.rows) / 1000).toFixed(0) + 'k' : (table.row_count || table.rows)) : ''}
+                                      {table.rows ? (table.rows >= 1000 ? (table.rows / 1000).toFixed(0) + 'k' : table.rows) : ''}
                                     </span>
                                   </button>
                                 )
@@ -914,11 +913,11 @@ function AnalyticsPageInner() {
         <div className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-semibold text-gray-800">
-              {selectedTable ? (selectedTable.display_name || selectedTable.full_name || 'Table') : 'Analytics'}
+              {selectedTable ? (selectedTable.display_name || selectedTable.name || 'Table') : 'Analytics'}
             </h1>
             {selectedTable && (
               <span className="text-xs text-gray-400">
-                {(selectedTable.row_count || selectedTable.rows || 0).toLocaleString()} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
+                {selectedTable.rows?.toLocaleString() || 0} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
               </span>
             )}
           </div>
@@ -997,7 +996,7 @@ function AnalyticsPageInner() {
                   value={nlQuery}
                   onChange={(e) => setNlQuery(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && runNLQuery()}
-                  placeholder={selectedTable ? `Ask about ${selectedTable.display_name || selectedTable.full_name}...` : "Ask a question about your data..."}
+                  placeholder={selectedTable ? `Ask about ${selectedTable.name}...` : "Ask a question about your data..."}
                   className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
                 />
                 <button
@@ -1606,11 +1605,10 @@ function formatTooltipValue(val) {
 // =============================================================================
 
 function NLEmptyState({ selectedTable, onQuickQuery }) {
-  const tableName = selectedTable?.display_name || selectedTable?.full_name || 'table'
   const queries = selectedTable ? [
-    { icon: Eye, label: 'Preview data', query: `Show first 20 rows of ${tableName}` },
-    { icon: BarChart3, label: 'Summarize', query: `Summarize ${tableName} by the most common groupings` },
-    { icon: Filter, label: 'Find patterns', query: `What patterns or anomalies exist in ${tableName}?` },
+    { icon: Eye, label: 'Preview data', query: `Show first 20 rows of ${selectedTable.name}` },
+    { icon: BarChart3, label: 'Summarize', query: `Summarize ${selectedTable.name} by the most common groupings` },
+    { icon: Filter, label: 'Find patterns', query: `What patterns or anomalies exist in ${selectedTable.name}?` },
   ] : [
     { icon: Users, label: 'Employee overview', query: 'How many employees are in the system?' },
     { icon: DollarSign, label: 'Payroll summary', query: 'Show total payroll by department' },
@@ -1624,7 +1622,7 @@ function NLEmptyState({ selectedTable, onQuickQuery }) {
           <Sparkles size={18} className="text-[#83b16d]" />
         </div>
         <h2 className="text-base font-semibold text-gray-800 mb-1">
-          {selectedTable ? `Explore ${tableName}` : 'Ask a question'}
+          {selectedTable ? `Explore ${selectedTable.name}` : 'Ask a question'}
         </h2>
         <p className="text-xs text-gray-500">Type naturally or try a suggestion</p>
       </div>
