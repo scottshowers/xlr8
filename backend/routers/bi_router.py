@@ -531,9 +531,17 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
             project_clean.lower().replace('-', '_'),
         ]
         
+        # Track seen tables to prevent duplicates
+        seen_table_names = set()
+        
         for (table_name,) in all_tables:
             if table_name.startswith('_'):
                 continue
+            
+            # Skip if already processed
+            if table_name in seen_table_names:
+                continue
+            seen_table_names.add(table_name)
             
             table_lower = table_name.lower()
             matches_project = any(
@@ -1044,12 +1052,18 @@ async def get_bi_schema(project: str):
         handler = get_structured_handler()
         schema = _build_bi_schema(handler, project)
         
-        # Simplify for frontend
+        # Simplify for frontend - deduplicate by table_name
+        seen_tables = set()
         tables = []
         for t in schema.get('tables', []):
+            table_name = t.get('table_name')
+            if not table_name or table_name in seen_tables:
+                continue
+            seen_tables.add(table_name)
+            
             tables.append({
                 'name': t.get('display_name') or t.get('table_name', '').split('__')[-1],
-                'full_name': t.get('table_name'),
+                'full_name': table_name,
                 'display_name': t.get('display_name'),
                 'rows': t.get('row_count', 0),
                 'columns': [c.get('name') if isinstance(c, dict) else c for c in t.get('columns', [])],
@@ -1058,6 +1072,8 @@ async def get_bi_schema(project: str):
                 'truth_type': t.get('truth_type', 'reality'),
                 'domain': t.get('domain', '')
             })
+        
+        logger.info(f"[BI] Schema for {project}: {len(tables)} unique tables")
         
         return {
             "project": project,
