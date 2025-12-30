@@ -1,5 +1,5 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.21.0 - TABLE SCORING FIX
+XLR8 INTELLIGENCE ENGINE v5.21.1 - CHECKLIST DEBUG
 ============================================================
 
 Deploy to: backend/utils/intelligence_engine.py
@@ -136,7 +136,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.21.0 TABLE SCORING FIX ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.21.1 CHECKLIST DEBUG ======")
 
 # CONSULTATIVE SYNTHESIS - Import the synthesizer
 try:
@@ -3327,6 +3327,9 @@ class IntelligenceEngine:
             
             score = 0
             
+            # DEBUG: Log every table being scored
+            logger.warning(f"[SQL-GEN] SCORING TABLE: {table_name[-60:]}")
+            
             # ============================================================
             # CRITICAL: DIRECT NAME MATCH - Highest priority boost
             # If user asks about "ale group" and table contains "ale_group",
@@ -3398,6 +3401,10 @@ class IntelligenceEngine:
             # DEPRIORITIZE checklist/document/procedural tables - these are guides, not config data
             checklist_indicators = ['checklist', 'step_', '_step', 'document', 'before_final', 'year_end', 'yearend']
             is_checklist = any(indicator in table_name for indicator in checklist_indicators)
+            # DEBUG: Log all tables being checked
+            matched_indicators = [ind for ind in checklist_indicators if ind in table_name]
+            if matched_indicators:
+                logger.warning(f"[SQL-GEN] CHECKLIST CHECK: {table_name[-50:]} matched {matched_indicators}")
             if is_checklist:
                 score -= 100  # Heavy penalty - these should almost never be selected for config questions
                 logger.warning(f"[SQL-GEN] Deprioritizing checklist/document table: {table_name[-40:]} (-100)")
