@@ -172,7 +172,8 @@ class IntelligenceEngineV2:
         # Initialize components
         self.table_selector = TableSelector(
             structured_handler=structured_handler,
-            filter_candidates=self.filter_candidates
+            filter_candidates=self.filter_candidates,
+            project=self.project  # Enable classification metadata loading
         )
         
         self.sql_generator = SQLGenerator(
