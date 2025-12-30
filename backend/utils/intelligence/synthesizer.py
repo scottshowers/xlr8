@@ -429,14 +429,37 @@ class Synthesizer:
         if not rows or not columns:
             return None
         
-        # Identify key columns
-        code_col = self._find_column(columns, ['code', 'earnings_code', 'earning_code', 
-                                                'deduction_code', 'ded_code', 'name', 'id'])
-        desc_col = self._find_column(columns, ['description', 'desc', 'code_description',
-                                                'earning_description', 'name', 'label'])
-        category_col = self._find_column(columns, ['type', 'category', 'group', 'class',
-                                                    'tax_category', 'earnings_group',
-                                                    'calculation_rule', 'earning_type'])
+        logger.info(f"[SYNTHESIZE] Config listing columns: {columns[:10]}")
+        
+        # Identify key columns - order matters, first match wins
+        # For earnings/deductions, the "code" is usually short (3-10 chars)
+        code_col = self._find_column(columns, [
+            'code', 'earnings_code', 'earning_code', 'deduction_code', 
+            'ded_code', 'pay_code', 'code_description'  # Sometimes code is in description field
+        ])
+        
+        # Description column
+        desc_col = self._find_column(columns, [
+            'description', 'code_description', 'earning_description',
+            'desc', 'name', 'label', 'long_description'
+        ])
+        
+        # If code_col same as desc_col, clear desc_col
+        if code_col and desc_col and code_col == desc_col:
+            desc_col = None
+        
+        # Category/type column for grouping
+        category_col = self._find_column(columns, [
+            'tax_category', 'category', 'type', 'group', 'class',
+            'earnings_group', 'earning_type', 'calc_type', 'calculation_rule'
+        ])
+        
+        logger.info(f"[SYNTHESIZE] Detected columns - code: {code_col}, desc: {desc_col}, category: {category_col}")
+        
+        # If no code column found, try to detect it from data
+        if not code_col:
+            code_col = self._detect_code_column(rows, columns)
+            logger.info(f"[SYNTHESIZE] Auto-detected code column: {code_col}")
         
         # Determine what we're listing
         domain = self._detect_domain(q_lower)
@@ -471,22 +494,85 @@ class Synthesizer:
         
         elif code_col:
             # No category, just list codes
-            codes = [str(row.get(code_col, ''))[:20] for row in rows[:30]]
+            codes = []
+            for row in rows[:50]:
+                code_val = str(row.get(code_col, ''))[:20]
+                if code_val and code_val not in codes:
+                    codes.append(code_val)
             
             # Show in organized chunks
             parts.append("\n**Configured codes:**")
             for i in range(0, min(len(codes), 30), 10):
                 chunk = codes[i:i+10]
-                parts.append(f"- {', '.join(f'`{c}`' for c in chunk if c)}")
+                parts.append(f"{', '.join(f'`{c}`' for c in chunk if c)}")
             
-            if total > 30:
-                parts.append(f"\n*Showing 30 of {total} total codes*")
+            if total > 50:
+                parts.append(f"\n*Showing {len(codes)} unique codes from {total} total records*")
         
         else:
             # Can't identify structure, return None to fall back to table
+            logger.warning("[SYNTHESIZE] Could not identify code column, falling back to table")
             return None
         
         return "\n".join(parts)
+    
+    def _detect_code_column(self, rows: List[Dict], columns: List[str]) -> Optional[str]:
+        """
+        Auto-detect which column contains the actual codes.
+        
+        Codes are typically:
+        - Short strings (2-15 chars)
+        - Alphanumeric, often uppercase
+        - High cardinality (many unique values)
+        """
+        if not rows or not columns:
+            return None
+        
+        best_col = None
+        best_score = 0
+        
+        for col in columns:
+            # Sample values from this column
+            values = [str(row.get(col, '')) for row in rows[:20] if row.get(col)]
+            if not values:
+                continue
+            
+            # Score this column
+            score = 0
+            
+            # Prefer columns with "code" in name
+            if 'code' in col.lower():
+                score += 50
+            
+            # Check value characteristics
+            avg_len = sum(len(v) for v in values) / len(values)
+            unique_ratio = len(set(values)) / len(values)
+            
+            # Codes are usually short (2-15 chars)
+            if 2 <= avg_len <= 15:
+                score += 30
+            elif avg_len > 50:
+                score -= 20  # Likely description
+            
+            # Codes typically have high uniqueness
+            if unique_ratio > 0.8:
+                score += 20
+            
+            # Check if values look like codes (alphanumeric, often uppercase)
+            uppercase_ratio = sum(1 for v in values if v.isupper() or v.replace('_', '').replace('-', '').isalnum()) / len(values)
+            if uppercase_ratio > 0.7:
+                score += 20
+            
+            # Numeric-only columns are usually IDs, not codes
+            numeric_ratio = sum(1 for v in values if v.isdigit()) / len(values)
+            if numeric_ratio > 0.9:
+                score -= 30  # Likely ID column
+            
+            if score > best_score:
+                best_score = score
+                best_col = col
+        
+        return best_col if best_score > 20 else None
     
     def _find_column(self, columns: List[str], patterns: List[str]) -> Optional[str]:
         """Find a column matching any of the patterns."""
