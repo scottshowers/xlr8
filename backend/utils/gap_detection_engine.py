@@ -17,7 +17,7 @@ NO CLAUDE FOR REGULATORY - Uses local LLM knowledge + web verification.
 Regulatory knowledge already exists in training data - we just verify.
 
 Author: XLR8 Team
-Version: 1.1.0 - The Engine That Finds Gaps (with Rule Registry Integration)
+Version: 1.2.0 - The Engine That Finds Gaps (with Rule Registry + Field Interpretation)
 """
 
 import os
@@ -48,6 +48,34 @@ except ImportError:
         get_rule_registry = None
         ExtractedRule = None
         logger.info("[GAP] Rule Registry not available - using built-in knowledge only")
+
+# =============================================================================
+# FIELD INTERPRETATION INTEGRATION
+# =============================================================================
+# Field interpretations provide semantic understanding of columns based on
+# domain context. This enables intelligent gap checks.
+
+try:
+    from utils.field_interpretation_engine import (
+        get_field_interpretation_engine,
+        run_gap_checks as run_field_gap_checks,
+        FieldSemantic
+    )
+    FIELD_INTERPRETATION_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.field_interpretation_engine import (
+            get_field_interpretation_engine,
+            run_gap_checks as run_field_gap_checks,
+            FieldSemantic
+        )
+        FIELD_INTERPRETATION_AVAILABLE = True
+    except ImportError:
+        FIELD_INTERPRETATION_AVAILABLE = False
+        get_field_interpretation_engine = None
+        run_field_gap_checks = None
+        FieldSemantic = None
+        logger.info("[GAP] Field Interpretation not available")
 
 
 # =============================================================================
@@ -302,7 +330,10 @@ class Gap:
     
     def to_conflict(self):
         """Convert to Conflict dataclass for intelligence_engine compatibility."""
-        from backend.utils.intelligence_engine import Conflict, Truth
+        try:
+            from backend.utils.intelligence import Conflict, Truth
+        except ImportError:
+            from utils.intelligence import Conflict, Truth
         
         # Create Truth objects for the comparison
         truth_a = Truth(
@@ -1058,12 +1089,79 @@ If no clear gaps exist, return: []"""
             )
             all_gaps.extend(reference_gaps)
         
+        # 4. Field Interpretation Gap Checks (Domain-specific data quality)
+        # These run automatically based on detected domains
+        if FIELD_INTERPRETATION_AVAILABLE and self.structured_handler and domains:
+            try:
+                field_gaps = self._run_field_interpretation_checks(domains, context)
+                all_gaps.extend(field_gaps)
+            except Exception as e:
+                logger.warning(f"[GAP] Field interpretation checks failed: {e}")
+        
         # Sort by severity
         severity_order = {'critical': 0, 'high': 1, 'medium': 2, 'low': 3}
         all_gaps.sort(key=lambda g: severity_order.get(g.severity, 4))
         
         logger.info(f"[GAP] Total gaps detected: {len(all_gaps)}")
         return all_gaps
+    
+    def _run_field_interpretation_checks(
+        self, 
+        domains: List[str],
+        context: Dict = None
+    ) -> List[Gap]:
+        """
+        Run field interpretation-based gap checks.
+        
+        These are domain-specific data quality checks that use semantic
+        understanding of columns to find issues.
+        """
+        gaps = []
+        
+        if not FIELD_INTERPRETATION_AVAILABLE or not self.structured_handler:
+            return gaps
+        
+        try:
+            # Get project from context
+            project = context.get('project', '') if context else ''
+            if not project:
+                return gaps
+            
+            # Run gap checks via field interpretation engine
+            check_results = run_field_gap_checks(
+                project=project,
+                domains=domains,
+                handler=self.structured_handler
+            )
+            
+            # Convert results to Gap objects
+            for result in check_results:
+                if result.get('has_violation'):
+                    gap = Gap(
+                        gap_id=f"field_{result.get('check_id')}_{datetime.now().strftime('%Y%m%d%H%M%S')}",
+                        gap_type="field_check",
+                        truth_source=f"reality:{result.get('table_name', 'unknown')}",
+                        truth_target="data_quality_standard",
+                        description=result.get('description', ''),
+                        severity=result.get('severity', 'medium'),
+                        evidence={
+                            'check_name': result.get('check_name'),
+                            'table': result.get('table_name'),
+                            'violation_count': result.get('violation_count', 0),
+                            'sample_data': result.get('sample_data', []),
+                        },
+                        recommendation=f"Review and correct data quality issues in {result.get('table_name')}",
+                        detected_at=datetime.now(),
+                    )
+                    gaps.append(gap)
+            
+            if gaps:
+                logger.info(f"[GAP] Field interpretation found {len(gaps)} issues")
+                
+        except Exception as e:
+            logger.warning(f"[GAP] Field interpretation check error: {e}")
+        
+        return gaps
 
 
 # =============================================================================
