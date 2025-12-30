@@ -17,7 +17,7 @@ NO CLAUDE FOR REGULATORY - Uses local LLM knowledge + web verification.
 Regulatory knowledge already exists in training data - we just verify.
 
 Author: XLR8 Team
-Version: 1.0.0 - The Engine That Finds Gaps
+Version: 1.1.0 - The Engine That Finds Gaps (with Rule Registry Integration)
 """
 
 import os
@@ -29,6 +29,25 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
+
+# =============================================================================
+# RULE REGISTRY INTEGRATION
+# =============================================================================
+# Dynamic rules from uploaded standards documents supplement the built-in
+# regulatory knowledge. This enables customer-specific compliance checking.
+
+try:
+    from utils.standards_processor import get_rule_registry, ExtractedRule
+    RULE_REGISTRY_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.standards_processor import get_rule_registry, ExtractedRule
+        RULE_REGISTRY_AVAILABLE = True
+    except ImportError:
+        RULE_REGISTRY_AVAILABLE = False
+        get_rule_registry = None
+        ExtractedRule = None
+        logger.info("[GAP] Rule Registry not available - using built-in knowledge only")
 
 
 # =============================================================================
@@ -332,12 +351,58 @@ class GapDetectionEngine:
     The brain that finds gaps between all five truths.
     
     This is the $500/hr Deloitte work - automated.
+    
+    v1.1.0: Integrates with RuleRegistry for dynamic rules from uploaded
+    standards documents. Combines built-in REGULATORY_KNOWLEDGE with
+    customer-uploaded reference materials.
     """
     
     def __init__(self, structured_handler=None, rag_handler=None):
         self.structured_handler = structured_handler
         self.rag_handler = rag_handler
         self._llm_orchestrator = None
+        self._rule_registry = None
+        self._registry_rules_loaded = False
+        
+    def _get_rule_registry(self):
+        """Get the rule registry for dynamic rules."""
+        if self._rule_registry is None and RULE_REGISTRY_AVAILABLE:
+            try:
+                self._rule_registry = get_rule_registry()
+                logger.info(f"[GAP] Rule Registry loaded: {len(self._rule_registry.rules)} rules")
+            except Exception as e:
+                logger.warning(f"[GAP] Failed to load Rule Registry: {e}")
+        return self._rule_registry
+    
+    def _search_registry_rules(self, query: str, domain: str = None) -> List[Any]:
+        """Search for applicable rules from the registry."""
+        registry = self._get_rule_registry()
+        if not registry:
+            return []
+        
+        try:
+            rules = registry.search_rules(query, domain=domain, limit=10)
+            if rules:
+                logger.info(f"[GAP] Found {len(rules)} rules from registry for '{query}'")
+            return rules
+        except Exception as e:
+            logger.warning(f"[GAP] Registry search failed: {e}")
+            return []
+    
+    def _get_registry_domains(self) -> set:
+        """Get domains that have rules in the registry."""
+        registry = self._get_rule_registry()
+        if not registry:
+            return set()
+        
+        domains = set()
+        for rule in registry.rules.values():
+            # Check rule's source document domain
+            for doc_id, doc in registry.documents.items():
+                if rule in doc.rules:
+                    domains.add(doc.domain)
+                    break
+        return domains
         
     def _get_llm(self):
         """Get LLM orchestrator - LOCAL FIRST, Claude only for fallback."""
@@ -390,7 +455,7 @@ class GapDetectionEngine:
         
         combined_text = ' '.join(text_content)
         
-        # Check each domain's keywords
+        # Check each domain's keywords from built-in REGULATORY_KNOWLEDGE
         for domain_key, domain_config in REGULATORY_KNOWLEDGE.items():
             keywords = domain_config.get('domain_keywords', [])
             if any(kw in combined_text for kw in keywords):
@@ -401,6 +466,14 @@ class GapDetectionEngine:
             if any(col in combined_text for col in data_columns):
                 detected.add(domain_key)
         
+        # Also check Rule Registry for domains from uploaded standards
+        registry_domains = self._get_registry_domains()
+        if registry_domains:
+            # Try to match registry domains to the data
+            for reg_domain in registry_domains:
+                if reg_domain.lower() in combined_text:
+                    detected.add(reg_domain)
+        
         logger.info(f"[GAP] Detected regulatory domains: {detected}")
         return list(detected)
     
@@ -409,10 +482,19 @@ class GapDetectionEngine:
         detected = set()
         q_lower = question.lower()
         
+        # Check built-in REGULATORY_KNOWLEDGE
         for domain_key, domain_config in REGULATORY_KNOWLEDGE.items():
             keywords = domain_config.get('domain_keywords', [])
             if any(kw in q_lower for kw in keywords):
                 detected.add(domain_key)
+        
+        # Search Rule Registry for matching rules
+        if RULE_REGISTRY_AVAILABLE:
+            registry_rules = self._search_registry_rules(question)
+            for rule in registry_rules:
+                # Add the domain of matching rules
+                if hasattr(rule, 'category') and rule.category:
+                    detected.add(rule.category)
         
         return list(detected)
     
