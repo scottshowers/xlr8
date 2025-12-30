@@ -139,6 +139,7 @@ class TableSelector:
             return
         
         if not self.project or not self.structured_handler:
+            logger.warning(f"[TABLE-SEL] Cannot load classifications: project={self.project}, handler={bool(self.structured_handler)}")
             self._classifications_loaded = True
             return
         
@@ -150,13 +151,16 @@ class TableSelector:
                 )
                 for c in classifications:
                     self._classifications[c.table_name.lower()] = c
-                logger.info(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications")
+                logger.warning(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications for project={self.project}")
             else:
                 # Fallback: load directly from database
+                logger.warning(f"[TABLE-SEL] Using direct classification load for project={self.project}")
                 self._load_classifications_direct()
                 
         except Exception as e:
             logger.warning(f"[TABLE-SEL] Failed to load classifications: {e}")
+            import traceback
+            logger.warning(traceback.format_exc())
         
         self._classifications_loaded = True
     
@@ -193,7 +197,7 @@ class TableSelector:
                     'config_target': row[7]
                 }
             
-            logger.info(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications (direct)")
+            logger.warning(f"[TABLE-SEL] Loaded {len(self._classifications)} classifications (direct)")
             
         except Exception as e:
             logger.debug(f"[TABLE-SEL] Direct classification load failed: {e}")
