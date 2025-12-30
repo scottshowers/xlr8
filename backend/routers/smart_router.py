@@ -139,15 +139,18 @@ try:
     from utils.standards_processor import process_pdf as standards_process_pdf
     from utils.standards_processor import process_text as standards_process_text
     from utils.standards_processor import get_rule_registry
+    from utils.standards_processor import StandardsDocument
     STANDARDS_AVAILABLE = True
 except ImportError:
     try:
         from backend.utils.standards_processor import process_pdf as standards_process_pdf
         from backend.utils.standards_processor import process_text as standards_process_text
         from backend.utils.standards_processor import get_rule_registry
+        from backend.utils.standards_processor import StandardsDocument
         STANDARDS_AVAILABLE = True
     except ImportError:
         STANDARDS_AVAILABLE = False
+        StandardsDocument = None
         logger.warning("[SMART-ROUTER] Standards processor not available")
 
 # Register Extractor
@@ -607,6 +610,63 @@ async def _route_to_register(
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+def _extract_text_from_excel(file_path: str) -> str:
+    """
+    Extract readable text from Excel file for rule processing.
+    
+    Converts Excel data to a text format suitable for LLM rule extraction.
+    Each sheet becomes a section with its data in tabular text format.
+    """
+    try:
+        import pandas as pd
+        
+        text_parts = []
+        
+        # Read all sheets
+        xlsx = pd.ExcelFile(file_path)
+        
+        for sheet_name in xlsx.sheet_names:
+            try:
+                df = pd.read_excel(xlsx, sheet_name=sheet_name)
+                
+                if df.empty:
+                    continue
+                
+                # Add sheet header
+                text_parts.append(f"\n=== SHEET: {sheet_name} ===\n")
+                
+                # Add column headers
+                headers = [str(col) for col in df.columns if not str(col).startswith('Unnamed')]
+                if headers:
+                    text_parts.append("Columns: " + ", ".join(headers))
+                
+                # Convert data to readable text (first 500 rows max for rule extraction)
+                for idx, row in df.head(500).iterrows():
+                    row_text = []
+                    for col in df.columns:
+                        val = row[col]
+                        if pd.notna(val) and str(val).strip():
+                            col_name = str(col)
+                            if not col_name.startswith('Unnamed'):
+                                row_text.append(f"{col_name}: {val}")
+                            else:
+                                row_text.append(str(val))
+                    if row_text:
+                        text_parts.append(" | ".join(row_text))
+                
+            except Exception as sheet_e:
+                logger.debug(f"[SMART-ROUTER] Failed to read sheet {sheet_name}: {sheet_e}")
+        
+        return "\n".join(text_parts)
+        
+    except ImportError:
+        logger.warning("[SMART-ROUTER] pandas not available for Excel text extraction")
+        return ""
+    except Exception as e:
+        logger.warning(f"[SMART-ROUTER] Excel text extraction failed: {e}")
+        return ""
+
+
 async def _route_to_standards(
     file_path: str,
     filename: str,
@@ -623,6 +683,8 @@ async def _route_to_standards(
     Reference files get BOTH:
     - Rule extraction (for compliance checking)
     - DuckDB tables (for SQL queries)
+    
+    FIX v2: Properly extracts text from Excel files (was reading binary as text).
     """
     
     if not STANDARDS_AVAILABLE:
@@ -661,14 +723,36 @@ async def _route_to_standards(
                 logger.warning(f"[SMART-ROUTER] DuckDB processing failed (continuing with rules): {struct_e}")
         
         # =====================================================
-        # STEP 2: Extract rules (existing logic)
+        # STEP 2: Extract text for rule processing
+        # FIX: Excel/CSV files need special handling (binary format)
         # =====================================================
         if extension == 'pdf':
             doc = standards_process_pdf(file_path, domain)
             raw_text = getattr(doc, 'raw_text', '') or ''
             if not raw_text and TEXT_EXTRACTION_AVAILABLE:
                 raw_text = extract_text(file_path)
+        elif extension in ['xlsx', 'xls']:
+            # Excel files are binary - extract text properly
+            raw_text = _extract_text_from_excel(file_path)
+            doc = standards_process_text(raw_text, filename, domain) if raw_text else None
+            if not doc:
+                # Create empty document if extraction failed
+                import hashlib
+                doc_id = hashlib.md5(f"{filename}_{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+                doc = StandardsDocument(
+                    document_id=doc_id,
+                    filename=filename,
+                    title=title or filename,
+                    domain=domain
+                )
+            logger.info(f"[SMART-ROUTER] Extracted {len(raw_text)} chars from Excel")
+        elif extension == 'csv':
+            # CSV is text-based, can read directly
+            with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                raw_text = f.read()
+            doc = standards_process_text(raw_text, filename, domain)
         else:
+            # Other text files (txt, md, etc.)
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 raw_text = f.read()
             doc = standards_process_text(raw_text, filename, domain)
