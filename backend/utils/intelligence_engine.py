@@ -1,5 +1,5 @@
 """
-XLR8 INTELLIGENCE ENGINE v5.20.0 - CONSULTATIVE SYNTHESIS
+XLR8 INTELLIGENCE ENGINE v5.21.0 - TABLE SCORING FIX
 ============================================================
 
 Deploy to: backend/utils/intelligence_engine.py
@@ -28,6 +28,11 @@ and uses LLM to generate responses that:
   - End with actionable next steps
 
 UPDATES:
+- v5.21.0: TABLE SCORING FIX - Critical fixes to table selection:
+  * Fixed VALUE MATCH: Removed reverse substring match (was matching 'ar' against 'earnings')
+  * Added minimum value length (3+ chars) to avoid state code false matches
+  * Added heavy penalty (-100) for checklist/document/procedural tables
+  * Word length minimum increased to 4 for substring VALUE MATCH
 - v5.20.0: CONSULTATIVE SYNTHESIS - LLM-powered response generation:
            * Added ConsultativeSynthesizer integration
            * Triangulates across Five Truths before answering
@@ -131,7 +136,7 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 # LOAD VERIFICATION - this line proves the new file is loaded
-logger.warning("[INTELLIGENCE_ENGINE] ====== v5.20.0 CONSULTATIVE SYNTHESIS ======")
+logger.warning("[INTELLIGENCE_ENGINE] ====== v5.21.0 TABLE SCORING FIX ======")
 
 # CONSULTATIVE SYNTHESIS - Import the synthesizer
 try:
@@ -3390,6 +3395,13 @@ class IntelligenceEngine:
                 score -= 30  # Significant penalty for lookup tables
                 logger.info(f"[SQL-GEN] Deprioritizing lookup table: {table_name[-40:]}")
             
+            # DEPRIORITIZE checklist/document/procedural tables - these are guides, not config data
+            checklist_indicators = ['checklist', 'step_', '_step', 'document', 'before_final', 'year_end', 'yearend']
+            is_checklist = any(indicator in table_name for indicator in checklist_indicators)
+            if is_checklist:
+                score -= 100  # Heavy penalty - these should almost never be selected for config questions
+                logger.warning(f"[SQL-GEN] Deprioritizing checklist/document table: {table_name[-40:]} (-100)")
+            
             # DEPRIORITIZE tables with very few columns (likely lookups)
             if len(columns) <= 3:
                 score -= 20
@@ -3501,13 +3513,18 @@ class IntelligenceEngine:
                             distinct_values = json.loads(distinct_values_json)
                             # Check if any query word matches a column value
                             for val_info in distinct_values:
-                                val = str(val_info.get('value', '')).lower() if isinstance(val_info, dict) else str(val_info).lower()
-                                if not val or len(val) < 2:
+                                val = str(val_info.get('value', '')).lower().strip() if isinstance(val_info, dict) else str(val_info).lower().strip()
+                                # Skip short values (state codes, single chars) - they cause false matches
+                                if not val or len(val) < 3:
                                     continue
                                 # Check if this value appears in the query
                                 for word in words:
-                                    if len(word) >= 2 and word not in skip_words:
-                                        if word == val or word in val or val in word:
+                                    if len(word) >= 3 and word not in skip_words:
+                                        # FIXED: Only match if:
+                                        # 1. Exact match (word == val)
+                                        # 2. Query word is a significant part of the value (word in val)
+                                        # REMOVED: val in word - this caused "ar" to match "earnings"
+                                        if word == val or (len(word) >= 4 and word in val):
                                             score += 80  # MAJOR boost - query matches a column value
                                             logger.warning(f"[SQL-GEN] VALUE MATCH: '{word}' matches value '{val}' in {table_name[-40:]}.{col_name} (+80)")
                                             break
