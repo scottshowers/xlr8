@@ -284,8 +284,8 @@ class TableSelector:
             if word_lower in canonical_matches:
                 for pattern in canonical_matches[word_lower]:
                     if pattern in table_name:
-                        score += 150  # Massive boost for canonical table match
-                        logger.warning(f"[TABLE-SEL] CANONICAL MATCH: '{word_lower}' → '{pattern}' in {table_name[-45:]} (+150)")
+                        score += 250  # Strong boost to beat helper tables with VALUE MATCH + config
+                        logger.warning(f"[TABLE-SEL] CANONICAL MATCH: '{word_lower}' → '{pattern}' in {table_name[-45:]} (+250)")
                         break  # Only one canonical boost per word
         
         # =====================================================================
