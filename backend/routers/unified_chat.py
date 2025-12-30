@@ -98,12 +98,24 @@ router = APIRouter(tags=["unified-chat"])
 # =============================================================================
 
 # Intelligence Engine
+# V2 Engine toggle - set USE_ENGINE_V2=1 to use new modular engine
+import os
+USE_ENGINE_V2 = os.environ.get('USE_ENGINE_V2', '0') == '1'
+
 try:
-    from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+    if USE_ENGINE_V2:
+        from utils.intelligence import IntelligenceEngineV2 as IntelligenceEngine, IntelligenceMode
+        logger.warning("[UNIFIED] Using IntelligenceEngineV2 (modular)")
+    else:
+        from utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
     INTELLIGENCE_AVAILABLE = True
 except ImportError:
     try:
-        from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
+        if USE_ENGINE_V2:
+            from backend.utils.intelligence import IntelligenceEngineV2 as IntelligenceEngine, IntelligenceMode
+            logger.warning("[UNIFIED] Using IntelligenceEngineV2 (modular)")
+        else:
+            from backend.utils.intelligence_engine import IntelligenceEngine, IntelligenceMode
         INTELLIGENCE_AVAILABLE = True
     except ImportError:
         INTELLIGENCE_AVAILABLE = False
