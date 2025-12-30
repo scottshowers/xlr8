@@ -1,6 +1,7 @@
 """
 XLR8 Intelligence Engine - Synthesizer
 =======================================
+VERSION: 2.0.1 - Config listing template fix
 
 Synthesizes responses from all Five Truths into consultative answers.
 
@@ -18,6 +19,9 @@ from .types import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Log version on import
+logger.warning("[SYNTHESIZER] Module loaded - VERSION 2.0.1 (Config listing template)")
 
 
 class Synthesizer:
@@ -255,9 +259,14 @@ class Synthesizer:
         """
         q_lower = question.lower()
         
+        logger.warning(f"[SYNTHESIZE] _generate_response called, question: {question[:50]}")
+        
         # For config listing questions, use template (more reliable formatting)
-        if self._is_config_listing_question(q_lower):
-            logger.info("[SYNTHESIZE] Config listing detected - using template")
+        is_config_listing = self._is_config_listing_question(q_lower)
+        logger.warning(f"[SYNTHESIZE] is_config_listing={is_config_listing}")
+        
+        if is_config_listing:
+            logger.warning("[SYNTHESIZE] Config listing detected - using template")
             return self._generate_template_response(
                 question, data_info, doc_context, reflib_context,
                 insights, conflicts, compliance_check
@@ -429,7 +438,7 @@ class Synthesizer:
         if not rows or not columns:
             return None
         
-        logger.info(f"[SYNTHESIZE] Config listing columns: {columns[:10]}")
+        logger.warning(f"[SYNTHESIZE] Config listing columns: {columns[:10]}")
         
         # Identify key columns - order matters, first match wins
         # For earnings/deductions, the "code" is usually short (3-10 chars)
@@ -454,12 +463,12 @@ class Synthesizer:
             'earnings_group', 'earning_type', 'calc_type', 'calculation_rule'
         ])
         
-        logger.info(f"[SYNTHESIZE] Detected columns - code: {code_col}, desc: {desc_col}, category: {category_col}")
+        logger.warning(f"[SYNTHESIZE] Detected columns - code: {code_col}, desc: {desc_col}, category: {category_col}")
         
         # If no code column found, try to detect it from data
         if not code_col:
             code_col = self._detect_code_column(rows, columns)
-            logger.info(f"[SYNTHESIZE] Auto-detected code column: {code_col}")
+            logger.warning(f"[SYNTHESIZE] Auto-detected code column: {code_col}")
         
         # Determine what we're listing
         domain = self._detect_domain(q_lower)
