@@ -261,7 +261,7 @@ def check_supabase_health() -> Dict[str, Any]:
 
 
 def check_llm_health() -> Dict[str, Any]:
-    """Check LLM (Ollama/RunPod) health."""
+    """Check LLM health - local (Ollama/RunPod) or Claude API fallback."""
     result = {
         "status": "unknown",
         "latency_ms": None,
@@ -274,17 +274,47 @@ def check_llm_health() -> Dict[str, Any]:
         import requests
         from requests.auth import HTTPBasicAuth
         
-        # Get LLM config
-        url = os.getenv('LLM_INFERENCE_URL') or os.getenv('OLLAMA_URL') or os.getenv('RUNPOD_URL')
+        # Get LLM config - check ALL possible env var names
+        url = (
+            os.getenv('LLM_INFERENCE_URL') or 
+            os.getenv('LLM_ENDPOINT') or
+            os.getenv('OLLAMA_URL') or 
+            os.getenv('OLLAMA_HOST') or
+            os.getenv('OLLAMA_BASE_URL') or
+            os.getenv('OLLAMA_API_URL') or
+            os.getenv('RUNPOD_URL')
+        )
         username = os.getenv('LLM_USERNAME', '')
         password = os.getenv('LLM_PASSWORD', '')
         
+        # Check Claude API as fallback
+        claude_api_key = os.getenv('ANTHROPIC_API_KEY') or os.getenv('CLAUDE_API_KEY')
+        groq_api_key = os.getenv('GROQ_API_KEY')
+        
         if not url:
-            result["status"] = "critical"
-            result["error"] = "No LLM endpoint configured"
-            return result
+            # No local LLM - check if we have API fallbacks
+            if claude_api_key:
+                result["status"] = "healthy"
+                result["details"]["mode"] = "claude_api_fallback"
+                result["details"]["endpoint"] = "api.anthropic.com"
+                result["latency_ms"] = 0
+                return result
+            elif groq_api_key:
+                result["status"] = "healthy"
+                result["details"]["mode"] = "groq_api_fallback"
+                result["details"]["endpoint"] = "api.groq.com"
+                result["latency_ms"] = 0
+                return result
+            else:
+                result["status"] = "critical"
+                result["error"] = "No LLM endpoint configured (no local LLM, no Claude API, no Groq API)"
+                return result
+        
+        # Normalize URL
+        url = url.rstrip('/')
         
         result["details"]["endpoint"] = url
+        result["details"]["mode"] = "local_llm"
         
         # Check if endpoint is reachable
         auth = HTTPBasicAuth(username, password) if username and password else None
@@ -322,7 +352,12 @@ def check_llm_health() -> Dict[str, Any]:
         elif result["latency_ms"] and result["latency_ms"] < 30000:
             result["status"] = "degraded"
         else:
-            result["status"] = "critical"
+            # Local LLM not responding - check for API fallback
+            if claude_api_key or groq_api_key:
+                result["status"] = "degraded"
+                result["details"]["fallback_available"] = "claude_api" if claude_api_key else "groq_api"
+            else:
+                result["status"] = "critical"
             
     except Exception as e:
         result["status"] = "critical"
