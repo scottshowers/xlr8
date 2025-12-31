@@ -76,22 +76,21 @@ class IntentGatherer(ChromaDBGatherer):
         try:
             # Search for intent documents in this project
             results = self.rag_handler.search(
+                collection_name="documents",  # CRITICAL: Must specify collection
                 query=question,
                 n_results=5,
                 where={"project_id": self.project_id, "truth_type": "intent"}
             )
             
-            # Process results
-            documents = results.get('documents', [[]])[0] if results else []
-            metadatas = results.get('metadatas', [[]])[0] if results else []
-            distances = results.get('distances', [[]])[0] if results else []
-            
-            for i, doc in enumerate(documents):
+            # Process results - rag_handler.search returns list of dicts
+            # Format: [{'document': str, 'metadata': dict, 'distance': float}, ...]
+            for result in results:
+                doc = result.get('document', '')
+                metadata = result.get('metadata', {})
+                distance = result.get('distance', 1.0)
+                
                 if not doc:
                     continue
-                    
-                metadata = metadatas[i] if i < len(metadatas) else {}
-                distance = distances[i] if i < len(distances) else 1.0
                 
                 # Convert distance to confidence (lower distance = higher confidence)
                 confidence = max(0.5, 1.0 - (distance / 2.0))
