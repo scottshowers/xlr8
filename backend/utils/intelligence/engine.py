@@ -238,7 +238,9 @@ class IntelligenceEngineV2:
         # Get table classifications for finding config tables
         table_classifications = {}
         if self.table_selector:
-            table_classifications = self.table_selector._table_classifications
+            # Load classifications first
+            self.table_selector._load_classifications()
+            table_classifications = self.table_selector._classifications
         
         self.configuration_gatherer = ConfigurationGatherer(
             project_name=self.project,
