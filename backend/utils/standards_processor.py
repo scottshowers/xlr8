@@ -723,10 +723,12 @@ class RuleRegistry:
     def _save_rule_to_supabase(self, rule: ExtractedRule, doc: StandardsDocument):
         """Save a rule to Supabase."""
         if not self._supabase_available:
+            logger.warning("[STANDARDS] Supabase not available, skipping rule save")
             return
         
         client = _get_supabase()
         if not client:
+            logger.warning("[STANDARDS] Could not get Supabase client, skipping rule save")
             return
         
         try:
@@ -751,12 +753,15 @@ class RuleRegistry:
             
             # Upsert (insert or update)
             client.table(self.RULES_TABLE).upsert(data).execute()
+            logger.warning(f"[STANDARDS] Saved rule {rule.rule_id} to Supabase")
             
         except Exception as e:
             logger.error(f"[STANDARDS] Failed to save rule to Supabase: {e}")
     
     def add_document(self, doc: StandardsDocument):
         """Add a processed document and its rules to the registry."""
+        logger.warning(f"[STANDARDS] add_document called: {doc.document_id} with {len(doc.rules)} rules")
+        
         # Add to memory
         self.documents[doc.document_id] = doc
         
@@ -773,7 +778,7 @@ class RuleRegistry:
             # Add to ChromaDB for semantic search
             self._add_to_chroma(rule, doc.domain)
         
-        logger.info(f"[STANDARDS] Added document {doc.document_id} with {len(doc.rules)} rules")
+        logger.warning(f"[STANDARDS] Added document {doc.document_id} with {len(doc.rules)} rules to registry")
     
     def delete_document(self, document_id: str) -> bool:
         """Delete a document and its rules."""
