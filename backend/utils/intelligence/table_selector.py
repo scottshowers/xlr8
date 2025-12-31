@@ -288,7 +288,7 @@ class TableSelector:
         if not relevant and tables:
             relevant = [tables[0]]
         
-        logger.info(f"[TABLE-SEL] Selected {len(relevant)} tables from {len(tables)}")
+        logger.warning(f"[TABLE-SEL] Selected {len(relevant)} tables from {len(tables)}")
         
         return relevant
     
@@ -588,7 +588,7 @@ class TableSelector:
                             if word == val or (len(word) >= 4 and word in val):
                                 score += 60  # Value match bonus
                                 matches_found += 1
-                                logger.info(f"[TABLE-SEL] VALUE MATCH: '{word}' → '{val}' "
+                                logger.warning(f"[TABLE-SEL] VALUE MATCH: '{word}' → '{val}' "
                                              f"in {table_name[-40:]}.{col_name} (+60)")
                                 break
                                 
@@ -596,7 +596,7 @@ class TableSelector:
                     pass
                     
         except Exception as e:
-            logger.debug(f"[TABLE-SEL] Value match check failed for {table_name}: {e}")
+            logger.warning(f"[TABLE-SEL] Value match check failed for {table_name}: {e}")
         
         return score
 
