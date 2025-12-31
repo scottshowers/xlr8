@@ -1,12 +1,14 @@
 """
 XLR8 Intelligence Engine - Synthesizer
 =======================================
-VERSION: 2.0.1 - Config listing template fix
+VERSION: 3.0.0 - Consultative-First (LLM primary, template fallback)
 
 Synthesizes responses from all Five Truths into consultative answers.
 
 This is where the magic happens - combining Reality, Intent, Configuration,
 Reference, and Regulatory data into actionable insights like a senior consultant.
+
+PRIORITY: LLM Synthesis FIRST → Template FALLBACK only on failure
 
 Deploy to: backend/utils/intelligence/synthesizer.py
 """
@@ -21,23 +23,24 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 # Log version on import
-logger.warning("[SYNTHESIZER] Module loaded - VERSION 2.0.1 (Config listing template)")
+logger.warning("[SYNTHESIZER] Module loaded - VERSION 3.0.0 (Consultative-First)")
 
 
 class Synthesizer:
     """
-    Synthesizes responses from Five Truths.
+    Synthesizes responses from Five Truths into consultative answers.
     
-    Supports two modes:
-    1. LLM Synthesis - Uses ConsultativeSynthesizer for intelligent responses
-    2. Template Fallback - Formatted response when LLM unavailable
+    PRIORITY: LLM Synthesis FIRST → Template FALLBACK
+    
+    This is what separates XLR8 from data dumps - the ability to triangulate
+    across the Five Truths and provide the "so-what" that consultants charge for.
     
     The Five Truths provide full provenance:
-    - REALITY: What the data actually shows
-    - INTENT: What the customer says they want
-    - CONFIGURATION: How they've configured the system
-    - REFERENCE: Product docs, implementation standards
-    - REGULATORY: Laws, compliance requirements
+    - REALITY: What the data actually shows (DuckDB)
+    - INTENT: What the customer says they want (ChromaDB)
+    - CONFIGURATION: How they've configured the system (DuckDB)
+    - REFERENCE: Product docs, implementation standards (ChromaDB)
+    - REGULATORY: Laws, compliance requirements (ChromaDB)
     """
     
     def __init__(self, llm_synthesizer=None, confirmed_facts: Dict = None,
@@ -254,25 +257,18 @@ class Synthesizer:
         """
         Generate the response text.
         
-        Uses template for config listing questions (more reliable),
-        LLM synthesis for complex analytical questions.
+        PRIORITY: LLM Synthesis FIRST (consultative), Template FALLBACK.
+        
+        This is what makes XLR8 consultative - we use LLM to reason across
+        the Five Truths and provide the "so-what" context, not just data dumps.
         """
         q_lower = question.lower()
         
         logger.warning(f"[SYNTHESIZE] _generate_response called, question: {question[:50]}")
         
-        # For config listing questions, use template (more reliable formatting)
-        is_config_listing = self._is_config_listing_question(q_lower)
-        logger.warning(f"[SYNTHESIZE] is_config_listing={is_config_listing}")
-        
-        if is_config_listing:
-            logger.warning("[SYNTHESIZE] Config listing detected - using template")
-            return self._generate_template_response(
-                question, data_info, doc_context, reflib_context,
-                insights, conflicts, compliance_check
-            )
-        
-        # Try LLM synthesis for complex questions
+        # =====================================================================
+        # ALWAYS TRY LLM SYNTHESIS FIRST - This is the consultative path
+        # =====================================================================
         if self.llm_synthesizer:
             try:
                 structured_data = {
@@ -288,6 +284,8 @@ class Synthesizer:
                         structured_data['rows'] = [{'result': data_info['result_value']}]
                         structured_data['columns'] = ['result']
                 
+                logger.warning("[SYNTHESIZE] Attempting LLM consultative synthesis...")
+                
                 answer = self.llm_synthesizer.synthesize(
                     question=question,
                     reality=self._last_reality,
@@ -300,13 +298,18 @@ class Synthesizer:
                     structured_data=structured_data
                 )
                 
-                logger.info(f"[SYNTHESIZE] LLM synthesis: method={answer.synthesis_method}")
+                logger.warning(f"[SYNTHESIZE] LLM synthesis SUCCESS: method={answer.synthesis_method}")
                 return answer.answer
                 
             except Exception as e:
-                logger.error(f"[SYNTHESIZE] LLM synthesis failed: {e}")
+                logger.warning(f"[SYNTHESIZE] LLM synthesis failed: {e}, falling back to template")
+        else:
+            logger.warning("[SYNTHESIZE] No LLM synthesizer available, using template")
         
-        # Fallback to template
+        # =====================================================================
+        # FALLBACK: Template-based response (only if LLM fails)
+        # =====================================================================
+        logger.warning("[SYNTHESIZE] Using template fallback")
         return self._generate_template_response(
             question, data_info, doc_context, reflib_context,
             insights, conflicts, compliance_check
