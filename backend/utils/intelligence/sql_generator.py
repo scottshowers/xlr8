@@ -308,14 +308,14 @@ class SQLGenerator:
                 if col not in column_filters or len(val) < len(column_filters[col]):
                     column_filters[col] = val
         
-        # Build WHERE clauses - one per column, combined with AND
+        # Build WHERE clauses - one per column, combined with OR (any match is useful)
         where_clauses = []
         for col, val in list(column_filters.items())[:2]:  # Max 2 columns
             where_clauses.append(f'"{col}" ILIKE \'%{val}%\'')
         
         if where_clauses:
-            base += " WHERE " + " AND ".join(where_clauses)
-            logger.warning(f"[SQL-GEN] Smart WHERE: {' AND '.join(where_clauses)}")
+            base += " WHERE (" + " OR ".join(where_clauses) + ")"
+            logger.warning(f"[SQL-GEN] Smart WHERE: ({' OR '.join(where_clauses)})")
         
         base += " LIMIT 100"
         
