@@ -505,21 +505,17 @@ async def delete_reference(filename: str, confirm: bool = False, user: User = De
         except Exception as e:
             logger.warning(f"[ADMIN] Lineage delete failed: {e}")
         
-        # 4. Clear from rule registry (if available)
+        # 4. Delete from standards_rules Supabase table
         try:
-            from utils.standards_processor import get_rule_registry
-            registry = get_rule_registry()
-            if hasattr(registry, 'remove_document'):
-                registry.remove_document(filename)
-                deleted['rules'] = True
-            elif hasattr(registry, 'documents'):
-                # Manual removal
-                registry.documents = [d for d in registry.documents if d.filename != filename]
-                deleted['rules'] = True
-        except ImportError:
-            pass
+            result = supabase.table('standards_rules') \
+                .delete() \
+                .eq('source_document', filename) \
+                .execute()
+            deleted['rules'] = len(result.data or [])
+            if deleted['rules']:
+                logger.info(f"[ADMIN] Deleted {deleted['rules']} rules from standards_rules")
         except Exception as e:
-            logger.warning(f"[ADMIN] Rule registry delete failed: {e}")
+            logger.warning(f"[ADMIN] standards_rules delete failed: {e}")
         
         return {
             'success': True,
@@ -605,20 +601,14 @@ async def clear_all_references(confirm: bool = False, user: User = Depends(requi
         except Exception as e:
             logger.warning(f"[ADMIN] Lineage clear failed: {e}")
         
-        # 5. Clear rule registry
+        # 5. Clear standards_rules table
         try:
-            from utils.standards_processor import get_rule_registry
-            registry = get_rule_registry()
-            if hasattr(registry, 'clear'):
-                registry.clear()
-                deleted['rules'] = True
-            elif hasattr(registry, 'documents'):
-                registry.documents = []
-                deleted['rules'] = True
-        except ImportError:
-            pass
+            result = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+            deleted['rules'] = len(result.data or [])
+            if deleted['rules']:
+                logger.info(f"[ADMIN] Deleted {deleted['rules']} rules from standards_rules")
         except Exception as e:
-            logger.warning(f"[ADMIN] Rule registry clear failed: {e}")
+            logger.warning(f"[ADMIN] standards_rules clear failed: {e}")
         
         return {
             'success': True,
