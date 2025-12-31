@@ -1,9 +1,14 @@
 """
-XLR8 Intelligence Engine - Table Selector v2.0
+XLR8 Intelligence Engine - Table Selector v2.1
 ===============================================
 
 Handles table scoring and selection for SQL generation.
 Given a question and available tables, selects the most relevant ones.
+
+v2.1 CHANGES:
+- Added fallback domain matching when no classifications exist
+- Penalizes tables matching WRONG domain (-50)
+- Boosts tables matching detected domain (+80)
 
 v2.0 CHANGES:
 - Uses TableClassification metadata instead of hardcoded domain boosts
@@ -13,6 +18,7 @@ v2.0 CHANGES:
 
 Key features:
 - Metadata-driven domain matching (highest priority)
+- Fallback name-based domain matching (when no metadata)
 - Direct name matching
 - Column value matching (finds tables with matching data)
 - Lookup/checklist deprioritization
@@ -240,7 +246,7 @@ class TableSelector:
         # Detect what domain the question is about
         question_domain = self._detect_question_domain(q_lower)
         if question_domain:
-            logger.info(f"[TABLE-SEL] Detected question domain: {question_domain}")
+            logger.warning(f"[TABLE-SEL] Detected question domain: {question_domain}")
         
         # Check if this is a config/setup question
         is_config_question = any(term in q_lower for term in [
@@ -303,7 +309,7 @@ class TableSelector:
         """
         Score a table's relevance to the question.
         
-        v2.0: Uses classification metadata for domain matching.
+        v2.1: Adds fallback domain matching when no classifications exist.
         
         Returns an integer score where higher = more relevant.
         """
@@ -316,7 +322,15 @@ class TableSelector:
         # =====================================================================
         # 1. METADATA-BASED DOMAIN MATCHING (highest priority - v2.0)
         # =====================================================================
-        score += self._score_metadata_match(table_name, question_domain, is_config_question)
+        metadata_score = self._score_metadata_match(table_name, question_domain, is_config_question)
+        score += metadata_score
+        
+        # =====================================================================
+        # 1b. FALLBACK DOMAIN MATCHING (when no classifications)
+        # If question has a clear domain but no metadata exists, use name-based matching
+        # =====================================================================
+        if question_domain and metadata_score == 0:
+            score += self._score_fallback_domain(table_name, question_domain, q_lower)
         
         # =====================================================================
         # 2. DIRECT NAME MATCHING
@@ -382,6 +396,38 @@ class TableSelector:
         # 8. COLUMN VALUE MATCHING (kept but not capped artificially)
         # =====================================================================
         score += self._score_value_match(table, words)
+        
+        return score
+    
+    def _score_fallback_domain(self, table_name: str, question_domain: str, q_lower: str) -> int:
+        """
+        Fallback domain scoring when no classifications exist.
+        
+        Checks if table name contains domain keywords and applies boost/penalty.
+        This ensures "tax" questions prefer "tax" tables over "workers_comp" tables.
+        """
+        score = 0
+        
+        # Get keywords for the detected domain
+        domain_keywords = DOMAIN_KEYWORDS.get(question_domain, [])
+        
+        # Check if table name matches question domain
+        table_matches_domain = any(kw.replace(' ', '_') in table_name or kw.replace(' ', '') in table_name 
+                                   for kw in domain_keywords)
+        
+        if table_matches_domain:
+            score += 80  # Strong boost for matching domain
+            logger.warning(f"[TABLE-SEL] FALLBACK DOMAIN MATCH: {table_name[-40:]} domain={question_domain} (+80)")
+        else:
+            # Check if table matches a DIFFERENT domain (penalty)
+            for other_domain, other_keywords in DOMAIN_KEYWORDS.items():
+                if other_domain == question_domain:
+                    continue
+                if any(kw.replace(' ', '_') in table_name or kw.replace(' ', '') in table_name 
+                       for kw in other_keywords):
+                    score -= 50  # Penalty for wrong domain
+                    logger.warning(f"[TABLE-SEL] WRONG DOMAIN PENALTY: {table_name[-40:]} is {other_domain}, want {question_domain} (-50)")
+                    break
         
         return score
     
