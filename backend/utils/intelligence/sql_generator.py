@@ -214,7 +214,10 @@ class SQLGenerator:
         """
         filters = []
         
+        logger.warning(f"[SQL-GEN] Detecting value filters for: {question[:40]}... table={table_name[-40:]}")
+        
         if not self.handler or not hasattr(self.handler, 'conn'):
+            logger.warning("[SQL-GEN] No handler.conn - skipping filter detection")
             return filters
         
         # Extract significant words from question
@@ -226,7 +229,10 @@ class SQLGenerator:
         
         significant_words = [w for w in words if len(w) >= 3 and w not in skip_words]
         
+        logger.warning(f"[SQL-GEN] Significant words from question: {significant_words}")
+        
         if not significant_words:
+            logger.warning("[SQL-GEN] No significant words found - skipping filter detection")
             return filters
         
         try:
@@ -237,6 +243,8 @@ class SQLGenerator:
                 WHERE LOWER(table_name) = LOWER(?)
                 AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
             """, [table_name]).fetchall()
+            
+            logger.warning(f"[SQL-GEN] Found {len(profiles)} column profiles with values")
             
             for col_name, distinct_values_json, top_values_json in profiles:
                 # Try distinct_values first, then top_values_json
@@ -269,7 +277,7 @@ class SQLGenerator:
                     pass
                     
         except Exception as e:
-            logger.debug(f"[SQL-GEN] Filter detection failed: {e}")
+            logger.warning(f"[SQL-GEN] Filter detection failed: {e}")
         
         return filters
 
@@ -533,7 +541,7 @@ SQL:"""
                 part, col = match.group(1), match.group(2)
                 fixed = re.sub(pattern, f"EXTRACT({part} FROM TRY_CAST({col} AS DATE))",
                               sql, flags=re.IGNORECASE)
-                logger.info(f"[SQL-FIX] Added TRY_CAST for {col}")
+                logger.warning(f"[SQL-FIX] Added TRY_CAST for {col}")
                 return fixed
         
         # Fix column not found
@@ -573,7 +581,7 @@ SQL:"""
         if best_match:
             fixed = re.sub(r'\b' + re.escape(bad_col) + r'\b', 
                           f'"{best_match}"', sql, flags=re.IGNORECASE)
-            logger.info(f"[SQL-FIX] {bad_col} → {best_match}")
+            logger.warning(f"[SQL-FIX] {bad_col} → {best_match}")
             return fixed
         
         return None
