@@ -9,6 +9,11 @@ The brain of XLR8. Thin orchestrator that coordinates:
 - Conflict detection
 - Response synthesis
 
+CRITICAL: ALL questions gather ALL Five Truths.
+Validation questions especially need all truths to triangulate:
+- "Is this tax rate correct?" needs Regulatory + Configuration + Reality
+- "Are we compliant?" needs Regulatory + Reference + Reality + Configuration
+
 This is the NEW modular engine replacing the 6000-line monolith.
 
 Deploy to: backend/utils/intelligence/engine.py
@@ -38,7 +43,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "6.1.0"
+__version__ = "6.2.0"  # FIXED: Gather ALL Five Truths for ALL questions (no more validation skip)
 
 # Try to load ConsultativeSynthesizer
 SYNTHESIS_AVAILABLE = False
@@ -66,6 +71,9 @@ class IntelligenceEngineV2:
     3. CONFIGURATION - How they've configured the system (DuckDB)
     4. REFERENCE - Product docs, implementation standards (ChromaDB)
     5. REGULATORY - Laws, compliance requirements (ChromaDB)
+    
+    CRITICAL: ALL questions gather ALL truths. The synthesizer decides relevance.
+    Validation questions ESPECIALLY need all truths to triangulate.
     
     Usage:
         engine = IntelligenceEngineV2("PROJECT123")
@@ -285,12 +293,15 @@ class IntelligenceEngineV2:
     def ask(self, question: str, mode: IntelligenceMode = None,
             context: Dict = None) -> SynthesizedAnswer:
         """
-        Answer a question using all Five Truths.
+        Answer a question using ALL Five Truths.
+        
+        CRITICAL: Every question gathers from ALL truth types.
+        The synthesizer decides what's relevant, not this method.
         
         This is the main entry point. It:
         1. Analyzes the question to detect mode and domains
         2. Handles clarification requests if needed
-        3. Gathers from each relevant Truth type
+        3. Gathers from ALL Truth types (no skipping)
         4. Detects conflicts between truths
         5. Synthesizes a consultative response
         
@@ -330,7 +341,7 @@ class IntelligenceEngineV2:
             if clarification:
                 return clarification
         
-        logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, facts={self.confirmed_facts}")
+        logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, validation={is_validation}, config={is_config}")
         
         # Build analysis context
         analysis = {
@@ -343,8 +354,17 @@ class IntelligenceEngineV2:
             'q_lower': q_lower
         }
         
-        # Gather from each Truth type
+        # =====================================================================
+        # GATHER ALL FIVE TRUTHS - NO SKIPPING
+        # =====================================================================
+        # CRITICAL: Every question needs all truths for proper triangulation.
+        # Validation questions ESPECIALLY need Regulatory + Reference to verify
+        # whether Reality matches what SHOULD be configured.
+        # =====================================================================
+        
+        # Truth 1: REALITY - What the data shows
         reality = self._gather_reality(question, analysis)
+        logger.warning(f"[ENGINE-V2] REALITY gathered: {len(reality)} truths")
         
         # Check for pending clarification from reality gathering
         if context.get('pending_clarification') or self._pending_clarification:
@@ -352,29 +372,37 @@ class IntelligenceEngineV2:
             self._pending_clarification = None
             return clarification
         
-        # For validation questions, skip other truths (they pull irrelevant docs)
-        if is_validation:
-            intent = []
-            configuration = []
-            reference, regulatory, compliance = [], [], []
-            conflicts = []
-        else:
-            intent = self._gather_intent(question, analysis)
-            configuration = self._gather_configuration(question, analysis)
-            reference, regulatory, compliance = self._gather_reference_library(question, analysis)
-            
-            # Enrich semantic truths with LLM extraction (LLM Lookups)
-            if self.truth_enricher:
-                intent = self.truth_enricher.enrich_batch(intent)
-                reference = self.truth_enricher.enrich_batch(reference)
-                regulatory = self.truth_enricher.enrich_batch(regulatory)
-                compliance = self.truth_enricher.enrich_batch(compliance)
-                # Configuration is DuckDB (structured), light enrichment
-                configuration = self.truth_enricher.enrich_batch(configuration)
-            
-            conflicts = self._detect_conflicts(
-                reality, intent, configuration, reference, regulatory, compliance
-            )
+        # Truth 2: INTENT - What customer wants (SOWs, requirements)
+        intent = self._gather_intent(question, analysis)
+        logger.warning(f"[ENGINE-V2] INTENT gathered: {len(intent)} truths")
+        
+        # Truth 3: CONFIGURATION - How system is configured (code tables)
+        configuration = self._gather_configuration(question, analysis)
+        logger.warning(f"[ENGINE-V2] CONFIGURATION gathered: {len(configuration)} truths")
+        
+        # Truths 4, 5, 6: REFERENCE, REGULATORY, COMPLIANCE (global library)
+        reference, regulatory, compliance = self._gather_reference_library(question, analysis)
+        logger.warning(f"[ENGINE-V2] REFERENCE gathered: {len(reference)} truths")
+        logger.warning(f"[ENGINE-V2] REGULATORY gathered: {len(regulatory)} truths")
+        logger.warning(f"[ENGINE-V2] COMPLIANCE gathered: {len(compliance)} truths")
+        
+        # Log total truths gathered
+        total_truths = len(reality) + len(intent) + len(configuration) + len(reference) + len(regulatory) + len(compliance)
+        logger.warning(f"[ENGINE-V2] TOTAL TRUTHS GATHERED: {total_truths}")
+        
+        # Enrich semantic truths with LLM extraction (LLM Lookups)
+        if self.truth_enricher:
+            intent = self.truth_enricher.enrich_batch(intent)
+            reference = self.truth_enricher.enrich_batch(reference)
+            regulatory = self.truth_enricher.enrich_batch(regulatory)
+            compliance = self.truth_enricher.enrich_batch(compliance)
+            # Configuration is DuckDB (structured), light enrichment
+            configuration = self.truth_enricher.enrich_batch(configuration)
+        
+        # Detect conflicts between truths
+        conflicts = self._detect_conflicts(
+            reality, intent, configuration, reference, regulatory, compliance
+        )
         
         # Run proactive checks
         insights = self._run_proactive_checks(analysis)
@@ -410,11 +438,20 @@ class IntelligenceEngineV2:
             'question': question,
             'mode': mode.value if mode else 'search',
             'answer_length': len(answer.answer),
-            'confidence': answer.confidence
+            'confidence': answer.confidence,
+            'truths_gathered': {
+                'reality': len(reality),
+                'intent': len(intent),
+                'configuration': len(configuration),
+                'reference': len(reference),
+                'regulatory': len(regulatory),
+                'compliance': len(compliance)
+            }
         })
         
+        total_truths = len(reality) + len(intent) + len(configuration) + len(reference) + len(regulatory) + len(compliance)
         logger.info(f"[ENGINE-V2] Answer: {len(answer.answer)} chars, "
-                   f"confidence={answer.confidence:.0%}")
+                   f"confidence={answer.confidence:.0%}, truths={total_truths}")
         
         return answer
     
