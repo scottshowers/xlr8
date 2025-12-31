@@ -843,7 +843,7 @@ function FilesPanel({ c, project, targetScope }) {
             <Tooltip title="Documents" detail="Global docs chunked for AI retrieval." action="Referenced across all projects">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <Database size={18} style={{ color: c.electricBlue }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> chunks</span>
+                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.reduce((sum, f) => sum + (f.chunk_count || 0), 0)}</strong> chunks</span>
               </div>
             </Tooltip>
           </>
