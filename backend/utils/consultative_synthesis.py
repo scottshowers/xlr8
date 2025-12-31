@@ -1,5 +1,5 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v1.1.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v1.2.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
@@ -152,7 +152,7 @@ class ConsultativeSynthesizer:
         Returns:
             ConsultativeAnswer with synthesized response
         """
-        logger.info(f"[SYNTHESIS] Starting synthesis for: {question[:80]}...")
+        logger.warning(f"[SYNTHESIS] Starting synthesis for: {question[:80]}...")
         
         # Step 1: Summarize each truth source
         summaries = self._summarize_truths(
@@ -606,7 +606,7 @@ Keep it under 100 words."""
                 method = 'claude'
             else:
                 method = model
-            logger.info(f"[CONSULTATIVE] Synthesis succeeded: {model}")
+            logger.warning(f"[CONSULTATIVE] Synthesis succeeded: {model}")
             return result['response'], method
         
         # Final fallback - template-based
