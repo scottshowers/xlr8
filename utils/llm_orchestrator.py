@@ -129,10 +129,10 @@ def classify_query(query: str, chunks: List[Dict] = None) -> str:
 
 def select_local_model(query: str, chunks: List[Dict] = None) -> str:
     """
-    Select local model for employee data queries
+    Select local model for queries
     
-    DeepSeek: Data extraction, tables, lists, calculations
-    Mistral: General HR understanding, policy interpretation
+    Qwen: SQL, data extraction, tables, lists, calculations
+    phi3:medium: General reasoning, analysis, policy interpretation
     """
     query_lower = query.lower()
     
@@ -148,11 +148,11 @@ def select_local_model(query: str, chunks: List[Dict] = None) -> str:
         mostly_tabular = False
     
     if is_data_extraction or mostly_tabular:
-        logger.info("Selected model: DeepSeek (data extraction)")
-        return 'deepseek-coder:6.7b'
+        logger.info("Selected model: Qwen (data extraction)")
+        return 'qwen2.5-coder:14b'
     
-    logger.info("Selected model: Mistral (general)")
-    return 'mistral:7b'
+    logger.info("Selected model: phi3:medium (general)")
+    return 'phi3:medium'
 
 
 # =============================================================================
@@ -630,11 +630,11 @@ Analyze the data. Answer the question with real numbers and real values from the
         if not self.ollama_url:
             return {"sql": None, "error": "No LLM configured", "success": False}
         
-        # SQLCoder is purpose-built for SQL - try it twice before fallback
+        # Qwen 14B is best for SQL - try it twice with different prompts
         attempts = [
-            ('sqlcoder:7b', 'sqlcoder_format'),
-            ('sqlcoder:7b', 'sqlcoder_strict'),
-            ('mistral:7b', 'fallback')
+            ('qwen2.5-coder:14b', 'sqlcoder_format'),
+            ('qwen2.5-coder:14b', 'sqlcoder_strict'),
+            ('qwen2.5-coder:14b', 'fallback')
         ]
         last_invalid_cols = []
         best_sql = None
@@ -671,7 +671,7 @@ DO NOT USE these columns (they don't exist): {', '.join(last_invalid_cols)}
 ```sql
 SELECT"""
 
-                else:  # fallback to mistral
+                else:  # fallback prompt style
                     local_prompt = f"""SQL query only. No explanation. Start with SELECT.
 
 {prompt}
@@ -1025,14 +1025,13 @@ Data Context:
 Analyze the data and provide a clear, direct answer. Focus on the key insight first, then supporting details."""
         
         # ==============================================================
-        # STEP 1: Try Mistral first (best for synthesis)
+        # STEP 1: Try phi3:medium (best for reasoning/synthesis)
         # ==============================================================
         if self.ollama_url:
             models_to_try = [
-                'mistral:7b',
-                'mistral:latest',
-                'llama2:7b',
-                'llama2:latest',
+                'phi3:medium',
+                'phi3:latest',
+                'qwen2.5-coder:14b',
             ]
             
             for model in models_to_try:
@@ -1200,13 +1199,12 @@ Always respond with valid JSON only - no explanations, no markdown, no code bloc
 If you cannot extract the requested data, return an appropriate empty JSON structure."""
         
         # ==============================================================
-        # STEP 1: Try Mistral first (good at structured output)
+        # STEP 1: Try phi3:medium first (good at structured output)
         # ==============================================================
         if self.ollama_url:
             models_to_try = [
-                'mistral:7b',
-                'mistral:latest',
-                'llama2:7b',
+                'phi3:medium',
+                'qwen2.5-coder:14b',
             ]
             
             for model in models_to_try:
