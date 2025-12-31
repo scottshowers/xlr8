@@ -254,6 +254,10 @@ class SQLGenerator:
                 try:
                     values = json.loads(distinct_values_json)
                     
+                    # Log first few values for debugging
+                    sample_vals = [str(v.get('value', v) if isinstance(v, dict) else v)[:30] for v in values[:5]]
+                    logger.warning(f"[SQL-GEN] Column {col_name}: {len(values)} values, sample: {sample_vals}")
+                    
                     for val_info in values:
                         val = str(val_info.get('value', '') if isinstance(val_info, dict) else val_info).lower().strip()
                         
