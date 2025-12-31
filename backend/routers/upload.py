@@ -1948,21 +1948,61 @@ async def standards_health():
 
 @router.get("/standards/rules")
 async def list_standards_rules(limit: int = 100):
-    """List extracted rules."""
-    if not STANDARDS_AVAILABLE:
-        raise HTTPException(503, "Standards processor not available")
-    registry = get_rule_registry()
-    rules = registry.get_all_rules()
-    return {"total": len(rules), "rules": [r.to_dict() for r in rules[:limit]]}
+    """List extracted rules - fetches from Supabase for persistence."""
+    rules_list = []
+    
+    # First try to get from Supabase (persisted)
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        if supabase:
+            result = supabase.table('standards_rules').select('*').limit(limit).execute()
+            if result.data:
+                rules_list = result.data
+                logger.warning(f"[STANDARDS] Fetched {len(rules_list)} rules from Supabase")
+    except Exception as e:
+        logger.warning(f"[STANDARDS] Could not fetch from Supabase: {e}")
+    
+    # Fallback to in-memory registry
+    if not rules_list and STANDARDS_AVAILABLE:
+        try:
+            registry = get_rule_registry()
+            rules = registry.get_all_rules()
+            rules_list = [r.to_dict() for r in rules[:limit]]
+            logger.warning(f"[STANDARDS] Using in-memory registry: {len(rules_list)} rules")
+        except Exception as e:
+            logger.warning(f"[STANDARDS] Registry fallback failed: {e}")
+    
+    return {"total": len(rules_list), "rules": rules_list}
 
 
 @router.get("/standards/documents")
 async def list_standards_documents():
-    """List processed documents."""
-    if not STANDARDS_AVAILABLE:
-        raise HTTPException(503, "Standards processor not available")
-    registry = get_rule_registry()
-    return {"total": len(registry.documents), "documents": [d.to_dict() for d in registry.documents.values()]}
+    """List processed documents - fetches from Supabase for persistence."""
+    docs_list = []
+    
+    # First try to get from Supabase (persisted)
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        if supabase:
+            result = supabase.table('standards_documents').select('*').execute()
+            if result.data:
+                docs_list = result.data
+                logger.warning(f"[STANDARDS] Fetched {len(docs_list)} documents from Supabase")
+    except Exception as e:
+        logger.warning(f"[STANDARDS] Could not fetch documents from Supabase: {e}")
+    
+    # Fallback to in-memory registry
+    if not docs_list and STANDARDS_AVAILABLE:
+        try:
+            registry = get_rule_registry()
+            docs_list = [d.to_dict() for d in registry.documents.values()]
+            logger.warning(f"[STANDARDS] Using in-memory registry: {len(docs_list)} documents")
+        except Exception as e:
+            logger.warning(f"[STANDARDS] Documents fallback failed: {e}")
+    
+    return {"total": len(docs_list), "documents": docs_list}
 
 
 # =============================================================================
