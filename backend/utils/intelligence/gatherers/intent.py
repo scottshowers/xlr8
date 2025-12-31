@@ -75,11 +75,17 @@ class IntentGatherer(ChromaDBGatherer):
         
         try:
             # Search for intent documents in this project
+            # ChromaDB requires $and for multiple conditions
+            where_filter = {"$and": [
+                {"project_id": self.project_id},
+                {"truth_type": "intent"}
+            ]} if self.project_id else {"truth_type": "intent"}
+            
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
                 query=question,
                 n_results=5,
-                where={"project_id": self.project_id, "truth_type": "intent"}
+                where=where_filter
             )
             
             # Process results - rag_handler.search returns list of dicts
