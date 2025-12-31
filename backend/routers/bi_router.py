@@ -648,12 +648,21 @@ async def execute_bi_query(request: BIQueryRequest):
         except:
             pass
         
+        # Initialize RAG handler for Reference/Regulatory truths
+        rag = None
+        if RAG_AVAILABLE:
+            try:
+                rag = RAGHandler()
+            except:
+                pass
+        
         # Initialize intelligence engine
         engine = IntelligenceEngine(request.project)
         engine.load_context(
             structured_handler=handler,
             schema=schema,
-            relationships=relationships
+            relationships=relationships,
+            rag_handler=rag
         )
         
         # Apply any pre-set filters
@@ -982,7 +991,8 @@ async def get_suggestions(project: str):
         try:
             if INTELLIGENCE_AVAILABLE:
                 engine = IntelligenceEngine(project)
-                engine.load_context(structured_handler=handler, schema=schema)
+                rag = RAGHandler() if RAG_AVAILABLE else None
+                engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
                 
                 # Run quick analysis for findings
                 # (In production, cache these or run async)
@@ -1180,7 +1190,8 @@ async def export_bi_data(request: BIExportRequest):
             # Generate from NL query
             schema = _build_bi_schema(handler, request.project)
             engine = IntelligenceEngine(request.project)
-            engine.load_context(structured_handler=handler, schema=schema)
+            rag = RAGHandler() if RAG_AVAILABLE else None
+            engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
             answer = engine.ask(request.query)
             
             if hasattr(engine, 'last_executed_sql'):
