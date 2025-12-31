@@ -235,19 +235,13 @@ class IntelligenceEngineV2:
         )
         
         # Configuration gatherer (DuckDB - code tables)
-        # Get table classifications for finding config tables
-        table_classifications = {}
-        if self.table_selector:
-            # Load classifications first
-            self.table_selector._load_classifications()
-            table_classifications = self.table_selector._classifications
-        
+        # Pass table_selector so it can use the same scoring logic
         self.configuration_gatherer = ConfigurationGatherer(
             project_name=self.project,
             project_id=self.project_id,
             structured_handler=structured_handler,
             schema=self.schema,
-            table_classifications=table_classifications
+            table_selector=self.table_selector  # Use same selector for consistent scoring
         )
         
         # Global gatherers (Reference Library - no project filter)
