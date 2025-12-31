@@ -586,20 +586,17 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt - FORCE DIRECT ANSWER
-        expert_prompt = """TASK: Answer this question using the data below.
+        # Expert prompt - FORCE THE FORMAT
+        expert_prompt = """Answer format: YES/NO/PARTIALLY + specific values from data.
 
-RULES:
-1. START your response with "YES", "NO", or "PARTIALLY" 
-2. Then list the SPECIFIC values that support your answer
-3. DO NOT describe what the data contains
-4. DO NOT explain the structure of the data
+If asked "are my SUI rates setup correctly":
+- Look for rows where type_of_tax = "SUI" or "Unemployment"
+- List the states and rates you find
+- Say YES if you found SUI data, NO if not found
 
-EXAMPLE QUESTION: "Are my SUI rates configured?"
-GOOD ANSWER: "YES - Found SUI rates for 12 states: TX (2.7%), CA (3.4%), NY (4.1%)..."
-BAD ANSWER: "The data contains tax information for various jurisdictions..."
+Example answer: "YES - Found SUI rates for: TX, CA, NY, FL (see contribution_rate_percent column)"
 
-If asked about SUI specifically, look for rows where type_of_tax contains "SUI" or "Unemployment"."""
+DO NOT describe what the data looks like. Just answer YES/NO and list what you found."""
 
         # =====================================================================
         # ROUTING: Validation → phi3 (reasoning), Simple → Qwen (coding)
@@ -683,8 +680,8 @@ Provide a direct answer based ONLY on the data above."""
                 "prompt": prompt,
                 "stream": False,
                 "options": {
-                    "temperature": 0.1,  # Low temp for accuracy
-                    "num_predict": 500
+                    "temperature": 0.3,  # Slightly higher for more natural output
+                    "num_predict": 1000  # Allow longer responses
                 }
             }
             
@@ -694,10 +691,10 @@ Provide a direct answer based ONLY on the data above."""
                 response = requests.post(
                     url, json=payload,
                     auth=HTTPBasicAuth(ollama_username, ollama_password),
-                    timeout=60
+                    timeout=90
                 )
             else:
-                response = requests.post(url, json=payload, timeout=60)
+                response = requests.post(url, json=payload, timeout=90)
             
             if response.status_code == 200:
                 result = response.json().get("response", "").strip()
