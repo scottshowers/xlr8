@@ -302,16 +302,19 @@ def _call_llm(prompt: str, system_prompt: str = None) -> str:
     This is NOT a money grab. Groq handles this fine.
     """
     
+    logger.warning("[STANDARDS] _call_llm starting...")
+    
     # Try Groq first (PRIMARY)
     result, success = _call_groq(prompt, system_prompt)
     if success and result:
-        logger.info("[STANDARDS] Using Groq (Llama 3.3 70B)")
+        logger.warning(f"[STANDARDS] Groq succeeded: {len(result)} chars")
         return result
     
     # Fallback to Claude ONLY if Groq failed
     logger.warning("[STANDARDS] Groq failed, falling back to Claude...")
     result, success = _call_claude_fallback(prompt, system_prompt)
     if success and result:
+        logger.warning(f"[STANDARDS] Claude fallback succeeded: {len(result)} chars")
         return result
     
     logger.error("[STANDARDS] All LLM calls failed")
@@ -381,7 +384,10 @@ def extract_rules_from_text(
 ) -> List[ExtractedRule]:
     """Extract rules from a block of text using LLM."""
     
+    logger.warning(f"[STANDARDS] extract_rules_from_text called: {document_name}, {len(text)} chars")
+    
     if not text or len(text.strip()) < 50:
+        logger.warning(f"[STANDARDS] Text too short ({len(text.strip()) if text else 0} chars), skipping extraction")
         return []
     
     prompt = EXTRACTION_PROMPT_TEMPLATE.format(
@@ -390,10 +396,14 @@ def extract_rules_from_text(
         text=text[:8000]  # Limit text size
     )
     
+    logger.warning(f"[STANDARDS] Calling LLM for rule extraction...")
     response = _call_llm(prompt, EXTRACTION_SYSTEM_PROMPT)
     
     if not response:
+        logger.warning(f"[STANDARDS] LLM returned empty response")
         return []
+    
+    logger.warning(f"[STANDARDS] LLM response: {len(response)} chars")
     
     # Parse JSON from response
     try:
@@ -430,7 +440,7 @@ def extract_rules_from_text(
         except Exception as e:
             logger.warning(f"[STANDARDS] Failed to create rule from data: {e}")
     
-    logger.info(f"[STANDARDS] Extracted {len(rules)} rules from {section}")
+    logger.warning(f"[STANDARDS] Extracted {len(rules)} rules from {section}")
     return rules
 
 
