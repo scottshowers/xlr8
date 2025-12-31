@@ -1,8 +1,13 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v1.2.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v2.0.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
+
+SIMPLIFIED ROUTING:
+- ALL synthesis → Qwen 14B (one model for everything)
+- FALLBACK → Claude (only if Qwen fails)
+- TEMPLATE → Last resort if all LLMs fail
 
 PURPOSE:
 This module transforms raw data retrieval into world-class consultative answers.
@@ -167,22 +172,18 @@ class ConsultativeSynthesizer:
         # Step 2: Triangulate - find alignments, conflicts, gaps
         triangulation = self._triangulate(summaries, conflicts or [])
         
-        # Step 3: Determine complexity and choose synthesis method
+        # Step 3: Determine complexity (for logging only now)
         complexity = self._assess_complexity(question, summaries, triangulation)
+        logger.warning(f"[SYNTHESIS] Complexity: {complexity} (using Qwen for all)")
         
-        # Step 4: Generate the answer
-        if complexity == 'simple' and structured_data:
-            # Simple data query - use lightweight synthesis
-            answer_text = self._synthesize_simple(question, structured_data)
-            method = 'template'
-        else:
-            # Complex query - use LLM synthesis
-            answer_text, method = self._synthesize_with_llm(
-                question=question,
-                summaries=summaries,
-                triangulation=triangulation,
-                conflicts=conflicts or []
-            )
+        # Step 4: Generate the answer - Qwen handles everything
+        answer_text, method = self._synthesize_with_llm(
+            question=question,
+            summaries=summaries,
+            triangulation=triangulation,
+            conflicts=conflicts or [],
+            complexity=complexity
+        )
         
         # Step 5: Extract recommended actions
         actions = self._extract_actions(answer_text, triangulation)
@@ -530,19 +531,18 @@ class ConsultativeSynthesizer:
         question: str,
         summaries: List[TruthSummary],
         triangulation: TriangulationResult,
-        conflicts: List[Any]
+        conflicts: List[Any],
+        complexity: str = 'complex'
     ) -> Tuple[str, str]:
         """
-        Use LLM to synthesize a consultative answer via LLMOrchestrator.
+        Use LLM to synthesize a consultative answer.
         
-        Flow: Mistral (local) → Claude (fallback) → Template (final fallback)
+        SIMPLE ROUTING:
+        - ALL questions → Qwen 14B (one model for everything)
+        - FALLBACK → Claude (only if Qwen fails)
         
         Returns: (answer_text, method_used)
         """
-        if not self._orchestrator:
-            logger.warning("[CONSULTATIVE] No orchestrator - using template")
-            return self._template_fallback(question, summaries, triangulation), 'template'
-        
         # Build context from summaries
         context_parts = []
         for summary in summaries:
@@ -566,42 +566,43 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt for consultative synthesis
+        # Expert prompt - strict grounding rules
         expert_prompt = """You are a senior implementation consultant reviewing configuration data.
 
-TONE: Peer-to-peer. Direct. Concise. The user is a professional.
+CRITICAL RULES:
+1. ONLY reference values that appear in the DATA below
+2. If a value is NOT in the data, say "not found in data provided"
+3. DO NOT invent codes, rates, or values
+4. If you cannot answer from the data, say so clearly
+
+TONE: Peer-to-peer. Direct. Concise.
 
 FORMAT:
 - Lead with the direct answer (1 sentence)
-- Bullet the specific findings (codes, rates, values found)
-- Flag issues or gaps in 1-2 bullets
-- No filler, no lectures, no "I recommend obtaining documentation"
+- Bullet the specific findings (ONLY values from data)
+- Flag what's missing or needs verification
+- Keep it under 100 words"""
 
-AVOID: "It's important...", "I recommend...", "stakeholders", "ensure", "comprehensive", consultant jargon.
-
-Example good response:
-"SUI rates for TISI:
-- Alaska (AKSUIEE): No rate value in config
-- Tax verification docs show FUTA rates only
-- Missing: Actual SUI rate percentages
-
-Check the tax rate configuration table for the rate values."
-
-Keep it under 100 words."""
-
-        # Use orchestrator - handles Mistral first, Claude fallback
-        result = self._orchestrator.synthesize_answer(
+        # =====================================================================
+        # SIMPLE: Qwen 14B for everything, Claude fallback
+        # =====================================================================
+        logger.warning("[CONSULTATIVE] Using Qwen 14B for synthesis")
+        result = self._call_local_model(
+            model='qwen2.5-coder:14b',
             question=question,
             context=context,
-            expert_prompt=expert_prompt,
-            use_claude_fallback=True
+            expert_prompt=expert_prompt
         )
+        
+        # If Qwen fails, fall back to Claude
+        if not result.get('success'):
+            logger.warning("[CONSULTATIVE] Qwen failed, falling back to Claude")
+            result = self._call_claude_direct(question, context, expert_prompt)
         
         if result.get('success') and result.get('response'):
             model = result.get('model_used', 'unknown')
-            # Normalize model name for reporting
-            if 'mistral' in model.lower():
-                method = 'mistral'
+            if 'qwen' in model.lower():
+                method = 'qwen-14b'
             elif 'claude' in model.lower():
                 method = 'claude'
             else:
@@ -610,8 +611,122 @@ Keep it under 100 words."""
             return result['response'], method
         
         # Final fallback - template-based
-        logger.warning(f"[CONSULTATIVE] LLM synthesis failed: {result.get('error')}, using template")
+        logger.warning(f"[CONSULTATIVE] All LLMs failed: {result.get('error')}, using template")
         return self._template_fallback(question, summaries, triangulation), 'template'
+    
+    def _call_local_model(self, model: str, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
+        """
+        Call a specific local Ollama model for synthesis.
+        """
+        try:
+            import requests
+            from requests.auth import HTTPBasicAuth
+            import os
+            
+            ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+            ollama_username = os.getenv("LLM_USERNAME", "")
+            ollama_password = os.getenv("LLM_PASSWORD", "")
+            
+            if not ollama_url:
+                logger.warning("[CONSULTATIVE] No LLM_ENDPOINT configured")
+                return {"success": False, "error": "No Ollama URL"}
+            
+            prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context[:10000]}
+
+Provide a direct answer based ONLY on the data above."""
+
+            url = f"{ollama_url}/api/generate"
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.1,  # Low temp for accuracy
+                    "num_predict": 500
+                }
+            }
+            
+            logger.warning(f"[CONSULTATIVE] Calling {model} ({len(prompt)} chars)")
+            
+            if ollama_username and ollama_password:
+                response = requests.post(
+                    url, json=payload,
+                    auth=HTTPBasicAuth(ollama_username, ollama_password),
+                    timeout=60
+                )
+            else:
+                response = requests.post(url, json=payload, timeout=60)
+            
+            if response.status_code == 200:
+                result = response.json().get("response", "").strip()
+                if result and len(result) > 30:
+                    logger.warning(f"[CONSULTATIVE] {model} succeeded ({len(result)} chars)")
+                    return {
+                        "success": True,
+                        "response": result,
+                        "model_used": model
+                    }
+                else:
+                    logger.warning(f"[CONSULTATIVE] {model} returned empty/short response")
+                    return {"success": False, "error": "Empty response"}
+            else:
+                logger.warning(f"[CONSULTATIVE] {model} HTTP error: {response.status_code}")
+                return {"success": False, "error": f"HTTP {response.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"[CONSULTATIVE] {model} error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _call_claude_direct(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
+        """
+        Call Claude as fallback when local models fail.
+        
+        Only called for complex queries when Qwen 14B fails.
+        """
+        try:
+            import anthropic
+            import os
+            
+            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                logger.warning("[CONSULTATIVE] No Claude API key for fallback")
+                return {"success": False, "error": "No API key"}
+            
+            client = anthropic.Anthropic(api_key=api_key)
+            
+            prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context}
+
+Provide a direct answer based ONLY on the data above."""
+
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=500,
+                temperature=0,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            answer = response.content[0].text.strip()
+            logger.warning(f"[CONSULTATIVE] Claude fallback succeeded ({len(answer)} chars)")
+            
+            return {
+                "success": True,
+                "response": answer,
+                "model_used": "claude-sonnet-fallback"
+            }
+            
+        except Exception as e:
+            logger.error(f"[CONSULTATIVE] Claude fallback failed: {e}")
+            return {"success": False, "error": str(e)}
     
     def _template_fallback(
         self,
