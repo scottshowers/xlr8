@@ -1246,11 +1246,13 @@ Return only valid JSON - no explanations, no markdown code blocks."""
             
             for truth_type in truth_types:
                 try:
+                    # RAGHandler.search(collection_name, query, n_results, project_id, ..., truth_type)
                     results = rag.search(
+                        collection_name="documents",
                         query=action_description,
+                        n_results=3,
                         project_id=None if truth_type in ['reference', 'regulatory'] else project_id,
-                        truth_type=truth_type,
-                        top_k=3
+                        truth_type=truth_type
                     )
                     
                     if results:
