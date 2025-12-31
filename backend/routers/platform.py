@@ -827,21 +827,44 @@ async def list_references():
                         'uploaded_at': meta.get('uploaded_at')
                     }
         
+        # Fetch rules from standards_rules table
+        rules_list = []
+        rules_by_doc = {}
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                rules_result = supabase.table('standards_rules').select('*').execute()
+                if rules_result.data:
+                    rules_list = rules_result.data
+                    # Group by source_document
+                    for rule in rules_list:
+                        doc_name = rule.get('source_document', '')
+                        if doc_name:
+                            if doc_name not in rules_by_doc:
+                                rules_by_doc[doc_name] = []
+                            rules_by_doc[doc_name].append(rule)
+                    logger.warning(f"[REFERENCES] Fetched {len(rules_list)} rules from standards_rules")
+        except Exception as e:
+            logger.warning(f"[REFERENCES] Could not fetch rules: {e}")
+        
         # Build response
         ref_files = []
         for filename, count in doc_counts.items():
             meta = doc_metadata.get(filename, {})
+            file_rules = rules_by_doc.get(filename, [])
             ref_files.append({
                 "filename": filename,
                 "project": meta.get('project', 'Global/Universal'),
                 "chunk_count": count,
                 "truth_type": meta.get('truth_type', 'reference'),
-                "uploaded_at": meta.get('uploaded_at')
+                "uploaded_at": meta.get('uploaded_at'),
+                "rule_count": len(file_rules)
             })
         
         return {
             "files": ref_files,
-            "rules": [],  # Rules extracted from these docs (future)
+            "rules": rules_list,
             "total": len(ref_files)
         }
         
