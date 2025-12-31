@@ -670,7 +670,7 @@ async def list_references():
             project = meta.get('project_id') or meta.get('project')
             
             # Only include reference library docs (global/universal)
-            if project not in ['Global/Universal', 'Reference Library', None, '']:
+            if project not in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
                 continue
                 
             if source:
