@@ -751,6 +751,32 @@ async def _route_to_standards(
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 raw_text = f.read()
             doc = standards_process_text(raw_text, filename, domain)
+        elif extension in ['docx', 'doc']:
+            # Word docs need proper extraction (NOT plain text)
+            if TEXT_EXTRACTION_AVAILABLE:
+                raw_text = extract_text(file_path)
+                doc = standards_process_text(raw_text, filename, domain) if raw_text else None
+                if not doc:
+                    import hashlib
+                    doc_id = hashlib.md5(f"{filename}_{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+                    doc = StandardsDocument(
+                        document_id=doc_id,
+                        filename=filename,
+                        title=title or filename,
+                        domain=domain
+                    )
+                logger.info(f"[SMART-ROUTER] Extracted {len(raw_text)} chars from Word doc")
+            else:
+                logger.warning(f"[SMART-ROUTER] Cannot extract text from {extension} - text extraction not available")
+                import hashlib
+                doc_id = hashlib.md5(f"{filename}_{datetime.now().isoformat()}".encode()).hexdigest()[:12]
+                doc = StandardsDocument(
+                    document_id=doc_id,
+                    filename=filename,
+                    title=title or filename,
+                    domain=domain
+                )
+                raw_text = ""
         else:
             # Other text files (txt, md, etc.)
             with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
