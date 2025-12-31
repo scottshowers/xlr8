@@ -972,11 +972,24 @@ async def delete_all_references(
         if ids_to_delete:
             coll.delete(ids=ids_to_delete)
         
+        # CASCADE: Delete from standards_rules
+        rules_deleted = 0
+        try:
+            from utils.database.supabase_client import get_supabase
+            supabase = get_supabase()
+            if supabase:
+                result = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+                rules_deleted = len(result.data or [])
+                logger.warning(f"[REFERENCES] Cleared {rules_deleted} rules from standards_rules")
+        except Exception as e:
+            logger.warning(f"[REFERENCES] standards_rules clear failed: {e}")
+        
         logger.info(f"[REFERENCES] Cleared {len(ids_to_delete)} reference chunks")
         return {
             "success": True,
-            "files_processed": len(ids_to_delete),
-            "message": f"Deleted {len(ids_to_delete)} reference chunks"
+            "chunks_deleted": len(ids_to_delete),
+            "rules_deleted": rules_deleted,
+            "message": f"Deleted {len(ids_to_delete)} chunks, {rules_deleted} rules"
         }
         
     except HTTPException:
