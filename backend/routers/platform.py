@@ -907,10 +907,19 @@ async def delete_reference(
             if del_result.data:
                 result['registry_removed'] = True
                 logger.info(f"[REFERENCES] Removed {filename} from document_registry")
+            
+            # 3. STANDARDS_RULES - Remove extracted rules (cascade)
+            try:
+                rules_result = supabase.table('standards_rules').delete().eq('source_document', filename).execute()
+                if rules_result.data:
+                    result['rules_removed'] = len(rules_result.data)
+                    logger.warning(f"[REFERENCES] Removed {len(rules_result.data)} rules from standards_rules")
+            except Exception as e:
+                logger.warning(f"[REFERENCES] Standards rules cleanup error: {e}")
     except Exception as e:
         logger.warning(f"[REFERENCES] Registry cleanup error: {e}")
     
-    if result['chunks_removed'] == 0 and not result['registry_removed']:
+    if result['chunks_removed'] == 0 and not result['registry_removed'] and not result.get('rules_removed'):
         raise HTTPException(404, f"Document not found: {filename}")
     
     # Build message
@@ -919,6 +928,8 @@ async def delete_reference(
         parts.append(f"ChromaDB ({result['chunks_removed']} chunks)")
     if result['registry_removed']:
         parts.append("Registry")
+    if result.get('rules_removed'):
+        parts.append(f"Rules ({result['rules_removed']})")
     result['message'] = f"Deleted from: {', '.join(parts)}"
     
     return result
