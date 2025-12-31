@@ -1,18 +1,22 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v2.1.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v3.0.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
 
-SIMPLIFIED ROUTING:
-- ALL synthesis → Qwen 14B (one model for everything)
-- FALLBACK → Claude (only if Qwen fails)
-- TEMPLATE → Last resort if all LLMs fail
+APPROACH: Let the LLM reason like a consultant
+- Send actual data rows (not just schema)
+- Reasoning framework: UNDERSTAND → DECOMPOSE → ANALYZE → SYNTHESIZE → VALIDATE → ANSWER
+- Trust the 14B model to find patterns (e.g., tax_type=SUI = SUI rate)
 
-v2.1 CHANGES:
-- Fixed context to describe table structure, not random sample values
-- Improved expert prompt to prevent hallucination
-- Model should now say "not in data" instead of inventing values
+ROUTING:
+- ALL synthesis → Qwen 14B 
+- FALLBACK → Claude (only if Qwen fails)
+
+v3.0 CHANGES:
+- Reasoning framework prompt (chain of thought)
+- Send ALL key_facts to LLM (removed [:5] truncation)
+- Actual row data included so LLM can analyze values
 
 PURPOSE:
 This module transforms raw data retrieval into world-class consultative answers.
@@ -271,23 +275,32 @@ class ConsultativeSynthesizer:
                 key_facts.append(f"Count: {count:,} records")
             elif query_type == 'group' and rows:
                 key_facts.append(f"Found {len(rows)} groups/categories")
-                # Show top 3 groups
-                for row in rows[:3]:
+                for row in rows[:5]:
                     vals = list(row.values())
                     if len(vals) >= 2:
                         key_facts.append(f"  - {vals[0]}: {vals[1]}")
             elif rows:
-                # Describe table structure, NOT sample values
-                key_facts.append(f"Table has {len(rows)} records with {len(cols)} columns")
-                key_facts.append(f"Columns: {', '.join(cols[:8])}")
-                if len(cols) > 8:
-                    key_facts.append(f"  ...and {len(cols) - 8} more columns")
+                # =====================================================================
+                # SEND ACTUAL DATA - Trust the LLM to reason over it
+                # The AI should be able to see tax_type=SUI and understand that's the SUI rate
+                # =====================================================================
+                key_facts.append(f"Table: {len(rows)} records, {len(cols)} columns")
+                key_facts.append(f"Columns: {', '.join(cols)}")
+                
+                # Send sample rows - this is the ACTUAL DATA the LLM needs to reason over
+                key_facts.append("\nSample data:")
+                for i, row in enumerate(rows[:15]):  # Up to 15 rows
+                    row_str = " | ".join(f"{k}={v}" for k, v in list(row.items())[:8])
+                    key_facts.append(f"  Row {i+1}: {row_str}")
+                
+                if len(rows) > 15:
+                    key_facts.append(f"  ... and {len(rows) - 15} more rows")
             
             if sql:
                 # Extract table name from SQL for clarity
                 table_match = re.search(r'FROM\s+["\']?(\w+)["\']?', sql, re.IGNORECASE)
                 if table_match:
-                    key_facts.append(f"Source table: {table_match.group(1)}")
+                    key_facts.append(f"\nSource: {table_match.group(1)}")
         
         # Extract from Truth objects
         if reality:
@@ -555,8 +568,9 @@ class ConsultativeSynthesizer:
             if summary.has_data:
                 context_parts.append(f"=== {summary.source_type.upper()} ===")
                 context_parts.append(summary.summary)
-                for fact in summary.key_facts[:5]:
-                    context_parts.append(f"  • {fact}")
+                # Send ALL key_facts - this is the actual data the LLM needs
+                for fact in summary.key_facts:
+                    context_parts.append(f"  {fact}")
         
         # Add conflicts
         if triangulation.conflicts:
@@ -572,23 +586,21 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt - strict grounding rules
-        expert_prompt = """You are a senior implementation consultant reviewing configuration data.
+        # Expert prompt - REASONING FRAMEWORK
+        # Let the LLM think through the problem like a consultant would
+        expert_prompt = """You are a senior implementation consultant. Use this framework to analyze the question:
 
-CRITICAL RULES:
-1. ONLY describe what the DATA section actually contains
-2. If asked about specific values (rates, codes) and they're NOT in the data, say "not found in the provided data"
-3. DO NOT list random column values as "findings"
-4. Summarize WHAT the table contains, not individual cell values
-5. If you cannot answer the question from the data, say so clearly
+STEP 1 - UNDERSTAND: What is the user actually asking? Restate it.
+STEP 2 - DECOMPOSE: What sub-questions need to be answered? (e.g., "what's configured?" and "what's needed?")
+STEP 3 - ANALYZE: Look at the DATA provided. What specific values answer each sub-question?
+STEP 4 - SYNTHESIZE: Connect the findings. Are there gaps? Conflicts? Missing pieces?
+STEP 5 - VALIDATE: What assumptions are you making? What data might be missing?
+STEP 6 - ANSWER: Provide a direct, specific answer with what you found.
 
-RESPONSE FORMAT:
-- First sentence: Directly answer whether the data can address the question
-- If data is relevant: Describe what's in the table (e.g., "Found 100 records with columns for state, rate, effective_date")
-- If data is NOT relevant: Say "The provided data shows [X] but does not contain [what was asked for]"
-- Flag what's missing if the data doesn't fully answer the question
-
-Keep response under 100 words. Be factual, not speculative."""
+IMPORTANT: 
+- Cite SPECIFIC values from the data (e.g., "Found SUI rate for TX = 2.7%")
+- If data for a sub-question is missing, say so explicitly
+- Think step-by-step, then give a clear final answer"""
 
         # =====================================================================
         # SIMPLE: Qwen 14B for everything, Claude fallback
