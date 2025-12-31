@@ -618,7 +618,8 @@ Answer the question. Be specific."""
         # =====================================================================
         
         is_validation = any(kw in question.lower() for kw in [
-            'correct', 'valid', 'configured', 'check', 'verify', 'missing', 'audit', 'compliant'
+            'correct', 'valid', 'configured', 'check', 'verify', 'missing', 'audit', 
+            'compliant', 'setup', 'set up', 'properly', 'right', 'wrong', 'issue', 'problem'
         ])
         
         if is_validation:
