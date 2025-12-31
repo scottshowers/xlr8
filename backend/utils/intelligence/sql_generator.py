@@ -238,22 +238,21 @@ class SQLGenerator:
         try:
             # Check column profiles for value matches
             profiles = self.handler.conn.execute("""
-                SELECT column_name, distinct_values, top_values_json
+                SELECT column_name, distinct_values
                 FROM _column_profiles 
                 WHERE LOWER(table_name) = LOWER(?)
-                AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
+                AND distinct_values IS NOT NULL
+                AND distinct_values != '[]'
             """, [table_name]).fetchall()
             
             logger.warning(f"[SQL-GEN] Found {len(profiles)} column profiles with values")
             
-            for col_name, distinct_values_json, top_values_json in profiles:
-                # Try distinct_values first, then top_values_json
-                values_json = distinct_values_json or top_values_json
-                if not values_json:
+            for col_name, distinct_values_json in profiles:
+                if not distinct_values_json:
                     continue
                 
                 try:
-                    values = json.loads(values_json)
+                    values = json.loads(distinct_values_json)
                     
                     for val_info in values:
                         val = str(val_info.get('value', '') if isinstance(val_info, dict) else val_info).lower().strip()
@@ -279,6 +278,7 @@ class SQLGenerator:
         except Exception as e:
             logger.warning(f"[SQL-GEN] Filter detection failed: {e}")
         
+        logger.warning(f"[SQL-GEN] Detected {len(filters)} filters: {[f['column'] + '=' + str(f['value'])[:20] for f in filters]}")
         return filters
 
     def _build_smart_fallback(self, table_name: str, filters: List[Dict], 
@@ -309,39 +309,6 @@ class SQLGenerator:
         base += " LIMIT 100"
         
         return base
-        """Detect if question is a simple single-table query."""
-        q_lower = question.lower()
-        
-        # Simple patterns
-        simple_patterns = [
-            r'^show\s+(me\s+)?(the\s+)?',
-            r'^list\s+(all\s+)?(the\s+)?',
-            r'^what\s+are\s+(the\s+)?',
-            r'^give\s+me\s+(the\s+)?',
-            r'^display\s+(the\s+)?',
-            r'^get\s+(me\s+)?(the\s+)?',
-        ]
-        
-        # Complex patterns
-        complex_patterns = [
-            r'\bcompare\b',
-            r'\bjoin\b',
-            r'\bcross.?reference\b',
-            r'\bvs\.?\b',
-            r'\bversus\b',
-            r'\bfrom\s+\w+\s+and\s+',
-            r'\bbetween\s+\w+\s+and\s+',
-        ]
-        
-        for pattern in complex_patterns:
-            if re.search(pattern, q_lower):
-                return False
-        
-        for pattern in simple_patterns:
-            if re.search(pattern, q_lower):
-                return True
-        
-        return len(question.split()) <= 8
     
     def _generate_simple(self, question: str, table: Dict, 
                         orchestrator) -> Optional[Dict]:
