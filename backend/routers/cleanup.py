@@ -404,7 +404,7 @@ async def delete_document(filename: str, project_id: str = Query(None)):
     Per ARCHITECTURE.md: All deletes must cascade to all storage systems.
     Uses case-insensitive matching.
     """
-    logger.info(f"[CLEANUP] Deleting document (cascade): {filename}")
+    logger.warning(f"[CLEANUP] Deleting document (cascade): {filename}")
     
     result = {
         "success": True,
@@ -417,11 +417,18 @@ async def delete_document(filename: str, project_id: str = Query(None)):
     
     # 1. CHROMADB - Delete chunks (case-insensitive)
     collection = _get_chromadb()
+    if not collection:
+        logger.warning(f"[CLEANUP] ChromaDB collection not available!")
     if collection:
         try:
             # Fetch all and do case-insensitive match on metadata
             all_docs = collection.get(include=["metadatas"])
             ids_to_delete = []
+            
+            # Debug: log first few docs to see metadata structure
+            sample_docs = all_docs.get("metadatas", [])[:3]
+            logger.warning(f"[CLEANUP] Sample metadata: {sample_docs}")
+            logger.warning(f"[CLEANUP] Looking for filename: {filename_lower}")
             
             for i, metadata in enumerate(all_docs.get("metadatas", [])):
                 if not metadata:
@@ -431,10 +438,12 @@ async def delete_document(filename: str, project_id: str = Query(None)):
                 if doc_name.lower() == filename_lower:
                     ids_to_delete.append(all_docs["ids"][i])
             
+            logger.warning(f"[CLEANUP] Found {len(ids_to_delete)} chunks to delete")
+            
             if ids_to_delete:
                 collection.delete(ids=ids_to_delete)
                 result['deleted_chunks'] = len(ids_to_delete)
-                logger.info(f"[CLEANUP] Deleted {len(ids_to_delete)} chunks for {filename}")
+                logger.warning(f"[CLEANUP] Deleted {len(ids_to_delete)} chunks for {filename}")
                     
         except Exception as e:
             logger.warning(f"[CLEANUP] ChromaDB delete error: {e}")
