@@ -1089,7 +1089,7 @@ class FindingsExtractor:
                 from backend.utils.llm_orchestrator import LLMOrchestrator
             
             orchestrator = LLMOrchestrator()
-            logger.info("[EXTRACT] Using LLMOrchestrator (local LLMs first)")
+            logger.warning("[EXTRACT] Using LLMOrchestrator (local LLMs first)")
         except Exception as e:
             logger.error(f"[EXTRACT] LLMOrchestrator not available: {e}")
             # Fall back to direct Claude as last resort
@@ -1205,7 +1205,7 @@ Return only valid JSON - no explanations, no markdown code blocks."""
                 if isinstance(findings, dict):
                     findings['_analyzed_by'] = result.get('model_used', 'unknown')
                     findings['_five_truths_used'] = bool(five_truths_context)
-                    logger.info(f"[EXTRACT] Success using {result.get('model_used')}")
+                    logger.warning(f"[EXTRACT] Success using {result.get('model_used')}")
                     return findings
                 else:
                     logger.warning(f"[EXTRACT] Response was not dict: {type(findings)}")
@@ -1263,10 +1263,10 @@ Return only valid JSON - no explanations, no markdown code blocks."""
                         
                         if snippets:
                             context[truth_type] = "\n".join(snippets)
-                            logger.debug(f"[EXTRACT] Found {len(snippets)} {truth_type} docs")
+                            logger.warning(f"[EXTRACT] Found {len(snippets)} {truth_type} docs")
                             
                 except Exception as e:
-                    logger.debug(f"[EXTRACT] Could not gather {truth_type}: {e}")
+                    logger.warning(f"[EXTRACT] Could not gather {truth_type}: {e}")
             
             # Get configuration context from DuckDB (code tables)
             try:
@@ -1296,12 +1296,12 @@ Return only valid JSON - no explanations, no markdown code blocks."""
                     context['configuration'] = f"Available config tables:\n" + "\n".join(config_parts)
                     
             except Exception as e:
-                logger.debug(f"[EXTRACT] Could not gather configuration: {e}")
+                logger.warning(f"[EXTRACT] Could not gather configuration: {e}")
         
         except Exception as e:
             logger.warning(f"[EXTRACT] Five Truths gathering failed: {e}")
         
-        logger.info(f"[EXTRACT] Five Truths context: {list(context.keys())}")
+        logger.warning(f"[EXTRACT] Five Truths context: {list(context.keys())}")
         return context
     
     @staticmethod
