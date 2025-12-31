@@ -755,6 +755,7 @@ async def _route_to_standards(
             # Word docs need proper extraction (NOT plain text)
             if TEXT_EXTRACTION_AVAILABLE:
                 raw_text = extract_text(file_path)
+                logger.warning(f"[SMART-ROUTER] DOCX text extraction: {len(raw_text) if raw_text else 0} chars")
                 doc = standards_process_text(raw_text, filename, domain) if raw_text else None
                 if not doc:
                     import hashlib
@@ -765,7 +766,7 @@ async def _route_to_standards(
                         title=title or filename,
                         domain=domain
                     )
-                logger.info(f"[SMART-ROUTER] Extracted {len(raw_text)} chars from Word doc")
+                logger.warning(f"[SMART-ROUTER] Word doc: {len(raw_text)} chars, {len(doc.rules)} rules extracted")
             else:
                 logger.warning(f"[SMART-ROUTER] Cannot extract text from {extension} - text extraction not available")
                 import hashlib
@@ -790,7 +791,7 @@ async def _route_to_standards(
         registry = get_rule_registry()
         registry.add_document(doc)
         
-        logger.info(f"[SMART-ROUTER] Extracted {len(doc.rules)} rules")
+        logger.warning(f"[SMART-ROUTER] Extracted {len(doc.rules)} rules from {filename}")
         
         # Also add to ChromaDB for semantic search
         if raw_text and len(raw_text.strip()) > 100 and RAG_AVAILABLE:
