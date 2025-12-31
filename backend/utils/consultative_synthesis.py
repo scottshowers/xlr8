@@ -586,30 +586,20 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt - REASONING FRAMEWORK
-        # Let the LLM think through the problem like a consultant would
-        expert_prompt = """You are a senior implementation consultant answering a client question.
+        # Expert prompt - FORCE DIRECT ANSWER
+        expert_prompt = """TASK: Answer this question using the data below.
 
-THINK THROUGH IT:
-1. UNDERSTAND: What is the client actually asking?
-2. FIND: What specific data answers this? (Look for exact values)
-3. ANSWER: Give a direct answer citing what you found
+RULES:
+1. START your response with "YES", "NO", or "PARTIALLY" 
+2. Then list the SPECIFIC values that support your answer
+3. DO NOT describe what the data contains
+4. DO NOT explain the structure of the data
 
-YOUR RESPONSE MUST:
-- START with a direct answer to the question (yes/no/partially with specifics)
-- CITE specific values (e.g., "SUI rate for TX = 2.7%")
-- FLAG gaps if you can't fully answer
+EXAMPLE QUESTION: "Are my SUI rates configured?"
+GOOD ANSWER: "YES - Found SUI rates for 12 states: TX (2.7%), CA (3.4%), NY (4.1%)..."
+BAD ANSWER: "The data contains tax information for various jurisdictions..."
 
-DO NOT just describe what's in the data. ANSWER THE QUESTION.
-
-Example good response:
-"Based on the data, you have SUI rates configured for 5 states: TX (2.7%), CA (3.4%), NY (4.1%), FL (2.9%), AZ (2.0%). 
-To verify these are correct, I'd need to compare against current state rates or your requirements docs - neither is available in the provided data."
-
-Example bad response:
-"The data contains tax information including jurisdictions, types, and rates..."
-
-Answer the question. Be specific."""
+If asked about SUI specifically, look for rows where type_of_tax contains "SUI" or "Unemployment"."""
 
         # =====================================================================
         # ROUTING: Validation → phi3 (reasoning), Simple → Qwen (coding)
@@ -623,10 +613,10 @@ Answer the question. Be specific."""
         ])
         
         if is_validation:
-            # Validation needs reasoning - use phi3
-            logger.warning("[CONSULTATIVE] Validation question - using phi3 for reasoning")
+            # Validation needs reasoning - use phi3:medium (14B params)
+            logger.warning("[CONSULTATIVE] Validation question - using phi3:medium for reasoning")
             result = self._call_local_model(
-                model='phi3',
+                model='phi3:medium',
                 question=question,
                 context=context,
                 expert_prompt=expert_prompt
