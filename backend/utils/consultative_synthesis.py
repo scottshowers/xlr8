@@ -612,15 +612,33 @@ Example bad response:
 Answer the question. Be specific."""
 
         # =====================================================================
-        # SIMPLE: Qwen 14B for everything, Claude fallback
+        # ROUTING: Validation → phi3 (reasoning), Simple → Qwen (coding)
+        # phi3 is Microsoft's reasoning model, built for analysis
+        # qwen-coder is for code generation, not consultative reasoning
         # =====================================================================
-        logger.warning("[CONSULTATIVE] Using Qwen 14B for synthesis")
-        result = self._call_local_model(
-            model='qwen2.5-coder:14b',
-            question=question,
-            context=context,
-            expert_prompt=expert_prompt
-        )
+        
+        is_validation = any(kw in question.lower() for kw in [
+            'correct', 'valid', 'configured', 'check', 'verify', 'missing', 'audit', 'compliant'
+        ])
+        
+        if is_validation:
+            # Validation needs reasoning - use phi3
+            logger.warning("[CONSULTATIVE] Validation question - using phi3 for reasoning")
+            result = self._call_local_model(
+                model='phi3',
+                question=question,
+                context=context,
+                expert_prompt=expert_prompt
+            )
+        else:
+            # Simple queries - Qwen is fine
+            logger.warning("[CONSULTATIVE] Simple question - using Qwen 14B")
+            result = self._call_local_model(
+                model='qwen2.5-coder:14b',
+                question=question,
+                context=context,
+                expert_prompt=expert_prompt
+            )
         
         # If Qwen fails, fall back to Claude
         if not result.get('success'):
