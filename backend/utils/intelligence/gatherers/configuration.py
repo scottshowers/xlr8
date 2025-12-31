@@ -128,8 +128,20 @@ class ConfigurationGatherer(DuckDBGatherer):
             display_name = table.get('display_name', '').lower()
             
             # Check if it's classified as config
-            classification = self.table_classifications.get(table_name, {})
-            is_config = classification.get('table_type') == 'config'
+            # Handle both TableClassification objects and dicts
+            classification = self.table_classifications.get(table_name)
+            
+            if classification is None:
+                is_config = False
+                domain = ''
+            elif hasattr(classification, 'table_type'):
+                # It's a TableClassification object
+                is_config = str(getattr(classification, 'table_type', '')).lower() == 'config'
+                domain = str(getattr(classification, 'domain', '')).lower()
+            else:
+                # It's a dict
+                is_config = classification.get('table_type') == 'config'
+                domain = classification.get('domain', '')
             
             # Also check table name for config indicators
             has_config_indicator = any(ind in table_name for ind in self.CONFIG_INDICATORS)
@@ -147,7 +159,6 @@ class ConfigurationGatherer(DuckDBGatherer):
                             score += 80
                 
                 # Domain match
-                domain = classification.get('domain', '')
                 if domain and domain in q_lower:
                     score += 50
                 
@@ -192,6 +203,15 @@ class ConfigurationGatherer(DuckDBGatherer):
             columns = list(rows[0].keys()) if rows else []
             display_name = table_info.get('display_name') or table_name
             
+            # Get domain from classification (handle both object and dict)
+            classification = table_info.get('classification')
+            if classification is None:
+                domain = None
+            elif hasattr(classification, 'domain'):
+                domain = str(getattr(classification, 'domain', ''))
+            else:
+                domain = classification.get('domain') if isinstance(classification, dict) else None
+            
             logger.debug(f"[GATHER-CONFIG] Queried {table_name}: {len(rows)} rows")
             
             return self.create_truth(
@@ -204,13 +224,13 @@ class ConfigurationGatherer(DuckDBGatherer):
                     'table': table_name,
                     'display_name': display_name,
                     'is_config_table': True,
-                    'classification': table_info.get('classification', {})
+                    'classification': classification
                 },
                 location=f"Config table: {display_name}",
                 confidence=0.90,
                 row_count=len(rows),
                 column_count=len(columns),
-                domain=table_info.get('classification', {}).get('domain')
+                domain=domain
             )
             
         except Exception as e:
