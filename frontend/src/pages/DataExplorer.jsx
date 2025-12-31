@@ -475,6 +475,15 @@ export default function DataExplorer() {
       // Relationships from platform.relationships
       setRelationships(platform?.relationships || []);
       
+      // Load rules from standards_rules
+      try {
+        const rulesRes = await api.get('/standards/rules');
+        setRules(rulesRes.data?.rules || []);
+      } catch (rulesErr) {
+        console.log('Rules not loaded:', rulesErr);
+        setRules([]);
+      }
+      
     } catch (err) {
       console.error('Failed to load tables:', err);
       // Fallback to old endpoints if /platform not available
@@ -512,6 +521,14 @@ export default function DataExplorer() {
         setTables(allTables);
         if (allTables.length > 0 && !selectedTable) {
           setSelectedTable(allTables[0].table_name);
+        }
+        
+        // Load rules in fallback too
+        try {
+          const rulesRes = await api.get('/standards/rules');
+          setRules(rulesRes.data?.rules || []);
+        } catch (rulesErr) {
+          console.log('Rules not loaded:', rulesErr);
         }
       } catch (e2) {
         console.error('Fallback also failed:', e2);
