@@ -298,17 +298,24 @@ class SQLGenerator:
         # Start with basic select
         base = f'SELECT * FROM "{table_name}"'
         
-        # Add WHERE clauses from detected filters
-        where_clauses = []
-        for f in filters[:3]:  # Max 3 filters
+        # Group filters by column - only keep ONE filter per column (prefer shorter/more specific values)
+        column_filters = {}
+        for f in filters:
             col = f.get('column', '')
-            val = f.get('value', '')
+            val = str(f.get('value', ''))
             if col in valid_columns and val:
-                # Use ILIKE for flexibility
-                where_clauses.append(f'"{col}" ILIKE \'%{val}%\'')
+                # If column already has a filter, keep the shorter (more specific) value
+                if col not in column_filters or len(val) < len(column_filters[col]):
+                    column_filters[col] = val
+        
+        # Build WHERE clauses - one per column, combined with AND
+        where_clauses = []
+        for col, val in list(column_filters.items())[:2]:  # Max 2 columns
+            where_clauses.append(f'"{col}" ILIKE \'%{val}%\'')
         
         if where_clauses:
             base += " WHERE " + " AND ".join(where_clauses)
+            logger.warning(f"[SQL-GEN] Smart WHERE: {' AND '.join(where_clauses)}")
         
         base += " LIMIT 100"
         
