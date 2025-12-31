@@ -1786,6 +1786,15 @@ async def unified_chat(request: UnifiedChatRequest):
         data_model = None
         quality_service = None
         
+        # Load RAG handler FIRST (before load_context creates gatherers)
+        rag = None
+        if RAG_AVAILABLE:
+            try:
+                rag = RAGHandler()
+                logger.info("[UNIFIED] RAG handler created")
+            except Exception as e:
+                logger.warning(f"[UNIFIED] RAG handler error: {e}")
+        
         if STRUCTURED_AVAILABLE:
             try:
                 handler = get_structured_handler()
@@ -1793,7 +1802,8 @@ async def unified_chat(request: UnifiedChatRequest):
                     schema = await get_project_schema(project, request.scope, handler)
                     
                     if schema['tables']:
-                        engine.load_context(structured_handler=handler, schema=schema)
+                        # Pass rag_handler to load_context so gatherers get it
+                        engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
                         logger.info(f"[UNIFIED] Loaded {len(schema['tables'])} tables")
                         
                         # Initialize Data Model Service
@@ -1806,14 +1816,6 @@ async def unified_chat(request: UnifiedChatRequest):
                         
             except Exception as e:
                 logger.error(f"[UNIFIED] Structured handler error: {e}")
-        
-        # Load RAG handler
-        if RAG_AVAILABLE:
-            try:
-                rag = RAGHandler()
-                engine.rag_handler = rag
-            except Exception as e:
-                logger.warning(f"[UNIFIED] RAG handler error: {e}")
         
         # Load relationships
         if SUPABASE_AVAILABLE:
