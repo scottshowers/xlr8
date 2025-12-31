@@ -800,6 +800,9 @@ SELECT"""
             'to get',
             'to solve',
             'to query',
+            'to determine',
+            'to check',
+            'to verify',
             'let me',
             'i would',
             'i will',
@@ -819,6 +822,7 @@ SELECT"""
             'unfortunately',
             'i cannot',
             'i don\'t',
+            'in order to',
         ]
         
         for starter in prose_starts:
@@ -830,6 +834,9 @@ SELECT"""
         first_word = text_lower.split()[0] if text_lower.split() else ''
         
         if first_word and first_word not in sql_starters:
+            # Common short prose words
+            if first_word in ['to', 'in', 'the', 'a', 'an', 'for', 'as', 'if', 'it', 'is', 'are', 'this', 'that']:
+                return True
             # Check if it looks like a column/table reference (has underscore or is short)
             if '_' not in first_word and len(first_word) > 10:
                 return True
