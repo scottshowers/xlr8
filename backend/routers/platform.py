@@ -774,3 +774,202 @@ async def get_platform_stats_only(project: Optional[str] = None) -> Dict[str, An
         "value": full["value"],
         "_meta": full["_meta"]
     }
+
+
+# =============================================================================
+# REFERENCE LIBRARY ENDPOINTS
+# =============================================================================
+# These list/manage reference documents (ChromaDB vector data)
+# Moved here from cleanup.py - this is data listing, not cleanup
+# =============================================================================
+
+@router.get("/status/references")
+async def list_references():
+    """
+    List all reference library documents.
+    Shows ChromaDB vector data for Reference/Regulatory/Compliance truths.
+    """
+    try:
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+    except Exception as e:
+        logger.warning(f"[REFERENCES] RAG handler not available: {e}")
+        return {"files": [], "rules": [], "error": "RAG handler not available"}
+    
+    try:
+        # Get collection and all documents
+        try:
+            coll = rag.client.get_collection(name="documents")
+            results = coll.get(include=["metadatas"])
+        except:
+            return {"files": [], "rules": [], "total": 0}
+        
+        # Aggregate by source document
+        doc_counts = {}
+        doc_metadata = {}
+        
+        for meta in results.get('metadatas', []):
+            if not meta:
+                continue
+            source = meta.get('source') or meta.get('filename')
+            project = meta.get('project_id') or meta.get('project')
+            
+            # Only include reference library docs (global/universal/standards)
+            if project not in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
+                continue
+                
+            if source:
+                doc_counts[source] = doc_counts.get(source, 0) + 1
+                if source not in doc_metadata:
+                    doc_metadata[source] = {
+                        'truth_type': meta.get('truth_type', 'reference'),
+                        'project': project or 'Global/Universal',
+                        'uploaded_at': meta.get('uploaded_at')
+                    }
+        
+        # Build response
+        ref_files = []
+        for filename, count in doc_counts.items():
+            meta = doc_metadata.get(filename, {})
+            ref_files.append({
+                "filename": filename,
+                "project": meta.get('project', 'Global/Universal'),
+                "chunk_count": count,
+                "truth_type": meta.get('truth_type', 'reference'),
+                "uploaded_at": meta.get('uploaded_at')
+            })
+        
+        return {
+            "files": ref_files,
+            "rules": [],  # Rules extracted from these docs (future)
+            "total": len(ref_files)
+        }
+        
+    except Exception as e:
+        logger.error(f"[REFERENCES] Error listing: {e}")
+        return {"files": [], "rules": [], "error": str(e)}
+
+
+@router.delete("/status/references/{filename:path}")
+async def delete_reference(
+    filename: str,
+    confirm: bool = Query(False, description="Must be true to delete")
+):
+    """
+    Delete a single reference document - CASCADE to registry.
+    
+    Per ARCHITECTURE.md: All deletes must cascade to all storage systems.
+    """
+    from fastapi import HTTPException
+    
+    if not confirm:
+        raise HTTPException(400, "Add ?confirm=true to delete")
+    
+    result = {
+        "success": True,
+        "deleted": filename,
+        "chunks_removed": 0,
+        "registry_removed": False
+    }
+    
+    # 1. CHROMADB - Delete chunks
+    try:
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+        try:
+            coll = rag.client.get_collection(name="documents")
+            
+            # Find and delete all chunks for this document
+            results = coll.get(include=["metadatas"], where={"source": filename})
+            
+            if not results.get('ids'):
+                # Try with filename field instead
+                results = coll.get(include=["metadatas"], where={"filename": filename})
+            
+            if results.get('ids'):
+                coll.delete(ids=results['ids'])
+                result['chunks_removed'] = len(results['ids'])
+                logger.info(f"[REFERENCES] Deleted {len(results['ids'])} chunks for: {filename}")
+        except Exception as e:
+            logger.warning(f"[REFERENCES] ChromaDB error: {e}")
+    except Exception as e:
+        logger.warning(f"[REFERENCES] RAG handler error: {e}")
+    
+    # 2. DOCUMENT REGISTRY - Remove entry (cascade)
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        if supabase:
+            del_result = supabase.table('document_registry').delete().eq(
+                'filename', filename
+            ).execute()
+            
+            if del_result.data:
+                result['registry_removed'] = True
+                logger.info(f"[REFERENCES] Removed {filename} from document_registry")
+    except Exception as e:
+        logger.warning(f"[REFERENCES] Registry cleanup error: {e}")
+    
+    if result['chunks_removed'] == 0 and not result['registry_removed']:
+        raise HTTPException(404, f"Document not found: {filename}")
+    
+    # Build message
+    parts = []
+    if result['chunks_removed'] > 0:
+        parts.append(f"ChromaDB ({result['chunks_removed']} chunks)")
+    if result['registry_removed']:
+        parts.append("Registry")
+    result['message'] = f"Deleted from: {', '.join(parts)}"
+    
+    return result
+
+
+@router.delete("/status/references")
+async def delete_all_references(
+    confirm: bool = Query(False, description="Must be true to delete all")
+):
+    """Delete ALL reference documents. Use with caution."""
+    from fastapi import HTTPException
+    
+    if not confirm:
+        raise HTTPException(400, "Add ?confirm=true to delete all references")
+    
+    try:
+        from utils.rag_handler import RAGHandler
+        rag = RAGHandler()
+    except:
+        raise HTTPException(503, "RAG handler not available")
+    
+    try:
+        # Get collection
+        try:
+            coll = rag.client.get_collection(name="documents")
+        except:
+            raise HTTPException(503, "Documents collection not available")
+        
+        # Get all reference docs (global/universal project)
+        results = coll.get(include=["metadatas"])
+        
+        ids_to_delete = []
+        for i, meta in enumerate(results.get('metadatas', [])):
+            if not meta:
+                continue
+            project = meta.get('project_id') or meta.get('project')
+            if project in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
+                ids_to_delete.append(results['ids'][i])
+        
+        if ids_to_delete:
+            coll.delete(ids=ids_to_delete)
+        
+        logger.info(f"[REFERENCES] Cleared {len(ids_to_delete)} reference chunks")
+        return {
+            "success": True,
+            "files_processed": len(ids_to_delete),
+            "message": f"Deleted {len(ids_to_delete)} reference chunks"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[REFERENCES] Clear all error: {e}")
+        raise HTTPException(500, str(e))
