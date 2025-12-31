@@ -69,19 +69,22 @@ class RegulatoryGatherer(ChromaDBGatherer):
         self.log_gather_start(question)
         
         if not self.rag_handler:
-            logger.debug("[GATHER-REGULATORY] No RAG handler available")
+            logger.warning("[GATHER-REGULATORY] No RAG handler available - cannot search ChromaDB")
             return []
         
         truths = []
         
         try:
             # Search GLOBAL regulatory documents (NO project_id filter)
+            logger.warning(f"[GATHER-REGULATORY] Searching ChromaDB for: {question[:50]}...")
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
                 query=question,
                 n_results=5,
                 where={"truth_type": "regulatory"}  # Global - no project_id!
             )
+            
+            logger.warning(f"[GATHER-REGULATORY] Got {len(results)} results from ChromaDB")
             
             # Process results - rag_handler.search returns list of dicts
             # Format: [{'document': str, 'metadata': dict, 'distance': float}, ...]
