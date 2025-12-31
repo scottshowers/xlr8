@@ -26,7 +26,14 @@ from .types import (
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
 from .synthesizer import Synthesizer
-from .gatherers import RealityGatherer
+from .gatherers import (
+    RealityGatherer,
+    IntentGatherer,
+    ConfigurationGatherer,
+    ReferenceGatherer,
+    RegulatoryGatherer,
+    ComplianceGatherer
+)
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +119,14 @@ class IntelligenceEngineV2:
         self.table_selector: Optional[TableSelector] = None
         self.sql_generator: Optional[SQLGenerator] = None
         self.synthesizer: Optional[Synthesizer] = None
+        
+        # Truth Gatherers
         self.reality_gatherer: Optional[RealityGatherer] = None
+        self.intent_gatherer: Optional[IntentGatherer] = None
+        self.configuration_gatherer: Optional[ConfigurationGatherer] = None
+        self.reference_gatherer: Optional[ReferenceGatherer] = None
+        self.regulatory_gatherer: Optional[RegulatoryGatherer] = None
+        self.compliance_gatherer: Optional[ComplianceGatherer] = None
         
         # Pattern cache for learning
         self.pattern_cache = None
@@ -199,6 +213,46 @@ class IntelligenceEngineV2:
             schema=self.schema,
             sql_generator=self.sql_generator,
             pattern_cache=self.pattern_cache
+        )
+        
+        # Intent gatherer (ChromaDB - customer documents)
+        self.intent_gatherer = IntentGatherer(
+            project_name=self.project,
+            project_id=self.project_id,
+            rag_handler=rag_handler
+        )
+        
+        # Configuration gatherer (DuckDB - code tables)
+        # Get table classifications for finding config tables
+        table_classifications = {}
+        if self.table_selector:
+            table_classifications = self.table_selector._table_classifications
+        
+        self.configuration_gatherer = ConfigurationGatherer(
+            project_name=self.project,
+            project_id=self.project_id,
+            structured_handler=structured_handler,
+            schema=self.schema,
+            table_classifications=table_classifications
+        )
+        
+        # Global gatherers (Reference Library - no project filter)
+        self.reference_gatherer = ReferenceGatherer(
+            project_name=self.project,
+            project_id=self.project_id,
+            rag_handler=rag_handler
+        )
+        
+        self.regulatory_gatherer = RegulatoryGatherer(
+            project_name=self.project,
+            project_id=self.project_id,
+            rag_handler=rag_handler
+        )
+        
+        self.compliance_gatherer = ComplianceGatherer(
+            project_name=self.project,
+            project_id=self.project_id,
+            rag_handler=rag_handler
         )
         
         logger.info(f"[ENGINE-V2] Context loaded: {len(self.schema.get('tables', []))} tables, "
@@ -476,73 +530,44 @@ class IntelligenceEngineV2:
     
     def _gather_intent(self, question: str, analysis: Dict) -> List[Truth]:
         """Gather Intent truths from customer documents."""
-        if not self.rag_handler:
-            return []
-        
-        truths = []
-        try:
-            results = self.rag_handler.search(
-                query=question,
-                n_results=5,
-                where={"project_id": self.project_id, "truth_type": "intent"}
-            )
-            
-            for i, doc in enumerate(results.get('documents', [[]])[0]):
-                metadata = results.get('metadatas', [[]])[0][i] if results.get('metadatas') else {}
-                truths.append(Truth(
-                    source_type='intent',
-                    source_name=metadata.get('filename', 'Customer Document'),
-                    content={'text': doc, 'metadata': metadata},
-                    confidence=0.85,
-                    location=metadata.get('source', 'Unknown')
-                ))
-        except Exception as e:
-            logger.debug(f"[ENGINE-V2] Intent gathering error: {e}")
-        
-        return truths
+        if self.intent_gatherer:
+            return self.intent_gatherer.gather(question, analysis)
+        return []
     
     def _gather_configuration(self, question: str, analysis: Dict) -> List[Truth]:
-        """Gather Configuration truths from config tables/docs."""
-        if not self.rag_handler:
-            return []
+        """
+        Gather Configuration truths from config tables.
         
-        truths = []
-        try:
-            results = self.rag_handler.search(
-                query=question,
-                n_results=10,
-                where={"project_id": self.project_id, "truth_type": "configuration"}
-            )
-            
-            for i, doc in enumerate(results.get('documents', [[]])[0]):
-                metadata = results.get('metadatas', [[]])[0][i] if results.get('metadatas') else {}
-                truths.append(Truth(
-                    source_type='configuration',
-                    source_name=metadata.get('filename', 'Config Document'),
-                    content={'text': doc, 'metadata': metadata},
-                    confidence=0.90,
-                    location=metadata.get('source', 'Unknown')
-                ))
-        except Exception as e:
-            logger.debug(f"[ENGINE-V2] Configuration gathering error: {e}")
-        
-        return truths
+        NOTE: Configuration uses DuckDB (code tables, mappings), NOT ChromaDB.
+        This was a bug in the previous implementation that searched ChromaDB.
+        """
+        if self.configuration_gatherer:
+            return self.configuration_gatherer.gather(question, analysis)
+        return []
     
     def _gather_reference_library(self, question: str, 
                                   analysis: Dict) -> Tuple[List[Truth], List[Truth], List[Truth]]:
-        """Gather Reference Library truths."""
+        """
+        Gather Reference Library truths (global scope).
+        
+        Returns:
+            Tuple of (reference, regulatory, compliance) Truth lists
+            
+        These are GLOBAL - they apply to all projects and are not filtered by project_id.
+        """
         reference = []
         regulatory = []
         compliance = []
         
-        if not self.rag_handler:
-            return reference, regulatory, compliance
-        
-        # TODO: Implement reference library gathering
-        # This would search for:
-        # - reference: Product docs, best practices
-        # - regulatory: Laws, IRS rules
-        # - compliance: Standards, audit requirements
+        # Gather from each global truth type
+        if self.reference_gatherer:
+            reference = self.reference_gatherer.gather(question, analysis)
+            
+        if self.regulatory_gatherer:
+            regulatory = self.regulatory_gatherer.gather(question, analysis)
+            
+        if self.compliance_gatherer:
+            compliance = self.compliance_gatherer.gather(question, analysis)
         
         return reference, regulatory, compliance
     
