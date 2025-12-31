@@ -472,8 +472,24 @@ async def delete_document(filename: str, project_id: str = Query(None)):
                     logger.info(f"[CLEANUP] Removed {filename} from document_registry (case-insensitive)")
         except Exception as e:
             logger.warning(f"[CLEANUP] Registry cleanup error: {e}")
+        
+        # 3. STANDARDS_RULES - Remove extracted rules (cascade)
+        try:
+            # Delete rules where source_document matches filename
+            rules_result = supabase.table('standards_rules').delete().eq('source_document', filename).execute()
+            if rules_result.data:
+                result['rules_removed'] = len(rules_result.data)
+                logger.warning(f"[CLEANUP] Removed {len(rules_result.data)} rules from standards_rules for {filename}")
+            else:
+                # Try ilike for case-insensitive
+                rules_result = supabase.table('standards_rules').delete().ilike('source_document', filename).execute()
+                if rules_result.data:
+                    result['rules_removed'] = len(rules_result.data)
+                    logger.warning(f"[CLEANUP] Removed {len(rules_result.data)} rules from standards_rules (case-insensitive)")
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Standards rules cleanup error: {e}")
     
-    if result['deleted_chunks'] == 0 and not result['registry_removed']:
+    if result['deleted_chunks'] == 0 and not result['registry_removed'] and not result.get('rules_removed'):
         result['message'] = "Document not found or already deleted"
     else:
         parts = []
@@ -481,6 +497,8 @@ async def delete_document(filename: str, project_id: str = Query(None)):
             parts.append(f"ChromaDB ({result['deleted_chunks']} chunks)")
         if result['registry_removed']:
             parts.append("Registry")
+        if result.get('rules_removed'):
+            parts.append(f"Rules ({result['rules_removed']})")
         result['message'] = f"Deleted from: {', '.join(parts)}"
     
     return result
