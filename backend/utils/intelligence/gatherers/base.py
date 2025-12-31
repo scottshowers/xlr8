@@ -190,15 +190,29 @@ class ChromaDBGatherer(BaseGatherer):
         
         try:
             # Build filter for project scoping
-            where_filter = filters or {}
+            # ChromaDB requires $and for multiple conditions
+            conditions = []
+            
+            if filters:
+                for key, value in filters.items():
+                    conditions.append({key: value})
+            
             if self.project_id:
-                where_filter['project_id'] = self.project_id
+                conditions.append({"project_id": self.project_id})
+            
+            # Build where clause
+            if len(conditions) == 0:
+                where_filter = None
+            elif len(conditions) == 1:
+                where_filter = conditions[0]
+            else:
+                where_filter = {"$and": conditions}
             
             results = self.rag_handler.search(
                 query=query,
                 collection_name=self.collection_name,
                 n_results=n_results,
-                where=where_filter if where_filter else None
+                where=where_filter
             )
             return results
             
