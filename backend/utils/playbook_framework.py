@@ -32,7 +32,7 @@ USAGE:
 3. Framework handles: scanning, progress, export, learning
 
 Author: XLR8 Team
-Version: 1.1.0 - P3.6 P4 Learning Integration (Supabase)
+Version: 2.0.0 - Five Truths Integration + Local LLMs First
 Date: December 2025
 """
 
@@ -1046,6 +1046,11 @@ class FindingsExtractor:
     Extracts findings from document content using AI.
     
     Uses consultative prompts for domain-specific analysis.
+    
+    ARCHITECTURE (v2.0):
+    - Uses LLMOrchestrator (local LLMs first, Claude fallback)
+    - Gathers Five Truths context for triangulation
+    - Produces consultative-quality analysis
     """
     
     @staticmethod
@@ -1058,7 +1063,7 @@ class FindingsExtractor:
         intelligence_findings: Optional[List[Dict]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Extract findings from content using Claude.
+        Extract findings from content using Five Truths + LLM.
         
         Args:
             action: The action definition
@@ -1073,6 +1078,247 @@ class FindingsExtractor:
         """
         if not content and not inherited_findings:
             return None
+        
+        # =====================================================================
+        # STEP 1: Get LLM Orchestrator (local first, Claude fallback)
+        # =====================================================================
+        try:
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+            except ImportError:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+            
+            orchestrator = LLMOrchestrator()
+            logger.info("[EXTRACT] Using LLMOrchestrator (local LLMs first)")
+        except Exception as e:
+            logger.error(f"[EXTRACT] LLMOrchestrator not available: {e}")
+            # Fall back to direct Claude as last resort
+            return await FindingsExtractor._extract_direct_claude(
+                action, content, inherited_findings, project_id,
+                consultative_prompt, intelligence_findings
+            )
+        
+        # =====================================================================
+        # STEP 2: Gather Five Truths Context
+        # =====================================================================
+        five_truths_context = await FindingsExtractor._gather_five_truths_context(
+            project_id, action.description
+        )
+        
+        # =====================================================================
+        # STEP 3: Build comprehensive prompt with Five Truths
+        # =====================================================================
+        # Build content summary
+        content_summary = "\n\n---\n\n".join(content[:10]) if content else "No new content"
+        
+        # Build inherited context
+        inherited_text = ""
+        if inherited_findings:
+            inherited_parts = []
+            for inf in inherited_findings:
+                if isinstance(inf, dict) and inf.get('findings'):
+                    inherited_parts.append(json.dumps(inf['findings'], indent=2))
+            if inherited_parts:
+                inherited_text = f"\n\nINHERITED FINDINGS FROM PARENT ACTIONS:\n{chr(10).join(inherited_parts)}"
+        
+        # Build intelligence context
+        intelligence_text = ""
+        if intelligence_findings:
+            intel_parts = [f"- {f.get('title', 'Unknown')}: {f.get('description', '')}" for f in intelligence_findings[:10]]
+            if intel_parts:
+                intelligence_text = f"\n\nPRE-ANALYZED ISSUES FROM DATA PROFILING:\n{chr(10).join(intel_parts)}"
+        
+        # Build Five Truths context section
+        five_truths_text = ""
+        if five_truths_context:
+            truths_parts = []
+            
+            if five_truths_context.get('reference'):
+                truths_parts.append(f"📚 REFERENCE (Product Documentation):\n{five_truths_context['reference']}")
+            
+            if five_truths_context.get('regulatory'):
+                truths_parts.append(f"⚖️ REGULATORY (Laws & Requirements):\n{five_truths_context['regulatory']}")
+            
+            if five_truths_context.get('configuration'):
+                truths_parts.append(f"⚙️ CONFIGURATION (System Setup):\n{five_truths_context['configuration']}")
+            
+            if five_truths_context.get('intent'):
+                truths_parts.append(f"📋 INTENT (Customer Requirements):\n{five_truths_context['intent']}")
+            
+            if truths_parts:
+                five_truths_text = "\n\nFIVE TRUTHS CONTEXT (use for validation):\n" + "\n\n".join(truths_parts)
+        
+        # Build the full prompt
+        prompt = f"""Analyze this data for playbook action: {action.action_id}
+
+ACTION: {action.description}
+
+REPORTS NEEDED: {', '.join(action.reports_needed) if action.reports_needed else 'None specified'}
+
+{consultative_prompt or ''}
+{five_truths_text}
+
+DOCUMENT CONTENT (REALITY - What the data shows):
+{content_summary}
+{inherited_text}
+{intelligence_text}
+
+ANALYSIS INSTRUCTIONS:
+1. Compare REALITY (document content) against REGULATORY (what's required) and REFERENCE (best practices)
+2. Identify gaps, issues, and recommendations
+3. Cite specific values from the data
+4. Note which sources support each finding
+
+Return ONLY valid JSON with this structure:
+{{
+    "complete": true/false,
+    "key_values": {{"field": "value (Source: filename)"}},
+    "issues": ["Issue 1", "Issue 2"],
+    "recommendations": ["Recommendation 1"],
+    "risk_level": "low|medium|high",
+    "summary": "2-3 sentences with specific findings citing Five Truths where relevant",
+    "sources_used": ["filenames"],
+    "truths_referenced": ["reality", "regulatory", "reference"]
+}}
+
+Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
+
+        # System prompt for structured output
+        system_prompt = """You are a senior implementation consultant analyzing payroll/HCM data.
+You have access to Five Truths: Reality (data), Intent (customer requirements), Configuration (system setup), Reference (product docs), and Regulatory (laws).
+Always validate Reality against Regulatory and Reference standards.
+Return only valid JSON - no explanations, no markdown code blocks."""
+
+        # =====================================================================
+        # STEP 4: Call LLM Orchestrator (local first)
+        # =====================================================================
+        try:
+            result = orchestrator.generate_json(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                use_claude_fallback=True,
+                max_tokens=2000
+            )
+            
+            if result.get('success') and result.get('response'):
+                findings = result['response']
+                if isinstance(findings, dict):
+                    findings['_analyzed_by'] = result.get('model_used', 'unknown')
+                    findings['_five_truths_used'] = bool(five_truths_context)
+                    logger.info(f"[EXTRACT] Success using {result.get('model_used')}")
+                    return findings
+                else:
+                    logger.warning(f"[EXTRACT] Response was not dict: {type(findings)}")
+            else:
+                logger.warning(f"[EXTRACT] LLM failed: {result.get('error')}")
+                
+        except Exception as e:
+            logger.error(f"[EXTRACT] LLM call failed: {e}")
+        
+        # If orchestrator fails completely, try direct Claude as absolute last resort
+        logger.warning("[EXTRACT] Orchestrator failed, trying direct Claude as last resort")
+        return await FindingsExtractor._extract_direct_claude(
+            action, content, inherited_findings, project_id,
+            consultative_prompt, intelligence_findings
+        )
+    
+    @staticmethod
+    async def _gather_five_truths_context(project_id: str, action_description: str) -> Dict[str, str]:
+        """
+        Gather relevant context from Five Truths for the analysis.
+        
+        This provides Regulatory, Reference, Configuration, and Intent context
+        so the analysis can triangulate Reality against standards.
+        """
+        context = {}
+        
+        try:
+            # Get RAG handler for semantic search
+            try:
+                from utils.rag_handler import RAGHandler
+            except ImportError:
+                from backend.utils.rag_handler import RAGHandler
+            
+            rag = RAGHandler()
+            
+            # Search each truth type
+            truth_types = ['reference', 'regulatory', 'intent']
+            
+            for truth_type in truth_types:
+                try:
+                    results = rag.search(
+                        query=action_description,
+                        project_id=None if truth_type in ['reference', 'regulatory'] else project_id,
+                        truth_type=truth_type,
+                        top_k=3
+                    )
+                    
+                    if results:
+                        snippets = []
+                        for r in results[:3]:
+                            doc = r.get('document', '')
+                            if doc and len(doc) > 50:
+                                source = r.get('metadata', {}).get('source', 'Unknown')
+                                snippets.append(f"[{source}]: {doc[:500]}...")
+                        
+                        if snippets:
+                            context[truth_type] = "\n".join(snippets)
+                            logger.debug(f"[EXTRACT] Found {len(snippets)} {truth_type} docs")
+                            
+                except Exception as e:
+                    logger.debug(f"[EXTRACT] Could not gather {truth_type}: {e}")
+            
+            # Get configuration context from DuckDB (code tables)
+            try:
+                try:
+                    from utils.structured_data_handler import get_structured_handler
+                except ImportError:
+                    from backend.utils.structured_data_handler import get_structured_handler
+                
+                handler = get_structured_handler()
+                
+                # Find config tables for this project
+                config_tables = handler.conn.execute("""
+                    SELECT table_name, display_name 
+                    FROM _schema_metadata 
+                    WHERE table_name LIKE ? 
+                    AND (LOWER(display_name) LIKE '%code%' 
+                         OR LOWER(display_name) LIKE '%config%'
+                         OR LOWER(display_name) LIKE '%setup%'
+                         OR LOWER(display_name) LIKE '%mapping%')
+                    LIMIT 3
+                """, [f"{project_id[:8]}%"]).fetchall()
+                
+                if config_tables:
+                    config_parts = []
+                    for table_name, display_name in config_tables:
+                        config_parts.append(f"- {display_name or table_name}")
+                    context['configuration'] = f"Available config tables:\n" + "\n".join(config_parts)
+                    
+            except Exception as e:
+                logger.debug(f"[EXTRACT] Could not gather configuration: {e}")
+        
+        except Exception as e:
+            logger.warning(f"[EXTRACT] Five Truths gathering failed: {e}")
+        
+        logger.info(f"[EXTRACT] Five Truths context: {list(context.keys())}")
+        return context
+    
+    @staticmethod
+    async def _extract_direct_claude(
+        action: ActionDefinition,
+        content: List[str],
+        inherited_findings: List[Dict],
+        project_id: str,
+        consultative_prompt: Optional[str] = None,
+        intelligence_findings: Optional[List[Dict]] = None
+    ) -> Optional[Dict[str, Any]]:
+        """
+        FALLBACK ONLY: Direct Claude call when orchestrator unavailable.
+        
+        This should rarely be used - only when local LLMs AND orchestrator fail.
+        """
+        logger.warning("[EXTRACT] Using direct Claude (fallback mode)")
         
         try:
             import anthropic
@@ -1151,7 +1397,7 @@ Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
             text = text.strip()
             
             result = json.loads(text)
-            result['_analyzed_by'] = 'claude'
+            result['_analyzed_by'] = 'claude-direct-fallback'
             return result
             
         except Exception as e:
