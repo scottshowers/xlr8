@@ -26,6 +26,7 @@ from .types import (
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
 from .synthesizer import Synthesizer
+from .truth_enricher import TruthEnricher
 from .gatherers import (
     RealityGatherer,
     IntentGatherer,
@@ -127,6 +128,9 @@ class IntelligenceEngineV2:
         self.reference_gatherer: Optional[ReferenceGatherer] = None
         self.regulatory_gatherer: Optional[RegulatoryGatherer] = None
         self.compliance_gatherer: Optional[ComplianceGatherer] = None
+        
+        # Truth Enricher (LLM Lookups)
+        self.truth_enricher: Optional[TruthEnricher] = None
         
         # Pattern cache for learning
         self.pattern_cache = None
@@ -255,6 +259,9 @@ class IntelligenceEngineV2:
             rag_handler=rag_handler
         )
         
+        # Truth Enricher (LLM Lookups) - extracts structured data from raw truths
+        self.truth_enricher = TruthEnricher(project_id=self.project_id)
+        
         logger.info(f"[ENGINE-V2] Context loaded: {len(self.schema.get('tables', []))} tables, "
                    f"{len(self.filter_candidates)} filter categories")
     
@@ -355,6 +362,16 @@ class IntelligenceEngineV2:
             intent = self._gather_intent(question, analysis)
             configuration = self._gather_configuration(question, analysis)
             reference, regulatory, compliance = self._gather_reference_library(question, analysis)
+            
+            # Enrich semantic truths with LLM extraction (LLM Lookups)
+            if self.truth_enricher:
+                intent = self.truth_enricher.enrich_batch(intent)
+                reference = self.truth_enricher.enrich_batch(reference)
+                regulatory = self.truth_enricher.enrich_batch(regulatory)
+                compliance = self.truth_enricher.enrich_batch(compliance)
+                # Configuration is DuckDB (structured), light enrichment
+                configuration = self.truth_enricher.enrich_batch(configuration)
+            
             conflicts = self._detect_conflicts(
                 reality, intent, configuration, reference, regulatory, compliance
             )
