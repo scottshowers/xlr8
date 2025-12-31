@@ -68,19 +68,22 @@ class ReferenceGatherer(ChromaDBGatherer):
         self.log_gather_start(question)
         
         if not self.rag_handler:
-            logger.debug("[GATHER-REFERENCE] No RAG handler available")
+            logger.warning("[GATHER-REFERENCE] No RAG handler available - cannot search ChromaDB")
             return []
         
         truths = []
         
         try:
             # Search GLOBAL reference documents (NO project_id filter)
+            logger.warning(f"[GATHER-REFERENCE] Searching ChromaDB for: {question[:50]}...")
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
                 query=question,
                 n_results=5,
                 where={"truth_type": "reference"}  # Global - no project_id!
             )
+            
+            logger.warning(f"[GATHER-REFERENCE] Got {len(results)} results from ChromaDB")
             
             # Process results - rag_handler.search returns list of dicts
             # Format: [{'document': str, 'metadata': dict, 'distance': float}, ...]
