@@ -58,7 +58,7 @@ class ConfigurationGatherer(DuckDBGatherer):
     
     def __init__(self, project_name: str, project_id: str = None,
                  structured_handler=None, schema: Dict = None,
-                 table_classifications: Dict = None):
+                 table_selector=None):
         """
         Initialize Configuration gatherer.
         
@@ -67,11 +67,11 @@ class ConfigurationGatherer(DuckDBGatherer):
             project_id: Project UUID
             structured_handler: DuckDB handler
             schema: Schema metadata (tables, columns)
-            table_classifications: Dict of table_name -> classification info
+            table_selector: TableSelector instance for consistent scoring
         """
         super().__init__(project_name, project_id, structured_handler)
         self.schema = schema or {}
-        self.table_classifications = table_classifications or {}
+        self.table_selector = table_selector
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
         """
@@ -117,72 +117,47 @@ class ConfigurationGatherer(DuckDBGatherer):
         return truths
     
     def _find_config_tables(self, question: str, context: Dict) -> List[Dict]:
-        """Find config tables relevant to the question."""
+        """Find config tables relevant to the question using TableSelector."""
+        if not self.table_selector:
+            logger.warning("[GATHER-CONFIG] No table_selector available")
+            return []
+        
+        # Use TableSelector to get scored tables
+        selected = self.table_selector.select_tables(
+            question=question,
+            schema=self.schema,
+            max_tables=10  # Get more, then filter for config
+        )
+        
+        # Filter for config-type tables only
         config_tables = []
-        q_lower = question.lower()
-        
-        tables = self.schema.get('tables', [])
-        
-        for table in tables:
-            table_name = table.get('table_name', '').lower()
-            display_name = table.get('display_name', '').lower()
+        for table_info in selected:
+            table_name = table_info.get('table_name', '').lower()
             
-            # Check if it's classified as config
-            # Handle both TableClassification objects and dicts
-            classification = self.table_classifications.get(table_name)
+            # Check classification
+            classification = self.table_selector._classifications.get(table_name)
             
-            if classification is None:
-                is_config = False
-                domain = ''
-            elif hasattr(classification, 'table_type'):
-                # It's a TableClassification object
-                is_config = str(getattr(classification, 'table_type', '')).lower() == 'config'
-                domain = str(getattr(classification, 'domain', '')).lower()
-            else:
-                # It's a dict
-                is_config = classification.get('table_type') == 'config'
-                domain = classification.get('domain', '')
+            is_config = False
+            if classification:
+                if hasattr(classification, 'table_type'):
+                    is_config = str(getattr(classification, 'table_type', '')).lower() == 'config'
+                elif isinstance(classification, dict):
+                    is_config = classification.get('table_type') == 'config'
             
             # Also check table name for config indicators
             has_config_indicator = any(ind in table_name for ind in self.CONFIG_INDICATORS)
             
             if is_config or has_config_indicator:
-                # Score relevance to question
-                score = 0
-                
-                # Name match
-                for word in q_lower.split():
-                    if len(word) > 3:
-                        if word in table_name:
-                            score += 100
-                        if word in display_name:
-                            score += 80
-                
-                # Domain match
-                if domain and domain in q_lower:
-                    score += 50
-                
-                # Column match
-                for col in table.get('columns', []):
-                    col_name = col.get('name', '').lower() if isinstance(col, dict) else col.lower()
-                    for word in q_lower.split():
-                        if len(word) > 3 and word in col_name:
-                            score += 20
-                
-                if score > 0 or is_config:
-                    config_tables.append({
-                        'table_name': table.get('table_name'),
-                        'display_name': table.get('display_name'),
-                        'score': score,
-                        'classification': classification,
-                        'row_count': table.get('row_count', 0)
-                    })
+                config_tables.append({
+                    'table_name': table_info.get('table_name'),
+                    'display_name': table_info.get('display_name'),
+                    'score': table_info.get('score', 0),
+                    'classification': classification,
+                    'row_count': table_info.get('row_count', 0)
+                })
         
-        # Sort by score
-        config_tables.sort(key=lambda x: x['score'], reverse=True)
-        
-        logger.debug(f"[GATHER-CONFIG] Found {len(config_tables)} config tables, "
-                    f"top: {[t['table_name'] for t in config_tables[:3]]}")
+        logger.warning(f"[GATHER-CONFIG] Found {len(config_tables)} config tables from selector, "
+                      f"top: {[t['table_name'][:40] for t in config_tables[:3]]}")
         
         return config_tables
     
