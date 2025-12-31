@@ -1,5 +1,5 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v2.0.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v2.1.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
@@ -8,6 +8,11 @@ SIMPLIFIED ROUTING:
 - ALL synthesis → Qwen 14B (one model for everything)
 - FALLBACK → Claude (only if Qwen fails)
 - TEMPLATE → Last resort if all LLMs fail
+
+v2.1 CHANGES:
+- Fixed context to describe table structure, not random sample values
+- Improved expert prompt to prevent hallucination
+- Model should now say "not in data" instead of inventing values
 
 PURPOSE:
 This module transforms raw data retrieval into world-class consultative answers.
@@ -41,6 +46,7 @@ USAGE:
 """
 
 import os
+import re
 import json
 import logging
 from typing import Dict, List, Optional, Any, Tuple
@@ -271,17 +277,17 @@ class ConsultativeSynthesizer:
                     if len(vals) >= 2:
                         key_facts.append(f"  - {vals[0]}: {vals[1]}")
             elif rows:
-                key_facts.append(f"Found {len(rows)} records with {len(cols)} columns")
-                # Sample some key values
-                if rows and cols:
-                    sample_row = rows[0]
-                    for col in cols[:3]:
-                        val = sample_row.get(col, '')
-                        if val:
-                            key_facts.append(f"  - {col}: {str(val)[:50]}")
+                # Describe table structure, NOT sample values
+                key_facts.append(f"Table has {len(rows)} records with {len(cols)} columns")
+                key_facts.append(f"Columns: {', '.join(cols[:8])}")
+                if len(cols) > 8:
+                    key_facts.append(f"  ...and {len(cols) - 8} more columns")
             
             if sql:
-                sources.append(f"SQL: {sql[:100]}...")
+                # Extract table name from SQL for clarity
+                table_match = re.search(r'FROM\s+["\']?(\w+)["\']?', sql, re.IGNORECASE)
+                if table_match:
+                    key_facts.append(f"Source table: {table_match.group(1)}")
         
         # Extract from Truth objects
         if reality:
@@ -570,18 +576,19 @@ class ConsultativeSynthesizer:
         expert_prompt = """You are a senior implementation consultant reviewing configuration data.
 
 CRITICAL RULES:
-1. ONLY reference values that appear in the DATA below
-2. If a value is NOT in the data, say "not found in data provided"
-3. DO NOT invent codes, rates, or values
-4. If you cannot answer from the data, say so clearly
+1. ONLY describe what the DATA section actually contains
+2. If asked about specific values (rates, codes) and they're NOT in the data, say "not found in the provided data"
+3. DO NOT list random column values as "findings"
+4. Summarize WHAT the table contains, not individual cell values
+5. If you cannot answer the question from the data, say so clearly
 
-TONE: Peer-to-peer. Direct. Concise.
+RESPONSE FORMAT:
+- First sentence: Directly answer whether the data can address the question
+- If data is relevant: Describe what's in the table (e.g., "Found 100 records with columns for state, rate, effective_date")
+- If data is NOT relevant: Say "The provided data shows [X] but does not contain [what was asked for]"
+- Flag what's missing if the data doesn't fully answer the question
 
-FORMAT:
-- Lead with the direct answer (1 sentence)
-- Bullet the specific findings (ONLY values from data)
-- Flag what's missing or needs verification
-- Keep it under 100 words"""
+Keep response under 100 words. Be factual, not speculative."""
 
         # =====================================================================
         # SIMPLE: Qwen 14B for everything, Claude fallback
