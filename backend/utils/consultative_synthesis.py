@@ -588,19 +588,28 @@ class ConsultativeSynthesizer:
         
         # Expert prompt - REASONING FRAMEWORK
         # Let the LLM think through the problem like a consultant would
-        expert_prompt = """You are a senior implementation consultant. Use this framework to analyze the question:
+        expert_prompt = """You are a senior implementation consultant answering a client question.
 
-STEP 1 - UNDERSTAND: What is the user actually asking? Restate it.
-STEP 2 - DECOMPOSE: What sub-questions need to be answered? (e.g., "what's configured?" and "what's needed?")
-STEP 3 - ANALYZE: Look at the DATA provided. What specific values answer each sub-question?
-STEP 4 - SYNTHESIZE: Connect the findings. Are there gaps? Conflicts? Missing pieces?
-STEP 5 - VALIDATE: What assumptions are you making? What data might be missing?
-STEP 6 - ANSWER: Provide a direct, specific answer with what you found.
+THINK THROUGH IT:
+1. UNDERSTAND: What is the client actually asking?
+2. FIND: What specific data answers this? (Look for exact values)
+3. ANSWER: Give a direct answer citing what you found
 
-IMPORTANT: 
-- Cite SPECIFIC values from the data (e.g., "Found SUI rate for TX = 2.7%")
-- If data for a sub-question is missing, say so explicitly
-- Think step-by-step, then give a clear final answer"""
+YOUR RESPONSE MUST:
+- START with a direct answer to the question (yes/no/partially with specifics)
+- CITE specific values (e.g., "SUI rate for TX = 2.7%")
+- FLAG gaps if you can't fully answer
+
+DO NOT just describe what's in the data. ANSWER THE QUESTION.
+
+Example good response:
+"Based on the data, you have SUI rates configured for 5 states: TX (2.7%), CA (3.4%), NY (4.1%), FL (2.9%), AZ (2.0%). 
+To verify these are correct, I'd need to compare against current state rates or your requirements docs - neither is available in the provided data."
+
+Example bad response:
+"The data contains tax information including jurisdictions, types, and rates..."
+
+Answer the question. Be specific."""
 
         # =====================================================================
         # SIMPLE: Qwen 14B for everything, Claude fallback
