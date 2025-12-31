@@ -1,16 +1,19 @@
 """
-XLR8 Intelligence Engine - SQL Generator
-==========================================
+XLR8 Intelligence Engine - SQL Generator v2.0
+==============================================
 
 Generates SQL queries from natural language questions.
 
-Uses LLMOrchestrator (local LLMs: DeepSeek for SQL, Claude fallback)
-with smart table selection, column mapping, and query optimization.
+v2.0 CHANGES:
+- SMART FILTER DETECTION: Detects question keywords that match column VALUES
+  and injects WHERE clauses (e.g., "SUI rates" → WHERE type_of_tax ILIKE '%SUI%')
+- SMART FALLBACK: When LLM fails, uses filtered query instead of SELECT *
+- Filter hints in LLM prompt guide better query generation
 
 Key features:
+- Question-aware value filtering (the key to useful queries)
 - Simple vs complex query detection
 - CREATE TABLE schema format for better LLM accuracy
-- Automatic filter injection
 - Column name fixing and validation
 - DuckDB syntax corrections
 
@@ -18,6 +21,7 @@ Deploy to: backend/utils/intelligence/sql_generator.py
 """
 
 import re
+import json
 import logging
 from typing import Dict, List, Optional, Set, Tuple, Any
 from difflib import SequenceMatcher
@@ -199,9 +203,146 @@ class SQLGenerator:
         
         return len(question.split()) <= 8
     
+    def _detect_value_filters(self, question: str, table_name: str) -> List[Dict]:
+        """
+        Detect filters based on question keywords matching column VALUES.
+        
+        If question contains "SUI" and the table has a column where "SUI" is a value,
+        return a filter like {"column": "type_of_tax", "value": "SUI"}.
+        
+        This is the key to smart SQL generation - we filter BEFORE sending to LLM.
+        """
+        filters = []
+        
+        if not self.handler or not hasattr(self.handler, 'conn'):
+            return filters
+        
+        # Extract significant words from question
+        q_lower = question.lower()
+        words = re.findall(r'\b[a-z]+\b', q_lower)
+        skip_words = {'the', 'a', 'an', 'is', 'are', 'my', 'our', 'your', 'what', 
+                     'how', 'show', 'list', 'get', 'find', 'check', 'verify',
+                     'configured', 'setup', 'correct', 'correctly', 'valid'}
+        
+        significant_words = [w for w in words if len(w) >= 3 and w not in skip_words]
+        
+        if not significant_words:
+            return filters
+        
+        try:
+            # Check column profiles for value matches
+            profiles = self.handler.conn.execute("""
+                SELECT column_name, distinct_values, top_values_json
+                FROM _column_profiles 
+                WHERE LOWER(table_name) = LOWER(?)
+                AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
+            """, [table_name]).fetchall()
+            
+            for col_name, distinct_values_json, top_values_json in profiles:
+                # Try distinct_values first, then top_values_json
+                values_json = distinct_values_json or top_values_json
+                if not values_json:
+                    continue
+                
+                try:
+                    values = json.loads(values_json)
+                    
+                    for val_info in values:
+                        val = str(val_info.get('value', '') if isinstance(val_info, dict) else val_info).lower().strip()
+                        
+                        if not val or len(val) < 2:
+                            continue
+                        
+                        # Check if any question word matches this value
+                        for word in significant_words:
+                            # Match: exact, or word is substring of value, or value is substring of word
+                            if word == val or (len(word) >= 3 and word in val) or (len(val) >= 3 and val in word):
+                                filters.append({
+                                    "column": col_name,
+                                    "value": val_info.get('value', val_info) if isinstance(val_info, dict) else val_info,
+                                    "match_word": word
+                                })
+                                logger.warning(f"[SQL-GEN] FILTER DETECTED: {col_name} contains '{val}' (from '{word}')")
+                                break
+                                
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                    
+        except Exception as e:
+            logger.debug(f"[SQL-GEN] Filter detection failed: {e}")
+        
+        return filters
+
+    def _build_smart_fallback(self, table_name: str, filters: List[Dict], 
+                               valid_columns: Set[str]) -> str:
+        """
+        Build a smart fallback SQL with filters instead of SELECT *.
+        
+        If we detected that the question is about "SUI", generate:
+        SELECT * FROM table WHERE type_of_tax ILIKE '%SUI%' LIMIT 100
+        
+        This gives the synthesis LLM clean, relevant data instead of garbage.
+        """
+        # Start with basic select
+        base = f'SELECT * FROM "{table_name}"'
+        
+        # Add WHERE clauses from detected filters
+        where_clauses = []
+        for f in filters[:3]:  # Max 3 filters
+            col = f.get('column', '')
+            val = f.get('value', '')
+            if col in valid_columns and val:
+                # Use ILIKE for flexibility
+                where_clauses.append(f'"{col}" ILIKE \'%{val}%\'')
+        
+        if where_clauses:
+            base += " WHERE " + " AND ".join(where_clauses)
+        
+        base += " LIMIT 100"
+        
+        return base
+        """Detect if question is a simple single-table query."""
+        q_lower = question.lower()
+        
+        # Simple patterns
+        simple_patterns = [
+            r'^show\s+(me\s+)?(the\s+)?',
+            r'^list\s+(all\s+)?(the\s+)?',
+            r'^what\s+are\s+(the\s+)?',
+            r'^give\s+me\s+(the\s+)?',
+            r'^display\s+(the\s+)?',
+            r'^get\s+(me\s+)?(the\s+)?',
+        ]
+        
+        # Complex patterns
+        complex_patterns = [
+            r'\bcompare\b',
+            r'\bjoin\b',
+            r'\bcross.?reference\b',
+            r'\bvs\.?\b',
+            r'\bversus\b',
+            r'\bfrom\s+\w+\s+and\s+',
+            r'\bbetween\s+\w+\s+and\s+',
+        ]
+        
+        for pattern in complex_patterns:
+            if re.search(pattern, q_lower):
+                return False
+        
+        for pattern in simple_patterns:
+            if re.search(pattern, q_lower):
+                return True
+        
+        return len(question.split()) <= 8
+    
     def _generate_simple(self, question: str, table: Dict, 
                         orchestrator) -> Optional[Dict]:
-        """Generate SQL for simple single-table query using CREATE TABLE format."""
+        """
+        Generate SQL for simple single-table query using CREATE TABLE format.
+        
+        v2.0: Now detects value-based filters from question keywords.
+        If question mentions "SUI", we add WHERE type_of_tax ILIKE '%SUI%'.
+        """
         table_name = table.get('table_name', '')
         
         # Create short alias
@@ -217,17 +358,33 @@ class SQLGenerator:
         
         self._table_aliases = {short_alias: table_name}
         
+        # =====================================================================
+        # SMART FILTER DETECTION - the key to useful queries
+        # =====================================================================
+        detected_filters = self._detect_value_filters(question, table_name)
+        
+        # Build filter hints for LLM prompt
+        filter_hints = ""
+        if detected_filters:
+            filter_hints = "\n### Filter Hints (from question keywords)\n"
+            for f in detected_filters[:3]:
+                col = f.get('column', '')
+                val = f.get('value', '')
+                filter_hints += f"- Column '{col}' contains value '{val}' - consider filtering on this\n"
+        
         prompt = f"""### Task
 Generate a SQL query to answer: {question}
 
 ### Database Schema
 {schema_str}
-
+{filter_hints}
 ### Rules
 - Use ONLY columns from the schema above
 - Table name: {short_alias}
 - For text search, use ILIKE '%term%'
-- Return all relevant columns
+- If the question asks about specific values (like SUI, FED, etc.), ADD a WHERE clause
+- Return relevant columns, not SELECT *
+- Add LIMIT 100
 
 ### Answer
 Given the schema, here is the SQL query:
@@ -252,9 +409,13 @@ SELECT"""
                 else:
                     logger.warning(f"[SQL-GEN] Invalid columns: {invalid}")
         
-        # FALLBACK: When LLM fails, do simple SELECT * to at least get data
-        logger.warning(f"[SQL-GEN] LLM failed, using SELECT * fallback for {table_name[-40:]}")
-        fallback_sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+        # =====================================================================
+        # SMART FALLBACK - use detected filters instead of SELECT *
+        # =====================================================================
+        logger.warning(f"[SQL-GEN] LLM failed, using SMART fallback for {table_name[-40:]}")
+        fallback_sql = self._build_smart_fallback(table_name, detected_filters, valid_columns)
+        logger.warning(f"[SQL-GEN] Fallback SQL: {fallback_sql[:100]}...")
+        
         return {
             'sql': fallback_sql,
             'table': short_alias,
