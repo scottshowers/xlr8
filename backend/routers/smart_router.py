@@ -472,7 +472,8 @@ async def smart_upload(
                 extension=extension,
                 domain=domain,
                 title=title,
-                temp_dir=temp_dir
+                temp_dir=temp_dir,
+                truth_type=truth_type  # Pass truth_type for correct categorization
             )
             route_name = 'standards'
         
@@ -675,7 +676,8 @@ async def _route_to_standards(
     extension: str,
     domain: str,
     title: Optional[str],
-    temp_dir: str
+    temp_dir: str,
+    truth_type: Optional[str] = None  # NEW: Allow explicit truth_type
 ) -> Dict[str, Any]:
     """Route to Standards Processor for reference documents.
     
@@ -685,6 +687,7 @@ async def _route_to_standards(
     - DuckDB tables (for SQL queries)
     
     FIX v2: Properly extracts text from Excel files (was reading binary as text).
+    FIX v3: truth_type parameter for correct categorization (reference/regulatory/compliance).
     """
     
     if not STANDARDS_AVAILABLE:
@@ -797,16 +800,19 @@ async def _route_to_standards(
         if raw_text and len(raw_text.strip()) > 100 and RAG_AVAILABLE:
             try:
                 rag = RAGHandler()
+                # Use passed truth_type, default to 'reference' for backwards compatibility
+                actual_truth_type = truth_type or 'reference'
                 metadata = {
                     'source': filename,
                     'filename': filename,
                     'project': '__STANDARDS__',
-                    'truth_type': 'reference',
+                    'truth_type': actual_truth_type,
                     'domain': domain,
                     'is_global': True,
                     'document_id': doc.document_id,
                     'rules_extracted': len(doc.rules)
                 }
+                logger.warning(f"[SMART-ROUTER] Adding to ChromaDB with truth_type={actual_truth_type}")
                 chunks_added = rag.add_document(
                     collection_name="documents",
                     text=raw_text,
