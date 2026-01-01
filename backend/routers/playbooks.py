@@ -698,7 +698,16 @@ async def get_document_checklist(project_id: str):
 
 @router.get("/year-end/export/{project_id}")
 async def export_playbook(project_id: str):
-    """Export playbook progress as Excel."""
+    """
+    Export playbook progress as comprehensive Excel workbook.
+    
+    Sheets:
+    1. Summary - Overall completion stats
+    2. Checklist - All actions with status
+    3. Issues - All identified issues across all actions
+    4. Recommendations - All recommendations
+    5. Analysis Details - Full analysis summaries per action
+    """
     try:
         structure = await get_year_end_structure()
         
@@ -709,77 +718,276 @@ async def export_playbook(project_id: str):
         
         # Create workbook
         wb = openpyxl.Workbook()
-        ws = wb.active
-        ws.title = "Year-End Checklist"
         
         # Styles
         header_font = Font(bold=True, color="FFFFFF")
         header_fill = PatternFill(start_color="366092", end_color="366092", fill_type="solid")
+        section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        issue_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
+        complete_fill = PatternFill(start_color="C6EFCE", end_color="C6EFCE", fill_type="solid")
         thin_border = Border(
             left=Side(style='thin'),
             right=Side(style='thin'),
             top=Side(style='thin'),
             bottom=Side(style='thin')
         )
+        wrap_alignment = Alignment(wrap_text=True, vertical='top')
         
-        # Headers
+        def style_header(ws, row=1):
+            for cell in ws[row]:
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.border = thin_border
+        
+        # Collect all issues and recommendations across actions
+        all_issues = []
+        all_recommendations = []
+        all_analyses = []
+        status_counts = {"complete": 0, "in_progress": 0, "not_started": 0, "blocked": 0, "n_a": 0}
+        total_actions = 0
+        
+        for step in structure.get('steps', []):
+            for action in step.get('actions', []):
+                total_actions += 1
+                action_id = action['action_id']
+                action_progress = progress.get(action_id, {})
+                status = action_progress.get('status', 'not_started')
+                
+                # Count statuses
+                status_key = status.replace(' ', '_').lower()
+                if status_key in status_counts:
+                    status_counts[status_key] += 1
+                
+                findings = action_progress.get('findings', {}) or {}
+                
+                # Collect issues
+                for issue in findings.get('issues', []):
+                    all_issues.append({
+                        "action_id": action_id,
+                        "step": f"Step {step['step_number']}",
+                        "action_description": action.get('description', '')[:100],
+                        "issue": issue,
+                        "status": status
+                    })
+                
+                # Collect recommendations
+                for rec in findings.get('recommendations', []):
+                    all_recommendations.append({
+                        "action_id": action_id,
+                        "step": f"Step {step['step_number']}",
+                        "action_description": action.get('description', '')[:100],
+                        "recommendation": rec,
+                        "status": status
+                    })
+                
+                # Collect analysis summaries
+                summary = findings.get('summary', '')
+                if summary:
+                    extracted = findings.get('extracted_data', {})
+                    extracted_str = ""
+                    if extracted:
+                        extracted_str = "; ".join([f"{k}: {v}" for k, v in extracted.items()][:5])
+                    
+                    all_analyses.append({
+                        "action_id": action_id,
+                        "step": f"Step {step['step_number']}",
+                        "description": action.get('description', '')[:150],
+                        "summary": summary,
+                        "extracted_data": extracted_str,
+                        "method": findings.get('analysis_method', ''),
+                        "confidence": findings.get('confidence', ''),
+                        "sources": ", ".join(action_progress.get('documents_found', [])[:3])
+                    })
+        
+        # =====================================================================
+        # Sheet 1: Summary
+        # =====================================================================
+        ws_summary = wb.active
+        ws_summary.title = "Summary"
+        
+        ws_summary['A1'] = "Year-End Playbook Export"
+        ws_summary['A1'].font = Font(bold=True, size=16)
+        
+        ws_summary['A3'] = "Project ID:"
+        ws_summary['B3'] = project_id
+        ws_summary['A4'] = "Export Date:"
+        ws_summary['B4'] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        ws_summary['A5'] = "Total Actions:"
+        ws_summary['B5'] = total_actions
+        
+        ws_summary['A7'] = "Completion Status"
+        ws_summary['A7'].font = Font(bold=True)
+        ws_summary['A8'] = "Complete:"
+        ws_summary['B8'] = status_counts.get('complete', 0)
+        ws_summary['A9'] = "In Progress:"
+        ws_summary['B9'] = status_counts.get('in_progress', 0)
+        ws_summary['A10'] = "Not Started:"
+        ws_summary['B10'] = status_counts.get('not_started', 0)
+        ws_summary['A11'] = "Blocked:"
+        ws_summary['B11'] = status_counts.get('blocked', 0)
+        ws_summary['A12'] = "N/A:"
+        ws_summary['B12'] = status_counts.get('n_a', 0)
+        
+        ws_summary['A14'] = "Issues Found:"
+        ws_summary['B14'] = len(all_issues)
+        ws_summary['A15'] = "Recommendations:"
+        ws_summary['B15'] = len(all_recommendations)
+        
+        ws_summary.column_dimensions['A'].width = 20
+        ws_summary.column_dimensions['B'].width = 40
+        
+        # =====================================================================
+        # Sheet 2: Checklist (all actions)
+        # =====================================================================
+        ws_checklist = wb.create_sheet("Checklist")
+        
         headers = [
             "Action ID", "Step", "Type", "Description", "Due Date",
-            "Owner", "Quarter End", "Reports Needed", "Docs Found",
-            "Found Files", "Analysis Tab", "Status", "Findings", "Issues", "Notes"
+            "Reports Needed", "Docs Found", "Status", "Issues Count", 
+            "Analysis Summary", "Notes"
         ]
+        ws_checklist.append(headers)
+        style_header(ws_checklist)
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=1, column=col, value=header)
-            cell.font = header_font
-            cell.fill = header_fill
-            cell.border = thin_border
-        
-        # Data rows
-        row = 2
         for step in structure.get('steps', []):
             for action in step.get('actions', []):
                 action_id = action['action_id']
                 action_progress = progress.get(action_id, {})
-                
-                ws.cell(row=row, column=1, value=action_id)
-                ws.cell(row=row, column=2, value=f"Step {step['step_number']}")
-                ws.cell(row=row, column=3, value=action.get('action_type', 'Recommended'))
-                ws.cell(row=row, column=4, value=action.get('description', ''))
-                ws.cell(row=row, column=5, value=action.get('due_date', 'N/A'))
-                ws.cell(row=row, column=6, value='')  # Owner
-                ws.cell(row=row, column=7, value='Yes' if action.get('quarter_end') else 'No')
-                ws.cell(row=row, column=8, value=', '.join(action.get('reports_needed', [])))
-                
-                docs_found = action_progress.get('documents_found', [])
-                ws.cell(row=row, column=9, value='Yes' if docs_found else 'No')
-                ws.cell(row=row, column=10, value=', '.join(docs_found[:3]))
-                ws.cell(row=row, column=11, value='')  # Analysis tab
+                findings = action_progress.get('findings', {}) or {}
                 
                 status = action_progress.get('status', 'not_started')
-                ws.cell(row=row, column=12, value=status.replace('_', ' ').title())
+                issues_count = len(findings.get('issues', []))
                 
-                findings = action_progress.get('findings', {})
-                ws.cell(row=row, column=13, value=findings.get('summary', '') if findings else '')
-                ws.cell(row=row, column=14, value='\n'.join(findings.get('issues', [])) if findings else '')
-                ws.cell(row=row, column=15, value=action_progress.get('notes', ''))
+                row_data = [
+                    action_id,
+                    f"Step {step['step_number']}",
+                    action.get('action_type', 'Recommended'),
+                    action.get('description', '')[:200],
+                    action.get('due_date', 'N/A'),
+                    ', '.join(action.get('reports_needed', [])),
+                    ', '.join(action_progress.get('documents_found', [])[:3]),
+                    status.replace('_', ' ').title(),
+                    issues_count,
+                    (findings.get('summary', '') or '')[:300],
+                    action_progress.get('notes', '') or ''
+                ]
+                ws_checklist.append(row_data)
                 
-                for col in range(1, 16):
-                    ws.cell(row=row, column=col).border = thin_border
-                
-                row += 1
+                # Color code by status
+                row_num = ws_checklist.max_row
+                if status == 'complete':
+                    for col in range(1, 12):
+                        ws_checklist.cell(row=row_num, column=col).fill = complete_fill
+                elif issues_count > 0:
+                    for col in range(1, 12):
+                        ws_checklist.cell(row=row_num, column=col).fill = issue_fill
         
         # Set column widths
-        widths = [10, 10, 12, 50, 15, 15, 12, 40, 10, 40, 20, 12, 50, 50, 30]
+        widths = [10, 10, 12, 60, 12, 40, 40, 12, 10, 60, 30]
         for i, width in enumerate(widths, 1):
-            ws.column_dimensions[get_column_letter(i)].width = width
+            ws_checklist.column_dimensions[get_column_letter(i)].width = width
+        
+        # =====================================================================
+        # Sheet 3: Issues Detail
+        # =====================================================================
+        if all_issues:
+            ws_issues = wb.create_sheet("Issues")
+            
+            issue_headers = ["Action ID", "Step", "Action", "Issue", "Status"]
+            ws_issues.append(issue_headers)
+            style_header(ws_issues)
+            
+            for issue in all_issues:
+                ws_issues.append([
+                    issue['action_id'],
+                    issue['step'],
+                    issue['action_description'],
+                    issue['issue'],
+                    issue['status'].replace('_', ' ').title()
+                ])
+            
+            ws_issues.column_dimensions['A'].width = 10
+            ws_issues.column_dimensions['B'].width = 10
+            ws_issues.column_dimensions['C'].width = 50
+            ws_issues.column_dimensions['D'].width = 80
+            ws_issues.column_dimensions['E'].width = 12
+            
+            # Enable text wrapping for issue column
+            for row in ws_issues.iter_rows(min_row=2, min_col=4, max_col=4):
+                for cell in row:
+                    cell.alignment = wrap_alignment
+        
+        # =====================================================================
+        # Sheet 4: Recommendations
+        # =====================================================================
+        if all_recommendations:
+            ws_recs = wb.create_sheet("Recommendations")
+            
+            rec_headers = ["Action ID", "Step", "Action", "Recommendation", "Status"]
+            ws_recs.append(rec_headers)
+            style_header(ws_recs)
+            
+            for rec in all_recommendations:
+                ws_recs.append([
+                    rec['action_id'],
+                    rec['step'],
+                    rec['action_description'],
+                    rec['recommendation'],
+                    rec['status'].replace('_', ' ').title()
+                ])
+            
+            ws_recs.column_dimensions['A'].width = 10
+            ws_recs.column_dimensions['B'].width = 10
+            ws_recs.column_dimensions['C'].width = 50
+            ws_recs.column_dimensions['D'].width = 80
+            ws_recs.column_dimensions['E'].width = 12
+            
+            for row in ws_recs.iter_rows(min_row=2, min_col=4, max_col=4):
+                for cell in row:
+                    cell.alignment = wrap_alignment
+        
+        # =====================================================================
+        # Sheet 5: Analysis Details
+        # =====================================================================
+        if all_analyses:
+            ws_analysis = wb.create_sheet("Analysis Details")
+            
+            analysis_headers = ["Action ID", "Step", "Description", "Analysis Summary", 
+                               "Extracted Data", "Method", "Confidence", "Sources"]
+            ws_analysis.append(analysis_headers)
+            style_header(ws_analysis)
+            
+            for analysis in all_analyses:
+                ws_analysis.append([
+                    analysis['action_id'],
+                    analysis['step'],
+                    analysis['description'],
+                    analysis['summary'],
+                    analysis['extracted_data'],
+                    analysis['method'],
+                    str(analysis['confidence']) if analysis['confidence'] else '',
+                    analysis['sources']
+                ])
+            
+            ws_analysis.column_dimensions['A'].width = 10
+            ws_analysis.column_dimensions['B'].width = 10
+            ws_analysis.column_dimensions['C'].width = 50
+            ws_analysis.column_dimensions['D'].width = 80
+            ws_analysis.column_dimensions['E'].width = 40
+            ws_analysis.column_dimensions['F'].width = 15
+            ws_analysis.column_dimensions['G'].width = 10
+            ws_analysis.column_dimensions['H'].width = 40
+            
+            for row in ws_analysis.iter_rows(min_row=2, min_col=4, max_col=4):
+                for cell in row:
+                    cell.alignment = wrap_alignment
         
         # Save to bytes
         output = io.BytesIO()
         wb.save(output)
         output.seek(0)
         
-        filename = f"Year_End_Checklist_{project_id[:8]}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        filename = f"Year_End_Playbook_{project_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         
         return StreamingResponse(
             output,
