@@ -1999,9 +1999,27 @@ class PlaybookEngine:
                     "match_type": "semantic"
                 })
         
-        # Get structured data (DuckDB) - ONLY for matched files, not all project files
-        duckdb_content = DocumentScanner.get_structured_data(seen_files)
-        logger.warning(f"[SCAN] DuckDB structured data: {len(duckdb_content)} content blocks for {len(seen_files)} matched files")
+        # Get structured data (DuckDB) - ONLY for files matching reports_needed
+        # For comparison tasks, we need all matched files. For other tasks, focus on required reports.
+        # This prevents unrelated tables (e.g., Earnings Codes) from drowning out the required data.
+        duckdb_files = seen_files
+        if action.reports_needed:
+            # Filter to only files that match reports_needed
+            filtered_files = set()
+            for filename in seen_files:
+                filename_lower = filename.lower().replace(' ', '').replace('.pdf', '').replace('team', '')
+                for report in action.reports_needed:
+                    report_lower = report.lower().replace(' ', '')
+                    if report_lower in filename_lower or filename_lower in report_lower:
+                        filtered_files.add(filename)
+                        break
+            
+            if filtered_files:
+                logger.warning(f"[SCAN] Filtering DuckDB to reports_needed: {filtered_files} (was {len(seen_files)} files)")
+                duckdb_files = filtered_files
+        
+        duckdb_content = DocumentScanner.get_structured_data(duckdb_files)
+        logger.warning(f"[SCAN] DuckDB structured data: {len(duckdb_content)} content blocks for {len(duckdb_files)} matched files")
         if duckdb_content:
             logger.warning(f"[SCAN] First DuckDB block preview: {duckdb_content[0][:200] if duckdb_content[0] else 'empty'}...")
         
