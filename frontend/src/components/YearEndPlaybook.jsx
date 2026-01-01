@@ -3167,8 +3167,15 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   const handleScanComplete = async (results) => {
     console.log('[SCAN-ALL] Complete:', results);
     
-    // Reload all data to show updated findings
-    await refreshAll();
+    // Set loading state to prevent visual churn during data refresh
+    setLoading(true);
+    
+    try {
+      // Batch all data loads together
+      await refreshAll();
+    } finally {
+      setLoading(false);
+    }
     
     const successful = results?.filter(r => r.found)?.length || 0;
     const total = results?.length || 0;
