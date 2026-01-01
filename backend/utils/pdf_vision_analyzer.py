@@ -442,21 +442,43 @@ def image_to_base64(image: Image.Image, format: str = 'JPEG', quality: int = 80)
 # CLAUDE VISION COLUMN EXTRACTION
 # =============================================================================
 
-COLUMN_EXTRACTION_PROMPT = """You are analyzing a PDF table to extract the column headers.
+COLUMN_EXTRACTION_PROMPT = """You are analyzing a PDF table to extract column structure and data patterns.
 
-Look at this image of a PDF page containing a table. Identify ALL column headers in the table.
+Look at this image of a PDF page containing a table.
 
-IMPORTANT:
-- Focus on the actual column headers, not page titles or metadata
+TASK 1 - COLUMN HEADERS:
+- Identify ALL column headers in the table
+- Focus on actual column headers, not page titles or letterhead
 - If headers span multiple lines, combine them into one name
 - Use snake_case for column names (lowercase, underscores)
-- Be precise - these will be used as database column names
-- Include ALL columns you can see, in left-to-right order
-- If a column has no clear header, use a descriptive name based on the data
+- Include ALL columns in left-to-right order
+
+TASK 2 - DATA PATTERNS (for validation):
+For each column, describe what VALID data looks like:
+- Format pattern (e.g., "6-8 uppercase letters ending in ER", "2-letter state code", "XX-XXXXXXX")
+- Example patterns you can see (use [REDACTED] for any blacked-out/sensitive values)
+- Whether it can be empty
+
+TASK 3 - TABLE BOUNDARIES:
+- How many lines of non-table content (letterhead, titles) appear BEFORE the table header?
+- What text pattern marks the START of actual data rows?
+- What text marks the END of data (e.g., "Page X of Y", "Total:", footer)?
 
 Respond with ONLY a JSON object in this exact format:
 {
-  "columns": ["column_name_1", "column_name_2", "column_name_3", ...],
+  "columns": ["column_name_1", "column_name_2", ...],
+  "column_patterns": {
+    "column_name_1": {
+      "format": "description of valid format",
+      "examples": ["PATTERN1", "PATTERN2"],
+      "can_be_empty": false
+    }
+  },
+  "table_boundaries": {
+    "skip_lines_before_header": 5,
+    "header_contains": "Tax Jurisdiction",
+    "end_markers": ["Page", "Total", "Report Date"]
+  },
   "table_description": "Brief description of what this table contains",
   "confidence": 0.95
 }
@@ -644,14 +666,22 @@ def extract_columns_with_vision(
             columns = result.get('columns', [])
             description = result.get('table_description', '')
             confidence = result.get('confidence', 0.0)
+            column_patterns = result.get('column_patterns', {})
+            table_boundaries = result.get('table_boundaries', {})
             
             logger.warning(f"[PDF-VISION] Extracted {len(columns)} columns with {confidence:.0%} confidence")
             logger.warning(f"[PDF-VISION] Columns: {columns[:10]}{'...' if len(columns) > 10 else ''}")
+            if column_patterns:
+                logger.warning(f"[PDF-VISION] Got patterns for {len(column_patterns)} columns")
+            if table_boundaries:
+                logger.warning(f"[PDF-VISION] Table boundaries: skip {table_boundaries.get('skip_lines_before_header', 0)} lines, header contains '{table_boundaries.get('header_contains', '')}'")
             
             return {
                 'columns': columns,
                 'table_description': description,
                 'confidence': confidence,
+                'column_patterns': column_patterns,
+                'table_boundaries': table_boundaries,
                 'method': 'claude_vision',
                 'success': True
             }
@@ -736,67 +766,183 @@ def get_pdf_table_structure(
 def extract_table_data_from_text(
     text: str,
     columns: List[str],
-    page_num: int = 0
+    page_num: int = 0,
+    column_patterns: Dict = None,
+    table_boundaries: Dict = None
 ) -> List[Dict[str, str]]:
     """
-    Extract table rows from text using known column structure.
+    Extract table rows from text using known column structure and validation patterns.
     
     This is the FAST path - no Vision API calls needed.
-    Used for pages 3+ after Vision has identified columns from pages 1-2.
+    Uses patterns from Vision to validate data and skip garbage.
     
     Args:
         text: Raw text from PDF page
         columns: Known column names from Vision analysis
         page_num: For logging
+        column_patterns: Dict of column -> {format, examples, can_be_empty} for validation
+        table_boundaries: Dict with skip_lines_before_header, header_contains, end_markers
         
     Returns:
-        List of row dicts
+        List of row dicts with validated data
     """
     rows = []
     
     if not text or not columns:
         return rows
     
-    # Split into lines and look for data patterns
+    # Defaults
+    column_patterns = column_patterns or {}
+    table_boundaries = table_boundaries or {}
+    
+    skip_lines = table_boundaries.get('skip_lines_before_header', 0)
+    header_marker = table_boundaries.get('header_contains', '').lower()
+    end_markers = [m.lower() for m in table_boundaries.get('end_markers', ['page ', 'total', 'report date', 'continued'])]
+    
+    # Add common skip patterns
+    skip_patterns = ['phone:', 'fax:', 'contact:', 'address:', 'email:', 'www.', 'http', 
+                     'company:', 'inc.', 'llc', 'corp.', 'suite ', 'floor ']
+    
     lines = text.strip().split('\n')
     
-    for line in lines:
+    # Find the header row first
+    header_line_idx = -1
+    for idx, line in enumerate(lines):
+        line_lower = line.lower()
+        # Check if this looks like a header row
+        if header_marker and header_marker in line_lower:
+            header_line_idx = idx
+            break
+        # Or if it contains multiple column names
+        col_matches = sum(1 for col in columns if col.replace('_', ' ').lower() in line_lower or col.replace('_', '').lower() in line_lower)
+        if col_matches >= len(columns) * 0.3:  # At least 30% of columns mentioned
+            header_line_idx = idx
+            break
+    
+    # Start after header (or after skip_lines if no header found)
+    start_idx = max(header_line_idx + 1, skip_lines) if header_line_idx >= 0 else skip_lines
+    
+    logger.info(f"[PDF-VISION] Page {page_num}: starting extraction at line {start_idx} (header at {header_line_idx})")
+    
+    for line_idx, line in enumerate(lines[start_idx:], start=start_idx):
         line = line.strip()
         if not line:
             continue
-            
-        # Skip obvious headers/footers
-        if any(skip in line.lower() for skip in ['page ', 'continued', 'select:', 'last page']):
+        
+        line_lower = line.lower()
+        
+        # Check for end markers
+        if any(marker in line_lower for marker in end_markers):
+            logger.info(f"[PDF-VISION] Page {page_num}: hit end marker at line {line_idx}")
+            break
+        
+        # Skip obvious non-data lines
+        if any(skip in line_lower for skip in skip_patterns):
             continue
         
-        # Split line into values - try multiple delimiters
+        # Skip if line is too short (likely garbage)
+        if len(line) < 10:
+            continue
+        
+        # Parse line into values - use TAB or multiple spaces as delimiter
         values = None
-        for delimiter in ['\t', '  ', ' | ', '|']:
-            parts = [p.strip() for p in line.split(delimiter) if p.strip()]
-            if len(parts) >= len(columns) * 0.5:  # At least half the columns
-                values = parts
-                break
         
-        if not values:
-            # Try whitespace splitting with column count hint
-            parts = line.split()
+        # Try tab first (most reliable)
+        if '\t' in line:
+            values = [p.strip() for p in line.split('\t')]
+        else:
+            # Try multiple spaces (2+)
+            import re as regex
+            parts = regex.split(r'\s{2,}', line)
             if len(parts) >= 2:
-                values = parts
+                values = [p.strip() for p in parts]
         
-        if values:
-            row = {}
-            for i, col in enumerate(columns):
-                if i < len(values):
-                    row[col] = values[i]
-                else:
-                    row[col] = ''
-            
-            # Only add if we got meaningful data
-            if any(v for v in row.values()):
-                rows.append(row)
+        if not values or len(values) < 2:
+            # Last resort: if line has enough "words", it might be space-delimited
+            # But validate against patterns to filter garbage
+            parts = line.split()
+            if len(parts) >= len(columns) * 0.5:
+                values = parts
+            else:
+                continue
+        
+        # Map values to columns
+        row = {}
+        for i, col in enumerate(columns):
+            if i < len(values):
+                row[col] = values[i].strip()
+            else:
+                row[col] = ''
+        
+        # Validate row against patterns if available
+        if column_patterns and not _validate_row(row, column_patterns, columns):
+            continue
+        
+        # Basic sanity check: at least one value should look like data (not all single chars)
+        meaningful_values = [v for v in row.values() if v and len(v) > 1]
+        if len(meaningful_values) < 2:
+            continue
+        
+        rows.append(row)
     
     if rows:
-        logger.info(f"[PDF-VISION] Page {page_num}: extracted {len(rows)} rows from text")
+        logger.info(f"[PDF-VISION] Page {page_num}: extracted {len(rows)} validated rows from text")
+    else:
+        logger.warning(f"[PDF-VISION] Page {page_num}: no valid rows extracted")
+    
+    return rows
+
+
+def _validate_row(row: Dict[str, str], patterns: Dict, columns: List[str]) -> bool:
+    """
+    Validate a row against column patterns.
+    Returns True if row looks like valid table data, False if garbage.
+    """
+    if not patterns:
+        return True
+    
+    valid_score = 0
+    checked = 0
+    
+    for col in columns[:5]:  # Check first 5 columns
+        value = row.get(col, '')
+        pattern_info = patterns.get(col, {})
+        
+        if not pattern_info:
+            continue
+        
+        checked += 1
+        examples = pattern_info.get('examples', [])
+        can_be_empty = pattern_info.get('can_be_empty', True)
+        
+        # Empty check
+        if not value:
+            if can_be_empty:
+                valid_score += 0.5
+            continue
+        
+        # Check if value matches example patterns
+        if examples:
+            # Check length similarity to examples
+            example_lengths = [len(ex) for ex in examples if ex and ex != '[REDACTED]']
+            if example_lengths:
+                avg_len = sum(example_lengths) / len(example_lengths)
+                if 0.3 * avg_len <= len(value) <= 3 * avg_len:
+                    valid_score += 0.5
+                
+            # Check character class similarity
+            for example in examples:
+                if example and example != '[REDACTED]':
+                    # Similar pattern (all caps, has numbers, etc)
+                    if (example.isupper() and value.isupper()) or \
+                       (any(c.isdigit() for c in example) and any(c.isdigit() for c in value)):
+                        valid_score += 0.5
+                        break
+    
+    # Need at least 50% validity score
+    if checked == 0:
+        return True
+    return (valid_score / checked) >= 0.3
     
     return rows
 
@@ -876,75 +1022,107 @@ def extract_tables_smart(
         columns = structure_result['columns']
         confidence = structure_result.get('confidence', 0)
         description = structure_result.get('table_description', '')
+        column_patterns = structure_result.get('column_patterns', {})
+        table_boundaries = structure_result.get('table_boundaries', {})
         
         update_status(f"✓ Detected {len(columns)} columns ({confidence:.0%} confidence)")
         logger.warning(f"[PDF-VISION] Columns: {columns}")
         
-        # Step 2: Extract text from ALL pages using pdfplumber (fast, free)
-        update_status("Extracting data from all pages...")
+        # Step 2: Extract text from ALL pages and parse with LLM
+        # THIS IS THE SAME APPROACH AS REGISTER EXTRACTOR (which works)
+        update_status("Extracting text from all pages...")
         
         try:
             import pdfplumber
             
+            pages_text = []
             with pdfplumber.open(file_path) as pdf:
                 total_pages = len(pdf.pages)
                 
                 for page_idx, page in enumerate(pdf.pages):
                     try:
-                        # Extract text from page
                         page_text = page.extract_text() or ''
-                        
-                        # Also try to get tables directly if pdfplumber can see them
-                        tables = page.extract_tables()
-                        
-                        if tables:
-                            # pdfplumber found tables - use those
-                            for table in tables:
-                                if not table or len(table) < 1:
-                                    continue
-                                
-                                for row_data in table:
-                                    if not row_data or not any(row_data):
-                                        continue
-                                    
-                                    # Skip header-like rows
-                                    row_text = ' '.join(str(c) for c in row_data if c)
-                                    if 'Page' in row_text and 'of' in row_text:
-                                        continue
-                                    
-                                    # Map to columns
-                                    row = {}
-                                    for i, col in enumerate(columns):
-                                        if i < len(row_data) and row_data[i]:
-                                            row[col] = str(row_data[i]).strip()
-                                        else:
-                                            row[col] = ''
-                                    
-                                    if any(v for v in row.values()):
-                                        all_rows.append(row)
-                        else:
-                            # No tables found - parse text
-                            page_rows = extract_table_data_from_text(
-                                text=page_text,
-                                columns=columns,
-                                page_num=page_idx + 1
-                            )
-                            all_rows.extend(page_rows)
+                        if page_text.strip():
+                            pages_text.append(page_text)
                         
                         # Progress update every 5 pages
                         if (page_idx + 1) % 5 == 0:
-                            update_status(f"Processed {page_idx + 1}/{total_pages} pages, {len(all_rows)} rows")
+                            update_status(f"Extracted text from {page_idx + 1}/{total_pages} pages")
                             
                     except Exception as page_error:
-                        logger.warning(f"[PDF-VISION] Page {page_idx + 1} error: {page_error}")
+                        logger.warning(f"[PDF-VISION] Page {page_idx + 1} text extraction error: {page_error}")
                         continue
+            
+            if not pages_text:
+                return {
+                    'rows': [],
+                    'columns': columns,
+                    'success': False,
+                    'error': 'No text extracted from PDF'
+                }
+            
+            update_status(f"✓ Extracted text from {len(pages_text)} pages, parsing with LLM...")
+            
+            # Step 3: Parse with LLM (same approach as Register Extractor)
+            try:
+                from backend.utils.llm_table_parser import parse_pages_with_llm
+            except ImportError:
+                from utils.llm_table_parser import parse_pages_with_llm
+            
+            parse_result = parse_pages_with_llm(
+                pages_text=pages_text,
+                columns=columns,
+                table_description=description,
+                redact_pii=True  # ALWAYS redact PII before sending to LLM
+            )
+            
+            if parse_result.get('success') and parse_result.get('rows'):
+                all_rows = parse_result['rows']
+                llm_used = parse_result.get('llm_used', 'unknown')
+                pii_redacted = parse_result.get('pii_redacted', 0)
                 
-        except ImportError:
+                update_status(f"✓ LLM ({llm_used}) extracted {len(all_rows)} rows (PII redacted: {pii_redacted})")
+                logger.warning(f"[PDF-VISION] LLM parsing success: {len(all_rows)} rows via {llm_used}")
+            else:
+                logger.warning(f"[PDF-VISION] LLM parsing failed, trying pdfplumber tables as fallback...")
+                
+                # Fallback: try pdfplumber's table extraction for bordered tables
+                with pdfplumber.open(file_path) as pdf:
+                    for page_idx, page in enumerate(pdf.pages):
+                        try:
+                            tables = page.extract_tables()
+                            if tables:
+                                for table in tables:
+                                    if not table or len(table) < 1:
+                                        continue
+                                    for row_data in table:
+                                        if not row_data or not any(row_data):
+                                            continue
+                                        row_text = ' '.join(str(c) for c in row_data if c)
+                                        if 'Page' in row_text and 'of' in row_text:
+                                            continue
+                                        row = {}
+                                        for i, col in enumerate(columns):
+                                            if i < len(row_data) and row_data[i]:
+                                                row[col] = str(row_data[i]).strip()
+                                            else:
+                                                row[col] = ''
+                                        if any(v for v in row.values()):
+                                            all_rows.append(row)
+                        except Exception:
+                            continue
+                
+                if all_rows:
+                    update_status(f"✓ Fallback: pdfplumber extracted {len(all_rows)} rows")
+                else:
+                    update_status("⚠ No data extracted")
+                
+        except ImportError as ie:
             return {
                 'rows': [],
                 'columns': columns,
                 'success': False,
-                'error': 'pdfplumber not available for text extraction'
+                'error': f'Missing dependency: {ie}'
             }
         
         update_status(f"✓ Complete: {len(all_rows)} rows from {total_pages} pages")
@@ -955,6 +1133,8 @@ def extract_tables_smart(
             'page_count': total_pages,
             'table_description': description,
             'confidence': confidence,
+            'column_patterns': column_patterns,
+            'table_boundaries': table_boundaries,
             'success': True
         }
         
@@ -1034,7 +1214,9 @@ def store_learned_structure(
     fingerprint: str,
     columns: List[str],
     document_type: str = None,
-    description: str = None
+    description: str = None,
+    column_patterns: Dict = None,
+    table_boundaries: Dict = None
 ) -> bool:
     """
     Store learned document structure for future reuse.
@@ -1058,6 +1240,8 @@ def store_learned_structure(
             'columns': columns,
             'document_type': document_type,
             'description': description,
+            'column_patterns': column_patterns or {},
+            'table_boundaries': table_boundaries or {},
             'created_at': datetime.now().isoformat()
         }
         
@@ -1166,49 +1350,55 @@ def extract_all_tables_with_vision(
                 if cached and cached.get('columns'):
                     update_status(f"✓ Using cached structure (fingerprint: {fingerprint[:8]}...)")
                     
-                    # Fast path: use cached columns, extract all pages
+                    # Use cached columns, but STILL use LLM for parsing (same as uncached path)
                     columns = cached['columns']
-                    all_rows = []
+                    description = cached.get('description', '')
                     
+                    # Extract text from all pages
+                    pages_text = []
                     with pdfplumber.open(file_path) as pdf:
                         total_pages = len(pdf.pages)
                         if max_pages:
                             total_pages = min(total_pages, max_pages)
                         
                         for page_idx in range(total_pages):
-                            page = pdf.pages[page_idx]
+                            page_text = pdf.pages[page_idx].extract_text() or ''
+                            if page_text.strip():
+                                pages_text.append(page_text)
+                    
+                    if not pages_text:
+                        logger.warning("[PDF-VISION] No text extracted from cached document")
+                    else:
+                        # Parse with LLM (same approach as Register Extractor)
+                        update_status(f"Parsing {len(pages_text)} pages with LLM...")
+                        
+                        try:
+                            from backend.utils.llm_table_parser import parse_pages_with_llm
+                        except ImportError:
+                            from utils.llm_table_parser import parse_pages_with_llm
+                        
+                        parse_result = parse_pages_with_llm(
+                            pages_text=pages_text,
+                            columns=columns,
+                            table_description=description,
+                            redact_pii=True
+                        )
+                        
+                        if parse_result.get('success') and parse_result.get('rows'):
+                            all_rows = parse_result['rows']
+                            update_status(f"✓ Extracted {len(all_rows)} rows using cached structure + LLM")
                             
-                            # Try tables first
-                            tables = page.extract_tables()
-                            if tables:
-                                for table in tables:
-                                    for row_data in (table or []):
-                                        if not row_data or not any(row_data):
-                                            continue
-                                        row = {}
-                                        for i, col in enumerate(columns):
-                                            if i < len(row_data) and row_data[i]:
-                                                row[col] = str(row_data[i]).strip()
-                                            else:
-                                                row[col] = ''
-                                        if any(v for v in row.values()):
-                                            all_rows.append(row)
-                            else:
-                                # Parse text
-                                page_text = page.extract_text() or ''
-                                page_rows = extract_table_data_from_text(page_text, columns, page_idx + 1)
-                                all_rows.extend(page_rows)
-                    
-                    update_status(f"✓ Extracted {len(all_rows)} rows using cached structure")
-                    
-                    return {
-                        'rows': all_rows,
-                        'columns': columns,
-                        'page_count': total_pages,
-                        'from_cache': True,
-                        'fingerprint': fingerprint,
-                        'success': True
-                    }
+                            return {
+                                'rows': all_rows,
+                                'columns': columns,
+                                'page_count': total_pages,
+                                'from_cache': True,
+                                'fingerprint': fingerprint,
+                                'llm_used': parse_result.get('llm_used'),
+                                'success': True
+                            }
+                        else:
+                            logger.warning("[PDF-VISION] LLM parsing failed for cached structure, will retry with Vision")
                     
         except Exception as e:
             logger.warning(f"[PDF-VISION] Cache lookup failed: {e}")
@@ -1237,7 +1427,9 @@ def extract_all_tables_with_vision(
                 store_learned_structure(
                     fingerprint=fingerprint,
                     columns=result['columns'],
-                    description=result.get('table_description', '')
+                    description=result.get('table_description', ''),
+                    column_patterns=result.get('column_patterns', {}),
+                    table_boundaries=result.get('table_boundaries', {})
                 )
                 result['fingerprint'] = fingerprint
                 update_status(f"✓ Cached structure for future use (fingerprint: {fingerprint[:8]}...)")
