@@ -99,8 +99,8 @@ class IntelligenceEngineV2:
     
     EMPLOYEE_INDICATORS = [
         'employee', 'worker', 'staff', 'personnel', 'headcount',
-        'how many', 'count of', 'list of', 'show me', 'who',
-        'terminated', 'active', 'hired', 'tenure'
+        'how many people', 'count of people', 'list of employees', 
+        'terminated', 'active employee', 'hired', 'tenure'
     ]
     
     def __init__(self, project_name: str, project_id: str = None):
@@ -324,9 +324,10 @@ class IntelligenceEngineV2:
         is_config = self._is_config_domain(q_lower)
         
         # Override employee detection for config/validation questions
-        if is_validation and is_config:
+        # Config questions (tax codes, earnings, deductions, GL) are NOT about employees
+        if is_config:
             is_employee_question = False
-            logger.warning("[ENGINE-V2] Config validation - skipping employee clarification")
+            logger.warning("[ENGINE-V2] Config domain detected - skipping employee clarification")
         
         # Handle filter clarification for employee questions
         if is_employee_question:
