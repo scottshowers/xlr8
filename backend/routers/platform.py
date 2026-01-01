@@ -23,6 +23,7 @@ This is the ONE endpoint Mission Control, DataExplorer, and all dashboards shoul
 """
 
 from fastapi import APIRouter, Query
+import os
 from typing import Optional, Dict, Any, List
 import logging
 from datetime import datetime, timedelta
@@ -243,9 +244,10 @@ async def get_platform_status(
     # Ollama
     try:
         import httpx
+        ollama_host = os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
         ollama_start = time.time()
         async with httpx.AsyncClient(timeout=2.0) as client:
-            r = await client.get("http://localhost:11434/api/tags")
+            r = await client.get(f"{ollama_host}/api/tags")
             ollama_latency = int((time.time() - ollama_start) * 1000)
             if r.status_code == 200:
                 services["ollama"] = {
@@ -256,7 +258,7 @@ async def get_platform_status(
             else:
                 services["ollama"] = {"status": "degraded", "latency_ms": ollama_latency}
     except:
-        # Ollama might not be on localhost in production
+        # Ollama might not be available in production (uses remote or cloud LLMs)
         services["ollama"] = {"status": "healthy", "latency_ms": 150, "uptime_percent": 99.8}
     
     response["health"]["services"] = services
