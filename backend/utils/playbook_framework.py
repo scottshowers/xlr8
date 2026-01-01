@@ -2123,13 +2123,17 @@ MATCH STATISTICS:
                             synthesizer = ConsultativeSynthesizer()
                             
                             # Build truths from comparison data
-                            from backend.utils.intelligence.types import Truth
+                            try:
+                                from backend.utils.intelligence.types import Truth
+                            except ImportError:
+                                from utils.intelligence.types import Truth
                             
                             comparison_truth = Truth(
-                                truth_type='reality',
-                                content=comparison_context,
+                                source_type='reality',
                                 source_name=f"Comparison: {file_a} vs {file_b}",
-                                confidence=1.0  # SQL comparison is deterministic
+                                content=comparison_context,
+                                confidence=1.0,  # SQL comparison is deterministic
+                                location=f"{table_a} vs {table_b}"
                             )
                             
                             synthesis_question = f"""Based on the comparison between {file_a} and {file_b}, what are the key findings and what action should be taken?
@@ -2146,8 +2150,8 @@ Focus on:
                                 reality=[comparison_truth],
                                 intent=[],
                                 configuration=[],
-                                reference=reference_truths if 'reference_truths' in dir() else [],
-                                regulatory=regulatory_truths if 'regulatory_truths' in dir() else [],
+                                reference=[],  # Not gathered in comparison path
+                                regulatory=[],  # Not gathered in comparison path
                                 compliance=[],
                                 conflicts=[],
                                 insights=[],
