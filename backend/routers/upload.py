@@ -653,6 +653,12 @@ class JobQueue:
                     logger.error(f"[QUEUE] Job {job.job_id} failed: {e}")
                     import traceback
                     logger.error(traceback.format_exc())
+                    # CRITICAL FIX: Mark job as failed in database so it doesn't stay stuck
+                    try:
+                        ProcessingJobModel.fail(job.job_id, f"Processing error: {str(e)[:500]}")
+                        logger.info(f"[QUEUE] Marked job {job.job_id} as failed in database")
+                    except Exception as fail_err:
+                        logger.error(f"[QUEUE] Could not mark job {job.job_id} as failed: {fail_err}")
                 finally:
                     self._current_job = None
                     if job.job_id in self._job_positions:
