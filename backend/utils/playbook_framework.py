@@ -1225,15 +1225,33 @@ Return only valid JSON - no explanations, no markdown code blocks."""
     @staticmethod
     async def _gather_five_truths_context(project_id: str, action_description: str) -> Dict[str, str]:
         """
-        Gather relevant context from Five Truths for the analysis.
+        Gather relevant context from Five Truths using the Intelligence Engine gatherers.
         
         This provides Regulatory, Reference, Configuration, and Intent context
         so the analysis can triangulate Reality against standards.
+        
+        ARCHITECTURE: Uses the same gatherers as Chat/IntelligenceEngine for consistency.
+        - ReferenceGatherer (global) - Product docs, how-to guides
+        - RegulatoryGatherer (global) - Laws, IRS rules  
+        - IntentGatherer (project-scoped) - Customer requirements
+        - ConfigurationGatherer (project-scoped) - Code tables, setup
         """
         context = {}
         
         try:
-            # Get RAG handler for semantic search
+            # Import the modular gatherers from Intelligence Engine
+            try:
+                from backend.utils.intelligence.gatherers import (
+                    ReferenceGatherer, RegulatoryGatherer, 
+                    IntentGatherer, ConfigurationGatherer
+                )
+            except ImportError:
+                from utils.intelligence.gatherers import (
+                    ReferenceGatherer, RegulatoryGatherer,
+                    IntentGatherer, ConfigurationGatherer
+                )
+            
+            # Get RAG handler for semantic gatherers
             try:
                 from utils.rag_handler import RAGHandler
             except ImportError:
@@ -1241,69 +1259,156 @@ Return only valid JSON - no explanations, no markdown code blocks."""
             
             rag = RAGHandler()
             
-            # Search each truth type
-            truth_types = ['reference', 'regulatory', 'intent']
-            
-            for truth_type in truth_types:
-                try:
-                    # RAGHandler.search(collection_name, query, n_results, project_id, ..., truth_type)
-                    results = rag.search(
-                        collection_name="documents",
-                        query=action_description,
-                        n_results=3,
-                        project_id=None if truth_type in ['reference', 'regulatory'] else project_id,
-                        truth_type=truth_type
-                    )
-                    
-                    if results:
-                        snippets = []
-                        for r in results[:3]:
-                            doc = r.get('document', '')
-                            if doc and len(doc) > 50:
-                                source = r.get('metadata', {}).get('source', 'Unknown')
-                                snippets.append(f"[{source}]: {doc[:500]}...")
-                        
-                        if snippets:
-                            context[truth_type] = "\n".join(snippets)
-                            logger.warning(f"[EXTRACT] Found {len(snippets)} {truth_type} docs")
-                            
-                except Exception as e:
-                    logger.warning(f"[EXTRACT] Could not gather {truth_type}: {e}")
-            
-            # Get configuration context from DuckDB (code tables)
+            # Get structured handler for config gatherer
             try:
+                from utils.structured_data_handler import get_structured_handler
+            except ImportError:
+                from backend.utils.structured_data_handler import get_structured_handler
+            
+            structured_handler = get_structured_handler()
+            
+            # Get schema for config gatherer
+            schema = {'tables': []}
+            if structured_handler:
                 try:
-                    from utils.structured_data_handler import get_structured_handler
-                except ImportError:
-                    from backend.utils.structured_data_handler import get_structured_handler
+                    tables = structured_handler.conn.execute("""
+                        SELECT table_name, display_name, columns 
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE AND table_name LIKE ?
+                    """, [f"{project_id[:8]}%"]).fetchall()
+                    schema['tables'] = [
+                        {'table_name': t[0], 'display_name': t[1], 'columns': t[2]}
+                        for t in tables
+                    ]
+                except:
+                    pass
+            
+            # Build analysis context for gatherers
+            analysis = {
+                'question': action_description,
+                'q_lower': action_description.lower(),
+                'domains': ['tax', 'payroll', 'benefits', 'compliance'],  # Broad for playbooks
+                'is_validation': True  # Playbooks are validation-focused
+            }
+            
+            # Resolve project name for logging
+            project_name = project_id[:8]
+            
+            # =====================================================================
+            # GATHER REFERENCE (global - product docs, best practices)
+            # =====================================================================
+            try:
+                ref_gatherer = ReferenceGatherer(
+                    project_name=project_name,
+                    project_id=project_id,
+                    rag_handler=rag
+                )
+                ref_truths = ref_gatherer.gather(action_description, analysis)
                 
-                handler = get_structured_handler()
-                
-                # Find config tables for this project
-                config_tables = handler.conn.execute("""
-                    SELECT table_name, display_name 
-                    FROM _schema_metadata 
-                    WHERE table_name LIKE ? 
-                    AND (LOWER(display_name) LIKE '%code%' 
-                         OR LOWER(display_name) LIKE '%config%'
-                         OR LOWER(display_name) LIKE '%setup%'
-                         OR LOWER(display_name) LIKE '%mapping%')
-                    LIMIT 3
-                """, [f"{project_id[:8]}%"]).fetchall()
-                
-                if config_tables:
-                    config_parts = []
-                    for table_name, display_name in config_tables:
-                        config_parts.append(f"- {display_name or table_name}")
-                    context['configuration'] = f"Available config tables:\n" + "\n".join(config_parts)
-                    
+                if ref_truths:
+                    snippets = []
+                    for truth in ref_truths[:3]:
+                        content = truth.content
+                        if isinstance(content, dict) and content.get('text'):
+                            source = truth.source_name or 'Reference'
+                            snippets.append(f"[{source}]: {content['text'][:500]}...")
+                    if snippets:
+                        context['reference'] = "\n".join(snippets)
+                        logger.warning(f"[EXTRACT] Gathered {len(ref_truths)} REFERENCE truths via gatherer")
             except Exception as e:
-                logger.warning(f"[EXTRACT] Could not gather configuration: {e}")
+                logger.warning(f"[EXTRACT] ReferenceGatherer failed: {e}")
+            
+            # =====================================================================
+            # GATHER REGULATORY (global - laws, IRS rules)
+            # =====================================================================
+            try:
+                reg_gatherer = RegulatoryGatherer(
+                    project_name=project_name,
+                    project_id=project_id,
+                    rag_handler=rag
+                )
+                reg_truths = reg_gatherer.gather(action_description, analysis)
+                
+                if reg_truths:
+                    snippets = []
+                    for truth in reg_truths[:3]:
+                        content = truth.content
+                        if isinstance(content, dict) and content.get('text'):
+                            source = truth.source_name or 'Regulatory'
+                            snippets.append(f"[{source}]: {content['text'][:500]}...")
+                    if snippets:
+                        context['regulatory'] = "\n".join(snippets)
+                        logger.warning(f"[EXTRACT] Gathered {len(reg_truths)} REGULATORY truths via gatherer")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] RegulatoryGatherer failed: {e}")
+            
+            # =====================================================================
+            # GATHER INTENT (project-scoped - customer requirements)
+            # =====================================================================
+            try:
+                intent_gatherer = IntentGatherer(
+                    project_name=project_name,
+                    project_id=project_id,
+                    rag_handler=rag
+                )
+                intent_truths = intent_gatherer.gather(action_description, analysis)
+                
+                if intent_truths:
+                    snippets = []
+                    for truth in intent_truths[:3]:
+                        content = truth.content
+                        if isinstance(content, dict) and content.get('text'):
+                            source = truth.source_name or 'Intent'
+                            snippets.append(f"[{source}]: {content['text'][:500]}...")
+                    if snippets:
+                        context['intent'] = "\n".join(snippets)
+                        logger.warning(f"[EXTRACT] Gathered {len(intent_truths)} INTENT truths via gatherer")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] IntentGatherer failed: {e}")
+            
+            # =====================================================================
+            # GATHER CONFIGURATION (project-scoped - code tables)
+            # =====================================================================
+            try:
+                # Import TableSelector for config gatherer
+                try:
+                    from backend.utils.intelligence.table_selector import TableSelector
+                except ImportError:
+                    from utils.intelligence.table_selector import TableSelector
+                
+                table_selector = TableSelector(
+                    structured_handler=structured_handler,
+                    filter_candidates={},
+                    project=project_name
+                )
+                
+                config_gatherer = ConfigurationGatherer(
+                    project_name=project_name,
+                    project_id=project_id,
+                    structured_handler=structured_handler,
+                    schema=schema,
+                    table_selector=table_selector
+                )
+                config_truths = config_gatherer.gather(action_description, analysis)
+                
+                if config_truths:
+                    config_parts = []
+                    for truth in config_truths[:3]:
+                        content = truth.content
+                        if isinstance(content, dict):
+                            table_name = content.get('display_name') or content.get('table')
+                            row_count = content.get('total', 0)
+                            config_parts.append(f"- {table_name} ({row_count} rows)")
+                    if config_parts:
+                        context['configuration'] = "Available config tables:\n" + "\n".join(config_parts)
+                        logger.warning(f"[EXTRACT] Gathered {len(config_truths)} CONFIGURATION truths via gatherer")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] ConfigurationGatherer failed: {e}")
         
         except Exception as e:
             logger.warning(f"[EXTRACT] Five Truths gathering failed: {e}")
         
-        logger.warning(f"[EXTRACT] Five Truths context: {list(context.keys())}")
+        logger.warning(f"[EXTRACT] Five Truths context via gatherers: {list(context.keys())}")
         return context
     
     @staticmethod
