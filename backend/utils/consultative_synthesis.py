@@ -599,50 +599,47 @@ Example answer: "YES - Found SUI rates for: TX, CA, NY, FL (see contribution_rat
 DO NOT describe what the data looks like. Just answer YES/NO and list what you found."""
 
         # =====================================================================
-        # ROUTING: Validation → phi3 (reasoning), Simple → Qwen (coding)
-        # phi3 is Microsoft's reasoning model, built for analysis
-        # qwen-coder is for code generation, not consultative reasoning
+        # MODEL CASCADE: Try local models in order, fall back to Claude
+        # Quality threshold: responses < 100 chars are considered failures
+        # Order: phi3:medium (14B) → qwen2.5-coder:14b → mistral:7b → Claude
         # =====================================================================
         
-        is_validation = any(kw in question.lower() for kw in [
-            'correct', 'valid', 'configured', 'check', 'verify', 'missing', 'audit', 
-            'compliant', 'setup', 'set up', 'properly', 'right', 'wrong', 'issue', 'problem'
-        ])
+        MIN_RESPONSE_LENGTH = 100  # Responses shorter than this trigger fallback
         
-        if is_validation:
-            # Validation needs reasoning - use phi3:medium (14B params)
-            logger.warning("[CONSULTATIVE] Validation question - using phi3:medium for reasoning")
+        # Define model cascade - try these in order
+        model_cascade = [
+            ('phi3:medium', 'phi3-14b'),      # Best for reasoning
+            ('qwen2.5-coder:14b', 'qwen-14b'), # Good for structured analysis
+            ('mistral:7b', 'mistral-7b'),      # General fallback
+        ]
+        
+        result = None
+        for model_name, method_name in model_cascade:
+            logger.warning(f"[CONSULTATIVE] Trying {model_name}...")
             result = self._call_local_model(
-                model='phi3:medium',
+                model=model_name,
                 question=question,
                 context=context,
                 expert_prompt=expert_prompt
             )
-        else:
-            # Simple queries - Qwen is fine
-            logger.warning("[CONSULTATIVE] Simple question - using Qwen 14B")
-            result = self._call_local_model(
-                model='qwen2.5-coder:14b',
-                question=question,
-                context=context,
-                expert_prompt=expert_prompt
-            )
+            
+            if result.get('success') and result.get('response'):
+                response_len = len(result.get('response', ''))
+                if response_len >= MIN_RESPONSE_LENGTH:
+                    logger.warning(f"[CONSULTATIVE] {model_name} succeeded ({response_len} chars)")
+                    return result['response'], method_name
+                else:
+                    logger.warning(f"[CONSULTATIVE] {model_name} response too short ({response_len} chars < {MIN_RESPONSE_LENGTH}), trying next model")
+            else:
+                logger.warning(f"[CONSULTATIVE] {model_name} failed: {result.get('error', 'unknown')}")
         
-        # If Qwen fails, fall back to Claude
-        if not result.get('success'):
-            logger.warning("[CONSULTATIVE] Qwen failed, falling back to Claude")
-            result = self._call_claude_direct(question, context, expert_prompt)
+        # All local models failed or gave garbage - fall back to Claude
+        logger.warning("[CONSULTATIVE] All local models failed/insufficient, falling back to Claude API")
+        result = self._call_claude_direct(question, context, expert_prompt)
         
         if result.get('success') and result.get('response'):
-            model = result.get('model_used', 'unknown')
-            if 'qwen' in model.lower():
-                method = 'qwen-14b'
-            elif 'claude' in model.lower():
-                method = 'claude'
-            else:
-                method = model
-            logger.warning(f"[CONSULTATIVE] Synthesis succeeded: {model}")
-            return result['response'], method
+            logger.warning(f"[CONSULTATIVE] Claude succeeded ({len(result.get('response', ''))} chars)")
+            return result['response'], 'claude'
         
         # Final fallback - template-based
         logger.warning(f"[CONSULTATIVE] All LLMs failed: {result.get('error')}, using template")
