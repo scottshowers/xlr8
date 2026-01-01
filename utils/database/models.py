@@ -1465,6 +1465,54 @@ class ProcessingJobModel:
             return False
     
     @staticmethod
+    def cancel(job_id: str) -> bool:
+        """Cancel a job - sets status to cancelled."""
+        supabase = get_supabase()
+        if not supabase:
+            return False
+        try:
+            supabase.table('processing_jobs').update({
+                'status': 'cancelled',
+                'error_message': 'Cancelled by user',
+                'updated_at': datetime.utcnow().isoformat()
+            }).eq('id', job_id).in_('status', ['queued', 'processing']).execute()
+            return True
+        except Exception as e:
+            print(f"Error cancelling job: {e}")
+            return False
+    
+    @staticmethod
+    def cancel_stuck(max_age_minutes: int = 15) -> int:
+        """Cancel all jobs stuck in processing/queued for longer than max_age_minutes."""
+        supabase = get_supabase()
+        if not supabase:
+            return 0
+        try:
+            from datetime import timedelta, timezone
+            cutoff = (datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)).isoformat()
+            
+            # Find stuck jobs
+            stuck = supabase.table('processing_jobs').select('id').in_(
+                'status', ['processing', 'queued']
+            ).lt('created_at', cutoff).execute()
+            
+            cancelled = 0
+            for job in (stuck.data or []):
+                try:
+                    supabase.table('processing_jobs').update({
+                        'status': 'cancelled',
+                        'error_message': f'Auto-cancelled: stuck for > {max_age_minutes} minutes',
+                        'updated_at': datetime.utcnow().isoformat()
+                    }).eq('id', job['id']).execute()
+                    cancelled += 1
+                except:
+                    pass
+            return cancelled
+        except Exception as e:
+            print(f"Error cancelling stuck jobs: {e}")
+            return 0
+    
+    @staticmethod
     def delete_all() -> int:
         supabase = get_supabase()
         if not supabase:
