@@ -1288,11 +1288,52 @@ class FindingsExtractor:
             if regulatory_truths:
                 truths_referenced.append('regulatory')
             
+            # Extract key_values from structured data
+            key_values = {}
+            if structured_data.get('rows'):
+                rows = structured_data['rows']
+                cols = structured_data.get('columns', [])
+                
+                # Extract interesting summary values
+                key_values['total_records'] = f"{len(rows)} records analyzed"
+                
+                # Look for common interesting columns
+                for col in cols[:10]:
+                    col_lower = col.lower()
+                    if 'tax' in col_lower or 'rate' in col_lower or 'amount' in col_lower:
+                        # Get unique values for this column
+                        unique_vals = list(set(str(row.get(col, ''))[:50] for row in rows[:100] if row.get(col)))
+                        if unique_vals and len(unique_vals) <= 10:
+                            key_values[col] = ', '.join(unique_vals[:5])
+                        elif unique_vals:
+                            key_values[col] = f"{len(unique_vals)} unique values"
+                    elif 'state' in col_lower or 'jurisdiction' in col_lower:
+                        unique_vals = list(set(str(row.get(col, '')) for row in rows if row.get(col)))
+                        if unique_vals:
+                            key_values[f'{col}_count'] = f"{len(unique_vals)} jurisdictions"
+            
+            # Enhance recommendations if empty
+            recommendations = list(answer.recommended_actions or [])
+            if not recommendations and issues:
+                # Add generic recommendations based on gaps
+                for issue in issues[:3]:
+                    issue_lower = issue.lower()
+                    if 'intent' in issue_lower or 'requirement' in issue_lower:
+                        recommendations.append("Upload customer requirements documents (SOW, requirements doc) to verify against stated intent")
+                    elif 'configuration' in issue_lower:
+                        recommendations.append("Upload system configuration exports to verify setup matches requirements")
+                    elif 'regulatory' in issue_lower:
+                        recommendations.append("Review regulatory compliance requirements for this action")
+            
+            # Add action-specific recommendation if still empty
+            if not recommendations:
+                recommendations.append(f"Review the analysis summary and verify findings against source documents")
+            
             findings = {
                 'complete': len(reality_truths) > 0,
-                'key_values': {},  # Could be extracted from structured_data
+                'key_values': key_values,
                 'issues': issues,
-                'recommendations': answer.recommended_actions or [],
+                'recommendations': recommendations[:5],
                 'risk_level': risk_level,
                 'summary': answer.answer,
                 'sources_used': sources_used[:10],
