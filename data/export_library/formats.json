@@ -1,0 +1,21 @@
+{
+  "version": "1.0.0",
+  "templates": {
+    "comparison_report": {
+      "description": "Standard comparison report with mismatches, only-in-A, only-in-B sheets",
+      "formats": ["xlsx", "csv", "json"],
+      "data_type": "ComparisonResult",
+      "built_in": true
+    },
+    "data_extract": {
+      "description": "Simple data export with optional provenance sheet",
+      "formats": ["xlsx", "csv", "json"],
+      "data_type": "List[Dict]",
+      "built_in": true
+    }
+  },
+  "user_templates": {
+    "storage": "document_registry",
+    "truth_type": "template",
+    "supported_formats": ["xlsx", "docx"]
+  }
