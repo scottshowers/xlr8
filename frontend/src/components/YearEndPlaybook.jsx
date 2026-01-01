@@ -455,8 +455,11 @@ function EntityConfigModal({ detectedEntities, onSave, onCancel, onSkip }) {
                   <input 
                     type="checkbox" 
                     checked={selectedEntities.includes(entity.id || entity.fein)}
-                    onChange={() => {}}
-                    style={{ margin: 0 }}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      toggleEntity(entity.id || entity.fein);
+                    }}
+                    style={{ margin: 0, cursor: 'pointer' }}
                   />
                   <span style={{ fontWeight: '600' }}>{entity.fein || entity.id}</span>
                   {entity.company_name && (
