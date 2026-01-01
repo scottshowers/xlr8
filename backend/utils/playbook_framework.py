@@ -2042,78 +2042,94 @@ class PlaybookEngine:
             
             comparison_findings = None
             if is_comparison_task and len(matched_tables) >= 2:
-                logger.warning(f"[SCAN] Detected comparison task with {len(matched_tables)} tables - using ComparisonEngine")
-                try:
-                    from utils.features.comparison_engine import compare
-                    
-                    # Compare first two tables
-                    table_a = matched_tables[0]['table_name']
-                    table_b = matched_tables[1]['table_name']
-                    
-                    comparison_result = compare(
-                        table_a=table_a,
-                        table_b=table_b,
-                        project_id=project_id,
-                        limit=50
-                    )
-                    
-                    logger.warning(f"[SCAN] ComparisonEngine result: {comparison_result.summary}")
-                    
-                    # Convert ComparisonResult to findings format
-                    comparison_findings = {
-                        'summary': comparison_result.summary,
-                        'analysis_method': 'comparison_engine',
-                        'match_rate': comparison_result.match_rate,
-                        'issues': [],
-                        'recommendations': [],
-                        'extracted_data': {
-                            'total_records': f"{comparison_result.source_a_rows} vs {comparison_result.source_b_rows} records compared",
-                            'matches': f"{comparison_result.matches} matching rows",
-                            'mismatches': f"{len(comparison_result.mismatches)} value differences",
-                            'only_in_a': f"{len(comparison_result.only_in_a)} only in {matched_tables[0]['file_name']}",
-                            'only_in_b': f"{len(comparison_result.only_in_b)} only in {matched_tables[1]['file_name']}"
-                        },
-                        'sources_used': [matched_tables[0]['file_name'], matched_tables[1]['file_name']],
-                        'truths_referenced': ['reality', 'configuration'],
-                        'risk_level': 'high' if comparison_result.match_rate < 0.8 else 'medium' if comparison_result.match_rate < 0.95 else 'low',
-                        'comparison_details': comparison_result.to_dict()
-                    }
-                    
-                    # Add issues from mismatches
-                    for mismatch in comparison_result.mismatches[:10]:
-                        keys_str = ", ".join([f"{k}={v}" for k, v in mismatch['keys'].items()])
-                        for diff in mismatch['differences'][:3]:
+                # Filter to only tables that match the action's reports_needed
+                # This prevents comparing unrelated tables (e.g., Earnings Codes vs Master Profile
+                # when we should compare Tax Verification vs Master Profile)
+                relevant_tables = []
+                for mt in matched_tables:
+                    file_name_lower = mt['file_name'].lower()
+                    for report in action.reports_needed:
+                        report_lower = report.lower().replace(' ', '')
+                        file_normalized = file_name_lower.replace(' ', '').replace('team', '').replace('.pdf', '')
+                        if report_lower in file_normalized or file_normalized in report_lower:
+                            relevant_tables.append(mt)
+                            break
+                
+                logger.warning(f"[SCAN] Detected comparison task - {len(matched_tables)} total tables, {len(relevant_tables)} match reports_needed")
+                
+                if len(relevant_tables) >= 2:
+                    logger.warning(f"[SCAN] Using ComparisonEngine for: {relevant_tables[0]['file_name']} vs {relevant_tables[1]['file_name']}")
+                    try:
+                        from utils.features.comparison_engine import compare
+                        
+                        # Compare the two relevant tables
+                        table_a = relevant_tables[0]['table_name']
+                        table_b = relevant_tables[1]['table_name']
+                        
+                        comparison_result = compare(
+                            table_a=table_a,
+                            table_b=table_b,
+                            project_id=project_id,
+                            limit=50
+                        )
+                        
+                        logger.warning(f"[SCAN] ComparisonEngine result: {comparison_result.summary}")
+                        
+                        # Convert ComparisonResult to findings format
+                        comparison_findings = {
+                            'summary': comparison_result.summary,
+                            'analysis_method': 'comparison_engine',
+                            'match_rate': comparison_result.match_rate,
+                            'issues': [],
+                            'recommendations': [],
+                            'extracted_data': {
+                                'total_records': f"{comparison_result.source_a_rows} vs {comparison_result.source_b_rows} records compared",
+                                'matches': f"{comparison_result.matches} matching rows",
+                                'mismatches': f"{len(comparison_result.mismatches)} value differences",
+                                'only_in_a': f"{len(comparison_result.only_in_a)} only in {relevant_tables[0]['file_name']}",
+                                'only_in_b': f"{len(comparison_result.only_in_b)} only in {relevant_tables[1]['file_name']}"
+                            },
+                            'sources_used': [relevant_tables[0]['file_name'], relevant_tables[1]['file_name']],
+                            'truths_referenced': ['reality', 'configuration'],
+                            'risk_level': 'high' if comparison_result.match_rate < 0.8 else 'medium' if comparison_result.match_rate < 0.95 else 'low',
+                            'comparison_details': comparison_result.to_dict()
+                        }
+                        
+                        # Add issues from mismatches
+                        for mismatch in comparison_result.mismatches[:10]:
+                            keys_str = ", ".join([f"{k}={v}" for k, v in mismatch['keys'].items()])
+                            for diff in mismatch['differences'][:3]:
+                                comparison_findings['issues'].append(
+                                    f"Value mismatch at [{keys_str}]: {diff['column']} is '{diff['value_a']}' vs '{diff['value_b']}'"
+                                )
+                        
+                        # Add issues for missing rows
+                        if comparison_result.only_in_a:
                             comparison_findings['issues'].append(
-                                f"Value mismatch at [{keys_str}]: {diff['column']} is '{diff['value_a']}' vs '{diff['value_b']}'"
+                                f"{len(comparison_result.only_in_a)} records in {relevant_tables[0]['file_name']} not found in {relevant_tables[1]['file_name']}"
                             )
-                    
-                    # Add issues for missing rows
-                    if comparison_result.only_in_a:
-                        comparison_findings['issues'].append(
-                            f"{len(comparison_result.only_in_a)} records in {matched_tables[0]['file_name']} not found in {matched_tables[1]['file_name']}"
-                        )
-                    if comparison_result.only_in_b:
-                        comparison_findings['issues'].append(
-                            f"{len(comparison_result.only_in_b)} records in {matched_tables[1]['file_name']} not found in {matched_tables[0]['file_name']}"
-                        )
-                    
-                    # Add recommendations
-                    if comparison_result.has_differences:
-                        comparison_findings['recommendations'].append(
-                            f"Review {len(comparison_result.mismatches)} value mismatches between {matched_tables[0]['file_name']} and {matched_tables[1]['file_name']}"
-                        )
-                        if comparison_result.only_in_a or comparison_result.only_in_b:
+                        if comparison_result.only_in_b:
+                            comparison_findings['issues'].append(
+                                f"{len(comparison_result.only_in_b)} records in {relevant_tables[1]['file_name']} not found in {relevant_tables[0]['file_name']}"
+                            )
+                        
+                        # Add recommendations
+                        if comparison_result.has_differences:
                             comparison_findings['recommendations'].append(
-                                "Reconcile records that exist in one source but not the other"
+                                f"Review {len(comparison_result.mismatches)} value mismatches between {relevant_tables[0]['file_name']} and {relevant_tables[1]['file_name']}"
                             )
-                    else:
-                        comparison_findings['recommendations'].append(
-                            "All records match - no action required"
-                        )
-                    
-                except Exception as e:
-                    logger.warning(f"[SCAN] ComparisonEngine failed: {e}, falling back to LLM")
-                    comparison_findings = None
+                            if comparison_result.only_in_a or comparison_result.only_in_b:
+                                comparison_findings['recommendations'].append(
+                                    "Reconcile records that exist in one source but not the other"
+                                )
+                        else:
+                            comparison_findings['recommendations'].append(
+                                "All records match - no action required"
+                            )
+                        
+                    except Exception as e:
+                        logger.warning(f"[SCAN] ComparisonEngine failed: {e}, falling back to LLM")
+                        comparison_findings = None
             
             # Use comparison findings if available, otherwise use LLM extraction
             if comparison_findings:
