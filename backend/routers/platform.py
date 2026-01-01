@@ -1202,3 +1202,94 @@ async def cleanup_stuck_jobs(
     except Exception as e:
         logger.error(f"[JOBS] Cleanup error: {e}")
         raise HTTPException(500, str(e))
+
+
+@router.delete("/jobs/{job_id}")
+async def delete_job(job_id: str):
+    """
+    Delete a job record from history.
+    
+    Only completed, failed, or cancelled jobs can be deleted.
+    """
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(503, "Supabase not available")
+        
+        # Check job exists and is deletable
+        job = supabase.table("processing_jobs").select("id, status").eq("id", job_id).single().execute()
+        
+        if not job.data:
+            raise HTTPException(404, f"Job {job_id} not found")
+        
+        if job.data.get('status') in ['queued', 'processing']:
+            raise HTTPException(400, f"Cannot delete active job - cancel it first")
+        
+        # Delete the job
+        supabase.table("processing_jobs").delete().eq("id", job_id).execute()
+        
+        logger.info(f"[JOBS] Deleted job {job_id}")
+        
+        return {
+            "success": True,
+            "job_id": job_id,
+            "message": "Job deleted"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[JOBS] Delete job error: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/jobs")
+async def clear_job_history(
+    status: str = Query(None, description="Only delete jobs with this status (completed, failed, cancelled)"),
+    older_than_hours: int = Query(24, description="Only delete jobs older than this many hours")
+):
+    """
+    Clear job history - delete old completed/failed/cancelled jobs.
+    
+    Does NOT delete active (queued/processing) jobs.
+    """
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(503, "Supabase not available")
+        
+        from datetime import datetime, timedelta, timezone
+        cutoff = (datetime.now(timezone.utc) - timedelta(hours=older_than_hours)).isoformat()
+        
+        # Build query for deletable jobs
+        deletable_statuses = ['completed', 'failed', 'cancelled']
+        if status and status in deletable_statuses:
+            deletable_statuses = [status]
+        
+        # Find jobs to delete
+        jobs = supabase.table("processing_jobs").select("id, status").in_(
+            "status", deletable_statuses
+        ).lt("created_at", cutoff).execute()
+        
+        deleted = 0
+        for job in (jobs.data or []):
+            try:
+                supabase.table("processing_jobs").delete().eq("id", job['id']).execute()
+                deleted += 1
+            except Exception as e:
+                logger.warning(f"[JOBS] Failed to delete {job['id']}: {e}")
+        
+        logger.info(f"[JOBS] Cleared {deleted} jobs from history")
+        
+        return {
+            "success": True,
+            "jobs_deleted": deleted,
+            "cutoff_hours": older_than_hours,
+            "status_filter": status
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[JOBS] Clear history error: {e}")
+        raise HTTPException(500, str(e))
