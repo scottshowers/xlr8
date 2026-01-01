@@ -17,6 +17,24 @@ from pathlib import Path
 import threading
 
 # Default configuration - SAFE MODE (risky features OFF)
+
+# Build CORS origins list based on environment
+_cors_origins = [
+    "https://xlr8-six.vercel.app",
+]
+
+# Add development origins only in non-production
+if os.getenv("ENVIRONMENT", "development") != "production":
+    _cors_origins.extend([
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ])
+
+# Allow additional origins via env var (comma-separated)
+_extra_origins = os.getenv("CORS_EXTRA_ORIGINS", "")
+if _extra_origins:
+    _cors_origins.extend([o.strip() for o in _extra_origins.split(",") if o.strip()])
+
 DEFAULT_CONFIG = {
     # Middleware toggles
     "rate_limiting_enabled": False,      # OFF by default - can cause issues during testing
@@ -43,12 +61,8 @@ DEFAULT_CONFIG = {
     "prompt_sanitization_enabled": True, # ON - blocks injection attempts
     "prompt_sanitization_log_only": True, # Log but don't block (safe mode)
     
-    # CORS
-    "cors_origins": [
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://xlr8-six.vercel.app",
-    ],
+    # CORS - dynamically built based on environment
+    "cors_origins": _cors_origins,
     
     # Audit settings
     "audit_to_file": True,
