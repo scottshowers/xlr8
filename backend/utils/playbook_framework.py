@@ -2058,11 +2058,13 @@ class PlaybookEngine:
                 logger.warning(f"[SCAN] Detected comparison task - {len(matched_tables)} total tables, {len(relevant_tables)} match reports_needed")
                 
                 if len(relevant_tables) >= 2:
-                    logger.warning(f"[SCAN] Using ComparisonEngine for: {relevant_tables[0]['file_name']} vs {relevant_tables[1]['file_name']}")
+                    file_a = relevant_tables[0]['file_name']
+                    file_b = relevant_tables[1]['file_name']
+                    logger.warning(f"[SCAN] Using ComparisonEngine for: {file_a} vs {file_b}")
                     try:
                         from utils.features.comparison_engine import compare
                         
-                        # Compare the two relevant tables
+                        # Compare the two relevant tables (SQL - no LLM)
                         table_a = relevant_tables[0]['table_name']
                         table_b = relevant_tables[1]['table_name']
                         
@@ -2070,62 +2072,153 @@ class PlaybookEngine:
                             table_a=table_a,
                             table_b=table_b,
                             project_id=project_id,
-                            limit=50
+                            limit=200
                         )
                         
                         logger.warning(f"[SCAN] ComparisonEngine result: {comparison_result.summary}")
                         
-                        # Convert ComparisonResult to findings format
-                        comparison_findings = {
-                            'summary': comparison_result.summary,
-                            'analysis_method': 'comparison_engine',
-                            'match_rate': comparison_result.match_rate,
-                            'issues': [],
-                            'recommendations': [],
-                            'extracted_data': {
-                                'total_records': f"{comparison_result.source_a_rows} vs {comparison_result.source_b_rows} records compared",
-                                'matches': f"{comparison_result.matches} matching rows",
-                                'mismatches': f"{len(comparison_result.mismatches)} value differences",
-                                'only_in_a': f"{len(comparison_result.only_in_a)} only in {relevant_tables[0]['file_name']}",
-                                'only_in_b': f"{len(comparison_result.only_in_b)} only in {relevant_tables[1]['file_name']}"
-                            },
-                            'sources_used': [relevant_tables[0]['file_name'], relevant_tables[1]['file_name']],
-                            'truths_referenced': ['reality', 'configuration'],
-                            'risk_level': 'high' if comparison_result.match_rate < 0.8 else 'medium' if comparison_result.match_rate < 0.95 else 'low',
-                            'comparison_details': comparison_result.to_dict()
-                        }
+                        # Build structured comparison data for LLM synthesis
+                        comparison_context = f"""COMPARISON RESULTS for {file_a} vs {file_b}:
+
+MATCH STATISTICS:
+- {comparison_result.source_a_rows} total records in {file_a}
+- {comparison_result.source_b_rows} total records in {file_b}
+- {comparison_result.matches} records match exactly
+- {len(comparison_result.mismatches)} records have value differences
+- {len(comparison_result.only_in_a)} records only in {file_a} (not in {file_b})
+- {len(comparison_result.only_in_b)} records only in {file_b} (not in {file_a})
+- Match rate: {comparison_result.match_rate:.1%}
+
+"""
+                        # Add sample mismatches
+                        if comparison_result.mismatches:
+                            comparison_context += "SAMPLE VALUE MISMATCHES:\n"
+                            for m in comparison_result.mismatches[:5]:
+                                keys = ", ".join([f"{k}={v}" for k,v in m['keys'].items()])
+                                for d in m['differences'][:2]:
+                                    comparison_context += f"- [{keys}] {d['column']}: '{d['value_a']}' vs '{d['value_b']}'\n"
                         
-                        # Add issues from mismatches
-                        for mismatch in comparison_result.mismatches[:10]:
-                            keys_str = ", ".join([f"{k}={v}" for k, v in mismatch['keys'].items()])
-                            for diff in mismatch['differences'][:3]:
-                                comparison_findings['issues'].append(
-                                    f"Value mismatch at [{keys_str}]: {diff['column']} is '{diff['value_a']}' vs '{diff['value_b']}'"
-                                )
-                        
-                        # Add issues for missing rows
+                        # Add sample missing records
                         if comparison_result.only_in_a:
-                            comparison_findings['issues'].append(
-                                f"{len(comparison_result.only_in_a)} records in {relevant_tables[0]['file_name']} not found in {relevant_tables[1]['file_name']}"
-                            )
-                        if comparison_result.only_in_b:
-                            comparison_findings['issues'].append(
-                                f"{len(comparison_result.only_in_b)} records in {relevant_tables[1]['file_name']} not found in {relevant_tables[0]['file_name']}"
-                            )
+                            comparison_context += f"\nSAMPLE RECORDS ONLY IN {file_a}:\n"
+                            for row in comparison_result.only_in_a[:5]:
+                                row_preview = ", ".join([f"{k}={v}" for k,v in list(row.items())[:4] if v])
+                                comparison_context += f"- {row_preview}\n"
                         
-                        # Add recommendations
-                        if comparison_result.has_differences:
-                            comparison_findings['recommendations'].append(
-                                f"Review {len(comparison_result.mismatches)} value mismatches between {relevant_tables[0]['file_name']} and {relevant_tables[1]['file_name']}"
+                        if comparison_result.only_in_b:
+                            comparison_context += f"\nSAMPLE RECORDS ONLY IN {file_b}:\n"
+                            for row in comparison_result.only_in_b[:5]:
+                                row_preview = ", ".join([f"{k}={v}" for k,v in list(row.items())[:4] if v])
+                                comparison_context += f"- {row_preview}\n"
+                        
+                        # Pass to ConsultativeSynthesizer for interpretation
+                        logger.warning(f"[SCAN] Passing comparison to ConsultativeSynthesizer for analysis")
+                        
+                        try:
+                            try:
+                                from backend.utils.consultative_synthesis import ConsultativeSynthesizer
+                            except ImportError:
+                                from utils.consultative_synthesis import ConsultativeSynthesizer
+                            
+                            synthesizer = ConsultativeSynthesizer()
+                            
+                            # Build truths from comparison data
+                            from backend.utils.intelligence.types import Truth
+                            
+                            comparison_truth = Truth(
+                                truth_type='reality',
+                                content=comparison_context,
+                                source_name=f"Comparison: {file_a} vs {file_b}",
+                                confidence=1.0  # SQL comparison is deterministic
                             )
-                            if comparison_result.only_in_a or comparison_result.only_in_b:
-                                comparison_findings['recommendations'].append(
-                                    "Reconcile records that exist in one source but not the other"
+                            
+                            synthesis_question = f"""Based on the comparison between {file_a} and {file_b}, what are the key findings and what action should be taken?
+
+Task context: {action.description}
+
+Focus on:
+1. What do the differences mean for year-end processing?
+2. Which specific items need attention?
+3. What's the business impact of the gaps found?"""
+                            
+                            answer = synthesizer.synthesize(
+                                question=synthesis_question,
+                                reality=[comparison_truth],
+                                intent=[],
+                                configuration=[],
+                                reference=reference_truths if 'reference_truths' in dir() else [],
+                                regulatory=regulatory_truths if 'regulatory_truths' in dir() else [],
+                                compliance=[],
+                                conflicts=[],
+                                insights=[],
+                                structured_data={
+                                    'rows': comparison_result.mismatches[:20] + comparison_result.only_in_a[:10] + comparison_result.only_in_b[:10],
+                                    'columns': list(comparison_result.only_in_a[0].keys()) if comparison_result.only_in_a else [],
+                                    'query_type': 'comparison'
+                                }
+                            )
+                            
+                            logger.warning(f"[SCAN] Synthesizer analysis complete: {answer.synthesis_method}")
+                            
+                            # Build findings from both comparison data AND synthesis
+                            comparison_findings = {
+                                'summary': answer.answer[:500] if answer.answer else comparison_result.summary,
+                                'analysis_method': f'comparison_engine + {answer.synthesis_method}',
+                                'match_rate': comparison_result.match_rate,
+                                'issues': [],
+                                'recommendations': answer.recommendations[:5] if answer.recommendations else [],
+                                'extracted_data': {
+                                    'total_records': f"{comparison_result.source_a_rows} in {file_a}, {comparison_result.source_b_rows} in {file_b}",
+                                    'matches': f"{comparison_result.matches} matching",
+                                    'mismatches': f"{len(comparison_result.mismatches)} differences",
+                                    'only_in_a': f"{len(comparison_result.only_in_a)} only in {file_a}",
+                                    'only_in_b': f"{len(comparison_result.only_in_b)} only in {file_b}"
+                                },
+                                'sources_used': [file_a, file_b],
+                                'truths_referenced': ['reality', 'configuration'],
+                                'risk_level': 'high' if comparison_result.match_rate < 0.8 else 'medium' if comparison_result.match_rate < 0.95 else 'low',
+                                'comparison_details': comparison_result.to_dict()
+                            }
+                            
+                            # Add concrete issues from comparison
+                            if comparison_result.only_in_a:
+                                comparison_findings['issues'].append(
+                                    f"{len(comparison_result.only_in_a)} records in {file_a} not found in {file_b}"
                                 )
-                        else:
-                            comparison_findings['recommendations'].append(
-                                "All records match - no action required"
-                            )
+                            if comparison_result.only_in_b:
+                                comparison_findings['issues'].append(
+                                    f"{len(comparison_result.only_in_b)} records in {file_b} not found in {file_a}"
+                                )
+                            for mismatch in comparison_result.mismatches[:5]:
+                                keys_str = ", ".join([f"{k}={v}" for k, v in mismatch['keys'].items()])
+                                for diff in mismatch['differences'][:2]:
+                                    comparison_findings['issues'].append(
+                                        f"Mismatch [{keys_str}]: {diff['column']} differs"
+                                    )
+                            
+                        except Exception as synth_e:
+                            logger.warning(f"[SCAN] Synthesis failed, using raw comparison: {synth_e}")
+                            # Fall back to raw comparison findings without synthesis
+                            comparison_findings = {
+                                'summary': f"{comparison_result.matches} matched, {len(comparison_result.only_in_a)} only in {file_a}, {len(comparison_result.only_in_b)} only in {file_b}",
+                                'analysis_method': 'comparison_engine',
+                                'match_rate': comparison_result.match_rate,
+                                'issues': [],
+                                'recommendations': ["Review records that exist in one source but not the other"],
+                                'extracted_data': {
+                                    'total_records': f"{comparison_result.source_a_rows} vs {comparison_result.source_b_rows}",
+                                    'matches': str(comparison_result.matches),
+                                    'only_in_a': str(len(comparison_result.only_in_a)),
+                                    'only_in_b': str(len(comparison_result.only_in_b))
+                                },
+                                'sources_used': [file_a, file_b],
+                                'truths_referenced': ['reality'],
+                                'risk_level': 'medium'
+                            }
+                            if comparison_result.only_in_a:
+                                comparison_findings['issues'].append(f"{len(comparison_result.only_in_a)} records in {file_a} not in {file_b}")
+                            if comparison_result.only_in_b:
+                                comparison_findings['issues'].append(f"{len(comparison_result.only_in_b)} records in {file_b} not in {file_a}")
                         
                     except Exception as e:
                         logger.warning(f"[SCAN] ComparisonEngine failed: {e}, falling back to LLM")
