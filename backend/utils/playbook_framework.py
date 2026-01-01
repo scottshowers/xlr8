@@ -2072,7 +2072,7 @@ class PlaybookEngine:
                             table_a=table_a,
                             table_b=table_b,
                             project_id=project_id,
-                            limit=200
+                            limit=500  # Increased for fuller picture
                         )
                         
                         logger.warning(f"[SCAN] ComparisonEngine result: {comparison_result.summary}")
@@ -2098,18 +2098,35 @@ MATCH STATISTICS:
                                 for d in m['differences'][:2]:
                                     comparison_context += f"- [{keys}] {d['column']}: '{d['value_a']}' vs '{d['value_b']}'\n"
                         
-                        # Add sample missing records
+                        # Add sample missing records with key identifying info
+                        sample_missing_a = []
                         if comparison_result.only_in_a:
                             comparison_context += f"\nSAMPLE RECORDS ONLY IN {file_a}:\n"
-                            for row in comparison_result.only_in_a[:5]:
-                                row_preview = ", ".join([f"{k}={v}" for k,v in list(row.items())[:4] if v])
-                                comparison_context += f"- {row_preview}\n"
+                            for row in comparison_result.only_in_a[:10]:
+                                # Get first meaningful identifier
+                                key_val = None
+                                for key in ['tax_code', 'tax_jurisdiction', 'code', 'name', 'id', 'description']:
+                                    if key in row and row[key]:
+                                        key_val = f"{key}={row[key]}"
+                                        break
+                                if not key_val:
+                                    key_val = ", ".join([f"{k}={v}" for k,v in list(row.items())[:3] if v])
+                                sample_missing_a.append(key_val)
+                                comparison_context += f"- {key_val}\n"
                         
+                        sample_missing_b = []
                         if comparison_result.only_in_b:
                             comparison_context += f"\nSAMPLE RECORDS ONLY IN {file_b}:\n"
-                            for row in comparison_result.only_in_b[:5]:
-                                row_preview = ", ".join([f"{k}={v}" for k,v in list(row.items())[:4] if v])
-                                comparison_context += f"- {row_preview}\n"
+                            for row in comparison_result.only_in_b[:10]:
+                                key_val = None
+                                for key in ['tax_code', 'tax_jurisdiction', 'code', 'name', 'id', 'description']:
+                                    if key in row and row[key]:
+                                        key_val = f"{key}={row[key]}"
+                                        break
+                                if not key_val:
+                                    key_val = ", ".join([f"{k}={v}" for k,v in list(row.items())[:3] if v])
+                                sample_missing_b.append(key_val)
+                                comparison_context += f"- {key_val}\n"
                         
                         # Pass to ConsultativeSynthesizer for interpretation
                         logger.warning(f"[SCAN] Passing comparison to ConsultativeSynthesizer for analysis")
@@ -2136,22 +2153,26 @@ MATCH STATISTICS:
                                 location=f"{table_a} vs {table_b}"
                             )
                             
-                            synthesis_question = f"""Based on the comparison between {file_a} and {file_b}, what are the key findings and what action should be taken?
+                            # Prompt that forces actionable output
+                            synthesis_question = f"""Analyze this tax configuration comparison and provide specific findings.
 
-Task context: {action.description}
+{comparison_context}
 
-Focus on:
-1. What do the differences mean for year-end processing?
-2. Which specific items need attention?
-3. What's the business impact of the gaps found?"""
+Task: {action.description}
+
+Respond with:
+1. SUMMARY: What's the overall situation? (2-3 sentences)
+2. CRITICAL ISSUES: What specific problems need immediate attention?
+3. RECOMMENDATIONS: You should [action 1]. You should [action 2]. (Use "should" or "recommend")
+4. BUSINESS IMPACT: What happens if these gaps aren't addressed before year-end?"""
                             
                             answer = synthesizer.synthesize(
                                 question=synthesis_question,
                                 reality=[comparison_truth],
                                 intent=[],
                                 configuration=[],
-                                reference=[],  # Not gathered in comparison path
-                                regulatory=[],  # Not gathered in comparison path
+                                reference=[],
+                                regulatory=[],
                                 compliance=[],
                                 conflicts=[],
                                 insights=[],
@@ -2164,17 +2185,30 @@ Focus on:
                             
                             logger.warning(f"[SCAN] Synthesizer analysis complete: {answer.synthesis_method}")
                             
+                            # Build smart recommendations if LLM didn't provide any
+                            recommendations = answer.recommended_actions[:5] if answer.recommended_actions else []
+                            if not recommendations:
+                                # Generate based on comparison data
+                                if comparison_result.only_in_a or comparison_result.only_in_b:
+                                    recommendations.append(f"Review and reconcile {len(comparison_result.only_in_a) + len(comparison_result.only_in_b)} records that exist in one report but not the other")
+                                if len(comparison_result.only_in_b) > len(comparison_result.only_in_a):
+                                    recommendations.append(f"Verify {len(comparison_result.only_in_b)} tax codes in {file_b} are configured correctly in Master Profile")
+                                if comparison_result.match_rate < 0.5:
+                                    recommendations.append("CRITICAL: Less than 50% match rate - review data sources for potential export or configuration issues")
+                                if comparison_result.mismatches:
+                                    recommendations.append(f"Investigate {len(comparison_result.mismatches)} value discrepancies between reports")
+                            
                             # Build findings from both comparison data AND synthesis
                             comparison_findings = {
-                                'summary': answer.answer[:500] if answer.answer else comparison_result.summary,
+                                'summary': answer.answer[:800] if answer.answer else comparison_result.summary,
                                 'analysis_method': f'comparison_engine + {answer.synthesis_method}',
                                 'match_rate': comparison_result.match_rate,
                                 'issues': [],
-                                'recommendations': answer.recommended_actions[:5] if answer.recommended_actions else [],
+                                'recommendations': recommendations,
                                 'extracted_data': {
                                     'total_records': f"{comparison_result.source_a_rows} in {file_a}, {comparison_result.source_b_rows} in {file_b}",
                                     'matches': f"{comparison_result.matches} matching",
-                                    'mismatches': f"{len(comparison_result.mismatches)} differences",
+                                    'mismatches': f"{len(comparison_result.mismatches)} value differences",
                                     'only_in_a': f"{len(comparison_result.only_in_a)} only in {file_a}",
                                     'only_in_b': f"{len(comparison_result.only_in_b)} only in {file_b}"
                                 },
@@ -2184,7 +2218,7 @@ Focus on:
                                 'comparison_details': comparison_result.to_dict()
                             }
                             
-                            # Add concrete issues from comparison
+                            # Add concrete issues - totals first
                             if comparison_result.only_in_a:
                                 comparison_findings['issues'].append(
                                     f"{len(comparison_result.only_in_a)} records in {file_a} not found in {file_b}"
@@ -2193,11 +2227,19 @@ Focus on:
                                 comparison_findings['issues'].append(
                                     f"{len(comparison_result.only_in_b)} records in {file_b} not found in {file_a}"
                                 )
-                            for mismatch in comparison_result.mismatches[:5]:
+                            
+                            # Add sample specific missing items as issues
+                            for item in sample_missing_a[:3]:
+                                comparison_findings['issues'].append(f"Missing from {file_b}: {item}")
+                            for item in sample_missing_b[:3]:
+                                comparison_findings['issues'].append(f"Missing from {file_a}: {item}")
+                            
+                            # Add value mismatches as issues
+                            for mismatch in comparison_result.mismatches[:3]:
                                 keys_str = ", ".join([f"{k}={v}" for k, v in mismatch['keys'].items()])
-                                for diff in mismatch['differences'][:2]:
+                                for diff in mismatch['differences'][:1]:
                                     comparison_findings['issues'].append(
-                                        f"Mismatch [{keys_str}]: {diff['column']} differs"
+                                        f"Value mismatch [{keys_str}]: {diff['column']} = '{diff['value_a']}' vs '{diff['value_b']}'"
                                     )
                             
                         except Exception as synth_e:
