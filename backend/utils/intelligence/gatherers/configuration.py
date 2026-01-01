@@ -122,10 +122,16 @@ class ConfigurationGatherer(DuckDBGatherer):
             logger.warning("[GATHER-CONFIG] No table_selector available")
             return []
         
-        # Use TableSelector to get scored tables
-        selected = self.table_selector.select_tables(
+        # Extract tables list from schema
+        tables = self.schema.get('tables', [])
+        if not tables:
+            logger.warning("[GATHER-CONFIG] No tables in schema")
+            return []
+        
+        # Use TableSelector.select() method (not select_tables)
+        selected = self.table_selector.select(
+            tables=tables,
             question=question,
-            schema=self.schema,
             max_tables=10  # Get more, then filter for config
         )
         
