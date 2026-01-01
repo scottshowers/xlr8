@@ -24,7 +24,7 @@ import {
   AlertTriangle, CheckCircle, TrendingUp, TrendingDown,
   Clock, Zap, Database, Upload, Cpu,
   Target, Award, ArrowRight, RefreshCw,
-  Gauge, BarChart3, GitBranch, Server, ChevronRight, ChevronDown, Bell, Loader2, XCircle
+  Gauge, BarChart3, GitBranch, Server, ChevronRight, ChevronDown, Bell, Loader2, XCircle, Trash2
 } from 'lucide-react';
 
 // ============================================================================
@@ -170,6 +170,38 @@ function AlertBanner({ alerts, onRefresh }) {
     }
   };
   
+  // Delete a job from history
+  const deleteJob = async (jobId) => {
+    try {
+      const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      if (res.ok) {
+        await loadJobs();
+        onRefresh?.();
+      } else {
+        const err = await res.json();
+        alert(`Failed to delete: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+  };
+  
+  // Clear all job history
+  const clearHistory = async () => {
+    if (!confirm('Delete all completed/failed jobs from history?')) return;
+    try {
+      const res = await fetch('/api/jobs?older_than_hours=0', { method: 'DELETE' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Deleted ${data.jobs_deleted} jobs`);
+        await loadJobs();
+        onRefresh?.();
+      }
+    } catch (err) {
+      console.error('Clear history failed:', err);
+    }
+  };
+  
   // Cleanup stuck jobs
   const cleanupStuckJobs = async () => {
     if (!confirm('Cancel all jobs stuck for more than 15 minutes?')) return;
@@ -249,6 +281,11 @@ function AlertBanner({ alerts, onRefresh }) {
                   🧹 Clean {stuckJobs.length} Stuck
                 </button>
               )}
+              {jobs.filter(j => ['completed', 'failed', 'cancelled'].includes(j.status)).length > 0 && (
+                <button onClick={clearHistory} style={{ padding: '6px 12px', background: colors.silver, color: 'white', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                  🗑️ Clear History
+                </button>
+              )}
               <button onClick={loadJobs} style={{ padding: '6px 12px', background: colors.accent, color: 'white', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
                 ↻ Refresh
               </button>
@@ -298,7 +335,7 @@ function AlertBanner({ alerts, onRefresh }) {
                     {job.status}
                   </div>
                   
-                  {/* Cancel button */}
+                  {/* Cancel button for active jobs */}
                   {job.can_cancel && (
                     <button
                       onClick={() => cancelJob(job.id)}
@@ -306,6 +343,17 @@ function AlertBanner({ alerts, onRefresh }) {
                       style={{ padding: '4px 8px', background: 'transparent', border: `1px solid ${colors.scarletSage}`, borderRadius: '4px', color: colors.scarletSage, fontSize: '11px', cursor: cancellingJob === job.id ? 'wait' : 'pointer', opacity: cancellingJob === job.id ? 0.5 : 1 }}
                     >
                       {cancellingJob === job.id ? '...' : 'Cancel'}
+                    </button>
+                  )}
+                  
+                  {/* Delete button for completed/failed/cancelled jobs */}
+                  {['completed', 'failed', 'cancelled'].includes(job.status) && (
+                    <button
+                      onClick={() => deleteJob(job.id)}
+                      style={{ padding: '4px 8px', background: 'transparent', border: `1px solid ${colors.silver}`, borderRadius: '4px', color: colors.silver, fontSize: '11px', cursor: 'pointer' }}
+                      title="Remove from history"
+                    >
+                      ✕
                     </button>
                   )}
                 </div>
