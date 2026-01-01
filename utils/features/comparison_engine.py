@@ -203,28 +203,39 @@ class ComparisonEngine:
         cols_a = self._get_table_columns(table_a)
         cols_b = self._get_table_columns(table_b)
         
-        logger.info(f"[COMPARE] Table A columns: {len(cols_a)}, Table B columns: {len(cols_b)}")
+        logger.warning(f"[COMPARE] Table A columns ({len(cols_a)}): {cols_a}")
+        logger.warning(f"[COMPARE] Table B columns ({len(cols_b)}): {cols_b}")
         
         # Auto-detect join keys if not provided
         if not join_keys:
             join_keys = self._detect_join_keys(cols_a, cols_b)
-            logger.info(f"[COMPARE] Auto-detected join keys: {join_keys}")
+            logger.warning(f"[COMPARE] Auto-detected join keys: {join_keys}")
         
         if not join_keys:
             raise ValueError(f"No common columns found between {table_a} and {table_b}")
         
+        # DIAGNOSTIC: Show sample values from join key columns
+        for key in join_keys[:2]:
+            sample_a = handler.query(f'SELECT DISTINCT "{key}" FROM "{table_a}" LIMIT 5')
+            sample_b = handler.query(f'SELECT DISTINCT "{key}" FROM "{table_b}" LIMIT 5')
+            logger.warning(f"[COMPARE] Sample {key} values in A: {[r[key] for r in sample_a]}")
+            logger.warning(f"[COMPARE] Sample {key} values in B: {[r[key] for r in sample_b]}")
+        
         # Determine columns to compare (common columns minus join keys)
         common_cols = set(cols_a) & set(cols_b)
+        logger.warning(f"[COMPARE] Common columns: {common_cols}")
+        
         if compare_columns:
             compare_columns = [c for c in compare_columns if c in common_cols]
         else:
             compare_columns = [c for c in common_cols if c not in join_keys and not c.startswith('_')]
         
-        logger.info(f"[COMPARE] Comparing {len(compare_columns)} columns: {compare_columns[:5]}...")
+        logger.warning(f"[COMPARE] Comparing {len(compare_columns)} value columns: {compare_columns}")
         
         # Get row counts
         rows_a = self._get_row_count(table_a)
         rows_b = self._get_row_count(table_b)
+        logger.warning(f"[COMPARE] Row counts: A={rows_a}, B={rows_b}")
         
         # Build join condition
         join_cond = " AND ".join([f"a.\"{k}\" = b.\"{k}\"" for k in join_keys])
@@ -240,7 +251,7 @@ class ComparisonEngine:
             LIMIT {limit}
         """
         only_in_a = handler.query(only_in_a_sql)
-        logger.info(f"[COMPARE] Only in A: {len(only_in_a)}")
+        logger.warning(f"[COMPARE] Only in A: {len(only_in_a)}")
         
         # 2. Find rows only in B (not in A)
         only_in_b_sql = f"""
