@@ -1315,7 +1315,7 @@ class FindingsExtractor:
             # Enhance recommendations if empty
             recommendations = list(answer.recommended_actions or [])
             if not recommendations and issues:
-                # Add generic recommendations based on gaps
+                # Add generic recommendations based on issues
                 for issue in issues[:3]:
                     issue_lower = issue.lower()
                     if 'intent' in issue_lower or 'requirement' in issue_lower:
@@ -1343,7 +1343,7 @@ class FindingsExtractor:
                 '_confidence': answer.confidence
             }
             
-            logger.warning(f"[EXTRACT] Success via ConsultativeSynthesizer: {len(issues)} issues, {len(answer.recommended_actions or [])} recommendations")
+            logger.warning(f"[EXTRACT] Success via ConsultativeSynthesizer: {len(issues)} issues, {len(recommendations)} recommendations")
             return findings
             
         except Exception as e:
