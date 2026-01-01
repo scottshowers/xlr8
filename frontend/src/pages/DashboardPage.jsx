@@ -134,14 +134,17 @@ function AlertBanner({ alerts, onRefresh }) {
   const [loadingJobs, setLoadingJobs] = useState(false);
   const [cancellingJob, setCancellingJob] = useState(null);
   
+  const [stuckCount, setStuckCount] = useState(0);
+  
   // Load full job list when expanded
   const loadJobs = async () => {
     setLoadingJobs(true);
     try {
-      const res = await fetch('/api/jobs?limit=20');
+      const res = await fetch('/api/jobs?limit=50');
       if (res.ok) {
         const data = await res.json();
         setJobs(data.jobs || []);
+        setStuckCount(data.stuck || 0);
       }
     } catch (err) {
       console.error('Failed to load jobs:', err);
