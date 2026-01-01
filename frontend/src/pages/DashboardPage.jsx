@@ -153,7 +153,12 @@ function AlertBanner({ alerts }) {
         <div style={{ flex: 1 }}>
           <div style={{ fontSize: '15px', fontWeight: 600, color: colors.text }}>{alerts.length} Active Alert{alerts.length > 1 ? 's' : ''}</div>
         </div>
-        <button style={{ padding: '8px 16px', backgroundColor: bannerColor, color: colors.white, border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <button 
+          onClick={() => {
+            alert(`Active Alerts:\n${alerts.map(a => `• ${a.message}`).join('\n')}`);
+          }}
+          style={{ padding: '8px 16px', backgroundColor: bannerColor, color: colors.white, border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+        >
           View All <ChevronRight size={16} />
         </button>
       </div>
