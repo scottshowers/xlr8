@@ -600,17 +600,16 @@ DO NOT describe what the data looks like. Just answer YES/NO and list what you f
 
         # =====================================================================
         # MODEL CASCADE: Try local models in order, fall back to Claude
-        # Quality threshold: responses < 100 chars are considered failures
-        # Order: phi3:medium (14B) → qwen2.5-coder:14b → mistral:7b → Claude
+        # Quality threshold: responses < 200 chars are considered failures
+        # Order: deepseek-r1:14b (reasoning) → qwen2.5-coder:14b → Claude
         # =====================================================================
         
-        MIN_RESPONSE_LENGTH = 100  # Responses shorter than this trigger fallback
+        MIN_RESPONSE_LENGTH = 200  # Reasoning models should give substantive answers
         
         # Define model cascade - try these in order
         model_cascade = [
-            ('phi3:medium', 'phi3-14b'),      # Best for reasoning
-            ('qwen2.5-coder:14b', 'qwen-14b'), # Good for structured analysis
-            ('mistral:7b', 'mistral-7b'),      # General fallback
+            ('deepseek-r1:14b', 'deepseek-r1'),    # Primary: actual reasoning model
+            ('qwen2.5-coder:14b', 'qwen-14b'),      # Fallback: good for structured data
         ]
         
         result = None
