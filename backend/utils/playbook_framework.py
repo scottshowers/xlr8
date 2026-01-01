@@ -2170,7 +2170,7 @@ Focus on:
                                 'analysis_method': f'comparison_engine + {answer.synthesis_method}',
                                 'match_rate': comparison_result.match_rate,
                                 'issues': [],
-                                'recommendations': answer.recommendations[:5] if answer.recommendations else [],
+                                'recommendations': answer.recommended_actions[:5] if answer.recommended_actions else [],
                                 'extracted_data': {
                                     'total_records': f"{comparison_result.source_a_rows} in {file_a}, {comparison_result.source_b_rows} in {file_b}",
                                     'matches': f"{comparison_result.matches} matching",
