@@ -669,10 +669,13 @@ def get_llm_client():
     # Try Ollama directly
     try:
         import httpx
+        import os
+        
+        ollama_host = os.getenv("OLLAMA_HOST", os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"))
         
         class OllamaClient:
-            def __init__(self, base_url="http://localhost:11434"):
-                self.base_url = base_url
+            def __init__(self, base_url=None):
+                self.base_url = base_url or ollama_host
                 self.model = "mistral"  # or llama3.1
             
             def generate(self, prompt: str, max_tokens: int = 1000) -> str:
@@ -692,7 +695,7 @@ def get_llm_client():
         
         # Test connection
         client = OllamaClient()
-        test_response = httpx.get("http://localhost:11434/api/tags", timeout=2.0)
+        test_response = httpx.get(f"{ollama_host}/api/tags", timeout=2.0)
         if test_response.status_code == 200:
             logger.info("Using Ollama for relationship analysis")
             return client
