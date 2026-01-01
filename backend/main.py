@@ -184,6 +184,14 @@ except ImportError as e:
     PLATFORM_AVAILABLE = False
     logging.warning(f"Platform router import failed: {e}")
 
+# Import features router (comparison and export engines)
+try:
+    from backend.routers import features
+    FEATURES_AVAILABLE = True
+except ImportError as e:
+    FEATURES_AVAILABLE = False
+    logging.warning(f"Features router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -425,6 +433,13 @@ if PLATFORM_AVAILABLE:
     logger.info("Platform router registered at /api/platform - USE THIS INSTEAD OF 50+ STATUS ENDPOINTS")
 else:
     logger.warning("Platform router not available")
+
+# Register features router if available (comparison and export engines)
+if FEATURES_AVAILABLE:
+    app.include_router(features.router, prefix="/api", tags=["features"])
+    logger.info("Features router registered at /api (compare, export)")
+else:
+    logger.warning("Features router not available")
 
 
 @app.get("/api/debug/imports")
