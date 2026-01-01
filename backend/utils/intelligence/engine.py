@@ -270,17 +270,14 @@ class IntelligenceEngineV2:
                    f"{len(self.filter_candidates)} filter categories")
     
     def _init_pattern_cache(self):
-        """Initialize SQL pattern cache for learning."""
-        try:
-            try:
-                from utils.sql_pattern_cache import initialize_patterns
-            except ImportError:
-                from backend.utils.sql_pattern_cache import initialize_patterns
-            
-            if self.project and self.schema:
-                self.pattern_cache = initialize_patterns(self.project, self.schema)
-        except Exception as e:
-            logger.debug(f"[ENGINE-V2] Pattern cache not available: {e}")
+        """Initialize SQL pattern cache for learning.
+        
+        NOTE: Pattern cache module was archived. This is a no-op stub.
+        The pattern_cache remains None, which is handled gracefully by
+        RealityGatherer (it checks `if self.pattern_cache` before use).
+        """
+        # Pattern cache feature removed - RealityGatherer handles None gracefully
+        pass
     
     # =========================================================================
     # MAIN ENTRY POINT
