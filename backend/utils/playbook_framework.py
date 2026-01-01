@@ -1063,7 +1063,10 @@ class FindingsExtractor:
         intelligence_findings: Optional[List[Dict]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Extract findings from content using Five Truths + LLM.
+        Extract findings from content using ConsultativeSynthesizer.
+        
+        ARCHITECTURE: Uses the SAME synthesis path as Chat for consistent quality.
+        ConsultativeSynthesizer handles LLM routing (phi3 for validation, Qwen for simple).
         
         Args:
             action: The action definition
@@ -1080,143 +1083,235 @@ class FindingsExtractor:
             return None
         
         # =====================================================================
-        # STEP 1: Get LLM Orchestrator (local first, Claude fallback)
+        # STEP 1: Import ConsultativeSynthesizer (same as Chat)
         # =====================================================================
         try:
             try:
-                from utils.llm_orchestrator import LLMOrchestrator
+                from backend.utils.consultative_synthesis import ConsultativeSynthesizer
             except ImportError:
-                from backend.utils.llm_orchestrator import LLMOrchestrator
+                from utils.consultative_synthesis import ConsultativeSynthesizer
             
-            orchestrator = LLMOrchestrator()
-            logger.warning("[EXTRACT] Using LLMOrchestrator (local LLMs first)")
+            synthesizer = ConsultativeSynthesizer()
+            logger.warning("[EXTRACT] Using ConsultativeSynthesizer (same path as Chat)")
         except Exception as e:
-            logger.error(f"[EXTRACT] LLMOrchestrator not available: {e}")
-            # Fall back to direct Claude as last resort
+            logger.error(f"[EXTRACT] ConsultativeSynthesizer not available: {e}")
+            # Fall back to direct extraction
             return await FindingsExtractor._extract_direct_claude(
                 action, content, inherited_findings, project_id,
                 consultative_prompt, intelligence_findings
             )
         
         # =====================================================================
-        # STEP 2: Gather Five Truths Context
+        # STEP 2: Gather Five Truths using proper gatherers
         # =====================================================================
-        five_truths_context = await FindingsExtractor._gather_five_truths_context(
-            project_id, action.description
-        )
+        reality_truths = []
+        intent_truths = []
+        config_truths = []
+        reference_truths = []
+        regulatory_truths = []
         
-        # =====================================================================
-        # STEP 3: Build comprehensive prompt with Five Truths
-        # =====================================================================
-        # Build content summary
-        content_summary = "\n\n---\n\n".join(content[:10]) if content else "No new content"
-        
-        # Build inherited context
-        inherited_text = ""
-        if inherited_findings:
-            inherited_parts = []
-            for inf in inherited_findings:
-                if isinstance(inf, dict) and inf.get('findings'):
-                    inherited_parts.append(json.dumps(inf['findings'], indent=2))
-            if inherited_parts:
-                inherited_text = f"\n\nINHERITED FINDINGS FROM PARENT ACTIONS:\n{chr(10).join(inherited_parts)}"
-        
-        # Build intelligence context
-        intelligence_text = ""
-        if intelligence_findings:
-            intel_parts = [f"- {f.get('title', 'Unknown')}: {f.get('description', '')}" for f in intelligence_findings[:10]]
-            if intel_parts:
-                intelligence_text = f"\n\nPRE-ANALYZED ISSUES FROM DATA PROFILING:\n{chr(10).join(intel_parts)}"
-        
-        # Build Five Truths context section
-        five_truths_text = ""
-        if five_truths_context:
-            truths_parts = []
-            
-            if five_truths_context.get('reference'):
-                truths_parts.append(f"📚 REFERENCE (Product Documentation):\n{five_truths_context['reference']}")
-            
-            if five_truths_context.get('regulatory'):
-                truths_parts.append(f"⚖️ REGULATORY (Laws & Requirements):\n{five_truths_context['regulatory']}")
-            
-            if five_truths_context.get('configuration'):
-                truths_parts.append(f"⚙️ CONFIGURATION (System Setup):\n{five_truths_context['configuration']}")
-            
-            if five_truths_context.get('intent'):
-                truths_parts.append(f"📋 INTENT (Customer Requirements):\n{five_truths_context['intent']}")
-            
-            if truths_parts:
-                five_truths_text = "\n\nFIVE TRUTHS CONTEXT (use for validation):\n" + "\n\n".join(truths_parts)
-        
-        # Build the full prompt
-        prompt = f"""Analyze this data for playbook action: {action.action_id}
-
-ACTION: {action.description}
-
-REPORTS NEEDED: {', '.join(action.reports_needed) if action.reports_needed else 'None specified'}
-
-{consultative_prompt or ''}
-{five_truths_text}
-
-DOCUMENT CONTENT (REALITY - What the data shows):
-{content_summary}
-{inherited_text}
-{intelligence_text}
-
-ANALYSIS INSTRUCTIONS:
-1. Compare REALITY (document content) against REGULATORY (what's required) and REFERENCE (best practices)
-2. Identify gaps, issues, and recommendations
-3. Cite specific values from the data
-4. Note which sources support each finding
-
-Return ONLY valid JSON with this structure:
-{{
-    "complete": true/false,
-    "key_values": {{"field": "value (Source: filename)"}},
-    "issues": ["Issue 1", "Issue 2"],
-    "recommendations": ["Recommendation 1"],
-    "risk_level": "low|medium|high",
-    "summary": "2-3 sentences with specific findings citing Five Truths where relevant",
-    "sources_used": ["filenames"],
-    "truths_referenced": ["reality", "regulatory", "reference"]
-}}
-
-Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
-
-        # System prompt for structured output
-        system_prompt = """You are a senior implementation consultant analyzing payroll/HCM data.
-You have access to Five Truths: Reality (data), Intent (customer requirements), Configuration (system setup), Reference (product docs), and Regulatory (laws).
-Always validate Reality against Regulatory and Reference standards.
-Return only valid JSON - no explanations, no markdown code blocks."""
-
-        # =====================================================================
-        # STEP 4: Call LLM Orchestrator (local first)
-        # =====================================================================
+        # Build Reality truths from document content
         try:
-            result = orchestrator.generate_json(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                use_claude_fallback=True,
-                max_tokens=2000
-            )
+            from backend.utils.intelligence.types import Truth
+        except ImportError:
+            from utils.intelligence.types import Truth
+        
+        # Convert content to Reality truths
+        for i, doc_content in enumerate(content[:10]):
+            # Extract filename from content if present
+            source_name = "Document"
+            if doc_content.startswith('[FILE:'):
+                try:
+                    source_name = doc_content.split(']')[0].replace('[FILE:', '').strip()
+                except:
+                    pass
             
-            if result.get('success') and result.get('response'):
-                findings = result['response']
-                if isinstance(findings, dict):
-                    findings['_analyzed_by'] = result.get('model_used', 'unknown')
-                    findings['_five_truths_used'] = bool(five_truths_context)
-                    logger.warning(f"[EXTRACT] Success using {result.get('model_used')}")
-                    return findings
-                else:
-                    logger.warning(f"[EXTRACT] Response was not dict: {type(findings)}")
-            else:
-                logger.warning(f"[EXTRACT] LLM failed: {result.get('error')}")
+            reality_truths.append(Truth(
+                source_type='reality',
+                source_name=source_name,
+                content={'text': doc_content[:3000], 'type': 'document'},
+                confidence=0.8,
+                location=f"content_block_{i}",
+                metadata={'project_id': project_id}
+            ))
+        
+        # Gather other truths using the Intelligence Engine gatherers
+        try:
+            try:
+                from backend.utils.intelligence.gatherers import (
+                    ReferenceGatherer, RegulatoryGatherer, 
+                    IntentGatherer, ConfigurationGatherer
+                )
+            except ImportError:
+                from utils.intelligence.gatherers import (
+                    ReferenceGatherer, RegulatoryGatherer,
+                    IntentGatherer, ConfigurationGatherer
+                )
+            
+            try:
+                from utils.rag_handler import RAGHandler
+            except ImportError:
+                from backend.utils.rag_handler import RAGHandler
+            
+            rag = RAGHandler()
+            project_name = project_id[:8]
+            
+            # Build the question for gathering
+            question = f"{action.description} {consultative_prompt or ''}"
+            analysis = {
+                'question': question,
+                'q_lower': question.lower(),
+                'domains': ['tax', 'payroll', 'benefits', 'compliance'],
+                'is_validation': True
+            }
+            
+            # Gather Reference (global)
+            try:
+                ref_gatherer = ReferenceGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                reference_truths = ref_gatherer.gather(question, analysis)
+                logger.warning(f"[EXTRACT] Gathered {len(reference_truths)} REFERENCE truths")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] ReferenceGatherer failed: {e}")
+            
+            # Gather Regulatory (global)
+            try:
+                reg_gatherer = RegulatoryGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                regulatory_truths = reg_gatherer.gather(question, analysis)
+                logger.warning(f"[EXTRACT] Gathered {len(regulatory_truths)} REGULATORY truths")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] RegulatoryGatherer failed: {e}")
+            
+            # Gather Intent (project-scoped)
+            try:
+                intent_gatherer = IntentGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                intent_truths = intent_gatherer.gather(question, analysis)
+                logger.warning(f"[EXTRACT] Gathered {len(intent_truths)} INTENT truths")
+            except Exception as e:
+                logger.warning(f"[EXTRACT] IntentGatherer failed: {e}")
                 
         except Exception as e:
-            logger.error(f"[EXTRACT] LLM call failed: {e}")
+            logger.warning(f"[EXTRACT] Five Truths gathering failed: {e}")
         
-        # If orchestrator fails completely, try direct Claude as absolute last resort
-        logger.warning("[EXTRACT] Orchestrator failed, trying direct Claude as last resort")
+        # =====================================================================
+        # STEP 3: Build structured_data for ConsultativeSynthesizer
+        # =====================================================================
+        # Parse content to extract any tabular data
+        structured_data = {
+            'rows': [],
+            'columns': [],
+            'query_type': 'list',
+            'sql': ''
+        }
+        
+        # Try to extract rows from content
+        for doc_content in content[:5]:
+            if '|' in doc_content:
+                lines = doc_content.split('\n')
+                for line in lines:
+                    if '|' in line and not line.startswith('['):
+                        parts = [p.strip() for p in line.split('|')]
+                        if len(parts) > 1:
+                            if not structured_data['columns']:
+                                structured_data['columns'] = parts
+                            else:
+                                row = {structured_data['columns'][i]: parts[i] 
+                                       for i in range(min(len(structured_data['columns']), len(parts)))}
+                                structured_data['rows'].append(row)
+                                if len(structured_data['rows']) >= 50:
+                                    break
+        
+        # =====================================================================
+        # STEP 4: Call ConsultativeSynthesizer (same path as Chat)
+        # =====================================================================
+        try:
+            # Build the question with action context
+            full_question = f"{action.description}"
+            if consultative_prompt:
+                full_question = f"{full_question}\n\nContext: {consultative_prompt}"
+            
+            logger.warning(f"[EXTRACT] Calling ConsultativeSynthesizer for: {action.action_id}")
+            
+            answer = synthesizer.synthesize(
+                question=full_question,
+                reality=reality_truths,
+                intent=intent_truths,
+                configuration=config_truths,
+                reference=reference_truths,
+                regulatory=regulatory_truths,
+                compliance=[],
+                conflicts=[],
+                insights=[],
+                structured_data=structured_data
+            )
+            
+            logger.warning(f"[EXTRACT] ConsultativeSynthesizer returned: method={answer.synthesis_method}, confidence={answer.confidence}")
+            
+            # =====================================================================
+            # STEP 5: Convert ConsultativeAnswer to Playbook JSON format
+            # =====================================================================
+            # Determine risk level from confidence
+            if answer.confidence >= 0.8:
+                risk_level = 'low'
+            elif answer.confidence >= 0.5:
+                risk_level = 'medium'
+            else:
+                risk_level = 'high'
+            
+            # Extract issues from triangulation gaps/conflicts
+            issues = []
+            if answer.triangulation:
+                issues.extend(answer.triangulation.conflicts[:5])
+                issues.extend(answer.triangulation.gaps[:3])
+            
+            # Add intelligence findings as issues if present
+            if intelligence_findings:
+                for finding in intelligence_findings[:5]:
+                    if finding.get('severity') in ['critical', 'warning']:
+                        issues.append(f"[Data Quality] {finding.get('title', 'Unknown issue')}")
+            
+            # Build sources used
+            sources_used = list(set(
+                [t.source_name for t in reality_truths if t.source_name] +
+                answer.sources_used
+            ))
+            
+            # Build truths referenced
+            truths_referenced = []
+            if reality_truths:
+                truths_referenced.append('reality')
+            if intent_truths:
+                truths_referenced.append('intent')
+            if config_truths:
+                truths_referenced.append('configuration')
+            if reference_truths:
+                truths_referenced.append('reference')
+            if regulatory_truths:
+                truths_referenced.append('regulatory')
+            
+            findings = {
+                'complete': len(reality_truths) > 0,
+                'key_values': {},  # Could be extracted from structured_data
+                'issues': issues,
+                'recommendations': answer.recommended_actions or [],
+                'risk_level': risk_level,
+                'summary': answer.answer,
+                'sources_used': sources_used[:10],
+                'truths_referenced': truths_referenced,
+                '_analyzed_by': answer.synthesis_method,
+                '_five_truths_used': True,
+                '_confidence': answer.confidence
+            }
+            
+            logger.warning(f"[EXTRACT] Success via ConsultativeSynthesizer: {len(issues)} issues, {len(answer.recommended_actions or [])} recommendations")
+            return findings
+            
+        except Exception as e:
+            logger.error(f"[EXTRACT] ConsultativeSynthesizer failed: {e}")
+        
+        # =====================================================================
+        # FALLBACK: Direct Claude if ConsultativeSynthesizer fails
+        # =====================================================================
+        logger.warning("[EXTRACT] ConsultativeSynthesizer failed, falling back to direct Claude")
         return await FindingsExtractor._extract_direct_claude(
             action, content, inherited_findings, project_id,
             consultative_prompt, intelligence_findings
