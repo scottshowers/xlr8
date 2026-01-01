@@ -24,7 +24,7 @@ import {
   AlertTriangle, CheckCircle, TrendingUp, TrendingDown,
   Clock, Zap, Database, Upload, Cpu,
   Target, Award, ArrowRight, RefreshCw,
-  Gauge, BarChart3, GitBranch, Server, ChevronRight, Bell
+  Gauge, BarChart3, GitBranch, Server, ChevronRight, ChevronDown, Bell, Loader2, XCircle
 } from 'lucide-react';
 
 // ============================================================================
@@ -126,9 +126,71 @@ function HealthScoreRing({ score, trend }) {
 }
 
 // ============================================================================
-// ALERT BANNER
+// ALERT BANNER - Expandable with job management
 // ============================================================================
-function AlertBanner({ alerts }) {
+function AlertBanner({ alerts, onRefresh }) {
+  const [expanded, setExpanded] = useState(false);
+  const [jobs, setJobs] = useState([]);
+  const [loadingJobs, setLoadingJobs] = useState(false);
+  const [cancellingJob, setCancellingJob] = useState(null);
+  
+  // Load full job list when expanded
+  const loadJobs = async () => {
+    setLoadingJobs(true);
+    try {
+      const res = await fetch('/api/jobs?limit=20');
+      if (res.ok) {
+        const data = await res.json();
+        setJobs(data.jobs || []);
+      }
+    } catch (err) {
+      console.error('Failed to load jobs:', err);
+    } finally {
+      setLoadingJobs(false);
+    }
+  };
+  
+  // Cancel a job
+  const cancelJob = async (jobId) => {
+    setCancellingJob(jobId);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' });
+      if (res.ok) {
+        await loadJobs();
+        onRefresh?.();
+      } else {
+        const err = await res.json();
+        alert(`Failed to cancel: ${err.detail || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('Cancel failed:', err);
+      alert('Failed to cancel job');
+    } finally {
+      setCancellingJob(null);
+    }
+  };
+  
+  // Cleanup stuck jobs
+  const cleanupStuckJobs = async () => {
+    if (!confirm('Cancel all jobs stuck for more than 15 minutes?')) return;
+    try {
+      const res = await fetch('/api/jobs/cleanup', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`Cleaned up ${data.jobs_cancelled} stuck jobs`);
+        await loadJobs();
+        onRefresh?.();
+      }
+    } catch (err) {
+      console.error('Cleanup failed:', err);
+    }
+  };
+  
+  // Load jobs when expanding
+  useEffect(() => {
+    if (expanded) loadJobs();
+  }, [expanded]);
+  
   if (!alerts || alerts.length === 0) {
     return (
       <div style={{ backgroundColor: `${colors.success}15`, border: `1px solid ${colors.success}40`, borderRadius: '12px', padding: '16px 20px', display: 'flex', alignItems: 'center', gap: '12px' }}>
@@ -143,32 +205,115 @@ function AlertBanner({ alerts }) {
   
   const criticalCount = alerts.filter(a => a.severity === 'critical').length;
   const bannerColor = criticalCount > 0 ? colors.scarletSage : colors.warning;
+  const stuckJobs = jobs.filter(j => j.is_stuck);
   
   return (
-    <div style={{ backgroundColor: `${bannerColor}12`, border: `1px solid ${bannerColor}40`, borderRadius: '12px', padding: '16px 20px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '12px' }}>
-        <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: `${bannerColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Bell size={20} color={bannerColor} />
+    <div style={{ backgroundColor: `${bannerColor}12`, border: `1px solid ${bannerColor}40`, borderRadius: '12px', overflow: 'hidden' }}>
+      {/* Header */}
+      <div style={{ padding: '16px 20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ width: '40px', height: '40px', borderRadius: '10px', backgroundColor: `${bannerColor}20`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <Bell size={20} color={bannerColor} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: '15px', fontWeight: 600, color: colors.text }}>{alerts.length} Active Alert{alerts.length > 1 ? 's' : ''}</div>
+          </div>
+          <button 
+            onClick={() => setExpanded(!expanded)}
+            style={{ padding: '8px 16px', backgroundColor: bannerColor, color: colors.white, border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            {expanded ? 'Collapse' : 'View All'} {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+          </button>
         </div>
-        <div style={{ flex: 1 }}>
-          <div style={{ fontSize: '15px', fontWeight: 600, color: colors.text }}>{alerts.length} Active Alert{alerts.length > 1 ? 's' : ''}</div>
-        </div>
-        <button 
-          onClick={() => {
-            alert(`Active Alerts:\n${alerts.map(a => `• ${a.message}`).join('\n')}`);
-          }}
-          style={{ padding: '8px 16px', backgroundColor: bannerColor, color: colors.white, border: 'none', borderRadius: '8px', fontSize: '13px', fontWeight: 500, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-        >
-          View All <ChevronRight size={16} />
-        </button>
+        
+        {/* Collapsed preview */}
+        {!expanded && alerts.slice(0, 2).map((alert, idx) => (
+          <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: colors.cardBg, borderRadius: '8px', marginTop: '12px' }}>
+            <AlertTriangle size={16} color={bannerColor} />
+            <span style={{ flex: 1, fontSize: '13px', color: colors.text }}>{alert.message}</span>
+            <span style={{ fontSize: '11px', color: colors.silver }}>{alert.time}</span>
+          </div>
+        ))}
       </div>
-      {alerts.slice(0, 2).map((alert, idx) => (
-        <div key={idx} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 12px', backgroundColor: colors.cardBg, borderRadius: '8px', marginTop: idx > 0 ? '8px' : 0 }}>
-          <AlertTriangle size={16} color={bannerColor} />
-          <span style={{ flex: 1, fontSize: '13px', color: colors.text }}>{alert.message}</span>
-          <span style={{ fontSize: '11px', color: colors.silver }}>{alert.time}</span>
+      
+      {/* Expanded job list */}
+      {expanded && (
+        <div style={{ borderTop: `1px solid ${bannerColor}40`, padding: '16px 20px', backgroundColor: colors.cardBg }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <div style={{ fontSize: '14px', fontWeight: 600, color: colors.text }}>
+              Processing Jobs {loadingJobs && <span style={{ marginLeft: '8px' }}>⏳</span>}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              {stuckJobs.length > 0 && (
+                <button onClick={cleanupStuckJobs} style={{ padding: '6px 12px', background: colors.scarletSage, color: 'white', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                  🧹 Clean {stuckJobs.length} Stuck
+                </button>
+              )}
+              <button onClick={loadJobs} style={{ padding: '6px 12px', background: colors.accent, color: 'white', border: 'none', borderRadius: '6px', fontSize: '12px', cursor: 'pointer' }}>
+                ↻ Refresh
+              </button>
+            </div>
+          </div>
+          
+          {jobs.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '20px', color: colors.textMuted }}>
+              {loadingJobs ? 'Loading...' : 'No jobs found'}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '300px', overflowY: 'auto' }}>
+              {jobs.map(job => (
+                <div key={job.id} style={{ 
+                  display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 12px', 
+                  background: job.is_stuck ? `${colors.scarletSage}10` : job.status === 'failed' ? `${colors.warning}10` : colors.background,
+                  borderRadius: '8px', border: job.is_stuck ? `1px solid ${colors.scarletSage}40` : '1px solid transparent'
+                }}>
+                  {/* Status icon */}
+                  <div style={{ width: '24px', display: 'flex', justifyContent: 'center' }}>
+                    {job.status === 'processing' && <Loader2 size={16} color={colors.accent} />}
+                    {job.status === 'queued' && <Clock size={16} color={colors.silver} />}
+                    {job.status === 'completed' && <CheckCircle size={16} color={colors.success} />}
+                    {job.status === 'failed' && <XCircle size={16} color={colors.scarletSage} />}
+                    {job.status === 'cancelled' && <XCircle size={16} color={colors.silver} />}
+                  </div>
+                  
+                  {/* Job info */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '13px', fontWeight: 500, color: colors.text, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                      {job.filename || job.type || 'Unknown Job'}
+                      {job.is_stuck && <span style={{ marginLeft: '8px', background: colors.scarletSage, color: 'white', padding: '2px 6px', borderRadius: '4px', fontSize: '10px' }}>STUCK</span>}
+                    </div>
+                    <div style={{ fontSize: '11px', color: colors.textMuted }}>
+                      {job.type} • {new Date(job.created_at).toLocaleString()}
+                      {job.duration_seconds && ` • ${job.duration_seconds}s`}
+                    </div>
+                    {job.error && <div style={{ fontSize: '11px', color: colors.scarletSage, marginTop: '2px' }}>Error: {job.error.slice(0, 80)}</div>}
+                  </div>
+                  
+                  {/* Status badge */}
+                  <div style={{ 
+                    padding: '4px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 500,
+                    background: job.status === 'completed' ? `${colors.success}20` : job.status === 'failed' ? `${colors.scarletSage}20` : job.status === 'processing' ? `${colors.accent}20` : `${colors.silver}20`,
+                    color: job.status === 'completed' ? colors.success : job.status === 'failed' ? colors.scarletSage : job.status === 'processing' ? colors.accent : colors.silver
+                  }}>
+                    {job.status}
+                  </div>
+                  
+                  {/* Cancel button */}
+                  {job.can_cancel && (
+                    <button
+                      onClick={() => cancelJob(job.id)}
+                      disabled={cancellingJob === job.id}
+                      style={{ padding: '4px 8px', background: 'transparent', border: `1px solid ${colors.scarletSage}`, borderRadius: '4px', color: colors.scarletSage, fontSize: '11px', cursor: cancellingJob === job.id ? 'wait' : 'pointer', opacity: cancellingJob === job.id ? 0.5 : 1 }}
+                    >
+                      {cancellingJob === job.id ? '...' : 'Cancel'}
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      ))}
+      )}
     </div>
   );
 }
@@ -748,7 +893,7 @@ export default function DashboardPage() {
           <HealthScoreRing score={healthScore} trend={healthTrend} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-          <AlertBanner alerts={alerts} />
+          <AlertBanner alerts={alerts} onRefresh={fetchData} />
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px' }}>
             {Object.entries(systems).map(([name, data]) => <SystemCard key={name} name={name} data={data} />)}
           </div>
