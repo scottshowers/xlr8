@@ -847,6 +847,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
         
         # Get document registry for provenance (single Supabase call)
         registry_lookup = {}
+        registry_entries = []  # Keep original entries for ChromaDB-only files
         try:
             supabase = get_supabase()
             if supabase:
@@ -861,15 +862,18 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                 else:
                     result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").execute()
                 
-                for entry in result.data or []:
+                registry_entries = result.data or []
+                for entry in registry_entries:
                     fname = entry.get('filename', '')
                     if fname:
                         registry_lookup[fname.lower()] = {
+                            'filename': fname,  # Keep original case
                             'uploaded_by': entry.get('uploaded_by', ''),
                             'uploaded_at': entry.get('created_at', ''),
                             'truth_type': entry.get('truth_type', ''),
                             'domain': entry.get('domain', []),
-                            'chunk_count': entry.get('chunk_count', 0)
+                            'chunk_count': entry.get('chunk_count', 0),
+                            'project_name': entry.get('project_name', '')
                         }
         except Exception as e:
             logger.debug(f"[FILES] Registry query: {e}")
@@ -942,6 +946,29 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             files_dict[fname]["tables"] += 1
             files_dict[fname]["rows"] += int(row[3] or 0)
             files_dict[fname]["row_count"] += int(row[3] or 0)
+        
+        # Add ChromaDB-only documents (files in registry but not in DuckDB)
+        for fname_lower, provenance in registry_lookup.items():
+            original_fname = provenance.get('filename', '')
+            if not original_fname:
+                continue
+                
+            if original_fname not in files_dict and provenance.get('chunk_count', 0) > 0:
+                files_dict[original_fname] = {
+                    "filename": original_fname,
+                    "project": provenance.get('project_name', ''),
+                    "tables": 0,
+                    "rows": 0,
+                    "row_count": 0,
+                    "chunks": provenance.get('chunk_count', 0),
+                    "loaded_at": provenance.get('uploaded_at', ''),
+                    "uploaded_by": provenance.get('uploaded_by', ''),
+                    "uploaded_at": provenance.get('uploaded_at', ''),
+                    "truth_type": provenance.get('truth_type', ''),
+                    "domain": provenance.get('domain', []),
+                    "type": "chromadb",
+                    "sheets": []
+                }
         
         files = list(files_dict.values())
         
