@@ -192,6 +192,14 @@ except ImportError as e:
     FEATURES_AVAILABLE = False
     logging.warning(f"Features router import failed: {e}")
 
+# Import domain decoder router (consultant knowledge)
+try:
+    from backend.routers import decoder_router
+    DECODER_AVAILABLE = True
+except ImportError as e:
+    DECODER_AVAILABLE = False
+    logging.warning(f"Decoder router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -440,6 +448,13 @@ if FEATURES_AVAILABLE:
     logger.info("Features router registered at /api (compare, export)")
 else:
     logger.warning("Features router not available")
+
+# Register domain decoder router if available (consultant knowledge)
+if DECODER_AVAILABLE:
+    app.include_router(decoder_router.router, prefix="/api", tags=["domain-decoder"])
+    logger.info("Domain Decoder router registered at /api/decoder")
+else:
+    logger.warning("Domain Decoder router not available")
 
 
 @app.get("/api/debug/imports")
