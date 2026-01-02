@@ -1847,7 +1847,7 @@ export default function DataExplorer() {
                 setComplianceRunning(true);
                 setComplianceError(null);
                 try {
-                  const res = await api.post(`/standards/compliance/check/${activeProject?.id || 'default'}`);
+                  const res = await api.post(`/standards/compliance/check/${encodeURIComponent(projectName)}`);
                   setComplianceResults(res.data);
                 } catch (e) {
                   setComplianceError(e.message || 'Compliance check failed');
