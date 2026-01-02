@@ -1561,7 +1561,7 @@ class StructuredDataHandler:
             for i, row in enumerate(sample_data[:5]):
                 sample_str += f"Row {i+1}: {row}\n"
             
-            # Build prompt for LLM
+            # Build prompt for LLM - EXPANDED semantic types for HCM/compliance
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
 COLUMN NAMES:
@@ -1571,19 +1571,39 @@ SAMPLE DATA:
 {sample_str}
 
 For each column, identify if it matches one of these semantic types:
-- employee_number: Employee ID/number (unique identifier for employees)
+
+EMPLOYEE IDENTIFIERS:
+- employee_number: Employee ID/number (unique identifier)
+- employee_name: Employee name field
+- employee_type_code: Employee classification (FT, PT, etc.)
+
+ORGANIZATIONAL CODES:
 - company_code: Company/organization code
-- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
-- earning_code: Earning type codes
-- deduction_code: Deduction/benefit codes
-- job_code: Job/position codes
 - department_code: Department/org unit codes
+- job_code: Job/position codes
+- location_code: Work location codes
+- pay_group_code: Pay group identifier
+- org_level_code: Organization level codes
+
+PAY & COMPENSATION:
+- earning_code: Earning type codes (REG, OT, etc.)
+- deduction_code: Deduction/benefit codes
 - amount: Monetary amounts (pay, deductions, etc.)
 - rate: Pay rates (hourly, salary)
+- fica_wages: Social Security/FICA taxable wages
+- gross_wages: Gross pay amounts
+
+DATES:
+- birth_date: Employee date of birth (for age calculation)
+- hire_date: Employment start date (for tenure calculation)
 - effective_date: Date fields for effective dates
-- start_date: Start dates
-- end_date: End dates
-- employee_name: Employee name field
+- start_date: Generic start dates
+- end_date: End/termination dates
+
+STATUS:
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave)
+- tax_code: Tax jurisdiction codes
+
 - NONE: Does not match any semantic type
 
 Respond with JSON array only, no explanation:
@@ -1993,7 +2013,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             for i, row in enumerate(sample_data[:5]):
                 sample_str += f"Row {i+1}: {row}\n"
             
-            # Build prompt for LLM
+            # Build prompt for LLM - EXPANDED semantic types for HCM/compliance
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
 COLUMN NAMES:
@@ -2003,19 +2023,39 @@ SAMPLE DATA:
 {sample_str}
 
 For each column, identify if it matches one of these semantic types:
-- employee_number: Employee ID/number (unique identifier for employees)
+
+EMPLOYEE IDENTIFIERS:
+- employee_number: Employee ID/number (unique identifier)
+- employee_name: Employee name field
+- employee_type_code: Employee classification (FT, PT, etc.)
+
+ORGANIZATIONAL CODES:
 - company_code: Company/organization code
-- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave, etc.)
-- earning_code: Earning type codes
-- deduction_code: Deduction/benefit codes
-- job_code: Job/position codes
 - department_code: Department/org unit codes
+- job_code: Job/position codes
+- location_code: Work location codes
+- pay_group_code: Pay group identifier
+- org_level_code: Organization level codes
+
+PAY & COMPENSATION:
+- earning_code: Earning type codes (REG, OT, etc.)
+- deduction_code: Deduction/benefit codes
 - amount: Monetary amounts (pay, deductions, etc.)
 - rate: Pay rates (hourly, salary)
+- fica_wages: Social Security/FICA taxable wages
+- gross_wages: Gross pay amounts
+
+DATES:
+- birth_date: Employee date of birth (for age calculation)
+- hire_date: Employment start date (for tenure calculation)
 - effective_date: Date fields for effective dates
-- start_date: Start dates
-- end_date: End dates
-- employee_name: Employee name field
+- start_date: Generic start dates
+- end_date: End/termination dates
+
+STATUS:
+- employment_status_code: Employment status (A=Active, T=Terminated, L=Leave)
+- tax_code: Tax jurisdiction codes
+
 - NONE: Does not match any semantic type
 
 Respond with JSON array only, no explanation:
