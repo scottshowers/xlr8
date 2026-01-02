@@ -221,10 +221,31 @@ class Synthesizer:
         context = []
         
         for truth in intent[:2]:
-            context.append(f"Customer Intent ({truth.source_name}): {str(truth.content)[:200]}")
+            # Extract useful text from content
+            content = truth.content
+            if isinstance(content, dict):
+                # For structured data, get summary or key info
+                text = content.get('text', content.get('summary', ''))
+                if not text and 'rows' in content:
+                    text = f"{len(content.get('rows', []))} records from {truth.source_name}"
+            else:
+                text = str(content)
+            context.append(f"Customer Intent ({truth.source_name}): {text[:200]}")
         
         for truth in configuration[:2]:
-            context.append(f"Configuration ({truth.source_name}): {str(truth.content)[:200]}")
+            content = truth.content
+            if isinstance(content, dict):
+                # For SQL results, summarize the query
+                sql = content.get('sql', '')
+                rows = content.get('rows', [])
+                cols = content.get('columns', [])
+                if sql and rows:
+                    text = f"Query returned {len(rows)} records with columns: {', '.join(cols[:5])}"
+                else:
+                    text = content.get('text', content.get('summary', str(content)[:100]))
+            else:
+                text = str(content)
+            context.append(f"Configuration ({truth.source_name}): {text[:200]}")
         
         return context
     
@@ -234,13 +255,31 @@ class Synthesizer:
         context = []
         
         for truth in reference[:2]:
-            context.append(f"Reference ({truth.source_name}): {str(truth.content)[:200]}")
+            content = truth.content
+            if isinstance(content, dict):
+                text = content.get('text', content.get('summary', ''))[:200]
+            else:
+                text = str(content)[:200]
+            if text:
+                context.append(f"Reference ({truth.source_name}): {text}")
         
         for truth in regulatory[:2]:
-            context.append(f"Regulatory ({truth.source_name}): {str(truth.content)[:200]}")
+            content = truth.content
+            if isinstance(content, dict):
+                text = content.get('text', content.get('summary', ''))[:200]
+            else:
+                text = str(content)[:200]
+            if text:
+                context.append(f"Regulatory ({truth.source_name}): {text}")
         
         for truth in compliance[:2]:
-            context.append(f"Compliance ({truth.source_name}): {str(truth.content)[:200]}")
+            content = truth.content
+            if isinstance(content, dict):
+                text = content.get('text', content.get('summary', ''))[:200]
+            else:
+                text = str(content)[:200]
+            if text:
+                context.append(f"Compliance ({truth.source_name}): {text}")
         
         return context
     
