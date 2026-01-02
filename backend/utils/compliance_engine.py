@@ -214,60 +214,78 @@ def generate_compliance_sql(
     """
     Generate SQL to check compliance with a rule.
     
-    Uses LLM to intelligently map rule requirements to actual schema.
+    Uses LLMOrchestrator.generate_sql() - the same pattern used everywhere else.
     """
     
-    # Format schema for prompt
-    schema_text = ""
+    # Build the prompt in the format generate_sql expects
+    # It needs: question + schema context
+    
+    # Format schema for prompt - generate_sql expects table.column format
+    schema_text = "### Database Schema\n"
+    all_columns = set()
     for table in schema.get("tables", []):
         table_name = table.get("table_name", "")
         columns = table.get("columns", [])
-        col_list = ", ".join([c.get("column_name", "") for c in columns[:20]])  # Limit columns
-        schema_text += f"\nTable: {table_name}\nColumns: {col_list}\n"
+        col_names = [c.get("column_name", "") for c in columns]
+        all_columns.update(col_names)
+        schema_text += f"\nTable: {table_name}\nColumns: {', '.join(col_names[:30])}\n"
     
-    # Format profiles for prompt
-    profile_text = ""
-    for col_name, profile in list(profiles.items())[:30]:  # Limit profiles
+    # Format profiles - sample values help LLM understand data
+    profile_text = "\n### Sample Values\n"
+    for col_name, profile in list(profiles.items())[:20]:
         distinct = profile.get("distinct_values", [])[:5]
-        profile_text += f"\n{col_name}: {distinct}"
+        if distinct:
+            profile_text += f"{col_name}: {distinct}\n"
     
-    prompt = SQL_GENERATION_PROMPT.format(
-        rule_title=rule.get("title", ""),
-        rule_description=rule.get("description", ""),
-        applies_to=json.dumps(rule.get("applies_to", {})),
-        requirement=json.dumps(rule.get("requirement", {})),
-        schema=schema_text[:4000],
-        profiles=profile_text[:2000]
+    # Build the question based on the rule
+    rule_title = rule.get("title", "Unknown Rule")
+    rule_desc = rule.get("description", "")
+    applies_to = rule.get("applies_to", {})
+    requirement = rule.get("requirement", {})
+    
+    question = f"""Find records that VIOLATE this compliance rule:
+
+RULE: {rule_title}
+DESCRIPTION: {rule_desc}
+APPLIES TO: {json.dumps(applies_to)}
+REQUIREMENT: {json.dumps(requirement)}
+
+Generate SQL that returns rows where this rule is VIOLATED (non-compliant records).
+If the rule cannot be checked with available columns, respond with: CANNOT_CHECK
+
+{schema_text}
+{profile_text}
+"""
+    
+    # Use LLMOrchestrator.generate_sql() - our established pattern
+    orchestrator = _get_orchestrator()
+    if not orchestrator:
+        logger.error("[COMPLIANCE] No LLM orchestrator available")
+        return None
+    
+    result = orchestrator.generate_sql(question, schema_columns=all_columns)
+    
+    if not result.get('success') or not result.get('sql'):
+        logger.warning(f"[COMPLIANCE] SQL generation failed for rule {rule.get('rule_id')}: {result.get('error')}")
+        return None
+    
+    sql = result.get('sql', '')
+    
+    # Check if LLM said it can't check this rule
+    if 'CANNOT_CHECK' in sql.upper() or not sql.strip().upper().startswith(('SELECT', 'WITH')):
+        logger.warning(f"[COMPLIANCE] Rule {rule.get('rule_id')} cannot be checked with available columns")
+        return None
+    
+    return ComplianceCheck(
+        check_id=f"CHK_{rule.get('rule_id', 'unknown')}",
+        rule_id=rule.get("rule_id", ""),
+        rule_title=rule_title,
+        sql_query=sql,
+        description=f"Check for violations of: {rule_title}",
+        expected_result="Records returned indicate non-compliance",
+        severity=rule.get("severity", "medium"),
+        category=rule.get("category", "general")
     )
-    
-    response = _call_llm(prompt, SQL_GENERATION_SYSTEM)
-    
-    if not response:
-        return None
-    
-    try:
-        # Parse JSON from response
-        json_match = re.search(r'\{[\s\S]*\}', response)
-        if json_match:
-            data = json.loads(json_match.group())
-        else:
-            logger.warning("[COMPLIANCE] No JSON found in SQL generation response")
-            return None
-        
-        return ComplianceCheck(
-            check_id=f"CHK_{rule.get('rule_id', 'unknown')}",
-            rule_id=rule.get("rule_id", ""),
-            rule_title=rule.get("title", ""),
-            sql_query=data.get("sql_query", ""),
-            description=data.get("description", ""),
-            expected_result=data.get("violation_meaning", "Records returned indicate non-compliance"),
-            severity=rule.get("severity", "medium"),
-            category=rule.get("category", "general")
-        )
-        
-    except Exception as e:
-        logger.error(f"[COMPLIANCE] Failed to parse SQL generation response: {e}")
-        return None
 
 
 # =============================================================================
@@ -480,21 +498,36 @@ class ComplianceEngine:
         self.db_handler = handler
     
     def get_schema(self, project_id: str) -> Dict:
-        """Get schema for a project."""
+        """Get schema for a project in compliance-engine format."""
         if project_id in self._schema_cache:
             return self._schema_cache[project_id]
         
         if not self.db_handler:
+            logger.warning("[COMPLIANCE] No db_handler - cannot get schema")
             return {"tables": []}
         
         try:
-            # Get schema from handler
-            if hasattr(self.db_handler, 'get_schema'):
-                schema = self.db_handler.get_schema(project_id)
-            else:
-                schema = {"tables": []}
+            # Use StructuredDataHandler.get_schema() - our established method
+            raw_schema = self.db_handler.get_schema(project_id)
             
+            # Convert to compliance engine format: {"tables": [{"table_name": ..., "columns": [...]}]}
+            tables = []
+            for table_name, table_info in raw_schema.items():
+                columns = table_info.get("columns", [])
+                # Columns may be list of strings or list of dicts
+                if columns and isinstance(columns[0], str):
+                    columns = [{"column_name": c} for c in columns]
+                
+                tables.append({
+                    "table_name": table_name,
+                    "display_name": table_info.get("display_name", table_name),
+                    "columns": columns,
+                    "row_count": table_info.get("row_count", 0)
+                })
+            
+            schema = {"tables": tables}
             self._schema_cache[project_id] = schema
+            logger.info(f"[COMPLIANCE] Loaded schema for {project_id}: {len(tables)} tables")
             return schema
             
         except Exception as e:
@@ -507,17 +540,20 @@ class ComplianceEngine:
             return self._profile_cache[project_id]
         
         if not self.db_handler:
+            logger.warning("[COMPLIANCE] No db_handler - cannot get profiles")
             return {}
         
         try:
-            # Try to get profiles from _column_profiles table
+            # Query _column_profiles using handler's connection
             if hasattr(self.db_handler, 'conn') and self.db_handler.conn:
-                result = self.db_handler.conn.execute(f"""
-                    SELECT column_name, distinct_values, data_type, filter_category
+                # Use parameterized query with LIKE pattern for project prefix
+                project_prefix = project_id[:8].lower() if project_id else ''
+                result = self.db_handler.conn.execute("""
+                    SELECT column_name, distinct_values, inferred_type, filter_category
                     FROM _column_profiles
-                    WHERE table_name LIKE '{project_id[:8].lower()}%'
+                    WHERE LOWER(table_name) LIKE ? || '%'
                     LIMIT 200
-                """).fetchall()
+                """, [project_prefix]).fetchall()
                 
                 profiles = {}
                 for row in result:
@@ -533,6 +569,7 @@ class ComplianceEngine:
                     }
                 
                 self._profile_cache[project_id] = profiles
+                logger.info(f"[COMPLIANCE] Loaded {len(profiles)} column profiles for {project_id}")
                 return profiles
                 
         except Exception as e:
@@ -661,22 +698,73 @@ class ComplianceEngine:
         logger.info(f"[COMPLIANCE] Starting scan of {project_id} with {len(rules)} rules")
         
         findings = []
+        check_results = []  # Track every rule's status
         
         for rule in rules:
+            rule_result = {
+                'rule_id': rule.get('rule_id', 'unknown'),
+                'rule_title': rule.get('title', 'Untitled'),
+                'status': 'pending',
+                'sql_generated': None,
+                'sql_error': None,
+                'result_count': None,
+                'message': None
+            }
+            
             try:
-                finding = self.check_rule(
-                    rule, 
-                    project_id,
-                    source_document=rule.get("source_document", "Standards")
-                )
+                # Get schema and profiles
+                schema = self.get_schema(project_id)
+                profiles = self.get_profiles(project_id)
                 
-                if finding:
-                    findings.append(finding)
+                if not schema.get("tables"):
+                    rule_result['status'] = 'skipped'
+                    rule_result['message'] = 'No schema available for project'
+                    check_results.append(rule_result)
+                    continue
+                
+                # Generate SQL check
+                check = generate_compliance_sql(rule, schema, profiles)
+                
+                if not check or not check.sql_query:
+                    rule_result['status'] = 'skipped'
+                    rule_result['message'] = 'Could not generate SQL - rule fields do not match available columns'
+                    check_results.append(rule_result)
+                    continue
+                
+                rule_result['sql_generated'] = check.sql_query
+                
+                # Run the check
+                try:
+                    results = self.run_check(check, project_id)
+                    rule_result['result_count'] = len(results)
+                    
+                    if results:
+                        rule_result['status'] = 'failed'
+                        rule_result['message'] = f'{len(results)} violations found'
+                        # Generate finding
+                        finding = generate_finding(rule, check, results, rule.get("source_document", "Standards"))
+                        if finding:
+                            findings.append(finding)
+                    else:
+                        rule_result['status'] = 'passed'
+                        rule_result['message'] = 'No violations found'
+                        
+                except Exception as sql_err:
+                    rule_result['status'] = 'error'
+                    rule_result['sql_error'] = str(sql_err)
+                    rule_result['message'] = f'SQL execution failed: {sql_err}'
                     
             except Exception as e:
+                rule_result['status'] = 'error'
+                rule_result['message'] = f'Check failed: {e}'
                 logger.error(f"[COMPLIANCE] Error checking rule {rule.get('rule_id')}: {e}")
+            
+            check_results.append(rule_result)
         
-        logger.info(f"[COMPLIANCE] Scan complete: {len(findings)} findings")
+        # Attach check_results to self so endpoint can access it
+        self._last_check_results = check_results
+        
+        logger.info(f"[COMPLIANCE] Scan complete: {len(findings)} findings, {len([r for r in check_results if r['status'] == 'passed'])} passed, {len([r for r in check_results if r['status'] == 'skipped'])} skipped")
         
         return findings
 
@@ -688,10 +776,18 @@ class ComplianceEngine:
 _compliance_engine: Optional[ComplianceEngine] = None
 
 def get_compliance_engine() -> ComplianceEngine:
-    """Get the singleton compliance engine."""
+    """Get the singleton compliance engine with proper DB handler."""
     global _compliance_engine
     if _compliance_engine is None:
-        _compliance_engine = ComplianceEngine()
+        # Get the structured handler - this is how we access DuckDB everywhere
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        _compliance_engine = ComplianceEngine(db_handler=handler)
+        logger.info("[COMPLIANCE] Engine initialized with StructuredDataHandler")
     return _compliance_engine
 
 
@@ -717,7 +813,7 @@ def run_compliance_scan(
     project_id: str,
     rules: List[Dict] = None,
     domain: str = None
-) -> List[Dict]:
+) -> Dict:
     """
     Run a compliance scan with specific rules.
     
@@ -726,11 +822,20 @@ def run_compliance_scan(
         rules: List of rule dicts to check
         domain: Optional domain filter
     
-    Returns list of findings as dicts.
+    Returns dict with:
+        - findings: List of finding dicts
+        - check_results: Per-rule status details
     """
     engine = get_compliance_engine()
     findings = engine.run_compliance_scan(project_id, rules=rules, domain=domain)
-    return [f.to_dict() for f in findings]
+    
+    # Get per-rule check results from engine
+    check_results = getattr(engine, '_last_check_results', [])
+    
+    return {
+        'findings': [f.to_dict() for f in findings] if findings else [],
+        'check_results': check_results
+    }
 
 
 def check_single_rule(
