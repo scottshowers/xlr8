@@ -143,6 +143,10 @@ class SQLGenerator:
         Build relationship hints for the LLM prompt.
         
         Tells the LLM how tables can be joined based on detected relationships.
+        
+        Handles both:
+        - Object format (from project_intelligence): rel.from_table, rel.to_table
+        - Dict format (from Supabase): rel['source_table'], rel['target_table']
         """
         if not self.relationships:
             return ""
@@ -151,14 +155,31 @@ class SQLGenerator:
         
         hints = []
         for rel in self.relationships:
-            # Check if relationship involves selected tables
-            from_lower = rel.from_table.lower() if hasattr(rel, 'from_table') else ''
-            to_lower = rel.to_table.lower() if hasattr(rel, 'to_table') else ''
+            # Handle both object and dict formats
+            if hasattr(rel, 'from_table'):
+                # Object format
+                from_table = rel.from_table
+                from_col = rel.from_column
+                to_table = rel.to_table
+                to_col = rel.to_column
+                confidence = getattr(rel, 'confidence', 0.9)
+            elif isinstance(rel, dict):
+                # Dict format from Supabase
+                from_table = rel.get('source_table', '')
+                from_col = rel.get('source_column', '')
+                to_table = rel.get('target_table', '')
+                to_col = rel.get('target_column', '')
+                confidence = rel.get('confidence', 0.9)
+            else:
+                continue
             
+            from_lower = from_table.lower() if from_table else ''
+            to_lower = to_table.lower() if to_table else ''
+            
+            # Check if relationship involves selected tables
             if from_lower in table_names and to_lower in table_names:
-                hint = (f"  - {rel.from_table}.{rel.from_column} → "
-                       f"{rel.to_table}.{rel.to_column}")
-                if hasattr(rel, 'confidence') and rel.confidence < 0.8:
+                hint = f"  - {from_table}.{from_col} → {to_table}.{to_col}"
+                if confidence < 0.8:
                     hint += " (low confidence)"
                 hints.append(hint)
         
