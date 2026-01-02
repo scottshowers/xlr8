@@ -961,6 +961,34 @@ def process_file_background(
                     result['intelligence'] = intelligence_summary
                 
                 # =====================================================
+                # SYSTEM/DOMAIN DETECTION - Phase 3.5
+                # Detect what system and domain this data belongs to
+                # =====================================================
+                try:
+                    from utils.detection_integration import run_project_detection
+                    ProcessingJobModel.update_progress(job_id, 76, "Detecting system context...")
+                    detection_result = run_project_detection(
+                        project=project,
+                        project_id=project_id,
+                        filename=filename,
+                        handler=handler,
+                        job_id=job_id
+                    )
+                    if detection_result:
+                        result['detection'] = detection_result
+                        # Log primary detections
+                        primary_sys = detection_result.get('primary_system')
+                        primary_dom = detection_result.get('primary_domain')
+                        if primary_sys:
+                            logger.info(f"[BACKGROUND] Detected system: {primary_sys.get('name')}")
+                        if primary_dom:
+                            logger.info(f"[BACKGROUND] Detected domain: {primary_dom.get('name')}")
+                except ImportError:
+                    logger.debug("[BACKGROUND] Detection integration not available")
+                except Exception as det_e:
+                    logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
+                
+                # =====================================================
                 # DOMAIN INFERENCE - Phase 4
                 # Detect what type of data this is for intelligent context
                 # =====================================================
