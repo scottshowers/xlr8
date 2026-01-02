@@ -29,6 +29,18 @@ from typing import Dict, List, Any, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+# Try to import LLM orchestrator
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    LLM_ORCHESTRATOR_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        LLM_ORCHESTRATOR_AVAILABLE = True
+    except ImportError:
+        LLM_ORCHESTRATOR_AVAILABLE = False
+        logger.warning("[HYBRID] LLMOrchestrator not available")
+
 
 # =============================================================================
 # EXTRACTION PATTERNS - What local LLM should find
@@ -197,6 +209,15 @@ class HybridAnalyzer:
     def __init__(self):
         self.local_llm = LocalLLMClient()
         self.claude_api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        
+        # Initialize LLMOrchestrator for Claude calls
+        self.orchestrator = None
+        if LLM_ORCHESTRATOR_AVAILABLE:
+            try:
+                self.orchestrator = LLMOrchestrator()
+                logger.info("[HYBRID] LLMOrchestrator initialized")
+            except Exception as e:
+                logger.warning(f"[HYBRID] LLMOrchestrator init failed: {e}")
         
         # Try to import learning system
         try:
@@ -385,15 +406,12 @@ Return JSON with SPECIFIC values and lists:
     
     def call_claude(self, text: str, action: Dict, local_results: Optional[Dict] = None, 
                     inherited_findings: List[Dict] = None) -> Optional[Dict]:
-        """Call Claude for complex analysis"""
-        if not self.claude_api_key:
-            logger.error("[HYBRID] Claude API key not configured")
+        """Call Claude for complex analysis - uses LLMOrchestrator"""
+        if not self.orchestrator and not self.claude_api_key:
+            logger.error("[HYBRID] No LLM available for Claude calls")
             return None
         
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.claude_api_key)
-            
             # Build context with local extraction results
             local_context = ""
             if local_results:
@@ -413,9 +431,7 @@ Use these values as reference. Focus on ANALYSIS and RECOMMENDATIONS.
                     parts.append(f"From {parent_id}: {parent_findings.get('summary', 'N/A')}")
                 inherited_context = "\n".join(parts)
             
-            prompt = f"""You are a senior UKG implementation consultant.
-
-ACTION: {action.get('action_id')} - {action.get('description', '')}
+            prompt = f"""ACTION: {action.get('action_id')} - {action.get('description', '')}
 {f'INHERITED: {inherited_context}' if inherited_context else ''}
 
 {local_context}
@@ -447,17 +463,37 @@ Return JSON:
 
 Return ONLY valid JSON."""
 
+            system_prompt = "You are a senior UKG implementation consultant. Analyze documents and provide specific, actionable findings."
+            
             logger.info(f"[HYBRID] Calling Claude for {action.get('action_id')}")
             self.stats['claude_calls'] += 1
             
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2500,
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}]
-            )
+            # Use orchestrator if available
+            if self.orchestrator:
+                result_text, success = self.orchestrator._call_claude(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    project_id=None,
+                    operation="hybrid_analyzer"
+                )
+                
+                if not success:
+                    logger.error(f"[HYBRID] Claude call failed: {result_text}")
+                    return None
+            else:
+                # Fallback to direct call if orchestrator not available
+                import anthropic
+                client = anthropic.Anthropic(api_key=self.claude_api_key)
+                response = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=2500,
+                    temperature=0,
+                    system=system_prompt,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                result_text = response.content[0].text
             
-            result_text = response.content[0].text.strip()
+            result_text = result_text.strip()
             if result_text.startswith("```"):
                 result_text = result_text.split("```")[1]
                 if result_text.startswith("json"):
