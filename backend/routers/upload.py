@@ -2068,17 +2068,32 @@ async def run_compliance_check(
         
         logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {project_id}")
         
-        # Run compliance scan
-        findings = run_compliance_scan(project_id, rules=rules, domain=domain)
+        # Run compliance scan - returns both findings and per-rule check results
+        result = run_compliance_scan(project_id, rules=rules, domain=domain)
         
-        logger.info(f"[COMPLIANCE] Scan complete: {len(findings)} findings")
+        findings = result.get('findings', [])
+        check_results = result.get('check_results', [])
+        
+        # Count by status
+        passed = len([r for r in check_results if r.get('status') == 'passed'])
+        failed = len([r for r in check_results if r.get('status') == 'failed'])
+        skipped = len([r for r in check_results if r.get('status') == 'skipped'])
+        errors = len([r for r in check_results if r.get('status') == 'error'])
+        
+        logger.info(f"[COMPLIANCE] Scan complete: {passed} passed, {failed} failed, {skipped} skipped, {errors} errors")
         
         return {
             "project_id": project_id,
             "rules_checked": len(rules),
+            "passed": passed,
+            "failed": failed,
+            "skipped": skipped,
+            "errors": errors,
             "findings_count": len(findings),
             "findings": findings,
-            "compliant_count": len(rules) - len(findings)
+            "check_results": check_results,
+            # Legacy fields for backwards compatibility
+            "compliant_count": passed
         }
         
     except HTTPException:
