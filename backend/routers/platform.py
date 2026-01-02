@@ -800,50 +800,50 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
     project_filter = project
     
     try:
-        from utils.database.structured_data_handler import StructuredDataHandler
+        from utils.structured_data_handler import get_structured_handler
         from utils.database.supabase_client import get_supabase
         
         files_dict = {}
         
-        with StructuredDataHandler() as handler:
-            # Query DuckDB for schema metadata (fast, local)
-            try:
-                if project_filter:
-                    schema_results = handler.conn.execute("""
-                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                        FROM _schema_metadata 
-                        WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
-                        ORDER BY file_name, table_name
-                    """, [project_filter]).fetchall()
-                else:
-                    schema_results = handler.conn.execute("""
-                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                        FROM _schema_metadata 
-                        WHERE is_current = TRUE
-                        ORDER BY file_name, table_name
-                    """).fetchall()
-            except Exception as e:
-                logger.debug(f"[FILES] Schema query: {e}")
-                schema_results = []
-            
-            # Query PDF tables
-            try:
-                if project_filter:
-                    pdf_results = handler.conn.execute("""
-                        SELECT source_file, project, table_name, row_count, created_at
-                        FROM _pdf_tables
-                        WHERE LOWER(project) = LOWER(?)
-                        ORDER BY source_file, table_name
-                    """, [project_filter]).fetchall()
-                else:
-                    pdf_results = handler.conn.execute("""
-                        SELECT source_file, project, table_name, row_count, created_at
-                        FROM _pdf_tables
-                        ORDER BY source_file, table_name
-                    """).fetchall()
-            except Exception as e:
-                logger.debug(f"[FILES] PDF query: {e}")
-                pdf_results = []
+        handler = get_structured_handler()
+        # Query DuckDB for schema metadata (fast, local)
+        try:
+            if project_filter:
+                schema_results = handler.conn.execute("""
+                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
+                    ORDER BY file_name, table_name
+                """, [project_filter]).fetchall()
+            else:
+                schema_results = handler.conn.execute("""
+                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    ORDER BY file_name, table_name
+                """).fetchall()
+        except Exception as e:
+            logger.debug(f"[FILES] Schema query: {e}")
+            schema_results = []
+        
+        # Query PDF tables
+        try:
+            if project_filter:
+                pdf_results = handler.conn.execute("""
+                    SELECT source_file, project, table_name, row_count, created_at
+                    FROM _pdf_tables
+                    WHERE LOWER(project) = LOWER(?)
+                    ORDER BY source_file, table_name
+                """, [project_filter]).fetchall()
+            else:
+                pdf_results = handler.conn.execute("""
+                    SELECT source_file, project, table_name, row_count, created_at
+                    FROM _pdf_tables
+                    ORDER BY source_file, table_name
+                """).fetchall()
+        except Exception as e:
+            logger.debug(f"[FILES] PDF query: {e}")
+            pdf_results = []
         
         # Get document registry for provenance (single Supabase call)
         registry_lookup = {}
