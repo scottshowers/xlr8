@@ -970,11 +970,72 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                     "sheets": []
                 }
         
+        # Also include ChromaDB reference documents (standards/regulatory)
+        # These may not be in document_registry but are in ChromaDB
+        try:
+            from utils.rag_handler import RAGHandler
+            rag = RAGHandler()
+            coll = rag.client.get_collection(name="documents")
+            results = coll.get(include=["metadatas"])
+            
+            # Aggregate by source document
+            chroma_docs = {}
+            for meta in results.get('metadatas', []):
+                if not meta:
+                    continue
+                source = meta.get('source') or meta.get('filename')
+                proj = meta.get('project_id') or meta.get('project') or ''
+                
+                # Include reference library docs OR docs matching current project filter
+                is_reference = proj in ['Global/Universal', 'Reference Library', '__STANDARDS__', '', None]
+                matches_project = project_filter and proj.lower() == project_filter.lower() if project_filter else False
+                
+                if source and (is_reference or matches_project):
+                    if source not in chroma_docs:
+                        chroma_docs[source] = {
+                            'count': 0,
+                            'project': proj or 'Reference Library',
+                            'truth_type': meta.get('truth_type', 'reference'),
+                            'uploaded_at': meta.get('uploaded_at', '')
+                        }
+                    chroma_docs[source]['count'] += 1
+            
+            # Add to files_dict if not already present
+            for filename, info in chroma_docs.items():
+                if filename not in files_dict:
+                    files_dict[filename] = {
+                        "filename": filename,
+                        "project": info['project'],
+                        "tables": 0,
+                        "rows": 0,
+                        "row_count": 0,
+                        "chunks": info['count'],
+                        "loaded_at": info.get('uploaded_at', ''),
+                        "uploaded_by": "",
+                        "uploaded_at": info.get('uploaded_at', ''),
+                        "truth_type": info['truth_type'],
+                        "domain": [],
+                        "type": "chromadb",
+                        "sheets": []
+                    }
+                else:
+                    # Update chunk count if file exists but had 0 chunks
+                    if files_dict[filename].get('chunks', 0) == 0:
+                        files_dict[filename]['chunks'] = info['count']
+                        if files_dict[filename].get('type') == 'structured':
+                            files_dict[filename]['type'] = 'hybrid'
+        except Exception as e:
+            logger.debug(f"[FILES] ChromaDB query: {e}")
+        
         files = list(files_dict.values())
         
-        # Filter by project if specified (backup filter)
+        # Filter by project if specified, but always include reference library docs
         if project_filter:
-            files = [f for f in files if f.get("project", "").lower() == project_filter.lower()]
+            reference_projects = ['global/universal', 'reference library', '__standards__', '']
+            files = [f for f in files if 
+                     f.get("project", "").lower() == project_filter.lower() or 
+                     f.get("project", "").lower() in reference_projects or
+                     f.get("type") == "chromadb"]
         
         return {
             "files": files,
