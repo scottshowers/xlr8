@@ -787,6 +787,193 @@ async def get_platform_health_only() -> Dict[str, Any]:
     }
 
 
+@router.get("/files")
+async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
+    """
+    FAST files endpoint - just files, no health checks or metrics.
+    Use this instead of /platform?include=files for file listings.
+    
+    Returns files with sheets, row counts, and provenance info.
+    Typically responds in <500ms vs 6-7s for full /platform.
+    """
+    start_time = time.time()
+    project_filter = project
+    
+    try:
+        from utils.database.structured_data_handler import StructuredDataHandler
+        from utils.database.supabase_client import get_supabase
+        
+        files_dict = {}
+        
+        with StructuredDataHandler() as handler:
+            # Query DuckDB for schema metadata (fast, local)
+            try:
+                if project_filter:
+                    schema_results = handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
+                        ORDER BY file_name, table_name
+                    """, [project_filter]).fetchall()
+                else:
+                    schema_results = handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE
+                        ORDER BY file_name, table_name
+                    """).fetchall()
+            except Exception as e:
+                logger.debug(f"[FILES] Schema query: {e}")
+                schema_results = []
+            
+            # Query PDF tables
+            try:
+                if project_filter:
+                    pdf_results = handler.conn.execute("""
+                        SELECT source_file, project, table_name, row_count, created_at
+                        FROM _pdf_tables
+                        WHERE LOWER(project) = LOWER(?)
+                        ORDER BY source_file, table_name
+                    """, [project_filter]).fetchall()
+                else:
+                    pdf_results = handler.conn.execute("""
+                        SELECT source_file, project, table_name, row_count, created_at
+                        FROM _pdf_tables
+                        ORDER BY source_file, table_name
+                    """).fetchall()
+            except Exception as e:
+                logger.debug(f"[FILES] PDF query: {e}")
+                pdf_results = []
+        
+        # Get document registry for provenance (single Supabase call)
+        registry_lookup = {}
+        try:
+            supabase = get_supabase()
+            if supabase:
+                if project_filter:
+                    from utils.database.models import ProjectModel
+                    proj_record = ProjectModel.get_by_name(project_filter)
+                    project_id = proj_record.get('id') if proj_record else None
+                    if project_id:
+                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").eq("project_id", project_id).execute()
+                    else:
+                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").execute()
+                else:
+                    result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").execute()
+                
+                for entry in result.data or []:
+                    fname = entry.get('filename', '')
+                    if fname:
+                        registry_lookup[fname.lower()] = {
+                            'uploaded_by': entry.get('uploaded_by', ''),
+                            'uploaded_at': entry.get('created_at', ''),
+                            'truth_type': entry.get('truth_type', ''),
+                            'domain': entry.get('domain', []),
+                            'chunk_count': entry.get('chunk_count', 0)
+                        }
+        except Exception as e:
+            logger.debug(f"[FILES] Registry query: {e}")
+        
+        # Build files from schema results
+        for row in schema_results:
+            fname = row[0]
+            if not fname:
+                continue
+            
+            provenance = registry_lookup.get(fname.lower(), {})
+            
+            if fname not in files_dict:
+                files_dict[fname] = {
+                    "filename": fname,
+                    "project": row[1],
+                    "tables": 0,
+                    "rows": 0,
+                    "row_count": 0,
+                    "chunks": provenance.get('chunk_count', 0),
+                    "loaded_at": str(row[6]) if row[6] else None,
+                    "uploaded_by": provenance.get('uploaded_by', ''),
+                    "uploaded_at": provenance.get('uploaded_at', ''),
+                    "truth_type": provenance.get('truth_type', ''),
+                    "domain": provenance.get('domain', ''),
+                    "type": "hybrid" if provenance.get('chunk_count', 0) > 0 else "structured",
+                    "sheets": []
+                }
+            
+            files_dict[fname]["sheets"].append({
+                "table_name": row[2],
+                "display_name": row[3] or row[2],
+                "row_count": int(row[4] or 0),
+                "column_count": int(row[5] or 0)
+            })
+            files_dict[fname]["tables"] += 1
+            files_dict[fname]["rows"] += int(row[4] or 0)
+            files_dict[fname]["row_count"] += int(row[4] or 0)
+        
+        # Add PDF tables
+        for row in pdf_results:
+            fname = row[0]
+            if not fname:
+                continue
+            
+            provenance = registry_lookup.get(fname.lower(), {})
+            
+            if fname not in files_dict:
+                files_dict[fname] = {
+                    "filename": fname,
+                    "project": row[1],
+                    "tables": 0,
+                    "rows": 0,
+                    "row_count": 0,
+                    "chunks": provenance.get('chunk_count', 0),
+                    "loaded_at": str(row[4]) if row[4] else None,
+                    "uploaded_by": provenance.get('uploaded_by', ''),
+                    "uploaded_at": provenance.get('uploaded_at', ''),
+                    "truth_type": provenance.get('truth_type', ''),
+                    "type": "hybrid" if provenance.get('chunk_count', 0) > 0 else "structured",
+                    "sheets": []
+                }
+            
+            files_dict[fname]["sheets"].append({
+                "table_name": row[2],
+                "display_name": row[2],
+                "row_count": int(row[3] or 0),
+                "column_count": 0
+            })
+            files_dict[fname]["tables"] += 1
+            files_dict[fname]["rows"] += int(row[3] or 0)
+            files_dict[fname]["row_count"] += int(row[3] or 0)
+        
+        files = list(files_dict.values())
+        
+        # Filter by project if specified (backup filter)
+        if project_filter:
+            files = [f for f in files if f.get("project", "").lower() == project_filter.lower()]
+        
+        return {
+            "files": files,
+            "total_files": len(files),
+            "total_tables": sum(f["tables"] for f in files),
+            "total_rows": sum(f["rows"] for f in files),
+            "project_filter": project_filter,
+            "_meta": {
+                "response_time_ms": int((time.time() - start_time) * 1000)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"[FILES] Failed: {e}")
+        return {
+            "files": [],
+            "total_files": 0,
+            "total_tables": 0,
+            "total_rows": 0,
+            "error": str(e),
+            "_meta": {
+                "response_time_ms": int((time.time() - start_time) * 1000)
+            }
+        }
+
+
 @router.get("/platform/stats")
 async def get_platform_stats_only(project: Optional[str] = None) -> Dict[str, Any]:
     """
