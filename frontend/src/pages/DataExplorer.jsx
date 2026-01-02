@@ -181,10 +181,45 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
     testRelationship(rel);
   };
 
-  // Get display name for table
+  // Get display name for table - extracts the friendly part from full table name
   const getDisplayName = (tableName) => {
     if (!tableName) return '?';
+    
+    // Check if we have this table in our tables array with a display_name
+    const tableInfo = tables?.find(t => t.table_name === tableName);
+    if (tableInfo?.display_name) {
+      return tableInfo.display_name;
+    }
+    
+    // Extract from table name: project_filename_sheetname
+    // Pattern: tea1000_team_configuration_validation_for_brande_company_information_component_company_information_r
+    // We want the last meaningful segment(s)
+    const parts = tableName.split('_');
+    
+    // Skip project prefix (first part that looks like a project code)
+    let startIdx = 0;
+    if (parts[0]?.match(/^[a-z]+\d+$/i)) {
+      startIdx = 1;
+    }
+    
+    // Try to find where the actual sheet name starts
+    // Usually after repeated words like "for_brande" or "validation"
+    const remaining = parts.slice(startIdx);
+    
+    // Take last 3-4 meaningful words, capitalize them
+    const meaningful = remaining.slice(-4).filter(p => p.length > 1);
+    if (meaningful.length > 0) {
+      return meaningful.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+    }
+    
     return tableName.split('__').pop() || tableName;
+  };
+
+  // Get truncated full table name for display
+  const getTruncatedName = (tableName, maxLen = 50) => {
+    if (!tableName) return '';
+    if (tableName.length <= maxLen) return tableName;
+    return tableName.substring(0, maxLen - 3) + '...';
   };
 
   // Filter relationships
@@ -315,9 +350,11 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                       <CheckCircle size={12} style={{ color: c.success }} />
                     )}
                   </div>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 500, color: c.text }}>{getDisplayName(sourceTable)}</div>
-                  <div style={{ fontSize: '0.7rem', color: c.textMuted }}>↓ {sourceCol} → {targetCol}</div>
-                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>{getDisplayName(targetTable)}</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: c.text }}>{getDisplayName(sourceTable)}</div>
+                  <div style={{ fontSize: '0.6rem', color: c.silver, fontFamily: 'monospace', marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceTable}>{getTruncatedName(sourceTable, 40)}</div>
+                  <div style={{ fontSize: '0.7rem', color: c.textMuted, margin: '4px 0' }}>↓ {sourceCol} → {targetCol}</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text }}>{getDisplayName(targetTable)}</div>
+                  <div style={{ fontSize: '0.6rem', color: c.silver, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={targetTable}>{getTruncatedName(targetTable, 40)}</div>
                 </div>
               );
             })
@@ -371,10 +408,13 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                       <span> — {testResult.statistics.match_rate_percent}% Match</span>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: c.text }}>
-                    <span style={{ color: c.electricBlue, fontWeight: 500 }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</span>
+                  <div style={{ fontSize: '0.9rem', color: c.text, marginBottom: '2px' }}>
+                    <span style={{ color: c.electricBlue, fontWeight: 600 }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</span>
                     <span style={{ margin: '0 8px', color: c.textMuted }}>→</span>
-                    <span style={{ color: c.electricBlue, fontWeight: 500 }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</span>
+                    <span style={{ color: c.electricBlue, fontWeight: 600 }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</span>
+                  </div>
+                  <div style={{ fontSize: '0.6rem', color: c.silver, fontFamily: 'monospace', marginBottom: '4px' }} title={`${selectedRel.source_table || selectedRel.from_table} → ${selectedRel.target_table || selectedRel.to_table}`}>
+                    {getTruncatedName(selectedRel.source_table || selectedRel.from_table, 45)} → {getTruncatedName(selectedRel.target_table || selectedRel.to_table, 45)}
                   </div>
                   <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '4px' }}>
                     Join: {testResult?.join_column_a || selectedRel.source_column || selectedRel.from_column} = {testResult?.join_column_b || selectedRel.target_column || selectedRel.to_column}
@@ -492,8 +532,9 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                 <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
                   <div style={{ padding: '10px 14px', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</div>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>{testResult.statistics?.table_a_rows?.toLocaleString() || 0} rows</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</div>
+                      <div style={{ fontSize: '0.55rem', color: c.silver, fontFamily: 'monospace', marginTop: '2px' }} title={selectedRel.source_table || selectedRel.from_table}>{getTruncatedName(selectedRel.source_table || selectedRel.from_table, 35)}</div>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '2px' }}>{testResult.statistics?.table_a_rows?.toLocaleString() || 0} rows</div>
                     </div>
                     <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
                       🔗 {testResult.join_column_a}
@@ -531,8 +572,9 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                 <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
                   <div style={{ padding: '10px 14px', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <div>
-                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</div>
-                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>{testResult.statistics?.table_b_rows?.toLocaleString() || 0} rows</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</div>
+                      <div style={{ fontSize: '0.55rem', color: c.silver, fontFamily: 'monospace', marginTop: '2px' }} title={selectedRel.target_table || selectedRel.to_table}>{getTruncatedName(selectedRel.target_table || selectedRel.to_table, 35)}</div>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '2px' }}>{testResult.statistics?.table_b_rows?.toLocaleString() || 0} rows</div>
                     </div>
                     <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
                       🔗 {testResult.join_column_b}
