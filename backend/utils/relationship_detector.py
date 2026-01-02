@@ -1,21 +1,19 @@
 """
-Relationship Detector v2 - INTELLIGENT table relationship detection.
+Relationship Detector v3 - VALUE-BASED relationship detection.
 
-Key Improvements:
-1. Configuration Validation file is SOURCE OF TRUTH - other tables map to it
-2. Only analyzes KEY columns (IDs, codes, numbers) - not every field
-3. Strips common prefixes (home_, work_, etc.) before comparing
-4. Limits to top 3 relationships per table pair
-5. Much higher confidence thresholds
-6. Prepares for global learning (cross-customer mappings)
+THE RIGHT WAY: Compare actual column VALUES, not just column names.
 
-Deploy to: backend/utils/relationship_detector.py
+Uses _column_profiles.top_values_json to find columns with overlapping values.
+If Column A has values ['USA', 'CAN', 'GBR'] and Column B has ['USA', 'CAN', 'MEX'],
+they share 66% of values = potential JOIN relationship.
+
+This is how real data profiling works.
 """
 
-import re
-from difflib import SequenceMatcher
-from typing import List, Dict, Tuple, Optional, Set
+import json
 import logging
+from typing import List, Dict, Set, Tuple, Optional
+from collections import defaultdict
 
 logger = logging.getLogger(__name__)
 
@@ -24,524 +22,412 @@ logger = logging.getLogger(__name__)
 # CONFIGURATION
 # =============================================================================
 
-# Only these column patterns are potential JOIN keys
+# Minimum overlap percentage to consider a relationship
+MIN_OVERLAP_PERCENT = 20  # At least 20% of values must match
+
+# Maximum distinct values for a column to be considered a "key" column
+# Columns with too many values (like names, descriptions) aren't good join keys
+MAX_DISTINCT_VALUES = 500
+
+# Minimum distinct values - single-value columns aren't useful for joins
+MIN_DISTINCT_VALUES = 2
+
+# Confidence thresholds based on overlap
+CONFIDENCE_EXCELLENT = 0.80  # 80%+ overlap
+CONFIDENCE_GOOD = 0.50       # 50-79% overlap  
+CONFIDENCE_WEAK = 0.20       # 20-49% overlap
+
+# Skip columns with these patterns (descriptions, names, free text)
+SKIP_COLUMN_PATTERNS = [
+    '_desc', 'description', '_name', '_text', '_comment', '_note',
+    '_address', '_street', '_city', '_message', '_reason',
+]
+
+# Prioritize columns with these patterns (likely join keys)
 KEY_COLUMN_PATTERNS = [
-    r'.*_id$', r'.*_code$', r'.*_num$', r'.*_number$', r'.*_key$',
-    r'^id$', r'^code$', r'^number$',
-    r'^emp.*', r'^employee.*', r'^ee_.*',
-    r'^company.*', r'^comp_.*', r'^co_.*',
-    r'^dept.*', r'^department.*',
-    r'^job.*', r'^position.*',
-    r'^location.*', r'^loc_.*',
-    r'^earn.*', r'^deduct.*', r'^ded_.*',
-    r'^tax.*', r'^pay.*group',
+    '_id', '_code', '_num', '_number', '_key', '_type',
+    'emp', 'company', 'dept', 'job', 'location', 'earn', 'deduct', 'tax',
 ]
 
-# NEVER treat these as join keys - they're descriptions, not codes
-EXCLUDED_COLUMN_PATTERNS = [
-    r'.*_desc$', r'.*_description$', r'.*description$',
-    r'.*_name$', r'.*_text$', r'.*_comment$', r'.*_note$',
-    r'^desc_', r'^description_', r'^name_',
-]
 
-# Strip these prefixes before comparing
-STRIP_PREFIXES = [
-    'home_', 'work_', 'primary_', 'current_', 'original_',
-    'old_', 'new_', 'src_', 'tgt_', 'legacy_', 'default_',
-    'main_', 'alt_', 'alternate_', 'secondary_',
-]
+# =============================================================================
+# MAIN FUNCTION
+# =============================================================================
 
-# Strip these suffixes before comparing  
-STRIP_SUFFIXES = [
-    '_1', '_2', '_old', '_new', '_orig', '_current',
-]
-
-# These files are likely the CONFIG/REFERENCE files (source of truth)
-CONFIG_FILE_PATTERNS = [
-    r'config.*valid', r'validation', r'configuration',
-    r'setup', r'reference', r'master', r'lookup',
-]
-
-# Semantic type patterns for grouping columns
-# IMPORTANT: These patterns must be PRECISE - only match exact concepts
-SEMANTIC_TYPES = {
-    'employee_id': [
-        r'^emp.*id$', r'^ee.*num$', r'^employee.*number$', r'^worker.*id$',
-        r'^person.*id$', r'^emp.*num$', r'^emp.*no$', r'^ee.*id$',
-        r'^employee.*id$', r'^staff.*id$', r'^associate.*id$', r'^emp.*key$',
-        r'^employee_number$', r'^emp_id$', r'^ee_id$',
-    ],
-    'company_code': [
-        r'^comp.*code$', r'^co.*code$', r'^company.*id$', r'^company.*code$',
-        r'^entity.*code$', r'^legal.*entity$', r'^business.*unit.*code$',
-        r'^company$', r'^comp$', r'^home.*company.*code$', r'^work.*company.*code$',
-    ],
-    'department': [
-        r'^dept.*code$', r'^department.*code$', r'^div.*code$', r'^division.*code$',
-        r'^cost.*center$', r'^dept$', r'^department$', r'^dept_id$',
-    ],
-    'job_code': [
-        r'^job.*code$', r'^job.*id$', r'^position.*code$', r'^title.*code$',
-        r'^job.*class$', r'^occupation.*code$', r'^job$',
-    ],
-    'location': [
-        r'^loc.*code$', r'^location.*code$', r'^work.*loc.*code$', r'^site.*code$',
-        r'^branch.*code$', r'^office.*code$', r'^location$', r'^loc_id$',
-    ],
-    'pay_group': [
-        r'^pay.*group$', r'^paygroup$', r'^pay.*grp$', r'^pay_group_code$',
-    ],
-    'pay_frequency': [
-        r'^pay.*freq.*code$', r'^pay.*frequency$', r'^payfreq$', r'^pay_freq$',
-        r'^frequency.*code$', r'^pay_frequency_code$',
-    ],
-    'earning_code': [
-        r'^earn.*code$', r'^earning.*code$', r'^earnings.*code$', 
-        r'^wage.*code$', r'^earning$', r'^earn_cd$',
-    ],
-    'deduction_code': [
-        r'^ded.*code$', r'^deduction.*code$', r'^deduct.*code$',
-        r'^deduction$', r'^ded_cd$', r'^benefit.*code$',
-    ],
-    'tax_code': [
-        r'^tax.*code$', r'^tax_code$', r'^withhold.*code$',
-        r'^tax.*type.*code$',  # tax_type_code but NOT tax_type (ambiguous)
-    ],
-    'org_level': [
-        r'^org.*level.*\d.*code$', r'^org_level_\d$', r'^org_level_\d_code$',
-        r'^organization.*level', r'^org_lvl_\d',
-    ],
-    'work_state': [
-        r'^work.*state$', r'^state.*code$', r'^work_state$', r'^sui.*state$',
-    ],
-    'status_code': [
-        r'^status.*code$', r'^emp.*status$', r'^employee.*status$', r'^status$',
-    ],
-}
-
-# Max relationships to suggest per table pair
-MAX_PER_TABLE_PAIR = 3
-
-# Confidence thresholds
-THRESHOLD_AUTO_ACCEPT = 0.90   # This high = auto-accept
-THRESHOLD_NEEDS_REVIEW = 0.70  # Between this and auto = needs review
-THRESHOLD_DISCARD = 0.70       # Below this = ignore completely
+def analyze_project_relationships(tables: List[Dict], project: str = None) -> Dict:
+    """
+    Detect relationships between tables by comparing actual column VALUES.
+    
+    Args:
+        tables: List of table dicts with 'name'/'table_name' and 'columns'
+        project: Project name for filtering
+        
+    Returns:
+        Dict with 'relationships' list and stats
+    """
+    logger.info(f"[RELATIONSHIP-V3] Analyzing {len(tables)} tables using VALUE-BASED detection")
+    
+    # Get column profiles from DuckDB
+    column_values = get_column_values(project)
+    
+    if not column_values:
+        logger.warning("[RELATIONSHIP-V3] No column profiles found - run upload first to populate _column_profiles")
+        return {
+            'relationships': [],
+            'stats': {
+                'tables_analyzed': len(tables),
+                'columns_with_values': 0,
+                'relationships_found': 0,
+                'method': 'value_based_v3',
+                'error': 'No column profiles found. Upload data to populate _column_profiles.top_values_json'
+            }
+        }
+    
+    logger.info(f"[RELATIONSHIP-V3] Found {len(column_values)} columns with value profiles")
+    
+    # Group columns by table
+    tables_columns = defaultdict(dict)
+    for (table_name, col_name), values in column_values.items():
+        tables_columns[table_name][col_name] = values
+    
+    logger.info(f"[RELATIONSHIP-V3] {len(tables_columns)} tables have profiled columns")
+    
+    # Find relationships by comparing values across tables
+    relationships = []
+    comparisons = 0
+    
+    table_names = list(tables_columns.keys())
+    
+    for i, table_a in enumerate(table_names):
+        cols_a = tables_columns[table_a]
+        
+        for table_b in table_names[i+1:]:
+            cols_b = tables_columns[table_b]
+            
+            # Compare each column pair between the two tables
+            for col_a, values_a in cols_a.items():
+                for col_b, values_b in cols_b.items():
+                    comparisons += 1
+                    
+                    # Calculate value overlap
+                    overlap_info = calculate_value_overlap(values_a, values_b)
+                    
+                    if overlap_info['overlap_percent'] >= MIN_OVERLAP_PERCENT:
+                        confidence = get_confidence(overlap_info['overlap_percent'])
+                        
+                        relationships.append({
+                            'from_table': table_a,
+                            'from_column': col_a,
+                            'to_table': table_b,
+                            'to_column': col_b,
+                            'confidence': confidence,
+                            'match_rate': overlap_info['overlap_percent'],
+                            'matching_values': overlap_info['matching_count'],
+                            'source_distinct': overlap_info['source_count'],
+                            'target_distinct': overlap_info['target_count'],
+                            'sample_matches': overlap_info['sample_matches'][:5],
+                            'method': 'value_overlap',
+                            'verification_status': get_status(overlap_info['overlap_percent']),
+                            'confirmed': False,
+                        })
+    
+    logger.info(f"[RELATIONSHIP-V3] Made {comparisons} comparisons, found {len(relationships)} relationships")
+    
+    # Sort by confidence/match_rate descending
+    relationships.sort(key=lambda x: x['match_rate'], reverse=True)
+    
+    # Deduplicate (keep highest confidence for each table pair)
+    relationships = deduplicate_relationships(relationships)
+    
+    # Limit per table pair
+    relationships = limit_per_pair(relationships, max_per_pair=5)
+    
+    # Stats
+    high_conf = sum(1 for r in relationships if r['confidence'] >= CONFIDENCE_EXCELLENT)
+    medium_conf = sum(1 for r in relationships if CONFIDENCE_GOOD <= r['confidence'] < CONFIDENCE_EXCELLENT)
+    low_conf = sum(1 for r in relationships if r['confidence'] < CONFIDENCE_GOOD)
+    
+    logger.info(f"[RELATIONSHIP-V3] Final: {len(relationships)} relationships ({high_conf} excellent, {medium_conf} good, {low_conf} weak)")
+    
+    return {
+        'relationships': relationships,
+        'stats': {
+            'tables_analyzed': len(tables),
+            'tables_with_profiles': len(tables_columns),
+            'columns_with_values': len(column_values),
+            'comparisons_made': comparisons,
+            'relationships_found': len(relationships),
+            'high_confidence': high_conf,
+            'medium_confidence': medium_conf,
+            'low_confidence': low_conf,
+            'method': 'value_based_v3',
+        }
+    }
 
 
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
 
-def is_key_column(col_name: str) -> bool:
-    """Check if column is likely a JOIN key (not just any field)."""
-    normalized = col_name.lower().strip()
-    
-    # First check if it's an excluded pattern (descriptions, names, etc.)
-    for pattern in EXCLUDED_COLUMN_PATTERNS:
-        if re.match(pattern, normalized) or re.search(pattern, normalized):
-            return False
-    
-    # Then check if it matches key patterns
-    for pattern in KEY_COLUMN_PATTERNS:
-        if re.match(pattern, normalized) or re.search(pattern, normalized):
-            return True
-    return False
-
-
-def normalize_column_name(name: str) -> str:
-    """Normalize column name for comparison."""
-    if not name:
-        return ''
-    
-    normalized = name.lower().strip()
-    normalized = re.sub(r'[^a-z0-9]', '_', normalized)
-    normalized = re.sub(r'_+', '_', normalized)
-    normalized = normalized.strip('_')
-    return normalized
-
-
-def strip_prefixes_suffixes(name: str) -> str:
-    """Strip common prefixes/suffixes to get core name."""
-    normalized = normalize_column_name(name)
-    
-    # Strip prefixes
-    for prefix in STRIP_PREFIXES:
-        if normalized.startswith(prefix):
-            normalized = normalized[len(prefix):]
-            break
-    
-    # Strip suffixes
-    for suffix in STRIP_SUFFIXES:
-        if normalized.endswith(suffix):
-            normalized = normalized[:-len(suffix)]
-            break
-    
-    return normalized
-
-
-def get_semantic_type(column_name: str) -> Tuple[str, float]:
-    """Detect semantic type from column name patterns."""
-    normalized = normalize_column_name(column_name)
-    stripped = strip_prefixes_suffixes(column_name)
-    
-    # First check if it's an excluded pattern (descriptions should never match)
-    for pattern in EXCLUDED_COLUMN_PATTERNS:
-        if re.match(pattern, normalized) or re.search(pattern, normalized):
-            return 'excluded', 0.0
-    
-    for sem_type, patterns in SEMANTIC_TYPES.items():
-        for pattern in patterns:
-            # Check both normalized and stripped versions
-            if re.match(pattern, normalized) or re.match(pattern, stripped):
-                return sem_type, 0.95
-            if re.search(pattern, normalized) or re.search(pattern, stripped):
-                return sem_type, 0.85
-    
-    return 'unknown', 0.0
-
-
-def similarity_score(name1: str, name2: str) -> float:
-    """Calculate similarity between two column names."""
-    # Normalize both
-    n1 = normalize_column_name(name1)
-    n2 = normalize_column_name(name2)
-    
-    if not n1 or not n2:
-        return 0.0
-    
-    # Exact match after normalization
-    if n1 == n2:
-        return 1.0
-    
-    # Try with prefixes/suffixes stripped
-    s1 = strip_prefixes_suffixes(name1)
-    s2 = strip_prefixes_suffixes(name2)
-    
-    if s1 == s2 and len(s1) > 2:
-        return 0.95  # Very high - just prefix difference
-    
-    # Check semantic type match
-    type1, _ = get_semantic_type(name1)
-    type2, _ = get_semantic_type(name2)
-    
-    if type1 != 'unknown' and type1 == type2:
-        # Same semantic type - boost score significantly
-        base_score = SequenceMatcher(None, s1, s2).ratio()
-        return min(0.95, base_score + 0.3)  # Boost by 0.3
-    
-    # Sequence matcher on stripped names
-    seq_score = SequenceMatcher(None, s1, s2).ratio()
-    
-    # Token overlap
-    tokens1 = set(s1.split('_'))
-    tokens2 = set(s2.split('_'))
-    
-    if tokens1 and tokens2:
-        overlap = len(tokens1 & tokens2)
-        total = len(tokens1 | tokens2)
-        token_score = overlap / total if total > 0 else 0
-    else:
-        token_score = 0
-    
-    # Combined score
-    return max(seq_score, token_score)
-
-
-def is_config_table(table_name: str, filename: str = '') -> bool:
-    """Check if this table is likely a configuration/reference table."""
-    check_str = f"{table_name} {filename}".lower()
-    
-    for pattern in CONFIG_FILE_PATTERNS:
-        if re.search(pattern, check_str):
-            return True
-    return False
-
-
-# =============================================================================
-# MAIN ANALYSIS FUNCTION
-# =============================================================================
-
-async def analyze_project_relationships(
-    project_name: str,
-    tables: List[Dict],
-    llm_client=None
-) -> Dict:
+def get_column_values(project: str = None) -> Dict[Tuple[str, str], Set[str]]:
     """
-    Analyze tables and detect relationships.
+    Get column values from _column_profiles.top_values_json.
     
-    INTELLIGENT APPROACH:
-    1. Detect semantic type of each key column
-    2. ONLY compare columns of the SAME type (employee to employee, company to company)
-    3. No cross-type comparisons (employee_id will never match company_code)
-    4. Strip prefixes before comparing
-    5. Use global mappings for known equivalents
-    
-    Args:
-        project_name: Project identifier
-        tables: List of table dicts with 'table_name', 'columns', etc.
-        llm_client: Optional local LLM for ambiguous cases
-    
-    Returns:
-        {
-            "relationships": [...],
-            "semantic_types": [...],
-            "unmatched_columns": [...],
-            "stats": {...}
-        }
+    Returns dict of (table_name, column_name) -> set of values
     """
-    logger.info(f"[RELATIONSHIP] Analyzing {len(tables)} tables for {project_name}")
-    
-    relationships = []
-    semantic_types = []
-    
-    # Step 1: Build a map of semantic_type -> [(table, column), ...]
-    type_to_columns: Dict[str, List[Tuple[str, str]]] = {}
-    
-    for table in tables:
-        table_name = table.get('table_name', '')
-        columns = table.get('columns', [])
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
         
-        for col in columns:
-            col_name = col if isinstance(col, str) else col.get('name', '')
-            if not col_name:
+        # Query _column_profiles for columns with top_values_json
+        if project:
+            query = """
+                SELECT table_name, column_name, top_values_json, distinct_count
+                FROM _column_profiles
+                WHERE top_values_json IS NOT NULL 
+                  AND top_values_json != '[]'
+                  AND top_values_json != 'null'
+                  AND LOWER(table_name) LIKE LOWER(?) || '%'
+            """
+            results = handler.conn.execute(query, [project]).fetchall()
+        else:
+            query = """
+                SELECT table_name, column_name, top_values_json, distinct_count
+                FROM _column_profiles
+                WHERE top_values_json IS NOT NULL 
+                  AND top_values_json != '[]'
+                  AND top_values_json != 'null'
+            """
+            results = handler.conn.execute(query).fetchall()
+        
+        column_values = {}
+        
+        for row in results:
+            table_name = row[0]
+            col_name = row[1]
+            top_values_json = row[2]
+            distinct_count = row[3] or 0
+            
+            # Skip columns with too many or too few distinct values
+            if distinct_count > MAX_DISTINCT_VALUES or distinct_count < MIN_DISTINCT_VALUES:
                 continue
             
-            # Only process key columns
-            if not is_key_column(col_name):
+            # Skip description/text columns
+            col_lower = col_name.lower()
+            if any(pattern in col_lower for pattern in SKIP_COLUMN_PATTERNS):
                 continue
             
-            # Get semantic type
-            sem_type, confidence = get_semantic_type(col_name)
-            
-            if sem_type != 'unknown':
-                semantic_types.append({
-                    'table': table_name,
-                    'column': col_name,
-                    'type': sem_type,
-                    'confidence': round(confidence, 2)
-                })
+            # Parse top values
+            try:
+                if isinstance(top_values_json, str):
+                    values_list = json.loads(top_values_json)
+                else:
+                    values_list = top_values_json
                 
-                # Add to type grouping
-                if sem_type not in type_to_columns:
-                    type_to_columns[sem_type] = []
-                type_to_columns[sem_type].append((table_name, col_name))
-    
-    logger.info(f"[RELATIONSHIP] Found {len(semantic_types)} typed key columns across {len(type_to_columns)} types")
-    
-    # Step 2: For each semantic type, find relationships WITHIN that type
-    for sem_type, columns in type_to_columns.items():
-        if len(columns) < 2:
-            continue  # Need at least 2 columns to form a relationship
-        
-        logger.info(f"[RELATIONSHIP] Processing {sem_type}: {len(columns)} columns")
-        
-        # Compare columns of the SAME type across DIFFERENT tables
-        for i, (table1, col1) in enumerate(columns):
-            for table2, col2 in columns[i+1:]:
-                # Skip if same table
-                if table1 == table2:
+                if not values_list:
                     continue
                 
-                # Calculate similarity
-                score = similarity_score(col1, col2)
+                # Extract just the values (top_values_json is list of [value, count] pairs)
+                if isinstance(values_list[0], list):
+                    values = set(str(v[0]) for v in values_list if v[0] is not None)
+                else:
+                    values = set(str(v) for v in values_list if v is not None)
                 
-                # Since they're already the same semantic type, boost confidence
-                # They're fundamentally the same kind of data
-                boosted_score = min(1.0, score + 0.15)
-                
-                if boosted_score >= THRESHOLD_DISCARD:
-                    relationships.append({
-                        'from_table': table1,
-                        'from_column': col1,
-                        'to_table': table2,
-                        'to_column': col2,
-                        'confidence': round(boosted_score, 2),
-                        'semantic_type': sem_type,
-                        'method': 'exact' if boosted_score == 1.0 else 'semantic',
-                        'needs_review': boosted_score < THRESHOLD_AUTO_ACCEPT,
-                        'confirmed': False,
-                    })
-    
-    # Step 3: Deduplicate and sort by confidence
-    relationships = deduplicate_relationships(relationships)
-    relationships.sort(key=lambda x: x['confidence'], reverse=True)
-    
-    # Step 4: Limit relationships per table pair
-    limited_relationships = []
-    pair_counts: Dict[Tuple[str, str], int] = {}
-    
-    for rel in relationships:
-        pair = tuple(sorted([rel['from_table'], rel['to_table']]))
-        count = pair_counts.get(pair, 0)
+                if len(values) >= MIN_DISTINCT_VALUES:
+                    column_values[(table_name, col_name)] = values
+                    
+            except (json.JSONDecodeError, TypeError, IndexError) as e:
+                logger.debug(f"[RELATIONSHIP-V3] Could not parse values for {table_name}.{col_name}: {e}")
+                continue
         
-        if count < MAX_PER_TABLE_PAIR:
-            limited_relationships.append(rel)
-            pair_counts[pair] = count + 1
+        return column_values
+        
+    except Exception as e:
+        logger.error(f"[RELATIONSHIP-V3] Failed to get column values: {e}")
+        return {}
+
+
+def calculate_value_overlap(values_a: Set[str], values_b: Set[str]) -> Dict:
+    """
+    Calculate overlap between two sets of values.
     
-    relationships = limited_relationships
+    Returns overlap statistics.
+    """
+    if not values_a or not values_b:
+        return {
+            'overlap_percent': 0,
+            'matching_count': 0,
+            'source_count': len(values_a) if values_a else 0,
+            'target_count': len(values_b) if values_b else 0,
+            'sample_matches': [],
+        }
     
-    # Step 5: Find unmatched key columns
-    matched_cols = set()
-    for r in relationships:
-        matched_cols.add(f"{r['from_table']}.{r['from_column']}")
-        matched_cols.add(f"{r['to_table']}.{r['to_column']}")
+    # Find intersection
+    matching = values_a & values_b
+    matching_count = len(matching)
     
-    unmatched = []
-    for st in semantic_types:
-        full_name = f"{st['table']}.{st['column']}"
-        if full_name not in matched_cols:
-            unmatched.append({
-                'table': st['table'],
-                'column': st['column'],
-                'semantic_type': st['type']
-            })
-    
-    # Stats
-    total_cols = sum(len(t.get('columns', [])) for t in tables)
-    high_conf = sum(1 for r in relationships if not r['needs_review'])
-    needs_review = sum(1 for r in relationships if r['needs_review'])
-    
-    logger.info(f"[RELATIONSHIP] Results: {len(relationships)} total, {high_conf} high-conf, {needs_review} needs review")
+    # Calculate overlap as percentage of the SMALLER set
+    # This handles cases where one table has a subset of another's values
+    smaller_count = min(len(values_a), len(values_b))
+    overlap_percent = round((matching_count / smaller_count) * 100, 1) if smaller_count > 0 else 0
     
     return {
-        'relationships': relationships,
-        'semantic_types': semantic_types,
-        'unmatched_columns': unmatched[:30],  # Limit list
-        'stats': {
-            'tables_analyzed': len(tables),
-            'columns_analyzed': total_cols,
-            'key_columns_found': len(semantic_types),
-            'semantic_types_found': len(type_to_columns),
-            'relationships_found': len(relationships),
-            'high_confidence': high_conf,
-            'needs_review': needs_review,
-        }
+        'overlap_percent': overlap_percent,
+        'matching_count': matching_count,
+        'source_count': len(values_a),
+        'target_count': len(values_b),
+        'sample_matches': list(matching)[:10],
     }
 
 
-def find_column_matches(
-    table1_name: str, 
-    cols1: List[str],
-    table2_name: str, 
-    cols2: List[str]
-) -> List[Dict]:
-    """
-    Find matching columns between two tables.
-    Returns list of matches sorted by confidence.
-    """
-    matches = []
-    seen_pairs = set()
-    
-    for col1 in cols1:
-        for col2 in cols2:
-            # Skip if same column name in same comparison
-            pair_key = tuple(sorted([col1.lower(), col2.lower()]))
-            if pair_key in seen_pairs:
-                continue
-            seen_pairs.add(pair_key)
-            
-            score = similarity_score(col1, col2)
-            
-            if score >= THRESHOLD_DISCARD:
-                matches.append({
-                    'from_table': table1_name,
-                    'from_column': col1,
-                    'to_table': table2_name,
-                    'to_column': col2,
-                    'confidence': round(score, 2),
-                    'method': 'exact' if score == 1.0 else 'semantic' if score >= 0.9 else 'fuzzy',
-                    'needs_review': score < THRESHOLD_AUTO_ACCEPT,
-                    'confirmed': False,
-                })
-    
-    # Sort by confidence descending
-    matches.sort(key=lambda x: x['confidence'], reverse=True)
-    
-    return matches
+def get_confidence(overlap_percent: float) -> float:
+    """Convert overlap percentage to confidence score (0-1)."""
+    if overlap_percent >= 80:
+        return round(overlap_percent / 100, 2)
+    elif overlap_percent >= 50:
+        return round(0.5 + (overlap_percent - 50) / 100, 2)
+    else:
+        return round(overlap_percent / 100, 2)
+
+
+def get_status(overlap_percent: float) -> str:
+    """Get verification status based on overlap."""
+    if overlap_percent >= 80:
+        return 'good'
+    elif overlap_percent >= 50:
+        return 'partial'
+    elif overlap_percent >= 20:
+        return 'weak'
+    else:
+        return 'none'
 
 
 def deduplicate_relationships(relationships: List[Dict]) -> List[Dict]:
-    """Remove duplicate relationships (same pair of columns)."""
-    seen = set()
-    unique = []
+    """Remove duplicate relationships, keeping highest confidence."""
+    seen = {}
     
-    for r in relationships:
-        # Create canonical pair key
-        pair = tuple(sorted([
-            f"{r['from_table']}.{r['from_column']}",
-            f"{r['to_table']}.{r['to_column']}"
+    for rel in relationships:
+        # Create canonical key for the column pair
+        key = tuple(sorted([
+            f"{rel['from_table']}.{rel['from_column']}",
+            f"{rel['to_table']}.{rel['to_column']}"
         ]))
         
-        if pair not in seen:
-            seen.add(pair)
-            unique.append(r)
+        if key not in seen or rel['match_rate'] > seen[key]['match_rate']:
+            seen[key] = rel
     
-    return unique
+    return list(seen.values())
+
+
+def limit_per_pair(relationships: List[Dict], max_per_pair: int = 5) -> List[Dict]:
+    """Limit relationships per table pair to avoid noise."""
+    pair_counts = defaultdict(int)
+    limited = []
+    
+    for rel in relationships:
+        pair = tuple(sorted([rel['from_table'], rel['to_table']]))
+        
+        if pair_counts[pair] < max_per_pair:
+            limited.append(rel)
+            pair_counts[pair] += 1
+    
+    return limited
 
 
 # =============================================================================
-# GLOBAL MAPPINGS (for cross-customer learning)
+# TEST A SPECIFIC RELATIONSHIP
 # =============================================================================
 
-# These are "known good" mappings that apply across customers
-# In production, this would come from Supabase global_column_mappings table
-KNOWN_GLOBAL_MAPPINGS = {
-    # (normalized_name1, normalized_name2): confidence
-    ('employee_number', 'ee_num'): 1.0,
-    ('employee_number', 'emp_id'): 1.0,
-    ('employee_number', 'employee_id'): 1.0,
-    ('company_code', 'home_company_code'): 1.0,
-    ('company_code', 'co_code'): 1.0,
-    ('department_code', 'dept_code'): 1.0,
-    ('department_code', 'home_department_code'): 1.0,
-    ('job_code', 'position_code'): 0.95,
-    ('location_code', 'loc_code'): 1.0,
-    ('location_code', 'work_location_code'): 1.0,
-    ('earning_code', 'earn_code'): 1.0,
-    ('deduction_code', 'ded_code'): 1.0,
-    ('pay_group', 'paygroup'): 1.0,
-    ('pay_group', 'pay_grp'): 1.0,
-}
+def test_relationship(table_a: str, col_a: str, table_b: str, col_b: str, project: str = None) -> Dict:
+    """
+    Test a specific relationship by comparing actual values.
+    
+    Returns detailed match statistics with sample data.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        # Get distinct values from both columns
+        query_a = f'SELECT DISTINCT "{col_a}" FROM "{table_a}" WHERE "{col_a}" IS NOT NULL LIMIT 1000'
+        query_b = f'SELECT DISTINCT "{col_b}" FROM "{table_b}" WHERE "{col_b}" IS NOT NULL LIMIT 1000'
+        
+        try:
+            values_a = set(str(row[0]) for row in handler.conn.execute(query_a).fetchall())
+            values_b = set(str(row[0]) for row in handler.conn.execute(query_b).fetchall())
+        except Exception as e:
+            return {'error': f'Query failed: {e}'}
+        
+        # Calculate overlap
+        matching = values_a & values_b
+        only_in_a = values_a - values_b
+        only_in_b = values_b - values_a
+        
+        smaller = min(len(values_a), len(values_b))
+        overlap_percent = round((len(matching) / smaller) * 100, 1) if smaller > 0 else 0
+        
+        # Get sample rows from each table
+        sample_a_query = f'SELECT * FROM "{table_a}" LIMIT 10'
+        sample_b_query = f'SELECT * FROM "{table_b}" LIMIT 10'
+        
+        try:
+            sample_a = [dict(zip([d[0] for d in handler.conn.execute(sample_a_query).description], row)) 
+                       for row in handler.conn.execute(sample_a_query).fetchall()]
+            sample_b = [dict(zip([d[0] for d in handler.conn.execute(sample_b_query).description], row))
+                       for row in handler.conn.execute(sample_b_query).fetchall()]
+        except:
+            sample_a = []
+            sample_b = []
+        
+        # Get row counts
+        try:
+            count_a = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_a}"').fetchone()[0]
+            count_b = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_b}"').fetchone()[0]
+        except:
+            count_a = 0
+            count_b = 0
+        
+        return {
+            'table_a': table_a,
+            'table_b': table_b,
+            'join_column_a': col_a,
+            'join_column_b': col_b,
+            'table_a_columns': [d[0] for d in handler.conn.execute(f'SELECT * FROM "{table_a}" LIMIT 1').description] if sample_a else [],
+            'table_b_columns': [d[0] for d in handler.conn.execute(f'SELECT * FROM "{table_b}" LIMIT 1').description] if sample_b else [],
+            'table_a_sample': sample_a,
+            'table_b_sample': sample_b,
+            'statistics': {
+                'match_rate_percent': overlap_percent,
+                'matching_keys': len(matching),
+                'orphans_in_a': len(only_in_a),
+                'orphans_in_b': len(only_in_b),
+                'table_a_rows': count_a,
+                'table_b_rows': count_b,
+                'distinct_values_a': len(values_a),
+                'distinct_values_b': len(values_b),
+                'orphan_samples_from_a': list(only_in_a)[:10],
+                'orphan_samples_from_b': list(only_in_b)[:10],
+                'matching_samples': list(matching)[:10],
+            },
+            'verification': {
+                'status': get_status(overlap_percent),
+                'confidence': get_confidence(overlap_percent),
+                'message': get_verification_message(overlap_percent),
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"[RELATIONSHIP-V3] Test failed: {e}")
+        return {'error': str(e)}
 
 
-def check_global_mapping(col1: str, col2: str) -> Optional[float]:
-    """
-    Check if this column pair has a known global mapping.
-    Returns confidence if found, None if not.
-    """
-    n1 = strip_prefixes_suffixes(col1)
-    n2 = strip_prefixes_suffixes(col2)
-    
-    # Check both orderings
-    pair1 = (n1, n2)
-    pair2 = (n2, n1)
-    
-    if pair1 in KNOWN_GLOBAL_MAPPINGS:
-        return KNOWN_GLOBAL_MAPPINGS[pair1]
-    if pair2 in KNOWN_GLOBAL_MAPPINGS:
-        return KNOWN_GLOBAL_MAPPINGS[pair2]
-    
-    return None
-
-
-async def save_confirmed_mapping(col1: str, col2: str, project: str = None):
-    """
-    Save a confirmed mapping to global mappings.
-    
-    TODO: Implement Supabase storage
-    """
-    n1 = strip_prefixes_suffixes(col1)
-    n2 = strip_prefixes_suffixes(col2)
-    
-    logger.info(f"[GLOBAL] Would save mapping: {n1} <-> {n2}")
-    # Future: INSERT INTO global_column_mappings ...
-
-
-async def get_confirmed_relationships(project: str) -> List[Dict]:
-    """
-    Get previously confirmed relationships for a project.
-    
-    TODO: Implement Supabase storage
-    """
-    # Future: SELECT * FROM project_relationships WHERE project = ...
-    return []
+def get_verification_message(overlap_percent: float) -> str:
+    """Get human-readable verification message."""
+    if overlap_percent >= 80:
+        return f"Strong relationship with {overlap_percent}% match. Safe to use for JOINs."
+    elif overlap_percent >= 50:
+        return f"Partial relationship with {overlap_percent}% match. Review orphan values."
+    elif overlap_percent >= 20:
+        return f"Weak relationship: Only {overlap_percent}% match. Review if these tables should be joined."
+    else:
+        return f"No matching keys found. These tables may not be related via {overlap_percent}% match."
