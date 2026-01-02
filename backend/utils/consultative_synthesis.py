@@ -781,10 +781,40 @@ Provide a direct answer based ONLY on the data above."""
     def _call_claude_direct(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
         """
         Call Claude as fallback when local models fail.
+        Uses LLMOrchestrator for consistent metrics tracking.
         
         Only called for complex queries when Qwen 14B fails.
         """
         try:
+            # Use orchestrator if available
+            if self._orchestrator and self._orchestrator.claude_api_key:
+                prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context}
+
+Provide a direct answer based ONLY on the data above."""
+
+                system_prompt = "You are a senior consultant. Provide direct, factual answers based only on the data provided."
+                
+                result, success = self._orchestrator._call_claude(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    project_id=None,
+                    operation="consultative_synthesis"
+                )
+                
+                if success:
+                    logger.warning(f"[CONSULTATIVE] Claude fallback via orchestrator succeeded ({len(result)} chars)")
+                    return {
+                        "success": True,
+                        "response": result.strip(),
+                        "model_used": "claude-via-orchestrator"
+                    }
+            
+            # Direct fallback if orchestrator unavailable
             import anthropic
             import os
             
