@@ -23,7 +23,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import api from '../services/api';
-import ProjectContext from '../components/ProjectContext';
+// import ProjectContext from '../components/ProjectContext'; // TODO: deploy component first
 
 // ============================================================================
 // BRAND COLORS (from Mission Control)
@@ -886,12 +886,13 @@ function FilesPanel({ c, project, targetScope }) {
         </button>
       </div>
 
-      {/* Project Context - System/Domain Detection (only for project scope) */}
+      {/* Project Context - System/Domain Detection (TODO: uncomment after deploying ProjectContext.jsx)
       {!isGlobalScope && currentProject && (
         <div style={{ marginBottom: '1rem' }}>
           <ProjectContext projectName={currentProject} compact />
         </div>
       )}
+      */}
 
       {/* Recently Completed */}
       {recentlyCompleted.length > 0 && (
