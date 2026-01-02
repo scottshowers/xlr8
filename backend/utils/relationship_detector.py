@@ -3,7 +3,7 @@ Relationship Detector v3 - VALUE-BASED relationship detection.
 
 THE RIGHT WAY: Compare actual column VALUES, not just column names.
 
-Uses _column_profiles.top_values_json to find columns with overlapping values.
+Uses _column_profiles.distinct_values to find columns with overlapping values.
 If Column A has values ['USA', 'CAN', 'GBR'] and Column B has ['USA', 'CAN', 'MEX'],
 they share 66% of values = potential JOIN relationship.
 
@@ -84,7 +84,7 @@ async def analyze_project_relationships(project: str, tables: List[Dict], llm_cl
                 'high_confidence': 0,
                 'needs_review': 0,
                 'method': 'value_based_v3',
-                'error': 'No column profiles found. Upload data to populate _column_profiles.top_values_json'
+                'error': 'No column profiles found. Upload data to populate _column_profiles.distinct_values'
             }
         }
     
@@ -180,7 +180,7 @@ async def analyze_project_relationships(project: str, tables: List[Dict], llm_cl
 
 def get_column_values(project: str = None) -> Dict[Tuple[str, str], Set[str]]:
     """
-    Get column values from _column_profiles.top_values_json.
+    Get column values from _column_profiles.distinct_values.
     
     Returns dict of (table_name, column_name) -> set of values
     """
@@ -188,24 +188,24 @@ def get_column_values(project: str = None) -> Dict[Tuple[str, str], Set[str]]:
         from utils.structured_data_handler import get_structured_handler
         handler = get_structured_handler()
         
-        # Query _column_profiles for columns with top_values_json
+        # Query _column_profiles for columns with distinct_values
         if project:
             query = """
-                SELECT table_name, column_name, top_values_json, distinct_count
+                SELECT table_name, column_name, distinct_values, distinct_count
                 FROM _column_profiles
-                WHERE top_values_json IS NOT NULL 
-                  AND top_values_json != '[]'
-                  AND top_values_json != 'null'
+                WHERE distinct_values IS NOT NULL 
+                  AND distinct_values != '[]'
+                  AND distinct_values != 'null'
                   AND LOWER(table_name) LIKE LOWER(?) || '%'
             """
             results = handler.conn.execute(query, [project]).fetchall()
         else:
             query = """
-                SELECT table_name, column_name, top_values_json, distinct_count
+                SELECT table_name, column_name, distinct_values, distinct_count
                 FROM _column_profiles
-                WHERE top_values_json IS NOT NULL 
-                  AND top_values_json != '[]'
-                  AND top_values_json != 'null'
+                WHERE distinct_values IS NOT NULL 
+                  AND distinct_values != '[]'
+                  AND distinct_values != 'null'
             """
             results = handler.conn.execute(query).fetchall()
         
@@ -214,7 +214,7 @@ def get_column_values(project: str = None) -> Dict[Tuple[str, str], Set[str]]:
         for row in results:
             table_name = row[0]
             col_name = row[1]
-            top_values_json = row[2]
+            distinct_values_json = row[2]
             distinct_count = row[3] or 0
             
             # Skip columns with too many or too few distinct values
@@ -226,17 +226,17 @@ def get_column_values(project: str = None) -> Dict[Tuple[str, str], Set[str]]:
             if any(pattern in col_lower for pattern in SKIP_COLUMN_PATTERNS):
                 continue
             
-            # Parse top values
+            # Parse distinct values
             try:
-                if isinstance(top_values_json, str):
-                    values_list = json.loads(top_values_json)
+                if isinstance(distinct_values_json, str):
+                    values_list = json.loads(distinct_values_json)
                 else:
-                    values_list = top_values_json
+                    values_list = distinct_values_json
                 
                 if not values_list:
                     continue
                 
-                # Extract just the values (top_values_json is list of [value, count] pairs)
+                # Extract just the values (distinct_values is list of [value, count] pairs or just values)
                 if isinstance(values_list[0], list):
                     values = set(str(v[0]) for v in values_list if v[0] is not None)
                 else:
