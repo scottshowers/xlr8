@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom';
 import { 
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
-  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search
+  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search, GitBranch
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -213,6 +213,20 @@ export default function DataPage() {
             >
               <Search size={16} />
               Data Explorer
+            </Link>
+          </Tooltip>
+          <Tooltip title="Data Model" detail="View, verify, and manage table relationships. See how tables connect via join columns." action="Confirm relationships for accurate JOIN queries">
+            <Link 
+              to="/data/model" 
+              style={{ 
+                display: 'flex', alignItems: 'center', gap: '0.5rem',
+                padding: '0.5rem 1rem', background: `${c.royalPurple}15`, border: `1px solid ${c.royalPurple}40`,
+                borderRadius: 8, color: c.royalPurple, fontSize: '0.85rem', textDecoration: 'none',
+                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap'
+              }}
+            >
+              <GitBranch size={16} />
+              Data Model
             </Link>
           </Tooltip>
           <Tooltip title="Register Extractor" detail="Extract structured data from PDF registers like payroll reports and tax documents." action="Upload PDFs to create queryable tables">
