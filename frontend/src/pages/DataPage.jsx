@@ -17,7 +17,7 @@ import { Link } from 'react-router-dom';
 import { 
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
-  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search, GitBranch
+  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -213,20 +213,6 @@ export default function DataPage() {
             >
               <Search size={16} />
               Data Explorer
-            </Link>
-          </Tooltip>
-          <Tooltip title="Data Model" detail="View, verify, and manage table relationships. See how tables connect via join columns." action="Confirm relationships for accurate JOIN queries">
-            <Link 
-              to="/data/model" 
-              style={{ 
-                display: 'flex', alignItems: 'center', gap: '0.5rem',
-                padding: '0.5rem 1rem', background: `${c.royalPurple}15`, border: `1px solid ${c.royalPurple}40`,
-                borderRadius: 8, color: c.royalPurple, fontSize: '0.85rem', textDecoration: 'none',
-                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap'
-              }}
-            >
-              <GitBranch size={16} />
-              Data Model
             </Link>
           </Tooltip>
           <Tooltip title="Register Extractor" detail="Extract structured data from PDF registers like payroll reports and tax documents." action="Upload PDFs to create queryable tables">
@@ -760,28 +746,28 @@ function FilesPanel({ c, project, targetScope }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Use /api/platform for structured data and stats, keep references separate (not in platform yet)
+      // Use fast /files endpoint instead of slow /platform
       const projectName = project?.name || project?.id || '';
-      const [platformRes, refRes] = await Promise.all([
-        api.get(`/platform?include=files${projectName ? `&project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
+      const [filesRes, refRes] = await Promise.all([
+        api.get(`/files${projectName ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
-      // Map platform response to expected format
-      const platform = platformRes.data;
+      // Map files response to expected format
+      const filesData = filesRes.data;
       const structuredData = {
-        files: platform?.files || [],
-        total_rows: platform?.stats?.rows || 0,
-        total_files: platform?.stats?.files || 0,
-        total_tables: platform?.stats?.tables || 0,
+        files: filesData?.files || [],
+        total_rows: filesData?.total_rows || 0,
+        total_files: filesData?.total_files || 0,
+        total_tables: filesData?.total_tables || 0,
       };
       
-      // Documents from platform files that have chunks (chromadb or hybrid)
+      // Documents from files that have chunks (chromadb or hybrid)
       const documents = {
-        documents: (platform?.files || []).filter(f => 
+        documents: (filesData?.files || []).filter(f => 
           f.type === 'chromadb' || f.type === 'hybrid' || (f.chunks && f.chunks > 0)
         ),
-        count: platform?.stats?.documents || 0,
+        count: (filesData?.files || []).filter(f => f.chunks > 0).length,
       };
       
       setStructuredData(structuredData);
