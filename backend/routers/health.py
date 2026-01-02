@@ -765,6 +765,319 @@ async def get_integrity_health():
     return check_data_integrity()
 
 
+@router.get("/health/operational")
+async def get_operational_health():
+    """
+    OPERATIONAL HEALTH - Functional metrics that answer "Is the platform WORKING?"
+    
+    This is different from basic health checks:
+    - Basic health: Are services UP? (DuckDB connected? ChromaDB reachable?)
+    - Operational health: Are services WORKING? (Are uploads succeeding? Are queries returning results?)
+    
+    Metrics tracked:
+    1. LLM Cascade Health - Are Groq/Ollama/Claude responding? What's the fallback rate?
+    2. Upload Success Rate - % of uploads completing without errors
+    3. Query Success Rate - % of queries returning meaningful results
+    4. PDF Parse Quality - % of PDFs producing valid tables (vs empty/error)
+    5. Synthesis Method - % using LLM vs template fallback
+    
+    This endpoint answers: "Would a customer have a good experience right now?"
+    """
+    result = {
+        "status": "unknown",
+        "overall_health_score": 0,
+        "llm_health": {},
+        "upload_health": {},
+        "query_health": {},
+        "pdf_health": {},
+        "synthesis_health": {},
+        "recommendations": [],
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    issues = []
+    scores = []
+    
+    try:
+        from utils.database.supabase_client import get_supabase
+        supabase = get_supabase()
+        
+        # Time windows
+        hour_ago = (datetime.utcnow() - timedelta(hours=1)).isoformat()
+        day_ago = (datetime.utcnow() - timedelta(days=1)).isoformat()
+        week_ago = (datetime.utcnow() - timedelta(days=7)).isoformat()
+        
+        # =========================================================================
+        # 1. LLM CASCADE HEALTH - from platform_metrics
+        # =========================================================================
+        llm_health = {
+            "providers": {},
+            "fallback_rate": 0,
+            "success_rate": 100,
+            "avg_latency_ms": 0,
+            "calls_last_hour": 0,
+            "calls_last_24h": 0
+        }
+        
+        try:
+            # Get LLM calls from metrics
+            llm_metrics = supabase.table('platform_metrics').select('*').eq('metric_type', 'llm_call').gte('created_at', day_ago).execute()
+            
+            if llm_metrics.data:
+                total_calls = len(llm_metrics.data)
+                successful = sum(1 for m in llm_metrics.data if m.get('success', True))
+                claude_calls = sum(1 for m in llm_metrics.data if 'claude' in (m.get('provider') or '').lower())
+                
+                llm_health["calls_last_24h"] = total_calls
+                llm_health["success_rate"] = round(successful / total_calls * 100, 1) if total_calls > 0 else 100
+                llm_health["fallback_rate"] = round(claude_calls / total_calls * 100, 1) if total_calls > 0 else 0
+                
+                # Per-provider stats
+                by_provider = {}
+                for m in llm_metrics.data:
+                    provider = m.get('provider') or 'unknown'
+                    if provider not in by_provider:
+                        by_provider[provider] = {"calls": 0, "successes": 0, "latency_sum": 0}
+                    by_provider[provider]["calls"] += 1
+                    if m.get('success', True):
+                        by_provider[provider]["successes"] += 1
+                    by_provider[provider]["latency_sum"] += m.get('duration_ms', 0) or 0
+                
+                for provider, stats in by_provider.items():
+                    llm_health["providers"][provider] = {
+                        "calls": stats["calls"],
+                        "success_rate": round(stats["successes"] / stats["calls"] * 100, 1) if stats["calls"] > 0 else 0,
+                        "avg_latency_ms": round(stats["latency_sum"] / stats["calls"]) if stats["calls"] > 0 else 0
+                    }
+                
+                # Calculate average latency
+                total_latency = sum(m.get('duration_ms', 0) or 0 for m in llm_metrics.data)
+                llm_health["avg_latency_ms"] = round(total_latency / total_calls) if total_calls > 0 else 0
+                
+                # Hour window
+                llm_hour = [m for m in llm_metrics.data if m.get('created_at', '') >= hour_ago]
+                llm_health["calls_last_hour"] = len(llm_hour)
+        except Exception as e:
+            logger.warning(f"[OP-HEALTH] LLM metrics query failed: {e}")
+            llm_health["error"] = str(e)
+        
+        result["llm_health"] = llm_health
+        
+        # Score LLM health
+        if llm_health.get("success_rate", 100) >= 95:
+            scores.append(100)
+        elif llm_health.get("success_rate", 100) >= 80:
+            scores.append(70)
+            issues.append("LLM success rate below 95%")
+        else:
+            scores.append(30)
+            issues.append("LLM success rate critical (<80%)")
+        
+        if llm_health.get("fallback_rate", 0) > 50:
+            issues.append(f"High Claude fallback rate ({llm_health['fallback_rate']}%) - check local LLM")
+        
+        # =========================================================================
+        # 2. UPLOAD SUCCESS RATE - from processing_jobs
+        # =========================================================================
+        upload_health = {
+            "success_rate_24h": 0,
+            "success_rate_7d": 0,
+            "uploads_last_24h": 0,
+            "uploads_last_7d": 0,
+            "failed_uploads": [],
+            "avg_processing_time_ms": 0
+        }
+        
+        try:
+            # Last 24h
+            uploads_24h = supabase.table('processing_jobs').select('*').gte('created_at', day_ago).execute()
+            if uploads_24h.data:
+                total = len(uploads_24h.data)
+                completed = sum(1 for j in uploads_24h.data if j.get('status') == 'completed')
+                failed = [j for j in uploads_24h.data if j.get('status') == 'failed']
+                
+                upload_health["uploads_last_24h"] = total
+                upload_health["success_rate_24h"] = round(completed / total * 100, 1) if total > 0 else 100
+                upload_health["failed_uploads"] = [
+                    {"filename": j.get('filename', 'unknown'), "error": j.get('error_message', 'Unknown')}
+                    for j in failed[:5]  # Last 5 failures
+                ]
+                
+                # Average processing time for completed jobs
+                completed_jobs = [j for j in uploads_24h.data if j.get('status') == 'completed' and j.get('duration_ms')]
+                if completed_jobs:
+                    avg_time = sum(j.get('duration_ms', 0) for j in completed_jobs) / len(completed_jobs)
+                    upload_health["avg_processing_time_ms"] = round(avg_time)
+            
+            # Last 7d
+            uploads_7d = supabase.table('processing_jobs').select('status', count='exact').gte('created_at', week_ago).execute()
+            if uploads_7d.data:
+                total = len(uploads_7d.data)
+                completed = sum(1 for j in uploads_7d.data if j.get('status') == 'completed')
+                upload_health["uploads_last_7d"] = total
+                upload_health["success_rate_7d"] = round(completed / total * 100, 1) if total > 0 else 100
+                
+        except Exception as e:
+            logger.warning(f"[OP-HEALTH] Upload metrics query failed: {e}")
+            upload_health["error"] = str(e)
+        
+        result["upload_health"] = upload_health
+        
+        # Score upload health
+        if upload_health.get("success_rate_24h", 100) >= 95:
+            scores.append(100)
+        elif upload_health.get("success_rate_24h", 100) >= 80:
+            scores.append(70)
+            issues.append("Upload success rate below 95%")
+        else:
+            scores.append(30)
+            issues.append("Upload success rate critical (<80%)")
+        
+        # =========================================================================
+        # 3. QUERY SUCCESS RATE - from chat_history or metrics
+        # =========================================================================
+        query_health = {
+            "queries_last_24h": 0,
+            "queries_with_results": 0,
+            "empty_response_rate": 0,
+            "avg_response_time_ms": 0
+        }
+        
+        try:
+            # Check platform_metrics for query events
+            query_metrics = supabase.table('platform_metrics').select('*').eq('metric_type', 'query').gte('created_at', day_ago).execute()
+            
+            if query_metrics.data:
+                total = len(query_metrics.data)
+                with_results = sum(1 for q in query_metrics.data if q.get('rows_returned', 0) > 0 or q.get('success', True))
+                
+                query_health["queries_last_24h"] = total
+                query_health["queries_with_results"] = with_results
+                query_health["empty_response_rate"] = round((total - with_results) / total * 100, 1) if total > 0 else 0
+                
+                # Average response time
+                times = [q.get('duration_ms', 0) for q in query_metrics.data if q.get('duration_ms')]
+                if times:
+                    query_health["avg_response_time_ms"] = round(sum(times) / len(times))
+        except Exception as e:
+            logger.warning(f"[OP-HEALTH] Query metrics failed: {e}")
+            query_health["error"] = str(e)
+        
+        result["query_health"] = query_health
+        
+        # Score query health
+        if query_health.get("empty_response_rate", 0) <= 20:
+            scores.append(100)
+        elif query_health.get("empty_response_rate", 0) <= 40:
+            scores.append(70)
+            issues.append("High empty response rate (>20%)")
+        else:
+            scores.append(40)
+            issues.append("Very high empty response rate (>40%)")
+        
+        # =========================================================================
+        # 4. PDF PARSE QUALITY - from document_registry or metrics
+        # =========================================================================
+        pdf_health = {
+            "pdfs_processed_24h": 0,
+            "pdfs_with_tables": 0,
+            "parse_success_rate": 100,
+            "avg_tables_per_pdf": 0
+        }
+        
+        try:
+            # Check document_registry for PDF uploads
+            pdf_docs = supabase.table('document_registry').select('*').like('filename', '%.pdf').gte('created_at', day_ago).execute()
+            
+            if pdf_docs.data:
+                total = len(pdf_docs.data)
+                with_tables = sum(1 for d in pdf_docs.data if d.get('table_count', 0) > 0 or d.get('storage_type') == 'duckdb')
+                
+                pdf_health["pdfs_processed_24h"] = total
+                pdf_health["pdfs_with_tables"] = with_tables
+                pdf_health["parse_success_rate"] = round(with_tables / total * 100, 1) if total > 0 else 100
+                
+                # Average tables per PDF
+                table_counts = [d.get('table_count', 0) for d in pdf_docs.data]
+                if table_counts:
+                    pdf_health["avg_tables_per_pdf"] = round(sum(table_counts) / len(table_counts), 1)
+        except Exception as e:
+            logger.warning(f"[OP-HEALTH] PDF metrics failed: {e}")
+            pdf_health["error"] = str(e)
+        
+        result["pdf_health"] = pdf_health
+        
+        # Score PDF health
+        if pdf_health.get("parse_success_rate", 100) >= 80:
+            scores.append(100)
+        elif pdf_health.get("parse_success_rate", 100) >= 50:
+            scores.append(60)
+            issues.append("PDF parse success rate below 80%")
+        else:
+            scores.append(20)
+            issues.append("PDF parsing broken (<50% success)")
+        
+        # =========================================================================
+        # 5. SYNTHESIS QUALITY - LLM vs template fallback
+        # =========================================================================
+        synthesis_health = {
+            "llm_synthesis_rate": 100,
+            "template_fallback_rate": 0,
+            "synthesis_calls_24h": 0
+        }
+        
+        try:
+            # Check for synthesis metrics
+            synth_metrics = supabase.table('platform_metrics').select('*').eq('metric_type', 'synthesis').gte('created_at', day_ago).execute()
+            
+            if synth_metrics.data:
+                total = len(synth_metrics.data)
+                llm_synth = sum(1 for s in synth_metrics.data if 'template' not in (s.get('method', '') or '').lower())
+                
+                synthesis_health["synthesis_calls_24h"] = total
+                synthesis_health["llm_synthesis_rate"] = round(llm_synth / total * 100, 1) if total > 0 else 100
+                synthesis_health["template_fallback_rate"] = round((total - llm_synth) / total * 100, 1) if total > 0 else 0
+        except Exception as e:
+            logger.warning(f"[OP-HEALTH] Synthesis metrics failed: {e}")
+            synthesis_health["error"] = str(e)
+        
+        result["synthesis_health"] = synthesis_health
+        
+        # Score synthesis health
+        if synthesis_health.get("template_fallback_rate", 0) <= 10:
+            scores.append(100)
+        elif synthesis_health.get("template_fallback_rate", 0) <= 30:
+            scores.append(70)
+            issues.append("High template fallback rate (>10%)")
+        else:
+            scores.append(40)
+            issues.append("LLM synthesis mostly failing (>30% template)")
+        
+        # =========================================================================
+        # CALCULATE OVERALL HEALTH
+        # =========================================================================
+        if scores:
+            result["overall_health_score"] = round(sum(scores) / len(scores))
+        
+        if result["overall_health_score"] >= 90:
+            result["status"] = "healthy"
+        elif result["overall_health_score"] >= 70:
+            result["status"] = "degraded"
+        else:
+            result["status"] = "critical"
+        
+        result["recommendations"] = issues
+        
+    except Exception as e:
+        result["status"] = "error"
+        result["error"] = str(e)
+        logger.error(f"[OP-HEALTH] Check failed: {e}")
+    
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
 # =============================================================================
 # PROJECT & FILE LEVEL METRICS
 # =============================================================================
