@@ -317,23 +317,23 @@ class TruthEnricher:
         return None
     
     def _call_claude_extraction(self, prompt: str, truth_type: str) -> Optional[str]:
-        """Fallback to Claude for complex extractions."""
+        """Fallback to Claude for complex extractions - uses LLMOrchestrator."""
         if not self.orchestrator or not self.orchestrator.claude_api_key:
             return None
         
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.orchestrator.claude_api_key)
+            system_prompt = f"You are a precise data extraction assistant. Extract structured data from {truth_type} documents. Return only valid JSON."
             
-            response = client.messages.create(
-                model=self.orchestrator.claude_model,
-                max_tokens=1000,
-                messages=[{"role": "user", "content": prompt}]
+            result, success = self.orchestrator._call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                project_id=getattr(self, 'project_id', None),
+                operation="truth_enricher"
             )
             
-            if response.content:
+            if success and result:
                 logger.debug(f"[ENRICHER] Claude extraction for {truth_type}")
-                return response.content[0].text
+                return result
                 
         except Exception as e:
             logger.warning(f"[ENRICHER] Claude extraction failed: {e}")
