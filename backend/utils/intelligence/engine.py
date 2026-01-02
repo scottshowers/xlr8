@@ -565,8 +565,8 @@ class IntelligenceEngineV2:
         """
         Handle comparison queries using the ComparisonEngine.
         
-        Parses the question to identify two tables, runs the comparison,
-        and formats results as a consultative answer.
+        Uses TableSelector to find the best matching tables for each reference,
+        leveraging all the classification/domain intelligence we built.
         """
         logger.warning(f"[ENGINE-V2] Handling comparison query: {question[:60]}...")
         
@@ -574,11 +574,33 @@ class IntelligenceEngineV2:
             logger.warning("[ENGINE-V2] No schema available for comparison")
             return None
         
-        # Parse question to find table references
-        table_a, table_b = self._parse_comparison_tables(q_lower)
+        # Parse question to extract the two table references
+        ref_a, ref_b = self._extract_comparison_references(q_lower)
         
-        if not table_a or not table_b:
-            logger.warning(f"[ENGINE-V2] Could not identify two tables for comparison")
+        if not ref_a or not ref_b:
+            logger.warning(f"[ENGINE-V2] Could not extract two table references from query")
+            return None
+        
+        logger.warning(f"[ENGINE-V2] Extracted references: A='{ref_a}', B='{ref_b}'")
+        
+        # Use TableSelector to find best match for EACH reference
+        # This uses all our classification intelligence (domain, truth_type, etc.)
+        tables = self.schema.get('tables', [])
+        
+        # Find best table for reference A
+        table_a = self._find_table_for_reference(ref_a, tables, exclude=None)
+        if not table_a:
+            logger.warning(f"[ENGINE-V2] No table found for reference A: {ref_a}")
+            return None
+        
+        # Find best table for reference B (excluding table A)
+        table_b = self._find_table_for_reference(ref_b, tables, exclude=table_a)
+        if not table_b:
+            logger.warning(f"[ENGINE-V2] No table found for reference B: {ref_b}")
+            return None
+        
+        if table_a == table_b:
+            logger.warning(f"[ENGINE-V2] Both references matched same table: {table_a}")
             return None
         
         logger.warning(f"[ENGINE-V2] Comparing: {table_a} vs {table_b}")
@@ -604,51 +626,35 @@ class IntelligenceEngineV2:
                     'result': result.to_dict()
                 },
                 reasoning=[
-                    f"Compared {result.source_a_rows} rows from source A",
-                    f"Compared {result.source_b_rows} rows from source B",
+                    f"Compared {result.source_a_rows} rows from {table_a}",
+                    f"Compared {result.source_b_rows} rows from {table_b}",
                     f"Found {result.matches} matches, {len(result.only_in_a)} only in A, {len(result.only_in_b)} only in B"
                 ]
             )
             
         except Exception as e:
             logger.error(f"[ENGINE-V2] Comparison failed: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return None
     
-    def _parse_comparison_tables(self, q_lower: str) -> Tuple[Optional[str], Optional[str]]:
+    def _extract_comparison_references(self, q_lower: str) -> Tuple[Optional[str], Optional[str]]:
         """
-        Parse question to identify two tables to compare.
+        Extract the two table references from a comparison question.
         
-        Looks for patterns like:
-        - "compare X to Y"
-        - "compare X vs Y"
-        - "X compared to Y"
-        - "difference between X and Y"
+        Returns the raw reference strings, NOT table names.
+        e.g., "Company Tax Verification" and "Company Master Profile"
         """
-        tables = self.schema.get('tables', [])
-        if not tables:
-            return None, None
-        
-        # Build name -> table_name mapping
-        table_map = {}
-        for t in tables:
-            table_name = t.get('table_name', '')
-            display_name = t.get('display_name', table_name).lower()
-            
-            # Add variations
-            table_map[display_name] = table_name
-            table_map[table_name.lower()] = table_name
-            
-            # Add simplified names
-            for keyword in ['tax_verification', 'master_profile', 'tax_codes', 'earnings', 'deductions']:
-                if keyword in table_name.lower() or keyword in display_name:
-                    table_map[keyword] = table_name
-        
-        # Common comparison patterns
+        # Patterns to extract the two things being compared
         patterns = [
-            r'compare\s+(.+?)\s+(?:to|with|vs|versus)\s+(.+?)(?:\s+and|\s*$)',
+            # "compare X to Y and tell me..."
+            r'compare\s+(?:the\s+)?(?:tax\s+codes\s+in\s+)?(.+?)\s+to\s+(.+?)(?:\s+and\s+tell|\s+and\s+show|\s*$)',
+            # "compare X with Y"
+            r'compare\s+(.+?)\s+(?:with|vs|versus)\s+(.+?)(?:\s+and|\s*$)',
+            # "X compared to Y"
             r'(.+?)\s+compared\s+to\s+(.+?)(?:\s+and|\s*$)',
+            # "difference between X and Y"
             r'difference\s+between\s+(.+?)\s+and\s+(.+?)(?:\s*$)',
-            r'(.+?)\s+vs\.?\s+(.+?)(?:\s+and|\s*$)',
         ]
         
         for pattern in patterns:
@@ -657,48 +663,47 @@ class IntelligenceEngineV2:
                 ref_a = match.group(1).strip()
                 ref_b = match.group(2).strip()
                 
-                # Find matching tables
-                table_a = self._find_table_by_reference(ref_a, table_map)
-                table_b = self._find_table_by_reference(ref_b, table_map)
+                # Clean up common prefixes
+                for prefix in ['the ', 'my ', 'our ']:
+                    if ref_a.startswith(prefix):
+                        ref_a = ref_a[len(prefix):]
+                    if ref_b.startswith(prefix):
+                        ref_b = ref_b[len(prefix):]
                 
-                if table_a and table_b:
-                    return table_a, table_b
-        
-        # Fallback: look for known table keywords in question
-        found_tables = []
-        keywords = ['tax_verification', 'master_profile', 'tax_codes', 'earnings_codes', 
-                    'deduction_codes', 'earnings', 'deductions']
-        
-        for kw in keywords:
-            if kw.replace('_', ' ') in q_lower or kw in q_lower:
-                if kw in table_map:
-                    found_tables.append(table_map[kw])
-        
-        if len(found_tables) >= 2:
-            return found_tables[0], found_tables[1]
+                if ref_a and ref_b:
+                    return ref_a, ref_b
         
         return None, None
     
-    def _find_table_by_reference(self, ref: str, table_map: Dict[str, str]) -> Optional[str]:
-        """Find table name from a reference string."""
-        ref = ref.lower().strip()
+    def _find_table_for_reference(self, reference: str, tables: List[Dict], 
+                                   exclude: str = None) -> Optional[str]:
+        """
+        Find the best matching table for a reference string.
         
-        # Direct match
-        if ref in table_map:
-            return table_map[ref]
+        Uses TableSelector with the reference as the "question" to leverage
+        all our classification intelligence.
+        """
+        # Filter out excluded table
+        if exclude:
+            tables = [t for t in tables if t.get('table_name') != exclude]
         
-        # Partial match
-        for key, table_name in table_map.items():
-            if ref in key or key in ref:
-                return table_name
+        if not tables:
+            return None
         
-        # Fuzzy match - check for key words
-        keywords = ref.replace('the ', '').replace('company ', '').split()
-        for kw in keywords:
-            if len(kw) > 3:  # Skip short words
-                for key, table_name in table_map.items():
-                    if kw in key:
-                        return table_name
+        # Use TableSelector to score tables against this reference
+        selector = TableSelector(
+            structured_handler=self.structured_handler,
+            filter_candidates=self.filter_candidates,
+            project=self.project_id
+        )
+        
+        # Select best matches for this reference
+        matches = selector.select(tables, reference, max_tables=3)
+        
+        if matches:
+            best_match = matches[0].get('table_name')
+            logger.warning(f"[ENGINE-V2] Reference '{reference[:30]}' -> {best_match}")
+            return best_match
         
         return None
     
