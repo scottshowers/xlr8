@@ -188,37 +188,18 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
   };
 
   // Get display name for table - extracts the friendly part from full table name
+  // Get display name for table - use the display_name from tables array
   const getDisplayName = (tableName) => {
     if (!tableName) return '?';
     
-    // Check if we have this table in our tables array with a display_name
+    // Look up in tables array - this has the proper display_name from the API
     const tableInfo = tables?.find(t => t.table_name === tableName);
     if (tableInfo?.display_name) {
       return tableInfo.display_name;
     }
     
-    // Extract from table name: project_filename_sheetname
-    // Pattern: tea1000_team_configuration_validation_for_brande_company_information_component_company_information_r
-    // We want the last meaningful segment(s)
-    const parts = tableName.split('_');
-    
-    // Skip project prefix (first part that looks like a project code)
-    let startIdx = 0;
-    if (parts[0]?.match(/^[a-z]+\d+$/i)) {
-      startIdx = 1;
-    }
-    
-    // Try to find where the actual sheet name starts
-    // Usually after repeated words like "for_brande" or "validation"
-    const remaining = parts.slice(startIdx);
-    
-    // Take last 3-4 meaningful words, capitalize them
-    const meaningful = remaining.slice(-4).filter(p => p.length > 1);
-    if (meaningful.length > 0) {
-      return meaningful.map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
-    }
-    
-    return tableName.split('__').pop() || tableName;
+    // Fallback: just return the table name as-is
+    return tableName;
   };
 
   // Get truncated full table name for display
@@ -1386,7 +1367,7 @@ export default function DataExplorer() {
       </div>
 
       {/* Stats Row */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
         <Tooltip title="Tables" detail="Total structured tables loaded into the system." action="Click a table to view columns">
           <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
             <span style={{ fontSize: '1.5rem' }}>🗄️</span>
@@ -1849,25 +1830,92 @@ export default function DataExplorer() {
           
           {complianceResults ? (
             <div style={{ display: 'grid', gap: '1rem' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem' }}>
+              {/* Summary Stats - 4 columns: passed, failed, skipped, errors */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem' }}>
                 <div style={{ padding: '1rem', background: `${c.success}10`, borderRadius: 8, textAlign: 'center' }}>
                   <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.success }}>{complianceResults.passed || 0}</div>
                   <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Passed</div>
-                </div>
-                <div style={{ padding: '1rem', background: `${c.warning}10`, borderRadius: 8, textAlign: 'center' }}>
-                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.warning }}>{complianceResults.warnings || 0}</div>
-                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Warnings</div>
                 </div>
                 <div style={{ padding: '1rem', background: `${c.scarletSage}10`, borderRadius: 8, textAlign: 'center' }}>
                   <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.scarletSage }}>{complianceResults.failed || 0}</div>
                   <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Failed</div>
                 </div>
-              </div>
-              {complianceResults.details?.map((d, i) => (
-                <div key={i} style={{ padding: '0.75rem', background: c.background, borderRadius: 6, fontSize: '0.85rem' }}>
-                  {d.rule}: <span style={{ color: d.passed ? c.success : c.scarletSage }}>{d.passed ? 'PASS' : 'FAIL'}</span>
+                <div style={{ padding: '1rem', background: `${c.warning}10`, borderRadius: 8, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.warning }}>{complianceResults.skipped || 0}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Skipped</div>
                 </div>
-              ))}
+                <div style={{ padding: '1rem', background: `${c.iceFlow}20`, borderRadius: 8, textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.textMuted }}>{complianceResults.errors || 0}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Errors</div>
+                </div>
+              </div>
+              
+              {/* Per-rule check results */}
+              <div style={{ maxHeight: '50vh', overflowY: 'auto' }}>
+                <h4 style={{ margin: '0.5rem 0', color: c.text, fontSize: '0.9rem' }}>Check Results ({complianceResults.check_results?.length || 0} rules)</h4>
+                {(complianceResults.check_results || []).map((r, i) => {
+                  const statusColor = r.status === 'passed' ? c.success : 
+                                      r.status === 'failed' ? c.scarletSage : 
+                                      r.status === 'skipped' ? c.warning : c.textMuted;
+                  const statusIcon = r.status === 'passed' ? '✓' : 
+                                     r.status === 'failed' ? '✗' : 
+                                     r.status === 'skipped' ? '⊘' : '⚠';
+                  return (
+                    <div key={i} style={{ 
+                      padding: '0.75rem', 
+                      background: c.background, 
+                      borderRadius: 6, 
+                      marginBottom: '0.5rem',
+                      borderLeft: `3px solid ${statusColor}`
+                    }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <div style={{ flex: 1 }}>
+                          <div style={{ fontWeight: 600, fontSize: '0.85rem', color: c.text }}>
+                            {r.rule_title || r.rule_id}
+                          </div>
+                          <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '2px' }}>
+                            {r.message}
+                          </div>
+                        </div>
+                        <span style={{ 
+                          fontSize: '0.75rem', 
+                          padding: '2px 8px', 
+                          borderRadius: 4, 
+                          background: `${statusColor}20`,
+                          color: statusColor,
+                          fontWeight: 600
+                        }}>
+                          {statusIcon} {r.status?.toUpperCase()}
+                        </span>
+                      </div>
+                      {r.sql_generated && (
+                        <details style={{ marginTop: '0.5rem' }}>
+                          <summary style={{ fontSize: '0.75rem', color: c.accent, cursor: 'pointer' }}>View SQL</summary>
+                          <pre style={{ 
+                            fontSize: '0.7rem', 
+                            background: c.cardBg, 
+                            padding: '0.5rem', 
+                            borderRadius: 4, 
+                            overflow: 'auto',
+                            margin: '0.25rem 0 0 0',
+                            maxHeight: '150px'
+                          }}>{r.sql_generated}</pre>
+                        </details>
+                      )}
+                      {r.sql_error && (
+                        <div style={{ fontSize: '0.75rem', color: c.scarletSage, marginTop: '0.25rem' }}>
+                          SQL Error: {r.sql_error}
+                        </div>
+                      )}
+                      {r.result_count > 0 && (
+                        <div style={{ fontSize: '0.75rem', color: c.scarletSage, marginTop: '0.25rem' }}>
+                          Found {r.result_count} violation{r.result_count !== 1 ? 's' : ''}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           ) : (rules && rules.length > 0) ? (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '3rem' }}>
