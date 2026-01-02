@@ -556,9 +556,10 @@ class ConsultativeSynthesizer:
         """
         Use LLM to synthesize a consultative answer.
         
-        SIMPLE ROUTING:
-        - ALL questions → Qwen 14B (one model for everything)
-        - FALLBACK → Claude (only if Qwen fails)
+        MODEL CASCADE (in order):
+        1. Groq (llama-3.3-70b) - Fast, reliable, high quality
+        2. Local Ollama (deepseek-r1:14b) - If Groq unavailable
+        3. Claude API - Final fallback
         
         Returns: (answer_text, method_used)
         """
@@ -586,33 +587,43 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt - FORCE THE FORMAT
-        expert_prompt = """Answer format: YES/NO/PARTIALLY + specific values from data.
+        # Expert prompt - consultative style
+        expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
 
-If asked "are my SUI rates setup correctly":
-- Look for rows where type_of_tax = "SUI" or "Unemployment"
-- List the states and rates you find
-- Say YES if you found SUI data, NO if not found
+RESPONSE FORMAT:
+1. Direct answer to the question (YES/NO/PARTIALLY with specifics)
+2. Key findings from the data (bullet points with actual values)
+3. Issues or gaps identified (if any)
+4. Recommended next steps
 
-Example answer: "YES - Found SUI rates for: TX, CA, NY, FL (see contribution_rate_percent column)"
+Be specific. Quote actual values from the data. Do not be vague."""
 
-DO NOT describe what the data looks like. Just answer YES/NO and list what you found."""
-
-        # =====================================================================
-        # MODEL CASCADE: Try local models in order, fall back to Claude
-        # Quality threshold: responses < 200 chars are considered failures
-        # Order: deepseek-r1:14b (reasoning) → qwen2.5-coder:14b → Claude
-        # =====================================================================
+        MIN_RESPONSE_LENGTH = 150
         
-        MIN_RESPONSE_LENGTH = 200  # Reasoning models should give substantive answers
+        # =====================================================================
+        # TRY GROQ FIRST - Most reliable for Railway deployment
+        # =====================================================================
+        logger.warning("[CONSULTATIVE] Trying Groq (llama-3.3-70b)...")
+        result = self._call_groq(question, context, expert_prompt)
         
-        # Define model cascade - try these in order
+        if result.get('success') and result.get('response'):
+            response_len = len(result.get('response', ''))
+            if response_len >= MIN_RESPONSE_LENGTH:
+                logger.warning(f"[CONSULTATIVE] Groq succeeded ({response_len} chars)")
+                return result['response'], 'groq'
+            else:
+                logger.warning(f"[CONSULTATIVE] Groq response too short ({response_len} chars)")
+        else:
+            logger.warning(f"[CONSULTATIVE] Groq failed: {result.get('error', 'unknown')}")
+        
+        # =====================================================================
+        # TRY LOCAL MODELS - If Groq unavailable
+        # =====================================================================
         model_cascade = [
-            ('deepseek-r1:14b', 'deepseek-r1'),    # Primary: actual reasoning model
-            ('qwen2.5-coder:14b', 'qwen-14b'),      # Fallback: good for structured data
+            ('deepseek-r1:14b', 'deepseek-r1'),
+            ('qwen2.5-coder:14b', 'qwen-14b'),
         ]
         
-        result = None
         for model_name, method_name in model_cascade:
             logger.warning(f"[CONSULTATIVE] Trying {model_name}...")
             result = self._call_local_model(
@@ -628,12 +639,12 @@ DO NOT describe what the data looks like. Just answer YES/NO and list what you f
                     logger.warning(f"[CONSULTATIVE] {model_name} succeeded ({response_len} chars)")
                     return result['response'], method_name
                 else:
-                    logger.warning(f"[CONSULTATIVE] {model_name} response too short ({response_len} chars < {MIN_RESPONSE_LENGTH}), trying next model")
+                    logger.warning(f"[CONSULTATIVE] {model_name} response too short ({response_len} chars)")
             else:
                 logger.warning(f"[CONSULTATIVE] {model_name} failed: {result.get('error', 'unknown')}")
         
-        # All local models failed or gave garbage - fall back to Claude
-        logger.warning("[CONSULTATIVE] All local models failed/insufficient, falling back to Claude API")
+        # All local models failed - fall back to Claude
+        logger.warning("[CONSULTATIVE] All models failed, falling back to Claude API")
         result = self._call_claude_direct(question, context, expert_prompt)
         
         if result.get('success') and result.get('response'):
@@ -643,6 +654,61 @@ DO NOT describe what the data looks like. Just answer YES/NO and list what you f
         # Final fallback - template-based
         logger.warning(f"[CONSULTATIVE] All LLMs failed: {result.get('error')}, using template")
         return self._template_fallback(question, summaries, triangulation), 'template'
+    
+    def _call_groq(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
+        """
+        Call Groq API for synthesis.
+        
+        Groq is fast and reliable - preferred for Railway deployment.
+        """
+        try:
+            import requests
+            import os
+            
+            api_key = os.getenv("GROQ_API_KEY")
+            if not api_key:
+                return {"success": False, "error": "No GROQ_API_KEY"}
+            
+            prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context[:12000]}
+
+Provide a consultative answer based on the data above."""
+
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            payload = {
+                "model": "llama-3.3-70b-versatile",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.3,
+                "max_tokens": 1000
+            }
+            
+            response = requests.post(
+                "https://api.groq.com/openai/v1/chat/completions",
+                headers=headers,
+                json=payload,
+                timeout=60
+            )
+            
+            if response.status_code == 200:
+                answer = response.json()['choices'][0]['message']['content'].strip()
+                if answer and len(answer) > 50:
+                    return {"success": True, "response": answer, "model_used": "groq"}
+                else:
+                    return {"success": False, "error": "Empty response"}
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
+                
+        except Exception as e:
+            logger.error(f"[CONSULTATIVE] Groq error: {e}")
+            return {"success": False, "error": str(e)}
     
     def _call_local_model(self, model: str, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
         """
