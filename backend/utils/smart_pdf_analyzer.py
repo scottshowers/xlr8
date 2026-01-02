@@ -1103,18 +1103,15 @@ def process_pdf_intelligently(
         else:
             update_status("PDF classified as narrative text (no tables detected)", 60)
         
-        # ChromaDB decision: Skip for large tabular PDFs that went to DuckDB
+        # ChromaDB decision: ALWAYS include for document search
+        # (Previously skipped for large tabular PDFs, but users want all PDFs searchable)
         text_length = len(text) if text else 0
         duckdb_success = 'duckdb' in result['storage_used']
-        is_tabular = analysis.get('is_tabular', False)
         
-        if is_tabular and duckdb_success and text_length > 500000:
-            # Large tabular PDF successfully in DuckDB - skip ChromaDB
-            logger.warning(f"[SMART-PDF] Skipping ChromaDB for large tabular PDF ({text_length:,} chars)")
-            update_status("✓ Large tabular PDF stored to DuckDB only (too large for semantic search)", 95)
-        else:
-            # Include ChromaDB for semantic search
-            result['storage_used'].append('chromadb')
+        # Always add to ChromaDB for searchability
+        result['storage_used'].append('chromadb')
+        if text_length > 500000:
+            logger.warning(f"[SMART-PDF] Large PDF ({text_length:,} chars) - will still add to ChromaDB for search")
         
         result['success'] = True
         
