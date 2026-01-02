@@ -264,6 +264,33 @@ except ImportError:
         PROJECT_INTELLIGENCE_AVAILABLE = False
         logger.warning("[UNIFIED] Project intelligence not available - using fallback services")
 
+# Chat Services (extracted from this file for modularity)
+try:
+    from backend.utils.chat_services import (
+        ReversibleRedactor,
+        DataModelService,
+        DataQualityService,
+        FollowUpGenerator,
+        CitationBuilder
+    )
+    CHAT_SERVICES_AVAILABLE = True
+    logger.info("[UNIFIED] Chat services imported from backend.utils.chat_services")
+except ImportError:
+    try:
+        from utils.chat_services import (
+            ReversibleRedactor,
+            DataModelService,
+            DataQualityService,
+            FollowUpGenerator,
+            CitationBuilder
+        )
+        CHAT_SERVICES_AVAILABLE = True
+        logger.info("[UNIFIED] Chat services imported from utils.chat_services")
+    except ImportError:
+        # Fallback to inline definitions (legacy)
+        CHAT_SERVICES_AVAILABLE = False
+        logger.warning("[UNIFIED] Chat services not available - using inline definitions")
+
 
 # =============================================================================
 # REQUEST/RESPONSE MODELS
@@ -1213,6 +1240,38 @@ class CitationBuilder:
                 lines.append(f"```sql\n{sql_display}\n```")
         
         return "\n".join(lines)
+
+
+# =============================================================================
+# OVERRIDE INLINE CLASSES WITH IMPORTED VERSIONS (if available)
+# =============================================================================
+# The inline classes above serve as fallback. If chat_services import succeeded,
+# we override them here with the imported versions for cleaner code organization.
+
+if CHAT_SERVICES_AVAILABLE:
+    # Import succeeded - use extracted modules
+    try:
+        from backend.utils.chat_services import (
+            ReversibleRedactor,
+            DataModelService,
+            DataQualityService,
+            FollowUpGenerator,
+            CitationBuilder
+        )
+        logger.info("[UNIFIED] Using extracted chat_services modules")
+    except ImportError:
+        try:
+            from utils.chat_services import (
+                ReversibleRedactor,
+                DataModelService,
+                DataQualityService,
+                FollowUpGenerator,
+                CitationBuilder
+            )
+            logger.info("[UNIFIED] Using extracted chat_services modules (alt path)")
+        except ImportError:
+            # Stick with inline definitions
+            logger.warning("[UNIFIED] Failed to re-import chat_services, using inline definitions")
 
 
 # =============================================================================
