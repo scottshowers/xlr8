@@ -1,10 +1,10 @@
 # XLR8 Platform Architecture
 ## Technical Stack & System Design
 
-**Version:** 4.0.0  
+**Version:** 5.0.0  
 **Architecture:** Five Truths Intelligence Model  
 **Deployment:** Railway (Backend) + Vercel (Frontend)  
-**Last Updated:** December 30, 2025
+**Last Updated:** January 2, 2026
 
 ---
 
@@ -405,9 +405,54 @@ xlr8-main/
 | Feature | Status | Priority |
 |---------|--------|----------|
 | Playbook Builder UI | In Progress | Exit Blocker |
+| Customer Landing Page | Planned | High |
 | Export Engine (PDF/Excel) | Planned | High |
-| Customer Portal | Planned | High |
-| Unified SQL Generation | Planned | Medium |
+| Comparison Engine | Planned | High |
+| Unified Chat Refactor | Planned | Medium |
+
+---
+
+## 🆕 RECENT ADDITIONS (January 2026)
+
+### Domain Decoder
+**File:** `backend/utils/domain_decoder.py`
+
+Consultant knowledge that makes XLR8 smarter. Stores pattern → meaning mappings.
+
+| Pattern | Meaning | Example |
+|---------|---------|---------|
+| Configuration Validation | What's CONFIGURED in UKG | Earning codes, deduction plans |
+| Employee Conversion Testing | What's IN USE by employees | Actual data being used |
+| TXC | Taxable Company Car | Fringe benefit earning code |
+
+**Endpoints:** `/api/decoder/*` - list, search, add, update, delete
+
+### Gap Detection Engine
+**File:** `backend/utils/gap_detection_engine.py`
+
+Compares Configuration vs Reality to find implementation gaps:
+- **Configured but unused:** Code in Config but not in Reality
+- **In use but unconfigured:** Code in Reality but not in Config (ERROR!)
+
+Automatically runs during Tier 2 analysis via `project_intelligence.py`.
+
+### Sequential Job Queue
+**File:** `backend/routers/upload.py` (JobQueue class)
+
+Prevents Ollama overload by processing ONE upload at a time. Multiple file uploads are queued and processed sequentially.
+
+**Endpoint:** `GET /api/upload/queue-status`
+
+### Relationship Detector
+**File:** `backend/utils/relationship_detector.py`
+
+Intelligent table relationship detection:
+1. Detects semantic type of each key column
+2. Only compares columns of the SAME type
+3. Strips prefixes before comparing (home_company_code ↔ company_code)
+4. Stores relationships to Supabase for review/confirmation
+
+Called from `project_intelligence.py` during Tier 2 analysis.
 
 ---
 
@@ -426,6 +471,6 @@ xlr8-main/
 
 ---
 
-**Document Version:** 4.0  
-**Last Updated:** December 30, 2025  
+**Document Version:** 5.0  
+**Last Updated:** January 2, 2026  
 **Maintainer:** HCMPACT Engineering
