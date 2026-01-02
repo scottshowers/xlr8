@@ -54,13 +54,14 @@ KEY_COLUMN_PATTERNS = [
 # MAIN FUNCTION
 # =============================================================================
 
-def analyze_project_relationships(tables: List[Dict], project: str = None) -> Dict:
+async def analyze_project_relationships(project: str, tables: List[Dict], llm_client = None) -> Dict:
     """
     Detect relationships between tables by comparing actual column VALUES.
     
     Args:
-        tables: List of table dicts with 'name'/'table_name' and 'columns'
         project: Project name for filtering
+        tables: List of table dicts with 'name'/'table_name' and 'columns'
+        llm_client: Not used in v3 (kept for API compatibility)
         
     Returns:
         Dict with 'relationships' list and stats
@@ -74,10 +75,14 @@ def analyze_project_relationships(tables: List[Dict], project: str = None) -> Di
         logger.warning("[RELATIONSHIP-V3] No column profiles found - run upload first to populate _column_profiles")
         return {
             'relationships': [],
+            'semantic_types': [],
+            'unmatched_columns': [],
             'stats': {
                 'tables_analyzed': len(tables),
                 'columns_with_values': 0,
                 'relationships_found': 0,
+                'high_confidence': 0,
+                'needs_review': 0,
                 'method': 'value_based_v3',
                 'error': 'No column profiles found. Upload data to populate _column_profiles.top_values_json'
             }
@@ -116,10 +121,10 @@ def analyze_project_relationships(tables: List[Dict], project: str = None) -> Di
                         confidence = get_confidence(overlap_info['overlap_percent'])
                         
                         relationships.append({
-                            'from_table': table_a,
-                            'from_column': col_a,
-                            'to_table': table_b,
-                            'to_column': col_b,
+                            'source_table': table_a,
+                            'source_column': col_a,
+                            'target_table': table_b,
+                            'target_column': col_b,
                             'confidence': confidence,
                             'match_rate': overlap_info['overlap_percent'],
                             'matching_values': overlap_info['matching_count'],
@@ -128,6 +133,7 @@ def analyze_project_relationships(tables: List[Dict], project: str = None) -> Di
                             'sample_matches': overlap_info['sample_matches'][:5],
                             'method': 'value_overlap',
                             'verification_status': get_status(overlap_info['overlap_percent']),
+                            'needs_review': overlap_info['overlap_percent'] < 80,
                             'confirmed': False,
                         })
     
@@ -151,6 +157,8 @@ def analyze_project_relationships(tables: List[Dict], project: str = None) -> Di
     
     return {
         'relationships': relationships,
+        'semantic_types': [],  # Not used in v3 - kept for API compatibility
+        'unmatched_columns': [],  # Not used in v3 - kept for API compatibility
         'stats': {
             'tables_analyzed': len(tables),
             'tables_with_profiles': len(tables_columns),
@@ -160,6 +168,7 @@ def analyze_project_relationships(tables: List[Dict], project: str = None) -> Di
             'high_confidence': high_conf,
             'medium_confidence': medium_conf,
             'low_confidence': low_conf,
+            'needs_review': sum(1 for r in relationships if r.get('needs_review')),
             'method': 'value_based_v3',
         }
     }
@@ -309,8 +318,8 @@ def deduplicate_relationships(relationships: List[Dict]) -> List[Dict]:
     for rel in relationships:
         # Create canonical key for the column pair
         key = tuple(sorted([
-            f"{rel['from_table']}.{rel['from_column']}",
-            f"{rel['to_table']}.{rel['to_column']}"
+            f"{rel['source_table']}.{rel['source_column']}",
+            f"{rel['target_table']}.{rel['target_column']}"
         ]))
         
         if key not in seen or rel['match_rate'] > seen[key]['match_rate']:
@@ -325,7 +334,7 @@ def limit_per_pair(relationships: List[Dict], max_per_pair: int = 5) -> List[Dic
     limited = []
     
     for rel in relationships:
-        pair = tuple(sorted([rel['from_table'], rel['to_table']]))
+        pair = tuple(sorted([rel['source_table'], rel['target_table']]))
         
         if pair_counts[pair] < max_per_pair:
             limited.append(rel)
