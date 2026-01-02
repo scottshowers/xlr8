@@ -473,21 +473,37 @@ async def get_platform_status(
             
             if include_files:
                 try:
-                    schema_results = handler.conn.execute("""
-                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
-                        FROM _schema_metadata 
-                        WHERE is_current = TRUE
-                        ORDER BY file_name, table_name
-                    """).fetchall()
+                    if project_filter:
+                        schema_results = handler.conn.execute("""
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                            FROM _schema_metadata 
+                            WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
+                            ORDER BY file_name, table_name
+                        """, [project_filter]).fetchall()
+                    else:
+                        schema_results = handler.conn.execute("""
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                            FROM _schema_metadata 
+                            WHERE is_current = TRUE
+                            ORDER BY file_name, table_name
+                        """).fetchall()
                 except Exception as e:
                     logger.debug(f"[PLATFORM] Schema metadata query: {e}")
                 
                 try:
-                    pdf_results = handler.conn.execute("""
-                        SELECT source_file, project, table_name, row_count, created_at
-                        FROM _pdf_tables
-                        ORDER BY source_file, table_name
-                    """).fetchall()
+                    if project_filter:
+                        pdf_results = handler.conn.execute("""
+                            SELECT source_file, project, table_name, row_count, created_at
+                            FROM _pdf_tables
+                            WHERE LOWER(project) = LOWER(?)
+                            ORDER BY source_file, table_name
+                        """, [project_filter]).fetchall()
+                    else:
+                        pdf_results = handler.conn.execute("""
+                            SELECT source_file, project, table_name, row_count, created_at
+                            FROM _pdf_tables
+                            ORDER BY source_file, table_name
+                        """).fetchall()
                 except Exception as e:
                     logger.debug(f"[PLATFORM] PDF tables query: {e}")
             
@@ -648,6 +664,14 @@ async def get_platform_status(
                     }
                 
                 response["files"] = list(files_dict.values())
+                
+                # Filter files by project if specified
+                if project_filter:
+                    response["files"] = [
+                        f for f in response["files"] 
+                        if f.get("project", "").lower() == project_filter.lower()
+                    ]
+                
                 if len(response["files"]) > response["stats"]["files"]:
                     response["stats"]["files"] = len(response["files"])
             
