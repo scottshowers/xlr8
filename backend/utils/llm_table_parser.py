@@ -26,6 +26,18 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 logger = logging.getLogger(__name__)
 
+# Try to import LLM orchestrator for consistent Claude calls
+_orchestrator = None
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    _orchestrator = LLMOrchestrator()
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        _orchestrator = LLMOrchestrator()
+    except ImportError:
+        logger.warning("[LLM-PARSER] LLMOrchestrator not available")
+
 
 # =============================================================================
 # PII REDACTOR - Same patterns that work in RegisterExtractor
@@ -268,9 +280,27 @@ def call_ollama(prompt: str, model: str = "deepseek-r1:14b", max_tokens: int = 8
 
 def call_claude(prompt: str, max_tokens: int = 8192) -> Optional[str]:
     """
-    Call Claude API as fallback.
+    Call Claude API as fallback - uses LLMOrchestrator for consistency.
     Only used when Groq and Ollama both fail.
     """
+    global _orchestrator
+    
+    # Try orchestrator first
+    if _orchestrator and _orchestrator.claude_api_key:
+        try:
+            system_prompt = "You are a precise data extraction assistant. Extract table data and return valid JSON."
+            result, success = _orchestrator._call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                project_id=None,
+                operation="llm_table_parser"
+            )
+            if success:
+                return result
+        except Exception as e:
+            logger.warning(f"[LLM-PARSER] Orchestrator Claude call failed: {e}")
+    
+    # Direct fallback if orchestrator unavailable
     claude_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
     
     if not claude_api_key:
