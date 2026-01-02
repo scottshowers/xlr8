@@ -1243,126 +1243,31 @@ def process_file_background(
                     # Fallback: extract text normally
                     text = extract_text(file_path)
                 
-                # If we got DuckDB storage but no text, we can complete here
+                # CHANGED: Always continue to ChromaDB for PDFs
+                # Even if we got DuckDB storage, PDFs should be searchable
                 if duckdb_success and (not text or len(text.strip()) < 100):
-                    # Register as DuckDB-only (structured)
-                    if REGISTRATION_SERVICE_AVAILABLE:
-                        try:
-                            duckdb_result = pdf_result.get('duckdb_result', {})
-                            reg_result = RegistrationService.register_structured(
-                                filename=filename,
-                                project=project,
-                                project_id=project_id,
-                                tables_created=duckdb_result.get('tables_created', []),
-                                row_count=duckdb_result.get('total_rows', 0),
-                                file_size=file_size,
-                                file_type='pdf',
-                                uploaded_by_id=uploaded_by_id,
-                                uploaded_by_email=uploaded_by_email,
-                                job_id=job_id,
-                                source=RegistrationSource.UPLOAD,
-                                classification_confidence=classification_confidence,
-                                content_domain=domain_list,
-                                metadata={
-                                    'project_name': project,
-                                    'functional_area': functional_area,
-                                    'source': 'smart_pdf',
-                                    'exit_reason': 'no_text',
-                                    'truth_type': truth_type
-                                }
-                            )
-                            logger.warning(f"[BACKGROUND] Registered PDF (DuckDB only): {reg_result.lineage_edges} lineage edges")
-                        except Exception as e:
-                            logger.warning(f"[BACKGROUND] Registration failed: {e}")
+                    # Try harder to extract text for ChromaDB
+                    logger.warning(f"[BACKGROUND] DuckDB succeeded but text is short ({len(text) if text else 0} chars) - re-extracting for ChromaDB")
+                    try:
+                        # Force text extraction for ChromaDB
+                        text = extract_text(file_path)
+                        if text:
+                            logger.warning(f"[BACKGROUND] Re-extracted {len(text)} chars for ChromaDB")
+                    except Exception as ext_e:
+                        logger.warning(f"[BACKGROUND] Text re-extraction failed: {ext_e}")
                     
-                    ProcessingJobModel.update_progress(job_id, 90, "Cleaning up...")
-                    if file_path and os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
-                    
-                    ProcessingJobModel.complete(job_id, {
-                        'filename': filename,
-                        'type': 'smart_pdf',
-                        'storage': pdf_result.get('storage_used', []),
-                        'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
-                        'project': project,
-                        'intelligence': pdf_result.get('intelligence')
-                    })
-                    
-                    # Record metrics
-                    if METRICS_AVAILABLE:
-                        times = calc_timing_ms()
-                        MetricsService.record_upload(
-                            processor='smart_pdf',
-                            filename=filename,
-                            duration_ms=times['processing_time_ms'],
-                            success=True,
-                            project_id=project_id,
-                            file_size_bytes=file_size,
-                            rows_processed=pdf_result.get('duckdb_result', {}).get('total_rows', 0)
-                        )
-                    
-                    logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only)")
-                    return
+                    # If STILL no text, at least add filename/metadata to ChromaDB
+                    if not text or len(text.strip()) < 10:
+                        text = f"PDF Document: {filename}\nProject: {project}\nThis document contains tabular data stored in DuckDB."
+                        logger.warning(f"[BACKGROUND] Using placeholder text for ChromaDB searchability")
                 
-                # Check if smart_pdf_analyzer says to skip ChromaDB (large tabular PDFs)
-                skip_chromadb = 'chromadb' not in pdf_result.get('storage_used', [])
+                # CHANGED: Always continue to ChromaDB - removed early return
+                # (Previously returned here for DuckDB-only PDFs)
                 
-                if skip_chromadb and duckdb_success:
-                    # Register as DuckDB-only (structured) - large tabular
-                    if REGISTRATION_SERVICE_AVAILABLE:
-                        try:
-                            duckdb_result = pdf_result.get('duckdb_result', {})
-                            reg_result = RegistrationService.register_structured(
-                                filename=filename,
-                                project=project,
-                                project_id=project_id,
-                                tables_created=duckdb_result.get('tables_created', []),
-                                row_count=duckdb_result.get('total_rows', 0),
-                                file_size=file_size,
-                                file_type='pdf',
-                                uploaded_by_id=uploaded_by_id,
-                                uploaded_by_email=uploaded_by_email,
-                                job_id=job_id,
-                                source=RegistrationSource.UPLOAD,
-                                classification_confidence=classification_confidence,
-                                content_domain=domain_list,
-                                metadata={
-                                    'project_name': project,
-                                    'functional_area': functional_area,
-                                    'source': 'smart_pdf',
-                                    'exit_reason': 'large_tabular_skip_chromadb',
-                                    'truth_type': truth_type
-                                }
-                            )
-                            logger.warning(f"[BACKGROUND] Registered PDF (DuckDB only, large tabular): {reg_result.lineage_edges} lineage edges")
-                        except Exception as e:
-                            logger.warning(f"[BACKGROUND] Registration failed: {e}")
-                    
-                    # Large tabular PDF - DuckDB only, skip ChromaDB
-                    ProcessingJobModel.update_progress(job_id, 90, "Cleaning up (skipping semantic search for large table)...")
-                    if file_path and os.path.exists(file_path):
-                        try:
-                            os.remove(file_path)
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
-                    
-                    ProcessingJobModel.complete(job_id, {
-                        'filename': filename,
-                        'type': 'smart_pdf_tabular_only',
-                        'storage': pdf_result.get('storage_used', []),
-                        'duckdb_rows': pdf_result.get('duckdb_result', {}).get('total_rows', 0),
-                        'project': project,
-                        'note': 'ChromaDB skipped - large tabular PDF',
-                        'intelligence': pdf_result.get('intelligence')
-                    })
-                    logger.info(f"[BACKGROUND] Smart PDF job {job_id} completed (DuckDB only - large tabular)")
-                    return
+                # CHANGED: Removed skip_chromadb logic - all PDFs go to ChromaDB
+                # Even large tabular PDFs should be searchable by filename/content
                 
                 # Continue with ChromaDB using extracted text
-                # (Fall through to ROUTE 2 below, but we already have text)
                 if text:
                     logger.warning(f"[BACKGROUND] Smart PDF: continuing to ChromaDB with {len(text)} chars")
                     ProcessingJobModel.update_progress(job_id, 50, f"Adding to semantic search ({len(text):,} chars)...")
