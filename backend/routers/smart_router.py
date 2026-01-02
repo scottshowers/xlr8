@@ -189,6 +189,19 @@ except ImportError:
         TEXT_EXTRACTION_AVAILABLE = False
         logger.warning("[SMART-ROUTER] Text extraction not available")
 
+# Job Queue - SEQUENTIAL processing to prevent Ollama/LLM overload
+try:
+    from routers.upload import job_queue
+    JOB_QUEUE_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.routers.upload import job_queue
+        JOB_QUEUE_AVAILABLE = True
+    except ImportError:
+        JOB_QUEUE_AVAILABLE = False
+        job_queue = None
+        logger.warning("[SMART-ROUTER] Job queue not available - uploads will run concurrently (may cause issues)")
+
 
 # =============================================================================
 # ROUTING DETECTION
@@ -589,16 +602,29 @@ async def _route_to_register(
     
     if async_mode:
         job_id = create_job(filename)
-        background_tasks.add_task(
-            process_extraction_job,
-            job_id, file_path, max_pages, use_textract, project_id,
-            vendor_type, None  # customer_id
-        )
+        
+        # Use sequential job queue to prevent Ollama overload
+        if JOB_QUEUE_AVAILABLE and job_queue:
+            job_queue.enqueue(
+                job_id,
+                process_extraction_job,
+                args=(job_id, file_path, max_pages, use_textract, project_id, vendor_type, None),
+                priority=10
+            )
+            queue_msg = "queued"
+        else:
+            # Fallback to concurrent background tasks
+            background_tasks.add_task(
+                process_extraction_job,
+                job_id, file_path, max_pages, use_textract, project_id,
+                vendor_type, None  # customer_id
+            )
+            queue_msg = "processing"
         
         return {
             "success": True,
             "job_id": job_id,
-            "status": "processing",
+            "status": queue_msg,
             "route": "register",
             "message": f"Processing started. Poll /register/job/{job_id} for status."
         }
@@ -911,12 +937,24 @@ async def _route_to_structured(
         except ImportError:
             from backend.routers.upload import process_file_background
         
-        background_tasks.add_task(
-            process_file_background,
-            job_id, file_path, filename, project, project_id,
-            functional_area, file_size, truth_type, content_domain,
-            file_hash, uploaded_by_id, uploaded_by_email
-        )
+        # Use sequential job queue to prevent Ollama overload
+        if JOB_QUEUE_AVAILABLE and job_queue:
+            job_queue.enqueue(
+                job_id,
+                process_file_background,
+                args=(job_id, file_path, filename, project, project_id,
+                      functional_area, file_size, truth_type, content_domain,
+                      file_hash, uploaded_by_id, uploaded_by_email),
+                priority=10
+            )
+        else:
+            # Fallback to concurrent background tasks
+            background_tasks.add_task(
+                process_file_background,
+                job_id, file_path, filename, project, project_id,
+                functional_area, file_size, truth_type, content_domain,
+                file_hash, uploaded_by_id, uploaded_by_email
+            )
         
         return {
             "success": True,
@@ -996,12 +1034,24 @@ async def _route_to_semantic(
         except ImportError:
             from backend.routers.upload import process_file_background
         
-        background_tasks.add_task(
-            process_file_background,
-            job_id, file_path, filename, project, project_id,
-            functional_area, file_size, truth_type, content_domain,
-            file_hash, uploaded_by_id, uploaded_by_email
-        )
+        # Use sequential job queue to prevent Ollama overload
+        if JOB_QUEUE_AVAILABLE and job_queue:
+            job_queue.enqueue(
+                job_id,
+                process_file_background,
+                args=(job_id, file_path, filename, project, project_id,
+                      functional_area, file_size, truth_type, content_domain,
+                      file_hash, uploaded_by_id, uploaded_by_email),
+                priority=10
+            )
+        else:
+            # Fallback to concurrent background tasks
+            background_tasks.add_task(
+                process_file_background,
+                job_id, file_path, filename, project, project_id,
+                functional_area, file_size, truth_type, content_domain,
+                file_hash, uploaded_by_id, uploaded_by_email
+            )
         
         return {
             "success": True,
