@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Database, FileSpreadsheet, FileText, Link2, Heart, ChevronDown, ChevronRight, ChevronUp,
+  Database, FileSpreadsheet, FileText, Link2, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
   Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2
 } from 'lucide-react';
@@ -1026,7 +1026,6 @@ export default function DataExplorer() {
   const [selectedTable, setSelectedTable] = useState(null);
   const [tableDetails, setTableDetails] = useState(null);
   const [relationships, setRelationships] = useState([]);
-  const [healthIssues, setHealthIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [expandedFiles, setExpandedFiles] = useState({}); // For grouping tables by file
@@ -1125,9 +1124,6 @@ export default function DataExplorer() {
       if (allTables.length > 0 && !selectedTable) {
         setSelectedTable(allTables[0].table_name);
       }
-      
-      // Health issues from platform (if available)
-      setHealthIssues([]);  // Platform doesn't include detailed issues yet
       
       // Relationships from platform.relationships
       setRelationships(platform?.relationships || []);
@@ -1305,9 +1301,7 @@ export default function DataExplorer() {
   };
 
   const getTableHealth = (tableName) => {
-    const tableIssues = healthIssues.filter(i => i.table === tableName);
-    if (tableIssues.some(i => i.severity === 'error')) return 'error';
-    if (tableIssues.some(i => i.severity === 'warning')) return 'warning';
+    // Health tracking removed - always return good
     return 'good';
   };
 
@@ -1322,14 +1316,12 @@ export default function DataExplorer() {
     { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
     { id: 'classification', label: '🔍 Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
     { id: 'relationships', label: '🔗 Data Model', icon: Link2, tooltip: 'View, verify, and test relationships. Confirm join columns between tables.' },
-    { id: 'health', label: '❤️ Data Health', icon: Heart, tooltip: 'Data integrity checks: missing values, format issues, and quality scores.' },
     { id: 'compliance', label: '✅ Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
     { id: 'rules', label: '📜 Rules', icon: BookOpen, tooltip: 'Extracted validation rules from regulatory documents. Used in compliance checks.' },
   ];
 
   const totalTables = tables.length;
   const totalColumns = tables.reduce((sum, t) => sum + (t.column_count || t.columns?.length || 0), 0);
-  const totalIssues = healthIssues?.length || 0;
 
   if (loading) {
     return (
@@ -1815,64 +1807,6 @@ export default function DataExplorer() {
             onConfirm={confirmRelationship}
             onReload={loadTables}
           />
-        </div>
-      )}
-
-      {/* Data Health Tab */}
-      {activeTab === 'health' && (
-        <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
-          <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
-            <Heart size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.scarletSage }} />
-            Data Health
-          </h3>
-          {(!healthIssues || healthIssues.length === 0) ? (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-              <CheckCircle size={48} style={{ color: c.success, marginBottom: '1rem' }} />
-              <p style={{ fontWeight: 600, margin: '0 0 0.5rem', color: c.success }}>All data looks healthy!</p>
-              <p style={{ fontSize: '0.85rem', color: c.textMuted, margin: '0 0 1rem' }}>
-                No integrity issues detected across {tables?.length || 0} table(s).
-              </p>
-              <div style={{ 
-                textAlign: 'left', 
-                background: c.background, 
-                borderRadius: 8, 
-                padding: '1rem',
-                fontSize: '0.8rem',
-                color: c.textMuted,
-                width: '100%',
-                maxWidth: '400px'
-              }}>
-                <strong style={{ color: c.text }}>Checks performed:</strong>
-                <ul style={{ margin: '0.5rem 0 0', paddingLeft: '1.25rem' }}>
-                  <li>Registry entries exist for all DuckDB tables</li>
-                  <li>Row counts match between registry and actual data</li>
-                  <li>No orphaned embeddings in ChromaDB</li>
-                  <li>File metadata is complete</li>
-                </ul>
-              </div>
-            </div>
-          ) : (
-            <div style={{ display: 'grid', gap: '0.75rem' }}>
-              {healthIssues.map((issue, i) => (
-                <div key={i} style={{ 
-                  padding: '0.75rem 1rem',
-                  background: issue.severity === 'error' ? `${c.scarletSage}10` : `${c.warning}10`,
-                  borderRadius: 8,
-                  border: `1px solid ${issue.severity === 'error' ? c.scarletSage : c.warning}40`
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.25rem' }}>
-                    {issue.severity === 'error' ? 
-                      <XCircle size={16} style={{ color: c.scarletSage }} /> : 
-                      <AlertTriangle size={16} style={{ color: c.warning }} />
-                    }
-                    <span style={{ fontWeight: 600, color: c.text }}>{issue.type || 'Issue'}</span>
-                  </div>
-                  <div style={{ fontSize: '0.85rem', color: c.textMuted }}>{issue.message}</div>
-                  {issue.table && <code style={{ fontSize: '0.75rem', color: c.primary }}>{issue.table}</code>}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       )}
 
