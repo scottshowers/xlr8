@@ -290,22 +290,22 @@ class IntentParser:
         return None
     
     def _call_claude(self, prompt: str) -> Optional[str]:
-        """Fallback to Claude for complex documents."""
+        """Fallback to Claude for complex documents - uses LLMOrchestrator."""
         if not self.orchestrator or not self.orchestrator.claude_api_key:
             return None
         
         try:
-            import anthropic
-            client = anthropic.Anthropic(api_key=self.orchestrator.claude_api_key)
+            system_prompt = "You are a precise requirements extraction assistant. Extract all requirements from documents. Return only valid JSON array."
             
-            response = client.messages.create(
-                model=self.orchestrator.claude_model,
-                max_tokens=4000,
-                messages=[{"role": "user", "content": prompt}]
+            result, success = self.orchestrator._call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                project_id=self.project_id,
+                operation="intent_parser"
             )
             
-            if response.content:
-                return response.content[0].text
+            if success and result:
+                return result
                 
         except Exception as e:
             logger.warning(f"[INTENT-PARSER] Claude call failed: {e}")
