@@ -200,6 +200,14 @@ except ImportError as e:
     DECODER_AVAILABLE = False
     logging.warning(f"Decoder router import failed: {e}")
 
+# Import reference truth router (systems, domains, detection)
+try:
+    from backend.routers import reference
+    REFERENCE_AVAILABLE = True
+except ImportError as e:
+    REFERENCE_AVAILABLE = False
+    logging.warning(f"Reference router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -455,6 +463,13 @@ if DECODER_AVAILABLE:
     logger.info("Domain Decoder router registered at /api/decoder")
 else:
     logger.warning("Domain Decoder router not available")
+
+# Register reference truth router if available (systems, domains, detection)
+if REFERENCE_AVAILABLE:
+    app.include_router(reference.router, tags=["reference"])
+    logger.info("Reference Truth router registered at /api/reference")
+else:
+    logger.warning("Reference Truth router not available")
 
 
 @app.get("/api/debug/imports")
