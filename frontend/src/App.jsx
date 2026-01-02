@@ -41,10 +41,13 @@ import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import DataPage from './pages/DataPage';
 import DataExplorer from './pages/DataExplorer';
+import DataModelPage from './pages/DataModelPage';
 import VacuumUploadPage from './pages/VacuumUploadPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
+import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
+import StandardsPage from './pages/StandardsPage';
 import WorkAdvisor from './pages/WorkAdvisor';
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
@@ -116,6 +119,9 @@ function AppRoutes() {
         <Route path="/data/explorer" element={
           <ProtectedRoute><Layout><DataExplorer /></Layout></ProtectedRoute>
         } />
+        <Route path="/data/model" element={
+          <ProtectedRoute><Layout><DataModelPage /></Layout></ProtectedRoute>
+        } />
         
         {/* Vacuum (sub-pages of Data) */}
         <Route path="/vacuum" element={
@@ -175,6 +181,16 @@ function AppRoutes() {
           <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
         } />
         
+        {/* Playbook Builder - Create/Edit Playbooks */}
+        <Route path="/admin/playbook-builder" element={
+          <ProtectedRoute><Layout><PlaybookBuilderPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Standards - Compliance document management */}
+        <Route path="/standards" element={
+          <ProtectedRoute><Layout><StandardsPage /></Layout></ProtectedRoute>
+        } />
+        
         {/* ====== UTILITY ROUTES ====== */}
         
         {/* Data Health (renamed from Data Model) */}
@@ -189,14 +205,13 @@ function AppRoutes() {
         <Route path="/admin-endpoints" element={<Navigate to="/admin/endpoints" replace />} />
         
         <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
-        <Route path="/standards" element={<Navigate to="/reference-library" replace />} />
         <Route path="/chat" element={<Navigate to="/workspace" replace />} />
         <Route path="/upload" element={<Navigate to="/data" replace />} />
         <Route path="/status" element={<Navigate to="/admin" replace />} />
         <Route path="/system" element={<Navigate to="/admin" replace />} />
         <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />
         <Route path="/packs" element={<Navigate to="/playbooks" replace />} />
-        <Route path="/playbooks/builder" element={<Navigate to="/advisor" replace />} />
+        <Route path="/playbooks/builder" element={<Navigate to="/admin/playbook-builder" replace />} />
         <Route path="/query-builder" element={<Navigate to="/analytics" replace />} />
         <Route path="/bi" element={<Navigate to="/analytics" replace />} />
         
