@@ -23,6 +23,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import api from '../services/api';
+import ProjectContext from '../components/ProjectContext';
 
 // ============================================================================
 // BRAND COLORS (from Mission Control)
@@ -884,6 +885,13 @@ function FilesPanel({ c, project, targetScope }) {
           <RefreshCw size={14} /> Refresh
         </button>
       </div>
+
+      {/* Project Context - System/Domain Detection (only for project scope) */}
+      {!isGlobalScope && currentProject && (
+        <div style={{ marginBottom: '1rem' }}>
+          <ProjectContext projectName={currentProject} compact />
+        </div>
+      )}
 
       {/* Recently Completed */}
       {recentlyCompleted.length > 0 && (
