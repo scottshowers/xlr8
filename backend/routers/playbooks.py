@@ -38,6 +38,18 @@ from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
 
+# Try to import LLM orchestrator for consistent Claude calls
+_playbooks_orchestrator = None
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    _playbooks_orchestrator = LLMOrchestrator()
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        _playbooks_orchestrator = LLMOrchestrator()
+    except ImportError:
+        logger.warning("[PLAYBOOKS] LLMOrchestrator not available")
+
 router = APIRouter(prefix="/playbooks", tags=["playbooks"])
 
 # Job tracking for scan-all background tasks
@@ -1518,9 +1530,6 @@ async def detect_entities(playbook_type: str, project_id: str):
         
         logger.info(f"[ENTITIES] Analyzing {len(combined_text)} chars")
         
-        from anthropic import Anthropic
-        client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
-        
         prompt = f"""Analyze these documents and extract ALL Federal Employer Identification Numbers (FEINs/EINs).
 
 FEINs are 9-digit numbers, usually formatted as XX-XXXXXXX (like 74-1776312).
@@ -1547,13 +1556,35 @@ If no FEINs/BNs found, return: {{"us": [], "canada": []}}
 DOCUMENTS:
 {combined_text}"""
 
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}]
-        )
+        system_prompt = "You are a precise data extraction assistant. Extract tax identification numbers and return valid JSON."
         
-        response_text = response.content[0].text.strip()
+        # Use orchestrator if available
+        global _playbooks_orchestrator
+        response_text = None
+        
+        if _playbooks_orchestrator and _playbooks_orchestrator.claude_api_key:
+            result, success = _playbooks_orchestrator._call_claude(
+                prompt=prompt,
+                system_prompt=system_prompt,
+                project_id=project_id,
+                operation="entity_detection"
+            )
+            if success:
+                response_text = result.strip()
+        
+        # Fallback to direct if orchestrator unavailable
+        if not response_text:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
+            
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            
+            response_text = response.content[0].text.strip()
         
         try:
             if "```json" in response_text:
