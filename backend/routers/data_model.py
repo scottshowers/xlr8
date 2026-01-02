@@ -172,15 +172,25 @@ async def analyze_data_model(project_name: str):
                 else:
                     status = 'auto_confirmed'  # High confidence, no review needed
                 
+                # Handle both field name conventions (from_table vs source_table)
+                source_table = rel.get('source_table') or rel.get('from_table', '')
+                source_column = rel.get('source_column') or rel.get('from_column', '')
+                target_table = rel.get('target_table') or rel.get('to_table', '')
+                target_column = rel.get('target_column') or rel.get('to_column', '')
+                
+                if not source_table or not target_table:
+                    continue
+                
                 # Upsert to avoid duplicates
                 supabase.table('project_relationships').upsert({
                     'project_name': project_name,
-                    'source_table': rel['source_table'],
-                    'source_column': rel['source_column'],
-                    'target_table': rel['target_table'],
-                    'target_column': rel['target_column'],
+                    'source_table': source_table,
+                    'source_column': source_column,
+                    'target_table': target_table,
+                    'target_column': target_column,
                     'confidence': rel.get('confidence', 0.9),
                     'method': rel.get('method', 'auto'),
+                    'semantic_type': rel.get('semantic_type'),
                     'status': status
                 }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
                 saved_count += 1
