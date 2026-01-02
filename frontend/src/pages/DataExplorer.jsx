@@ -16,7 +16,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Database, FileSpreadsheet, Link2, Heart, ChevronDown, ChevronRight, ChevronUp,
+  Database, FileSpreadsheet, FileText, Link2, Heart, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
   Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2
 } from 'lucide-react';
@@ -135,6 +135,12 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
   const [testing, setTesting] = useState(false);
   const [filter, setFilter] = useState('all');
   const [analyzing, setAnalyzing] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState({});
+
+  // Toggle group expansion
+  const toggleGroup = (groupKey) => {
+    setExpandedGroups(prev => ({ ...prev, [groupKey]: !prev[groupKey] }));
+  };
 
   // Test a relationship
   const testRelationship = async (rel) => {
@@ -302,7 +308,7 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
           ))}
         </div>
 
-        {/* List */}
+        {/* List - Grouped by Source File (Analytics-style) */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {filteredRels.length === 0 ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
@@ -311,53 +317,148 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
               <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>Click "Analyze" to detect</div>
             </div>
           ) : (
-            filteredRels.map((rel, idx) => {
-              const sourceTable = rel.source_table || rel.from_table || '?';
-              const targetTable = rel.target_table || rel.to_table || '?';
-              const sourceCol = rel.source_column || rel.from_column || '?';
-              const targetCol = rel.target_column || rel.to_column || '?';
-              const status = rel.verification_status || 'unknown';
-              const cfg = statusConfig[status] || statusConfig.unknown;
-              const isSelected = selectedRel && (
-                (selectedRel.source_table === sourceTable && selectedRel.target_table === targetTable) ||
-                (selectedRel.from_table === sourceTable && selectedRel.to_table === targetTable)
-              );
+            // Group relationships by source FILE (like Analytics)
+            (() => {
+              // Build lookup: table_name -> file info
+              const tableToFile = {};
+              (tables || []).forEach(t => {
+                if (t.table_name) {
+                  tableToFile[t.table_name] = {
+                    filename: t.filename || 'Unknown Source',
+                    display_name: t.display_name || t.table_name
+                  };
+                }
+              });
+              
+              // Group by source file
+              const fileGroups = {};
+              filteredRels.forEach(rel => {
+                const sourceTable = rel.source_table || rel.from_table || '?';
+                const fileInfo = tableToFile[sourceTable] || { filename: 'Unknown Source' };
+                const fileName = fileInfo.filename;
+                
+                if (!fileGroups[fileName]) {
+                  fileGroups[fileName] = { 
+                    fileName, 
+                    shortName: fileName.length > 35 ? fileName.substring(0, 32) + '...' : fileName,
+                    rels: [] 
+                  };
+                }
+                fileGroups[fileName].rels.push(rel);
+              });
+              
+              return Object.values(fileGroups).map(group => {
+                const isExpanded = expandedGroups[group.fileName] !== false;
+                
+                return (
+                  <div key={group.fileName} style={{ borderBottom: `1px solid ${c.border}` }}>
+                    {/* File Header - Analytics style */}
+                    <button
+                      onClick={() => toggleGroup(group.fileName)}
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '10px',
+                        background: 'transparent',
+                        border: 'none',
+                        borderLeft: `3px solid ${c.primary}`,
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        transition: 'background 0.15s',
+                      }}
+                      onMouseEnter={(e) => e.currentTarget.style.background = c.background}
+                      onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                    >
+                      <div style={{ 
+                        width: 24, height: 24, borderRadius: 4, 
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        background: 'white', border: `1px solid ${c.border}`
+                      }}>
+                        <FileText size={12} style={{ color: c.textMuted }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={group.fileName}>
+                          {group.shortName}
+                        </div>
+                        <div style={{ fontSize: '0.65rem', color: c.textMuted }}>{group.rels.length} relationship{group.rels.length !== 1 ? 's' : ''}</div>
+                      </div>
+                      {isExpanded ? (
+                        <ChevronDown size={14} style={{ color: c.textMuted }} />
+                      ) : (
+                        <ChevronRight size={14} style={{ color: c.textMuted }} />
+                      )}
+                    </button>
+                    
+                    {/* Relationships within File */}
+                    {isExpanded && (
+                      <div style={{ background: `${c.background}50` }}>
+                        {group.rels.map((rel, idx) => {
+                          const sourceTable = rel.source_table || rel.from_table || '?';
+                          const targetTable = rel.target_table || rel.to_table || '?';
+                          const sourceCol = rel.source_column || rel.from_column || '?';
+                          const targetCol = rel.target_column || rel.to_column || '?';
+                          const status = rel.verification_status || 'unknown';
+                          const cfg = statusConfig[status] || statusConfig.unknown;
+                          const isSelected = selectedRel && (
+                            (selectedRel.source_table === sourceTable && selectedRel.target_table === targetTable) ||
+                            (selectedRel.from_table === sourceTable && selectedRel.to_table === targetTable)
+                          );
 
-              return (
-                <div
-                  key={rel.id || idx}
-                  onClick={() => handleSelect(rel)}
-                  style={{
-                    padding: '10px 14px',
-                    borderBottom: `1px solid ${c.border}`,
-                    cursor: 'pointer',
-                    backgroundColor: isSelected ? c.background : 'transparent',
-                    borderLeft: isSelected ? `3px solid ${c.accent}` : '3px solid transparent',
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
-                    <span style={{ 
-                      fontSize: '0.65rem', 
-                      padding: '2px 6px', 
-                      borderRadius: '3px',
-                      backgroundColor: cfg.bgColor,
-                      color: cfg.color,
-                      fontWeight: 600,
-                    }}>
-                      {rel.match_rate != null ? `${rel.match_rate}%` : cfg.label}
-                    </span>
-                    {rel.confirmed && (
-                      <CheckCircle size={12} style={{ color: c.success }} />
+                          return (
+                            <button
+                              key={rel.id || idx}
+                              onClick={() => handleSelect(rel)}
+                              style={{
+                                width: '100%',
+                                padding: '8px 12px 8px 44px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '8px',
+                                background: isSelected ? `${c.accent}15` : 'transparent',
+                                border: 'none',
+                                borderTop: `1px solid ${c.border}`,
+                                borderLeft: isSelected ? `3px solid ${c.accent}` : '3px solid transparent',
+                                cursor: 'pointer',
+                                textAlign: 'left',
+                                transition: 'background 0.15s',
+                              }}
+                              onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = c.background)}
+                              onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'transparent')}
+                            >
+                              <Database size={10} style={{ color: c.textMuted, flexShrink: 0 }} />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontSize: '0.75rem', fontWeight: 500, color: isSelected ? c.accent : c.text }}>
+                                  {getDisplayName(sourceTable)} → {getDisplayName(targetTable)}
+                                </div>
+                                <div style={{ fontSize: '0.6rem', color: c.textMuted }}>
+                                  {sourceCol} = {targetCol}
+                                </div>
+                              </div>
+                              <span style={{ 
+                                fontSize: '0.55rem', 
+                                padding: '2px 5px', 
+                                borderRadius: '3px',
+                                backgroundColor: cfg.bgColor,
+                                color: cfg.color,
+                                fontWeight: 600,
+                                flexShrink: 0,
+                              }}>
+                                {rel.match_rate != null ? `${rel.match_rate}%` : cfg.label}
+                              </span>
+                              {rel.confirmed && (
+                                <CheckCircle size={10} style={{ color: c.success, flexShrink: 0 }} />
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
                     )}
                   </div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 600, color: c.text }}>{getDisplayName(sourceTable)}</div>
-                  <div style={{ fontSize: '0.6rem', color: c.silver, fontFamily: 'monospace', marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={sourceTable}>{getTruncatedName(sourceTable, 40)}</div>
-                  <div style={{ fontSize: '0.7rem', color: c.textMuted, margin: '4px 0' }}>↓ {sourceCol} → {targetCol}</div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text }}>{getDisplayName(targetTable)}</div>
-                  <div style={{ fontSize: '0.6rem', color: c.silver, fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={targetTable}>{getTruncatedName(targetTable, 40)}</div>
-                </div>
-              );
-            })
+                );
+              });
+            })()
           )}
         </div>
       </div>
@@ -928,6 +1029,7 @@ export default function DataExplorer() {
   const [healthIssues, setHealthIssues] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [expandedFiles, setExpandedFiles] = useState({}); // For grouping tables by file
   
   // NEW: Cache for table schemas (columns) - used by RelationshipEditor
   const [tableSchemas, setTableSchemas] = useState({});
@@ -1337,51 +1439,129 @@ export default function DataExplorer() {
       {/* Tables Tab */}
       {activeTab === 'tables' && (
         <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1rem' }}>
-          {/* Table List */}
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem', maxHeight: '70vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
-              <Database size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-              Tables ({tables.length})
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {tables.map(table => {
-                const health = getTableHealth(table.table_name);
-                const healthColor = health === 'good' ? c.success : health === 'warning' ? c.warning : c.scarletSage;
+          {/* Table List - Grouped by File */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '1rem', borderBottom: `1px solid ${c.border}` }}>
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
+                <Database size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
+                Tables ({tables.length})
+              </h3>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {(() => {
+                // Group tables by filename
+                const fileGroups = {};
+                tables.forEach(table => {
+                  const fileName = table.filename || 'Unknown Source';
+                  if (!fileGroups[fileName]) {
+                    fileGroups[fileName] = {
+                      fileName,
+                      shortName: fileName.length > 32 ? fileName.substring(0, 29) + '...' : fileName,
+                      tables: []
+                    };
+                  }
+                  fileGroups[fileName].tables.push(table);
+                });
                 
-                return (
-                  <div
-                    key={table.table_name}
-                    onClick={() => setSelectedTable(table.table_name)}
-                    style={{
-                      padding: '0.6rem 0.75rem',
-                      borderRadius: 6,
-                      cursor: 'pointer',
-                      background: selectedTable === table.table_name ? `${c.primary}10` : 'transparent',
-                      border: selectedTable === table.table_name ? `1px solid ${c.primary}40` : '1px solid transparent',
-                      transition: 'all 0.15s'
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                      <FileSpreadsheet size={14} color={c.primary} />
-                      <span style={{ 
-                        fontSize: '0.85rem', 
-                        fontWeight: selectedTable === table.table_name ? 600 : 400,
-                        color: c.text,
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        flex: 1
-                      }}>
-                        {table.display_name || table.table_name}
-                      </span>
-                      <div style={{ width: 6, height: 6, borderRadius: '50%', background: healthColor }} title={`Health: ${health}`} />
+                return Object.values(fileGroups).map(group => {
+                  const isExpanded = expandedFiles[group.fileName] !== false; // Default expanded
+                  
+                  return (
+                    <div key={group.fileName} style={{ borderBottom: `1px solid ${c.border}` }}>
+                      {/* File Header */}
+                      <button
+                        onClick={() => setExpandedFiles(prev => ({ ...prev, [group.fileName]: !isExpanded }))}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderLeft: `3px solid ${c.primary}`,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = c.background}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ 
+                          width: 24, height: 24, borderRadius: 4, 
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'white', border: `1px solid ${c.border}`
+                        }}>
+                          <FileText size={12} style={{ color: c.textMuted }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={group.fileName}>
+                            {group.shortName}
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: c.textMuted }}>{group.tables.length} table{group.tables.length !== 1 ? 's' : ''}</div>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronDown size={14} style={{ color: c.textMuted }} />
+                        ) : (
+                          <ChevronRight size={14} style={{ color: c.textMuted }} />
+                        )}
+                      </button>
+                      
+                      {/* Tables within File */}
+                      {isExpanded && (
+                        <div style={{ background: `${c.background}50` }}>
+                          {group.tables.map(table => {
+                            const health = getTableHealth(table.table_name);
+                            const healthColor = health === 'good' ? c.success : health === 'warning' ? c.warning : c.scarletSage;
+                            const isSelected = selectedTable === table.table_name;
+                            
+                            return (
+                              <button
+                                key={table.table_name}
+                                onClick={() => setSelectedTable(table.table_name)}
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 12px 8px 44px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  background: isSelected ? `${c.accent}15` : 'transparent',
+                                  border: 'none',
+                                  borderTop: `1px solid ${c.border}`,
+                                  borderLeft: isSelected ? `3px solid ${c.accent}` : '3px solid transparent',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  transition: 'background 0.15s',
+                                }}
+                                onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = c.background)}
+                                onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'transparent')}
+                              >
+                                <FileSpreadsheet size={12} style={{ color: c.primary, flexShrink: 0 }} />
+                                <div style={{ flex: 1, minWidth: 0 }}>
+                                  <div style={{ 
+                                    fontSize: '0.8rem', 
+                                    fontWeight: isSelected ? 600 : 500, 
+                                    color: isSelected ? c.accent : c.text,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap'
+                                  }}>
+                                    {table.display_name || table.table_name}
+                                  </div>
+                                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>
+                                    {table.row_count?.toLocaleString() || 0} rows
+                                  </div>
+                                </div>
+                                <div style={{ width: 6, height: 6, borderRadius: '50%', background: healthColor, flexShrink: 0 }} title={`Health: ${health}`} />
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.2rem', marginLeft: '1.25rem' }}>
-                      {table.row_count?.toLocaleString() || 0} rows
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </div>
 
