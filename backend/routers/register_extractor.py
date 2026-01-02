@@ -637,6 +637,15 @@ def store_to_duckdb(
             except Exception as e:
                 logger.warning(f"[REGISTER] Profiling failed: {e}")
         
+        # Run relationship detection (SAME as regular upload)
+        try:
+            from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
+            intelligence = ProjectIntelligenceService(project_name, handler)
+            intelligence.analyze(tier=AnalysisTier.BASIC)
+            logger.info(f"[REGISTER] Relationship detection complete for: {project_name}")
+        except Exception as intel_err:
+            logger.warning(f"[REGISTER] Relationship detection failed: {intel_err}")
+        
         return table_name
         
     except Exception as e:
