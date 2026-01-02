@@ -14,6 +14,18 @@ import json
 
 logger = logging.getLogger(__name__)
 
+# Try to import LLM orchestrator for consistent Claude calls
+_advisor_orchestrator = None
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    _advisor_orchestrator = LLMOrchestrator()
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        _advisor_orchestrator = LLMOrchestrator()
+    except ImportError:
+        logger.warning("[ADVISOR] LLMOrchestrator not available")
+
 router = APIRouter(prefix="/api/advisor", tags=["advisor"])
 
 
@@ -299,25 +311,42 @@ If recommending, use one of these exact phrases at the END of your response:
         except Exception as ollama_error:
             logger.warning(f"[ADVISOR] Ollama failed: {ollama_error}")
         
-        # Try Claude if Ollama failed
+        # Try Claude if Ollama failed - use orchestrator for consistency
         if not response_text:
             try:
-                import anthropic
-                import os
-                
-                client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-                
-                claude_messages = [{"role": m['role'], "content": m['content']} for m in messages]
-                
-                claude_response = client.messages.create(
-                    model="claude-3-haiku-20240307",
-                    max_tokens=500,
-                    system=full_system,
-                    messages=claude_messages
-                )
-                
-                response_text = claude_response.content[0].text
-                logger.info("[ADVISOR] Got response from Claude")
+                global _advisor_orchestrator
+                if _advisor_orchestrator and _advisor_orchestrator.claude_api_key:
+                    # Build conversation for orchestrator
+                    conversation_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
+                    
+                    result, success = _advisor_orchestrator._call_claude(
+                        prompt=conversation_text,
+                        system_prompt=full_system,
+                        project_id=None,
+                        operation="work_advisor"
+                    )
+                    
+                    if success:
+                        response_text = result
+                        logger.info("[ADVISOR] Got response from Claude via orchestrator")
+                else:
+                    # Direct fallback
+                    import anthropic
+                    import os
+                    
+                    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+                    
+                    claude_messages = [{"role": m['role'], "content": m['content']} for m in messages]
+                    
+                    claude_response = client.messages.create(
+                        model="claude-3-haiku-20240307",
+                        max_tokens=500,
+                        system=full_system,
+                        messages=claude_messages
+                    )
+                    
+                    response_text = claude_response.content[0].text
+                    logger.info("[ADVISOR] Got response from Claude (direct)")
                 
             except Exception as claude_error:
                 logger.warning(f"[ADVISOR] Claude failed: {claude_error}")
@@ -554,22 +583,38 @@ async def generate_playbook(request: GeneratePlaybookRequest):
         except Exception as ollama_error:
             logger.warning(f"[ADVISOR] Ollama failed for playbook gen: {ollama_error}")
         
-        # Try Claude if Ollama failed
+        # Try Claude if Ollama failed - use orchestrator for consistency
         if not response_text:
             try:
-                import anthropic
-                import os
-                
-                client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-                
-                claude_response = client.messages.create(
-                    model="claude-3-haiku-20240307",
-                    max_tokens=2000,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                
-                response_text = claude_response.content[0].text
-                logger.info("[ADVISOR] Got playbook structure from Claude")
+                global _advisor_orchestrator
+                if _advisor_orchestrator and _advisor_orchestrator.claude_api_key:
+                    system_prompt = "You are a playbook architect. Generate well-structured playbook definitions."
+                    
+                    result, success = _advisor_orchestrator._call_claude(
+                        prompt=prompt,
+                        system_prompt=system_prompt,
+                        project_id=None,
+                        operation="playbook_generation"
+                    )
+                    
+                    if success:
+                        response_text = result
+                        logger.info("[ADVISOR] Got playbook structure from Claude via orchestrator")
+                else:
+                    # Direct fallback
+                    import anthropic
+                    import os
+                    
+                    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
+                    
+                    claude_response = client.messages.create(
+                        model="claude-3-haiku-20240307",
+                        max_tokens=2000,
+                        messages=[{"role": "user", "content": prompt}]
+                    )
+                    
+                    response_text = claude_response.content[0].text
+                    logger.info("[ADVISOR] Got playbook structure from Claude (direct)")
                 
             except Exception as claude_error:
                 logger.warning(f"[ADVISOR] Claude failed for playbook gen: {claude_error}")
