@@ -348,7 +348,7 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
               });
               
               return Object.values(fileGroups).map(group => {
-                const isExpanded = expandedGroups[group.fileName] !== false;
+                const isExpanded = expandedGroups[group.fileName] === true; // Default collapsed
                 
                 return (
                   <div key={group.fileName} style={{ borderBottom: `1px solid ${c.border}` }}>
@@ -1464,7 +1464,7 @@ export default function DataExplorer() {
                 });
                 
                 return Object.values(fileGroups).map(group => {
-                  const isExpanded = expandedFiles[group.fileName] !== false; // Default expanded
+                  const isExpanded = expandedFiles[group.fileName] === true; // Default collapsed
                   
                   return (
                     <div key={group.fileName} style={{ borderBottom: `1px solid ${c.border}` }}>
@@ -1656,33 +1656,122 @@ export default function DataExplorer() {
       {/* Classification Tab */}
       {activeTab === 'classification' && (
         <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', gap: '1rem' }}>
-          {/* Table List - same as Tables tab */}
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem', maxHeight: '70vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 0.75rem', fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
-              <Database size={16} style={{ marginRight: 6, verticalAlign: 'middle' }} />
-              Tables ({tables.length})
-            </h3>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              {tables.map(table => (
-                <div
-                  key={table.table_name}
-                  onClick={() => setSelectedTable(table.table_name)}
-                  style={{
-                    padding: '0.6rem 0.75rem',
-                    borderRadius: 6,
-                    cursor: 'pointer',
-                    background: selectedTable === table.table_name ? `${c.primary}10` : 'transparent',
-                    border: selectedTable === table.table_name ? `1px solid ${c.primary}40` : '1px solid transparent'
-                  }}
-                >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <Eye size={14} color={c.royalPurple} />
-                    <span style={{ fontSize: '0.85rem', fontWeight: selectedTable === table.table_name ? 600 : 400, color: c.text }}>
-                      {table.display_name || table.table_name}
-                    </span>
-                  </div>
-                </div>
-              ))}
+          {/* Table List - Grouped by File */}
+          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, maxHeight: '70vh', overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+            <div style={{ padding: '1rem', borderBottom: `1px solid ${c.border}` }}>
+              <h3 style={{ margin: 0, fontSize: '0.9rem', fontWeight: 600, color: c.text }}>
+                <Eye size={16} style={{ marginRight: 6, verticalAlign: 'middle', color: c.royalPurple }} />
+                Tables ({tables.length})
+              </h3>
+            </div>
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {(() => {
+                // Group tables by filename
+                const fileGroups = {};
+                tables.forEach(table => {
+                  const fileName = table.filename || 'Unknown Source';
+                  if (!fileGroups[fileName]) {
+                    fileGroups[fileName] = {
+                      fileName,
+                      shortName: fileName.length > 32 ? fileName.substring(0, 29) + '...' : fileName,
+                      tables: []
+                    };
+                  }
+                  fileGroups[fileName].tables.push(table);
+                });
+                
+                return Object.values(fileGroups).map(group => {
+                  const isExpanded = expandedFiles[`class_${group.fileName}`] === true; // Default collapsed
+                  
+                  return (
+                    <div key={group.fileName} style={{ borderBottom: `1px solid ${c.border}` }}>
+                      {/* File Header */}
+                      <button
+                        onClick={() => setExpandedFiles(prev => ({ ...prev, [`class_${group.fileName}`]: !isExpanded }))}
+                        style={{
+                          width: '100%',
+                          padding: '10px 12px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '10px',
+                          background: 'transparent',
+                          border: 'none',
+                          borderLeft: `3px solid ${c.royalPurple}`,
+                          cursor: 'pointer',
+                          textAlign: 'left',
+                          transition: 'background 0.15s',
+                        }}
+                        onMouseEnter={(e) => e.currentTarget.style.background = c.background}
+                        onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                      >
+                        <div style={{ 
+                          width: 24, height: 24, borderRadius: 4, 
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          background: 'white', border: `1px solid ${c.border}`
+                        }}>
+                          <FileText size={12} style={{ color: c.textMuted }} />
+                        </div>
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={group.fileName}>
+                            {group.shortName}
+                          </div>
+                          <div style={{ fontSize: '0.65rem', color: c.textMuted }}>{group.tables.length} table{group.tables.length !== 1 ? 's' : ''}</div>
+                        </div>
+                        {isExpanded ? (
+                          <ChevronDown size={14} style={{ color: c.textMuted }} />
+                        ) : (
+                          <ChevronRight size={14} style={{ color: c.textMuted }} />
+                        )}
+                      </button>
+                      
+                      {/* Tables within File */}
+                      {isExpanded && (
+                        <div style={{ background: `${c.background}50` }}>
+                          {group.tables.map(table => {
+                            const isSelected = selectedTable === table.table_name;
+                            
+                            return (
+                              <button
+                                key={table.table_name}
+                                onClick={() => setSelectedTable(table.table_name)}
+                                style={{
+                                  width: '100%',
+                                  padding: '8px 12px 8px 44px',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  gap: '8px',
+                                  background: isSelected ? `${c.royalPurple}15` : 'transparent',
+                                  border: 'none',
+                                  borderTop: `1px solid ${c.border}`,
+                                  borderLeft: isSelected ? `3px solid ${c.royalPurple}` : '3px solid transparent',
+                                  cursor: 'pointer',
+                                  textAlign: 'left',
+                                  transition: 'background 0.15s',
+                                }}
+                                onMouseEnter={(e) => !isSelected && (e.currentTarget.style.background = c.background)}
+                                onMouseLeave={(e) => !isSelected && (e.currentTarget.style.background = 'transparent')}
+                              >
+                                <Eye size={12} style={{ color: c.royalPurple, flexShrink: 0 }} />
+                                <span style={{ 
+                                  fontSize: '0.8rem', 
+                                  fontWeight: isSelected ? 600 : 500, 
+                                  color: isSelected ? c.royalPurple : c.text,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  flex: 1
+                                }}>
+                                  {table.display_name || table.table_name}
+                                </span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
 
