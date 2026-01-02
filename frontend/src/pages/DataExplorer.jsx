@@ -1416,16 +1416,6 @@ export default function DataExplorer() {
             </div>
           </div>
         </Tooltip>
-        
-        <Tooltip title="Data Health" detail="Number of data quality issues detected." action="Check the Health tab for details">
-          <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
-            <span style={{ fontSize: '1.5rem' }}>{totalIssues === 0 ? '✅' : '⚠️'}</span>
-            <div>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: totalIssues === 0 ? c.success : c.warning }}>{totalIssues}</div>
-              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Issues</div>
-            </div>
-          </div>
-        </Tooltip>
       </div>
 
       {/* Tables Tab */}
