@@ -747,9 +747,12 @@ function FilesPanel({ c, project, targetScope }) {
     setLoading(true);
     try {
       // Use fast /files endpoint instead of slow /platform
+      // When in global scope (Reference Library), don't filter by project
       const projectName = project?.name || project?.id || '';
+      const shouldFilterByProject = targetScope !== 'global' && projectName;
+      
       const [filesRes, refRes] = await Promise.all([
-        api.get(`/files${projectName ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
+        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
@@ -785,14 +788,14 @@ function FilesPanel({ c, project, targetScope }) {
   
   const structuredFiles = (structuredData?.files || []).filter(f => {
     if (isGlobalScope) {
-      return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library';
+      return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library' || f.project === '__STANDARDS__';
     }
     return !project || f.project === project.id || f.project === project.name;
   });
   
   const docs = (documents?.documents || []).filter(d => {
     if (isGlobalScope) {
-      return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library';
+      return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library' || d.project === '__STANDARDS__';
     }
     return !project || d.project === project.id || d.project === project.name;
   });
