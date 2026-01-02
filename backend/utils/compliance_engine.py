@@ -756,7 +756,39 @@ class ComplianceEngine:
             return {"tables": []}
         
         try:
+            # Try exact match first, then case-insensitive
             raw_schema = self.db_handler.get_schema(project_id)
+            
+            # If no results, try case-insensitive by querying directly
+            if not raw_schema and hasattr(self.db_handler, 'conn'):
+                logger.warning(f"[COMPLIANCE] No schema for '{project_id}', trying case-insensitive lookup")
+                
+                # Query _schema_metadata with LOWER() for case-insensitive match
+                result = self.db_handler.conn.execute("""
+                    SELECT table_name, display_name, file_name, columns, row_count
+                    FROM _schema_metadata 
+                    WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
+                """, [project_id]).fetchall()
+                
+                raw_schema = {}
+                for row in result:
+                    table_name, display_name, file_name, columns_json, row_count = row
+                    try:
+                        columns = json.loads(columns_json) if columns_json else []
+                    except:
+                        columns = []
+                    raw_schema[table_name] = {
+                        'display_name': display_name or table_name,
+                        'file_name': file_name,
+                        'columns': columns,
+                        'row_count': row_count or 0
+                    }
+                
+                logger.warning(f"[COMPLIANCE] Case-insensitive lookup found {len(raw_schema)} tables")
+            
+            if not raw_schema:
+                logger.warning(f"[COMPLIANCE] No schema found for project '{project_id}'")
+                return {"tables": []}
             
             tables = []
             for table_name, table_info in raw_schema.items():
@@ -778,6 +810,8 @@ class ComplianceEngine:
             
         except Exception as e:
             logger.error(f"[COMPLIANCE] Failed to get schema: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {"tables": []}
     
     def get_profiles(self, project_id: str) -> Dict:
