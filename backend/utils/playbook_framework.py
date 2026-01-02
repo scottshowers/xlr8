@@ -878,21 +878,33 @@ class DocumentScanner:
         project_files: set,
         reports_needed: List[str]
     ) -> List[Dict[str, Any]]:
-        """Match files by filename to required reports."""
+        """Match files by filename to required reports using word-level matching."""
         found_docs = []
         seen_files = set()
         
+        # Words to ignore in matching (common/short words)
+        ignore_words = {'the', 'a', 'an', 'of', 'to', 'in', 'for', 'and', 'or', 'on', 'at', 'by'}
+        
         for report_name in reports_needed:
-            report_keywords = report_name.lower().split()
+            # Get significant words from report name (3+ chars, not in ignore list)
+            report_keywords = [w for w in report_name.lower().split() 
+                              if len(w) >= 3 and w not in ignore_words]
+            
+            if not report_keywords:
+                continue
+                
             for filename in project_files:
                 filename_lower = filename.lower()
+                # Count significant keyword matches
                 matches = sum(1 for kw in report_keywords if kw in filename_lower)
-                if matches >= len(report_keywords) - 1:  # Allow 1 word missing
+                # Require at least half the keywords to match, minimum 2
+                threshold = max(2, len(report_keywords) // 2)
+                if matches >= threshold:
                     if filename not in seen_files:
                         seen_files.add(filename)
                         found_docs.append({
                             "filename": filename,
-                            "snippet": f"Matched report: {report_name}",
+                            "snippet": f"Matched report: {report_name} ({matches}/{len(report_keywords)} keywords)",
                             "query": report_name,
                             "match_type": "filename"
                         })
@@ -2005,12 +2017,28 @@ class PlaybookEngine:
         duckdb_files = seen_files
         if action.reports_needed:
             # Filter to only files that match reports_needed
+            # Use word-level matching instead of substring matching for better accuracy
             filtered_files = set()
             for filename in seen_files:
-                filename_lower = filename.lower().replace(' ', '').replace('.pdf', '').replace('team', '')
+                filename_lower = filename.lower()
+                # Extract significant words from filename
+                filename_words = set(w for w in filename_lower.replace('.pdf', '').replace('.xlsx', '').replace('team', '').replace('_', ' ').replace('-', ' ').split() if len(w) > 2)
+                
                 for report in action.reports_needed:
-                    report_lower = report.lower().replace(' ', '')
-                    if report_lower in filename_lower or filename_lower in report_lower:
+                    # Extract significant words from report name
+                    report_words = set(w for w in report.lower().replace('_', ' ').replace('-', ' ').split() if len(w) > 2)
+                    
+                    # Match if 2+ significant words overlap, or strong phrase match
+                    common_words = filename_words & report_words
+                    if len(common_words) >= 2:
+                        filtered_files.add(filename)
+                        logger.warning(f"[SCAN] File '{filename}' matches report '{report}' (words: {common_words})")
+                        break
+                    # Also check for key phrase matches
+                    elif 'tax verification' in filename_lower and 'tax verification' in report.lower():
+                        filtered_files.add(filename)
+                        break
+                    elif 'master profile' in filename_lower and 'master profile' in report.lower():
                         filtered_files.add(filename)
                         break
             
@@ -2060,18 +2088,82 @@ class PlaybookEngine:
             
             comparison_findings = None
             if is_comparison_task and len(matched_tables) >= 2:
-                # Filter to only tables that match the action's reports_needed
-                # This prevents comparing unrelated tables (e.g., Earnings Codes vs Master Profile
-                # when we should compare Tax Verification vs Master Profile)
+                # =====================================================================
+                # USE TableSelector TO FIND BEST MATCHING TABLES FOR reports_needed
+                # This uses domain classification, not dumb string matching
+                # =====================================================================
                 relevant_tables = []
-                for mt in matched_tables:
-                    file_name_lower = mt['file_name'].lower()
-                    for report in action.reports_needed:
-                        report_lower = report.lower().replace(' ', '')
-                        file_normalized = file_name_lower.replace(' ', '').replace('team', '').replace('.pdf', '')
-                        if report_lower in file_normalized or file_normalized in report_lower:
-                            relevant_tables.append(mt)
-                            break
+                
+                try:
+                    # Import TableSelector
+                    try:
+                        from backend.utils.intelligence.table_selector import TableSelector
+                    except ImportError:
+                        from utils.intelligence.table_selector import TableSelector
+                    
+                    # Build table list for selector from matched_tables
+                    tables_for_selector = []
+                    for mt in matched_tables:
+                        tables_for_selector.append({
+                            'table_name': mt['table_name'],
+                            'display_name': mt.get('file_name', mt['table_name']),
+                            'row_count': mt.get('row_count', 0),
+                            'columns': []  # Will be loaded by selector
+                        })
+                    
+                    # Get structured handler for classification lookup
+                    try:
+                        from backend.utils.playbook_parser import get_duckdb_connection
+                        conn = get_duckdb_connection()
+                        
+                        # Create selector with project context
+                        project_prefix = matched_tables[0]['table_name'].split('_')[0] if matched_tables else ''
+                        selector = TableSelector(
+                            structured_handler=type('Handler', (), {'conn': conn})() if conn else None,
+                            filter_candidates={},
+                            project=project_prefix
+                        )
+                        
+                        # For each report_needed, find the best matching table
+                        used_tables = set()
+                        for report in action.reports_needed:
+                            # Use selector to score tables against this report name
+                            matches = selector.select(tables_for_selector, report, max_tables=2)
+                            for match in matches:
+                                table_name = match.get('table_name')
+                                if table_name and table_name not in used_tables:
+                                    # Find the original matched_table entry
+                                    for mt in matched_tables:
+                                        if mt['table_name'] == table_name:
+                                            relevant_tables.append(mt)
+                                            used_tables.add(table_name)
+                                            logger.warning(f"[SCAN] TableSelector matched '{report}' -> {table_name}")
+                                            break
+                                    break  # Only take first match per report
+                        
+                        if conn:
+                            conn.close()
+                            
+                    except Exception as sel_err:
+                        logger.warning(f"[SCAN] TableSelector failed, falling back to name matching: {sel_err}")
+                        # Fallback: use improved name matching
+                        for mt in matched_tables:
+                            file_name_lower = mt.get('file_name', '').lower()
+                            table_name_lower = mt.get('table_name', '').lower()
+                            for report in action.reports_needed:
+                                report_words = set(report.lower().replace('company', '').split())
+                                # Match if 2+ significant words from report appear in filename/tablename
+                                matches_in_file = sum(1 for w in report_words if len(w) > 3 and w in file_name_lower)
+                                matches_in_table = sum(1 for w in report_words if len(w) > 3 and w in table_name_lower)
+                                if matches_in_file >= 2 or matches_in_table >= 2:
+                                    if mt not in relevant_tables:
+                                        relevant_tables.append(mt)
+                                    break
+                                    
+                except Exception as e:
+                    logger.warning(f"[SCAN] Table matching failed: {e}")
+                    # Last resort fallback
+                    relevant_tables = matched_tables[:2]
                 
                 logger.warning(f"[SCAN] Detected comparison task - {len(matched_tables)} total tables, {len(relevant_tables)} match reports_needed")
                 
