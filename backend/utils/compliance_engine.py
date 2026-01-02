@@ -489,13 +489,29 @@ def generate_compliance_sql(
     for field_name, col_info in field_mappings.items():
         mapping_text += f"- '{field_name}' → {col_info['table_name']}.{col_info['column_name']}\n"
     
-    # Format tables
+    # Format tables - ensure columns are strings
     tables_text = ""
+    all_columns = set()
+    
     for table in schema.get("tables", [])[:10]:  # Limit to 10 tables
         table_name = table.get("table_name", "")
         columns = table.get("columns", [])
-        col_names = [c.get("column_name", c) if isinstance(c, dict) else c for c in columns[:20]]
+        
+        # Extract column names as strings
+        col_names = []
+        for c in columns[:20]:
+            if isinstance(c, dict):
+                col_name = c.get("column_name") or c.get("name") or str(c)
+            else:
+                col_name = str(c)
+            col_names.append(col_name)
+            all_columns.add(col_name)
+        
         tables_text += f"\nTable: {table_name}\nColumns: {', '.join(col_names)}\n"
+    
+    # Add mapped columns to the set
+    for col_info in field_mappings.values():
+        all_columns.add(col_info['column_name'])
     
     # Build prompt
     prompt = SQL_GENERATION_PROMPT.format(
@@ -512,15 +528,6 @@ def generate_compliance_sql(
     if not orchestrator:
         logger.error("[COMPLIANCE] No LLM orchestrator available")
         return None
-    
-    # Get all column names for validation
-    all_columns = set()
-    for col_info in field_mappings.values():
-        all_columns.add(col_info['column_name'])
-    for table in schema.get("tables", []):
-        for col in table.get("columns", []):
-            col_name = col.get("column_name", col) if isinstance(col, dict) else col
-            all_columns.add(col_name)
     
     result = orchestrator.generate_sql(prompt, schema_columns=all_columns)
     
