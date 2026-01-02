@@ -47,6 +47,18 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Try to import LLM orchestrator for consistent Claude calls
+_playbook_orchestrator = None
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    _playbook_orchestrator = LLMOrchestrator()
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        _playbook_orchestrator = LLMOrchestrator()
+    except ImportError:
+        logger.warning("[PLAYBOOK] LLMOrchestrator not available")
+
 
 # =============================================================================
 # ENUMS & DATA CLASSES
@@ -1626,23 +1638,13 @@ class FindingsExtractor:
         intelligence_findings: Optional[List[Dict]] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        FALLBACK ONLY: Direct Claude call when orchestrator unavailable.
+        FALLBACK ONLY: Claude call when ConsultativeSynthesizer unavailable.
+        Uses LLMOrchestrator for consistent metrics tracking.
         
-        This should rarely be used - only when local LLMs AND orchestrator fail.
+        This should rarely be used - only when ConsultativeSynthesizer fails.
         """
-        logger.warning("[EXTRACT] Using direct Claude (fallback mode)")
-        
-        try:
-            import anthropic
-            import os
-            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                logger.error("[EXTRACT] No Claude API key found")
-                return None
-            client = anthropic.Anthropic(api_key=api_key)
-        except Exception as e:
-            logger.error(f"[EXTRACT] Claude client init failed: {e}")
-            return None
+        global _playbook_orchestrator
+        logger.warning("[EXTRACT] Using Claude fallback (ConsultativeSynthesizer unavailable)")
         
         # Build content summary
         content_summary = "\n\n---\n\n".join(content[:10]) if content else "No new content"
@@ -1665,9 +1667,7 @@ class FindingsExtractor:
                 intelligence_text = f"\n\nPRE-ANALYZED ISSUES FROM INTELLIGENCE ENGINE:\n{chr(10).join(intel_parts)}"
         
         # Build prompt
-        base_prompt = f"""Analyze this data for playbook action: {action.action_id}
-
-ACTION: {action.description}
+        prompt = f"""ACTION: {action.action_id} - {action.description}
 
 REPORTS NEEDED: {', '.join(action.reports_needed) if action.reports_needed else 'None specified'}
 
@@ -1691,12 +1691,45 @@ Analyze the content and return JSON:
 
 Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
 
+        system_prompt = "You are a senior implementation consultant. Analyze documents and provide specific, actionable findings."
+
         try:
+            # Try orchestrator first
+            if _playbook_orchestrator and _playbook_orchestrator.claude_api_key:
+                result_text, success = _playbook_orchestrator._call_claude(
+                    prompt=prompt,
+                    system_prompt=system_prompt,
+                    project_id=project_id,
+                    operation="playbook_extract"
+                )
+                
+                if success:
+                    text = result_text.strip()
+                    # Clean markdown
+                    if text.startswith("```"):
+                        text = text.split("```")[1]
+                        if text.startswith("json"):
+                            text = text[4:]
+                    text = text.strip()
+                    
+                    result = json.loads(text)
+                    result['_analyzed_by'] = 'claude-via-orchestrator'
+                    return result
+            
+            # Direct fallback if orchestrator not available
+            import anthropic
+            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+            if not api_key:
+                logger.error("[EXTRACT] No Claude API key found")
+                return None
+            
+            client = anthropic.Anthropic(api_key=api_key)
             response = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=1500,
                 temperature=0,
-                messages=[{"role": "user", "content": base_prompt}]
+                system=system_prompt,
+                messages=[{"role": "user", "content": prompt}]
             )
             
             text = response.content[0].text.strip()
