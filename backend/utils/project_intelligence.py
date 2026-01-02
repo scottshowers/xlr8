@@ -82,6 +82,46 @@ import re
 
 logger = logging.getLogger(__name__)
 
+# Try to import gap detection engine
+try:
+    from backend.utils.gap_detection_engine import GapDetectionEngine
+    GAP_DETECTION_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.gap_detection_engine import GapDetectionEngine
+        GAP_DETECTION_AVAILABLE = True
+    except ImportError:
+        GAP_DETECTION_AVAILABLE = False
+        GapDetectionEngine = None
+        logger.info("[INTELLIGENCE] Gap Detection Engine not available")
+
+# Try to import domain decoder for enriching findings with consultant knowledge
+try:
+    from backend.utils.domain_decoder import get_decoder, decode
+    DOMAIN_DECODER_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.domain_decoder import get_decoder, decode
+        DOMAIN_DECODER_AVAILABLE = True
+    except ImportError:
+        DOMAIN_DECODER_AVAILABLE = False
+        get_decoder = None
+        decode = None
+        logger.info("[INTELLIGENCE] Domain Decoder not available")
+
+# Try to import relationship detector for table relationship analysis
+try:
+    from backend.utils.relationship_detector import analyze_project_relationships
+    RELATIONSHIP_DETECTOR_AVAILABLE = True
+except ImportError:
+    try:
+        from utils.relationship_detector import analyze_project_relationships
+        RELATIONSHIP_DETECTOR_AVAILABLE = True
+    except ImportError:
+        RELATIONSHIP_DETECTOR_AVAILABLE = False
+        analyze_project_relationships = None
+        logger.info("[INTELLIGENCE] Relationship Detector not available")
+
 
 # =============================================================================
 # ENUMS AND CONSTANTS
@@ -1094,6 +1134,9 @@ class ProjectIntelligenceService:
         
         # Check for date logic errors
         self._check_date_logic(tables)
+        
+        # Run gap detection (Configuration vs Reality)
+        self._run_gap_detection(tables)
     
     def _detect_reference_tables(self, tables: List[Dict]) -> None:
         """
@@ -1346,15 +1389,107 @@ class ProjectIntelligenceService:
             logger.debug(f"[INTELLIGENCE] Profile-based lookup detection failed: {e}")
     
     def _detect_relationships(self, tables: List[Dict]) -> None:
-        """Detect relationships between tables based on column names."""
-        # This is a stub - the full implementation would analyze column names
-        # and values to detect foreign key relationships
-        pass
+        """
+        Detect relationships between tables using semantic analysis.
+        
+        Uses relationship_detector.py which:
+        1. Detects semantic type of each key column (employee_id, company_code, etc.)
+        2. Only compares columns of the SAME type
+        3. Strips prefixes before comparing (home_company_code ↔ company_code)
+        4. Uses global mappings for known equivalents
+        """
+        if not RELATIONSHIP_DETECTOR_AVAILABLE or not analyze_project_relationships:
+            logger.info("[INTELLIGENCE] Relationship detector not available, skipping")
+            return
+        
+        if not tables:
+            return
+        
+        logger.info(f"[INTELLIGENCE] Detecting relationships across {len(tables)} tables")
+        
+        try:
+            import asyncio
+            
+            # Run the async function
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(
+                    analyze_project_relationships(self.project, tables, None)
+                )
+            finally:
+                loop.close()
+            
+            if not result:
+                logger.warning("[INTELLIGENCE] Relationship detection returned no results")
+                return
+            
+            # Convert results to Relationship objects
+            for rel_dict in result.get('relationships', []):
+                try:
+                    rel = Relationship(
+                        from_table=rel_dict.get('source_table', ''),
+                        from_column=rel_dict.get('source_column', ''),
+                        to_table=rel_dict.get('target_table', ''),
+                        to_column=rel_dict.get('target_column', ''),
+                        confidence=rel_dict.get('confidence', 0.5),
+                        relationship_type=rel_dict.get('relationship_type', 'one-to-many')
+                    )
+                    self.relationships.append(rel)
+                except Exception as e:
+                    logger.debug(f"[INTELLIGENCE] Failed to create relationship: {e}")
+            
+            logger.info(f"[INTELLIGENCE] Detected {len(self.relationships)} relationships")
+            
+            # Store semantic types as findings for visibility
+            semantic_types = result.get('semantic_types', [])
+            if semantic_types:
+                logger.info(f"[INTELLIGENCE] Identified {len(semantic_types)} typed key columns")
+                
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Relationship detection failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
     
     def _persist_relationships(self) -> None:
-        """Persist detected relationships to database."""
-        # This is called from _persist_results
-        pass
+        """Persist detected relationships to Supabase."""
+        if not self.relationships:
+            return
+        
+        try:
+            from utils.database.supabase_client import get_supabase
+        except ImportError:
+            try:
+                from backend.utils.database.supabase_client import get_supabase
+            except ImportError:
+                logger.debug("[INTELLIGENCE] Supabase not available for relationship persistence")
+                return
+        
+        try:
+            supabase = get_supabase()
+            
+            for rel in self.relationships:
+                try:
+                    supabase.table('project_relationships').upsert({
+                        'project_name': self.project,
+                        'source_table': rel.from_table,
+                        'source_column': rel.from_column,
+                        'target_table': rel.to_table,
+                        'target_column': rel.to_column,
+                        'confidence': rel.confidence,
+                        'relationship_type': rel.relationship_type,
+                        'needs_review': rel.confidence < 0.8,
+                        'confirmed': False,
+                        'orphan_count': rel.orphan_count,
+                        'orphan_percentage': rel.orphan_percentage
+                    }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
+                except Exception as e:
+                    logger.debug(f"[INTELLIGENCE] Failed to persist relationship: {e}")
+            
+            logger.info(f"[INTELLIGENCE] Persisted {len(self.relationships)} relationships to Supabase")
+            
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Relationship persistence failed: {e}")
     
     def _check_orphan_records(self) -> None:
         """Check for orphan records based on detected relationships."""
@@ -1454,6 +1589,226 @@ class ProjectIntelligenceService:
                             ))
                     except Exception as e:
                         logger.debug(f"[INTELLIGENCE] Date logic check failed for {table_name}: {e}")
+    
+    def _run_gap_detection(self, tables: List[Dict]) -> None:
+        """
+        Run gap detection between Configuration and Reality tables.
+        
+        This is the "Configuration Validation vs Employee Conversion Testing" logic:
+        - Config tables define what SHOULD exist (codes, plans, setup)
+        - Reality tables show what IS being used (actual employee data)
+        - The GAP between them = implementation issues
+        
+        Gap types:
+        1. Configured but unused: Code in Config but not in Reality → over-configured
+        2. In use but unconfigured: Code in Reality but not in Config → ERROR!
+        """
+        if not GAP_DETECTION_AVAILABLE:
+            logger.debug("[INTELLIGENCE] Gap detection not available")
+            return
+        
+        logger.info("[INTELLIGENCE] Running gap detection...")
+        
+        try:
+            # Initialize gap detection engine
+            gap_engine = GapDetectionEngine(self.project, self.project_id)
+            
+            # Get table classifications to find Config vs Reality pairs
+            config_tables = []
+            reality_tables = []
+            
+            for table_info in tables:
+                table_name = table_info.get('table_name', '')
+                table_lower = table_name.lower()
+                
+                # Detect Configuration tables
+                if any(pattern in table_lower for pattern in 
+                       ['configuration_validation', 'config_valid', '_codes', '_setup', 
+                        'code_table', 'earning_code', 'deduction_code', 'tax_code']):
+                    config_tables.append(table_info)
+                    logger.debug(f"[GAP] Config table: {table_name}")
+                
+                # Detect Reality/Transaction tables
+                elif any(pattern in table_lower for pattern in 
+                         ['employee_conversion', 'conversion_test', 'employee_', 
+                          'transaction', 'history', 'register', 'payroll']):
+                    reality_tables.append(table_info)
+                    logger.debug(f"[GAP] Reality table: {table_name}")
+            
+            if not config_tables or not reality_tables:
+                logger.info("[INTELLIGENCE] Gap detection skipped - need both Config and Reality tables")
+                return
+            
+            logger.info(f"[INTELLIGENCE] Gap detection: {len(config_tables)} config tables, {len(reality_tables)} reality tables")
+            
+            # Run gap detection for each domain
+            gaps_found = 0
+            
+            for config_table in config_tables:
+                config_name = config_table.get('table_name', '')
+                config_cols = [c.lower() for c in config_table.get('columns', [])]
+                
+                # Detect domain from config table
+                domain = self._detect_domain_from_table(config_name, config_cols)
+                
+                if not domain:
+                    continue
+                
+                # Find matching reality tables for this domain
+                for reality_table in reality_tables:
+                    reality_name = reality_table.get('table_name', '')
+                    reality_cols = [c.lower() for c in reality_table.get('columns', [])]
+                    
+                    # Look for common key columns (e.g., earning_code, deduction_code)
+                    common_keys = self._find_common_key_columns(config_cols, reality_cols)
+                    
+                    if common_keys:
+                        # Run comparison for each common key
+                        for key_col in common_keys:
+                            gaps = self._compare_config_vs_reality(
+                                config_name, reality_name, key_col, domain
+                            )
+                            gaps_found += len(gaps)
+            
+            logger.info(f"[INTELLIGENCE] Gap detection complete: {gaps_found} gaps found")
+            
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Gap detection failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+    
+    def _detect_domain_from_table(self, table_name: str, columns: List[str]) -> Optional[str]:
+        """Detect domain from table name and columns."""
+        name_lower = table_name.lower()
+        cols_str = ' '.join(columns)
+        
+        if any(x in name_lower or x in cols_str for x in ['earning', 'pay_code', 'compensation']):
+            return 'earnings'
+        if any(x in name_lower or x in cols_str for x in ['deduction', 'benefit', '401k', 'ded_code']):
+            return 'deductions'
+        if any(x in name_lower or x in cols_str for x in ['tax', 'sui', 'futa', 'withhold']):
+            return 'taxes'
+        if any(x in name_lower or x in cols_str for x in ['time', 'hours', 'attendance', 'schedule']):
+            return 'time'
+        
+        return None
+    
+    def _find_common_key_columns(self, config_cols: List[str], reality_cols: List[str]) -> List[str]:
+        """Find columns that could be join keys between config and reality."""
+        common = []
+        key_patterns = ['_code', '_id', '_num', '_key', '_type']
+        
+        for config_col in config_cols:
+            if any(pattern in config_col for pattern in key_patterns):
+                # Look for matching or similar column in reality
+                for reality_col in reality_cols:
+                    if config_col == reality_col:
+                        common.append(config_col)
+                        break
+                    # Try without common prefixes/suffixes
+                    config_base = config_col.replace('_code', '').replace('_id', '').replace('_num', '')
+                    reality_base = reality_col.replace('_code', '').replace('_id', '').replace('_num', '')
+                    if config_base and config_base == reality_base:
+                        common.append((config_col, reality_col))
+                        break
+        
+        return common
+    
+    def _compare_config_vs_reality(
+        self, 
+        config_table: str, 
+        reality_table: str, 
+        key_col: str, 
+        domain: str
+    ) -> List[Dict]:
+        """
+        Compare values between Config and Reality tables.
+        
+        Returns list of gaps:
+        - 'configured_unused': In config but not in reality
+        - 'in_use_unconfigured': In reality but not in config (ERROR!)
+        """
+        gaps = []
+        
+        try:
+            # Handle tuple (different column names) or string (same name)
+            if isinstance(key_col, tuple):
+                config_col, reality_col = key_col
+            else:
+                config_col = reality_col = key_col
+            
+            # Get distinct values from each table
+            config_values = set()
+            reality_values = set()
+            
+            try:
+                result = self.handler.conn.execute(f'''
+                    SELECT DISTINCT "{config_col}" FROM "{config_table}"
+                    WHERE "{config_col}" IS NOT NULL AND "{config_col}" != ''
+                ''').fetchall()
+                config_values = {str(r[0]).strip() for r in result if r[0]}
+            except Exception as e:
+                logger.debug(f"[GAP] Config query failed: {e}")
+                return gaps
+            
+            try:
+                result = self.handler.conn.execute(f'''
+                    SELECT DISTINCT "{reality_col}" FROM "{reality_table}"
+                    WHERE "{reality_col}" IS NOT NULL AND "{reality_col}" != ''
+                ''').fetchall()
+                reality_values = {str(r[0]).strip() for r in result if r[0]}
+            except Exception as e:
+                logger.debug(f"[GAP] Reality query failed: {e}")
+                return gaps
+            
+            # Find gaps
+            configured_unused = config_values - reality_values
+            in_use_unconfigured = reality_values - config_values
+            
+            # Report configured but unused
+            if configured_unused and len(configured_unused) <= 20:  # Don't report huge lists
+                self.findings.append(Finding(
+                    id=f"gap_unused_{config_table}_{config_col}_{int(time.time())}",
+                    category="GAP_DETECTION",
+                    finding_type="configured_unused",
+                    severity=FindingSeverity.INFO,
+                    table_name=config_table,
+                    column_name=config_col,
+                    title=f"Configured but Unused: {domain.title()} codes",
+                    description=f"{len(configured_unused)} {domain} codes are configured in {config_table} but not used in {reality_table}: {', '.join(list(configured_unused)[:10])}{'...' if len(configured_unused) > 10 else ''}",
+                    affected_count=len(configured_unused),
+                    evidence_sql=f'''
+                        SELECT * FROM "{config_table}" WHERE "{config_col}" IN ({','.join([f"'{v}'" for v in list(configured_unused)[:20]])})
+                    '''
+                ))
+                gaps.append({'type': 'configured_unused', 'count': len(configured_unused)})
+            
+            # Report in use but unconfigured - THIS IS AN ERROR
+            if in_use_unconfigured:
+                self.findings.append(Finding(
+                    id=f"gap_unconfigured_{reality_table}_{reality_col}_{int(time.time())}",
+                    category="GAP_DETECTION",
+                    finding_type="in_use_unconfigured",
+                    severity=FindingSeverity.CRITICAL if len(in_use_unconfigured) > 5 else FindingSeverity.WARNING,
+                    table_name=reality_table,
+                    column_name=reality_col,
+                    title=f"⚠️ IN USE BUT UNCONFIGURED: {domain.title()} codes",
+                    description=f"{len(in_use_unconfigured)} {domain} codes are being USED in {reality_table} but NOT CONFIGURED in {config_table}: {', '.join(list(in_use_unconfigured)[:10])}{'...' if len(in_use_unconfigured) > 10 else ''}. This is a data integrity issue!",
+                    affected_count=len(in_use_unconfigured),
+                    evidence_sql=f'''
+                        SELECT * FROM "{reality_table}" WHERE "{reality_col}" IN ({','.join([f"'{v}'" for v in list(in_use_unconfigured)[:20]])})
+                    '''
+                ))
+                gaps.append({'type': 'in_use_unconfigured', 'count': len(in_use_unconfigured)})
+            
+            if gaps:
+                logger.warning(f"[GAP] {config_table} vs {reality_table}.{reality_col}: "
+                              f"{len(configured_unused)} unused, {len(in_use_unconfigured)} unconfigured")
+            
+        except Exception as e:
+            logger.warning(f"[GAP] Comparison failed: {e}")
+        
+        return gaps
     
     # =========================================================================
     # TIER 3: BACKGROUND ANALYSIS (~2-3 minutes)
@@ -2015,6 +2370,9 @@ class ProjectIntelligenceService:
         warnings = [f for f in self.findings if f.severity == FindingSeverity.WARNING]
         info = [f for f in self.findings if f.severity == FindingSeverity.INFO]
         
+        # Get relevant domain knowledge
+        domain_knowledge = self._get_relevant_domain_knowledge()
+        
         return {
             'project': self.project,
             'analyzed_at': self.analyzed_at.isoformat() if self.analyzed_at else None,
@@ -2052,6 +2410,9 @@ class ProjectIntelligenceService:
             # Lookups
             'lookups': [l.to_dict() for l in self.lookups],
             
+            # Domain Knowledge (from Domain Decoder)
+            'domain_knowledge': domain_knowledge,
+            
             # Tier completion
             'tiers_complete': {
                 'tier1': self.tier1_complete,
@@ -2059,6 +2420,56 @@ class ProjectIntelligenceService:
                 'tier3': self.tier3_complete
             }
         }
+    
+    def _get_relevant_domain_knowledge(self) -> Dict:
+        """Get domain knowledge relevant to this project's data."""
+        if not DOMAIN_DECODER_AVAILABLE or not decode:
+            return {'available': False, 'entries': []}
+        
+        try:
+            decoder = get_decoder()
+            relevant_entries = []
+            
+            # Build text to match against from table names and findings
+            search_text_parts = []
+            
+            # Add table names
+            for table in self.tables:
+                search_text_parts.append(table.table_name)
+            
+            # Add finding descriptions
+            for finding in self.findings[:20]:  # Limit to avoid too many
+                search_text_parts.append(finding.description)
+            
+            combined_text = ' '.join(search_text_parts)
+            
+            # Get matches from decoder
+            matches = decoder.decode(combined_text)
+            
+            # Also get knowledge for detected domains
+            detected_domains = set(t.domain.value for t in self.tables if t.domain)
+            for domain in detected_domains:
+                domain_entries = decoder.get_by_domain(domain)
+                for entry in domain_entries:
+                    if entry not in matches:
+                        matches.append(entry)
+            
+            # Deduplicate and limit
+            seen_ids = set()
+            for entry in matches[:20]:  # Limit to 20
+                if entry.id not in seen_ids:
+                    relevant_entries.append(entry.to_dict())
+                    seen_ids.add(entry.id)
+            
+            return {
+                'available': True,
+                'count': len(relevant_entries),
+                'entries': relevant_entries
+            }
+            
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Domain knowledge enrichment failed: {e}")
+            return {'available': False, 'error': str(e), 'entries': []}
     
     def _group_findings_by_category(self) -> Dict[str, int]:
         """Group findings by category."""
