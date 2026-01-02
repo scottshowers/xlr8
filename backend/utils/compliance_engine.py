@@ -1,18 +1,12 @@
 """
-XLR8 COMPLIANCE ENGINE v3.0 - READS FROM _column_mappings
-=========================================================
+XLR8 COMPLIANCE ENGINE v4.0 - Uses Semantic Vocabulary
+=======================================================
 
 THE RIGHT WAY:
+- Uses semantic_vocabulary.py for ALL type matching
 - READS semantic types from _column_mappings (populated at upload)
-- NO runtime scoring or string matching
-- Uses DERIVED_FIELDS for calculated values (age from birth_date)
-
-This is how compliance should work:
-1. Rule says: check if employees over age 50 with wages > $145K...
-2. Engine looks up "age" → finds birth_date semantic type → knows to calculate age
-3. Engine looks up "wages" → finds fica_wages semantic type → maps to actual column
-4. Generates SQL with actual column names
-5. Runs SQL and produces findings
+- NO hardcoded field mappings
+- Handles derived fields via vocabulary (age from birth_date)
 
 Deploy to: backend/utils/compliance_engine.py
 """
@@ -26,51 +20,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# DERIVED FIELDS - Calculated from source columns
-# =============================================================================
-
-DERIVED_FIELDS = {
-    'age': {
-        'source_semantic_types': ['birth_date', 'date_of_birth', 'dob'],
-        'calculation': "EXTRACT(YEAR FROM AGE(CURRENT_DATE, {column}))",
-        'duckdb_calculation': "DATE_DIFF('year', {column}, CURRENT_DATE)",
-        'description': 'Age in years calculated from birth date'
-    },
-    'tenure': {
-        'source_semantic_types': ['hire_date', 'start_date', 'employment_date'],
-        'calculation': "EXTRACT(YEAR FROM AGE(CURRENT_DATE, {column}))",
-        'duckdb_calculation': "DATE_DIFF('year', {column}, CURRENT_DATE)",
-        'description': 'Years of service calculated from hire date'
-    },
-    'years_of_service': {
-        'source_semantic_types': ['hire_date', 'start_date', 'employment_date'],
-        'calculation': "EXTRACT(YEAR FROM AGE(CURRENT_DATE, {column}))",
-        'duckdb_calculation': "DATE_DIFF('year', {column}, CURRENT_DATE)",
-        'description': 'Years of service calculated from hire date'
-    },
-}
-
-# Field name to semantic type mapping
-# When a rule asks for "Social Security FICA wages", look for these semantic types
-FIELD_TO_SEMANTIC = {
-    'age': ['age', 'birth_date', 'date_of_birth'],
-    'wages': ['wages', 'fica_wages', 'ss_wages', 'gross_wages', 'amount'],
-    'fica_wages': ['fica_wages', 'ss_wages', 'social_security_wages'],
-    'social_security_wages': ['fica_wages', 'ss_wages', 'social_security_wages'],
-    'employee_type': ['employee_type', 'employee_type_code'],
-    'contribution': ['contribution', 'contribution_type', 'deduction_code'],
-    'contribution_type': ['contribution_type', 'deduction_code', 'deductionbenefit_code'],
-    'plan_type': ['plan_type', 'deductionbenefit_code'],
-    'deduction': ['deduction_code', 'deductionbenefit_code'],
-    'earnings': ['earnings_code', 'earning_code'],
-    'tax': ['tax_code'],
-    'location': ['location', 'location_code'],
-    'job': ['job_code'],
-    'department': ['department_code', 'org_level'],
-}
 
 
 # =============================================================================
@@ -129,170 +78,162 @@ class Finding:
 
 
 # =============================================================================
-# COLUMN MAPPER - Reads from _column_mappings
+# COLUMN MAPPER - Uses Semantic Vocabulary
 # =============================================================================
 
 class ColumnMapper:
     """
-    Maps rule fields to actual database columns using _column_mappings.
+    Maps rule fields to actual database columns using:
+    1. semantic_vocabulary.py for type definitions
+    2. _column_mappings for actual column->type assignments
     
-    NO RUNTIME SCORING - just reads what was computed at upload time.
+    NO HARDCODED MAPPINGS.
     """
     
     def __init__(self, db_handler=None):
         self.db_handler = db_handler
-        self._mappings_cache: Dict[str, Dict] = {}
-        self._columns_cache: Dict[str, List] = {}
+        self._semantic_mappings: Dict[Tuple[str, str], str] = {}  # (table, col) -> semantic_type
+        self._columns_by_type: Dict[str, List[Tuple[str, str]]] = {}  # semantic_type -> [(table, col), ...]
+        self._loaded_project: str = ""
     
-    def load_semantic_mappings(self, project: str) -> Dict[Tuple[str, str], str]:
-        """
-        Load all semantic type mappings for a project.
+    def load_project_mappings(self, project: str) -> bool:
+        """Load semantic mappings from _column_mappings for a project."""
+        if project == self._loaded_project and self._semantic_mappings:
+            return True
         
-        Returns:
-            Dict of (table_name, column_name) -> semantic_type
-        """
-        if project in self._mappings_cache:
-            return self._mappings_cache[project]
-        
-        mappings = {}
+        self._semantic_mappings = {}
+        self._columns_by_type = {}
         
         if not self.db_handler or not hasattr(self.db_handler, 'conn'):
-            logger.warning("[COMPLIANCE] No db_handler for semantic mappings")
-            return mappings
+            logger.warning("[COMPLIANCE] No db_handler available")
+            return False
         
         try:
             project_prefix = project[:8].lower() if project else ''
             
-            # Load from _column_mappings
+            # Load from _column_mappings (case-insensitive)
             result = self.db_handler.conn.execute("""
                 SELECT table_name, original_column, semantic_type, confidence
                 FROM _column_mappings
                 WHERE LOWER(table_name) LIKE ? || '%'
                   AND semantic_type IS NOT NULL
                   AND semantic_type != 'NONE'
+                  AND confidence >= 0.6
             """, [project_prefix]).fetchall()
             
             for row in result:
                 table_name, column_name, sem_type, confidence = row
-                mappings[(table_name, column_name)] = sem_type
+                self._semantic_mappings[(table_name, column_name)] = sem_type
+                
+                # Build reverse index
+                if sem_type not in self._columns_by_type:
+                    self._columns_by_type[sem_type] = []
+                self._columns_by_type[sem_type].append((table_name, column_name))
             
-            self._mappings_cache[project] = mappings
-            logger.warning(f"[COMPLIANCE] Loaded {len(mappings)} semantic mappings for {project}")
-            
-        except Exception as e:
-            logger.error(f"[COMPLIANCE] Failed to load semantic mappings: {e}")
-        
-        return mappings
-    
-    def load_all_columns(self, project: str) -> List[Dict]:
-        """Load all columns for a project with their profiles."""
-        if project in self._columns_cache:
-            return self._columns_cache[project]
-        
-        columns = []
-        
-        if not self.db_handler or not hasattr(self.db_handler, 'conn'):
-            return columns
-        
-        try:
-            project_prefix = project[:8].lower() if project else ''
-            
-            result = self.db_handler.conn.execute("""
-                SELECT table_name, column_name, inferred_type, distinct_values
-                FROM _column_profiles
-                WHERE LOWER(table_name) LIKE ? || '%'
-            """, [project_prefix]).fetchall()
-            
-            for row in result:
-                columns.append({
-                    'table_name': row[0],
-                    'column_name': row[1],
-                    'inferred_type': row[2],
-                    'distinct_values': row[3]
-                })
-            
-            self._columns_cache[project] = columns
-            logger.warning(f"[COMPLIANCE] Loaded {len(columns)} columns for {project}")
+            self._loaded_project = project
+            logger.warning(f"[COMPLIANCE] Loaded {len(self._semantic_mappings)} semantic mappings, "
+                           f"{len(self._columns_by_type)} unique types")
+            return True
             
         except Exception as e:
-            logger.error(f"[COMPLIANCE] Failed to load columns: {e}")
-        
-        return columns
+            logger.error(f"[COMPLIANCE] Failed to load mappings: {e}")
+            return False
     
-    def find_column_for_field(self, field_name: str, project: str) -> Optional[Dict]:
+    def find_column_for_field(self, rule_field: str, project: str) -> Optional[Dict]:
         """
-        Find the best column match for a rule field.
+        Find the best column match for a rule field using semantic vocabulary.
         
-        1. Check if field maps to a semantic type
-        2. Look for columns with that semantic type
-        3. Handle derived fields (age → birth_date)
+        1. Normalize rule_field to canonical semantic type
+        2. Look for columns with that type in _column_mappings
+        3. Handle derived fields (age -> birth_date with calculation)
         
         Returns:
             Dict with table_name, column_name, and optional calculation
         """
-        field_norm = self._normalize(field_name)
+        # Ensure mappings loaded
+        self.load_project_mappings(project)
         
-        # Load mappings
-        semantic_mappings = self.load_semantic_mappings(project)
-        all_columns = self.load_all_columns(project)
+        # Import vocabulary
+        try:
+            from backend.utils.semantic_vocabulary import (
+                find_semantic_type, 
+                get_derivation_source,
+                match_rule_field_to_column
+            )
+        except ImportError:
+            from utils.semantic_vocabulary import (
+                find_semantic_type,
+                get_derivation_source,
+                match_rule_field_to_column
+            )
         
-        # Step 1: Get semantic types to look for
-        target_semantic_types = self._get_target_semantic_types(field_norm)
+        # Step 1: Find canonical semantic type for rule field
+        type_result = find_semantic_type(rule_field)
+        if not type_result:
+            logger.warning(f"[COMPLIANCE] Field '{rule_field}' has no known semantic type")
+            return None
         
-        # Step 2: Check if this is a derived field
-        derived_info = DERIVED_FIELDS.get(field_norm)
-        if derived_info:
-            target_semantic_types.extend(derived_info['source_semantic_types'])
+        rule_type, type_confidence = type_result
+        logger.info(f"[COMPLIANCE] Field '{rule_field}' -> semantic type '{rule_type.name}' (conf: {type_confidence})")
         
-        # Step 3: Find columns with matching semantic types
-        for (table_name, col_name), sem_type in semantic_mappings.items():
-            if sem_type.lower() in [t.lower() for t in target_semantic_types]:
+        # Step 2: Look for direct match - columns with this semantic type
+        if rule_type.name in self._columns_by_type:
+            columns = self._columns_by_type[rule_type.name]
+            if columns:
+                table_name, col_name = columns[0]  # Take first match
+                logger.warning(f"[COMPLIANCE] Field '{rule_field}' -> {table_name}.{col_name} (direct match)")
+                return {
+                    'table_name': table_name,
+                    'column_name': col_name,
+                    'semantic_type': rule_type.name,
+                    'match_reason': 'direct_semantic_match',
+                    'confidence': type_confidence
+                }
+        
+        # Step 3: Check if this is a derived field (e.g., age from birth_date)
+        derivation = get_derivation_source(rule_type.name)
+        if derivation:
+            source_type, derivation_sql = derivation
+            logger.info(f"[COMPLIANCE] Field '{rule_field}' is derived from '{source_type.name}'")
+            
+            # Look for columns with the source type
+            if source_type.name in self._columns_by_type:
+                columns = self._columns_by_type[source_type.name]
+                if columns:
+                    table_name, col_name = columns[0]
+                    sql = derivation_sql.format(column=col_name) if derivation_sql else None
+                    logger.warning(f"[COMPLIANCE] Field '{rule_field}' -> derived from {table_name}.{col_name}")
+                    return {
+                        'table_name': table_name,
+                        'column_name': col_name,
+                        'semantic_type': source_type.name,
+                        'match_reason': 'derived_field',
+                        'calculation': sql,
+                        'is_derived': True,
+                        'derives_to': rule_type.name,
+                        'confidence': type_confidence * 0.9
+                    }
+        
+        # Step 4: Try matching against all column types using vocabulary
+        for (table_name, col_name), col_sem_type in self._semantic_mappings.items():
+            matches, conf, deriv_sql = match_rule_field_to_column(rule_field, col_sem_type)
+            if matches and conf > 0.6:
                 result = {
                     'table_name': table_name,
                     'column_name': col_name,
-                    'semantic_type': sem_type,
-                    'match_reason': f'semantic_type:{sem_type}'
+                    'semantic_type': col_sem_type,
+                    'match_reason': 'vocabulary_match',
+                    'confidence': conf
                 }
-                
-                # Add calculation for derived fields
-                if derived_info:
-                    result['calculation'] = derived_info['duckdb_calculation'].format(column=col_name)
+                if deriv_sql:
+                    result['calculation'] = deriv_sql.format(column=col_name)
                     result['is_derived'] = True
                 
-                logger.warning(f"[COMPLIANCE] Field '{field_name}' → {table_name}.{col_name} (semantic:{sem_type})")
+                logger.warning(f"[COMPLIANCE] Field '{rule_field}' -> {table_name}.{col_name} (vocab match)")
                 return result
         
-        # Step 4: Fallback - exact column name match
-        for col in all_columns:
-            col_norm = self._normalize(col['column_name'])
-            if col_norm == field_norm:
-                logger.warning(f"[COMPLIANCE] Field '{field_name}' → {col['table_name']}.{col['column_name']} (exact_name)")
-                return {
-                    'table_name': col['table_name'],
-                    'column_name': col['column_name'],
-                    'match_reason': 'exact_name'
-                }
-        
-        logger.warning(f"[COMPLIANCE] Field '{field_name}' → NO MATCH (looked for semantic types: {target_semantic_types})")
+        logger.warning(f"[COMPLIANCE] Field '{rule_field}' -> NO MATCH FOUND")
         return None
-    
-    def _normalize(self, text: str) -> str:
-        """Normalize field name."""
-        if not text:
-            return ''
-        text = text.lower().strip()
-        text = re.sub(r'[\s\-\.]+', '_', text)
-        return text
-    
-    def _get_target_semantic_types(self, field_norm: str) -> List[str]:
-        """Get semantic types to look for based on field name."""
-        # Check explicit mapping first
-        for key, types in FIELD_TO_SEMANTIC.items():
-            if key in field_norm or field_norm in key:
-                return list(types)
-        
-        # Return field itself as potential semantic type
-        return [field_norm]
 
 
 # =============================================================================
@@ -302,8 +243,7 @@ class ColumnMapper:
 class ComplianceEngine:
     """
     Runs compliance checks against customer data.
-    
-    READS from _column_mappings - no runtime scoring.
+    Uses semantic_vocabulary.py for all type matching.
     """
     
     def __init__(self, db_handler=None, chroma_client=None):
@@ -318,7 +258,6 @@ class ComplianceEngine:
             return self._rules_cache
         
         try:
-            # Try to load from standards_processor
             try:
                 from backend.utils.standards_processor import StandardsProcessor
                 processor = StandardsProcessor(chroma_client=self.chroma_client)
@@ -337,12 +276,7 @@ class ComplianceEngine:
         return self._rules_cache
     
     def run_compliance_scan(self, project_id: str) -> Dict:
-        """
-        Run all compliance rules against a project.
-        
-        Returns:
-            Dict with check results and findings
-        """
+        """Run all compliance rules against a project."""
         logger.warning(f"[COMPLIANCE] Starting scan for {project_id}")
         
         result = {
@@ -354,8 +288,12 @@ class ComplianceEngine:
             'errors': 0,
             'findings_count': 0,
             'findings': [],
-            'check_results': []
+            'check_results': [],
+            'semantic_types_found': list(self.column_mapper._columns_by_type.keys()) if self.column_mapper._columns_by_type else []
         }
+        
+        # Load mappings for this project
+        self.column_mapper.load_project_mappings(project_id)
         
         # Load rules
         rules = self.load_rules()
@@ -406,19 +344,20 @@ class ComplianceEngine:
                     result['check_results'].append(rule_result)
                     continue
                 
-                # Map fields to columns
+                # Map fields to columns using vocabulary
                 field_mappings = {}
                 unmapped_fields = []
                 
-                for field in fields:
-                    mapping = self.column_mapper.find_column_for_field(field, project_id)
+                for field_name in fields:
+                    mapping = self.column_mapper.find_column_for_field(field_name, project_id)
                     if mapping:
-                        field_mappings[field] = mapping
+                        field_mappings[field_name] = mapping
                     else:
-                        unmapped_fields.append(field)
+                        unmapped_fields.append(field_name)
                 
                 rule_result['field_mappings'] = {
-                    k: f"{v['table_name']}.{v['column_name']}" 
+                    k: f"{v['table_name']}.{v['column_name']}" + 
+                       (f" (calc: {v.get('calculation', '')[:30]}...)" if v.get('is_derived') else "")
                     for k, v in field_mappings.items()
                 }
                 
@@ -494,27 +433,27 @@ class ComplianceEngine:
         
         try:
             # Case-insensitive lookup
-            raw_schema = self.db_handler.get_schema(project_id)
+            raw_schema = None
             
-            if not raw_schema and hasattr(self.db_handler, 'conn'):
-                # Try case-insensitive
+            if hasattr(self.db_handler, 'conn'):
                 result = self.db_handler.conn.execute("""
                     SELECT table_name, display_name, columns
                     FROM _schema_metadata 
                     WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
                 """, [project_id]).fetchall()
                 
-                raw_schema = {}
-                for row in result:
-                    table_name, display_name, columns_json = row
-                    try:
-                        columns = json.loads(columns_json) if columns_json else []
-                    except:
-                        columns = []
-                    raw_schema[table_name] = {
-                        'display_name': display_name,
-                        'columns': columns
-                    }
+                if result:
+                    raw_schema = {}
+                    for row in result:
+                        table_name, display_name, columns_json = row
+                        try:
+                            columns = json.loads(columns_json) if columns_json else []
+                        except:
+                            columns = []
+                        raw_schema[table_name] = {
+                            'display_name': display_name,
+                            'columns': columns
+                        }
             
             if not raw_schema:
                 return {'tables': []}
@@ -546,12 +485,17 @@ class ComplianceEngine:
         for condition in applies_to.get('conditions', []):
             if 'field' in condition:
                 fields.add(condition['field'])
+            # Also check for semantic_type if present
+            if 'semantic_type' in condition:
+                fields.add(condition['semantic_type'])
         
         # Extract from requirement
         requirement = rule.get('requirement', {})
         for check in requirement.get('checks', []):
             if 'field' in check:
                 fields.add(check['field'])
+            if 'semantic_type' in check:
+                fields.add(check['semantic_type'])
         
         return list(fields)
     
@@ -562,13 +506,15 @@ class ComplianceEngine:
         except ImportError:
             from backend.utils.llm_orchestrator import LLMOrchestrator
         
-        # Build mapping text for prompt
+        # Build mapping text for prompt - include calculations for derived fields
         mapping_lines = []
-        for field, info in field_mappings.items():
-            col_ref = f"{info['table_name']}.{info['column_name']}"
-            if info.get('is_derived'):
+        for field_name, info in field_mappings.items():
+            if info.get('is_derived') and info.get('calculation'):
                 col_ref = info['calculation']
-            mapping_lines.append(f"- '{field}' → {col_ref}")
+                mapping_lines.append(f"- '{field_name}' → {col_ref} (calculated from {info['table_name']}.{info['column_name']})")
+            else:
+                col_ref = f"{info['table_name']}.{info['column_name']}"
+                mapping_lines.append(f"- '{field_name}' → {col_ref}")
         
         mapping_text = "\n".join(mapping_lines)
         
