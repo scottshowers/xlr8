@@ -187,18 +187,44 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
     testRelationship(rel);
   };
 
-  // Get display name for table - extracts the friendly part from full table name
   // Get display name for table - use the display_name from tables array
+  // With robust fallback for when tables array isn't populated yet
   const getDisplayName = (tableName) => {
     if (!tableName) return '?';
     
-    // Look up in tables array - this has the proper display_name from the API
-    const tableInfo = tables?.find(t => t.table_name === tableName);
-    if (tableInfo?.display_name) {
-      return tableInfo.display_name;
+    // Primary: Look up in tables array - this has the proper display_name from the API
+    if (tables && tables.length > 0) {
+      const tableInfo = tables.find(t => t.table_name === tableName);
+      if (tableInfo?.display_name) {
+        return tableInfo.display_name;
+      }
     }
     
-    // Fallback: just return the table name as-is
+    // Fallback: Extract a reasonable display name from the table_name itself
+    // Table names follow pattern: {prefix}_{filename}_{sheetname} 
+    // e.g., "tea1000_employee_conversion_testing_team_us_1_company" -> "Company"
+    const parts = tableName.split('_');
+    if (parts.length >= 2) {
+      // Get the last meaningful segment(s)
+      // Skip project prefix (first part) and number suffixes
+      const lastPart = parts[parts.length - 1];
+      const secondLastPart = parts.length > 2 ? parts[parts.length - 2] : '';
+      
+      // If last part is short and might be a fragment, include second-to-last
+      if (lastPart.length <= 3 && secondLastPart) {
+        const combined = `${secondLastPart}_${lastPart}`;
+        return combined.split('_').map(w => 
+          w.charAt(0).toUpperCase() + w.slice(1)
+        ).join(' ');
+      }
+      
+      // Title case the last part
+      return lastPart.split('_').map(w => 
+        w.charAt(0).toUpperCase() + w.slice(1)
+      ).join(' ');
+    }
+    
+    // Last resort: just return as-is
     return tableName;
   };
 
@@ -797,8 +823,35 @@ function RelationshipEditor({ relationships, tables, tableSchemas, c, onConfirm,
   };
   
   const getDisplayName = (tableName) => {
-    const table = tables.find(t => t.table_name === tableName);
-    return table?.display_name || tableName;
+    if (!tableName) return '?';
+    
+    // Primary: Look up in tables array
+    if (tables && tables.length > 0) {
+      const table = tables.find(t => t.table_name === tableName);
+      if (table?.display_name) {
+        return table.display_name;
+      }
+    }
+    
+    // Fallback: Extract display name from table_name pattern
+    const parts = tableName.split('_');
+    if (parts.length >= 2) {
+      const lastPart = parts[parts.length - 1];
+      const secondLastPart = parts.length > 2 ? parts[parts.length - 2] : '';
+      
+      if (lastPart.length <= 3 && secondLastPart) {
+        const combined = `${secondLastPart}_${lastPart}`;
+        return combined.split('_').map(w => 
+          w.charAt(0).toUpperCase() + w.slice(1)
+        ).join(' ');
+      }
+      
+      return lastPart.split('_').map(w => 
+        w.charAt(0).toUpperCase() + w.slice(1)
+      ).join(' ');
+    }
+    
+    return tableName;
   };
   
   if (Object.keys(grouped).length === 0) {
