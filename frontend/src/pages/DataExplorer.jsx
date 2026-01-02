@@ -86,8 +86,950 @@ function Tooltip({ children, title, detail, action }) {
 }
 
 // ============================================================================
-// RELATIONSHIP EDITOR - Collapsible connections with WORKING field dropdowns
+// STATUS CONFIG for relationship verification
 // ============================================================================
+const statusConfig = {
+  good: { 
+    color: brandColors.primary, 
+    bgColor: 'rgba(131, 177, 109, 0.15)', 
+    label: 'GOOD',
+    icon: CheckCircle,
+    description: 'Strong relationship with high match rate'
+  },
+  partial: { 
+    color: brandColors.warning, 
+    bgColor: 'rgba(217, 119, 6, 0.15)', 
+    label: 'PARTIAL',
+    icon: AlertTriangle,
+    description: 'Relationship exists but has orphan records'
+  },
+  weak: { 
+    color: brandColors.scarletSage, 
+    bgColor: 'rgba(153, 60, 68, 0.15)', 
+    label: 'WEAK',
+    icon: AlertTriangle,
+    description: 'Low match rate - review if tables should be joined'
+  },
+  none: { 
+    color: '#ef4444', 
+    bgColor: 'rgba(239, 68, 68, 0.15)', 
+    label: 'NO MATCH',
+    icon: XCircle,
+    description: 'No matching keys found between tables'
+  },
+  unknown: { 
+    color: brandColors.textMuted, 
+    bgColor: 'rgba(100, 116, 139, 0.15)', 
+    label: 'UNTESTED',
+    icon: Eye,
+    description: 'Click to test and verify'
+  }
+};
+
+// ============================================================================
+// DATA MODEL PANEL - Replaces RelationshipEditor with verification UI
+// ============================================================================
+function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onReload }) {
+  const [selectedRel, setSelectedRel] = useState(null);
+  const [testResult, setTestResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [analyzing, setAnalyzing] = useState(false);
+
+  // Test a relationship
+  const testRelationship = async (rel) => {
+    setTesting(true);
+    setTestResult(null);
+    
+    try {
+      const sourceTable = rel.source_table || rel.from_table;
+      const targetTable = rel.target_table || rel.to_table;
+      
+      const response = await api.post('/data-model/test-relationship', {
+        table_a: sourceTable,
+        table_b: targetTable,
+        project: projectName,
+        sample_limit: 10
+      });
+      
+      setTestResult(response.data);
+    } catch (err) {
+      console.error('Failed to test relationship:', err);
+      setTestResult({ error: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // Analyze project to detect relationships
+  const analyzeProject = async () => {
+    if (!projectName) return;
+    setAnalyzing(true);
+    try {
+      await api.post(`/data-model/analyze/${encodeURIComponent(projectName)}`);
+      if (onReload) onReload();
+    } catch (err) {
+      console.error('Failed to analyze:', err);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Select and test relationship
+  const handleSelect = (rel) => {
+    setSelectedRel(rel);
+    testRelationship(rel);
+  };
+
+  // Get display name for table
+  const getDisplayName = (tableName) => {
+    if (!tableName) return '?';
+    return tableName.split('__').pop() || tableName;
+  };
+
+  // Filter relationships
+  const filteredRels = filter === 'all' 
+    ? relationships 
+    : relationships.filter(r => (r.verification_status || 'unknown') === filter);
+
+  // Current status
+  const currentStatus = testResult?.verification?.status || selectedRel?.verification_status || 'unknown';
+  const currentConfig = statusConfig[currentStatus] || statusConfig.unknown;
+  const StatusIcon = currentConfig.icon;
+
+  return (
+    <div style={{ display: 'flex', gap: '1rem', minHeight: '500px' }}>
+      {/* Left Panel - List */}
+      <div style={{ 
+        width: '320px', 
+        flexShrink: 0,
+        border: `1px solid ${c.border}`, 
+        borderRadius: 8, 
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column'
+      }}>
+        {/* Header with Analyze button */}
+        <div style={{ 
+          padding: '12px 16px', 
+          borderBottom: `1px solid ${c.border}`,
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          background: c.background
+        }}>
+          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+            Relationships ({relationships?.length || 0})
+          </span>
+          <Tooltip title="Analyze Tables" detail="Auto-detect relationships between all tables in this project" action="Creates new relationship entries">
+            <button
+              onClick={analyzeProject}
+              disabled={analyzing}
+              style={{
+                padding: '6px 12px',
+                background: c.primary,
+                color: 'white',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: '0.75rem',
+                fontWeight: 500,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '4px'
+              }}
+            >
+              {analyzing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
+              {analyzing ? 'Analyzing...' : 'Analyze'}
+            </button>
+          </Tooltip>
+        </div>
+
+        {/* Filter Tabs */}
+        <div style={{ padding: '8px 12px', borderBottom: `1px solid ${c.border}`, display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+          {['all', 'good', 'partial', 'weak', 'unknown'].map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              style={{
+                padding: '3px 8px',
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                backgroundColor: filter === f ? c.accent : c.background,
+                color: filter === f ? 'white' : c.textMuted,
+                border: 'none',
+                borderRadius: '4px',
+                cursor: 'pointer',
+              }}
+            >
+              {f === 'all' ? 'All' : f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {filteredRels.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+              <Link2 size={32} style={{ opacity: 0.3, marginBottom: '8px' }} />
+              <div style={{ fontSize: '0.85rem' }}>No relationships found</div>
+              <div style={{ fontSize: '0.75rem', marginTop: '4px' }}>Click "Analyze" to detect</div>
+            </div>
+          ) : (
+            filteredRels.map((rel, idx) => {
+              const sourceTable = rel.source_table || rel.from_table || '?';
+              const targetTable = rel.target_table || rel.to_table || '?';
+              const sourceCol = rel.source_column || rel.from_column || '?';
+              const targetCol = rel.target_column || rel.to_column || '?';
+              const status = rel.verification_status || 'unknown';
+              const cfg = statusConfig[status] || statusConfig.unknown;
+              const isSelected = selectedRel && (
+                (selectedRel.source_table === sourceTable && selectedRel.target_table === targetTable) ||
+                (selectedRel.from_table === sourceTable && selectedRel.to_table === targetTable)
+              );
+
+              return (
+                <div
+                  key={rel.id || idx}
+                  onClick={() => handleSelect(rel)}
+                  style={{
+                    padding: '10px 14px',
+                    borderBottom: `1px solid ${c.border}`,
+                    cursor: 'pointer',
+                    backgroundColor: isSelected ? c.background : 'transparent',
+                    borderLeft: isSelected ? `3px solid ${c.accent}` : '3px solid transparent',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                    <span style={{ 
+                      fontSize: '0.65rem', 
+                      padding: '2px 6px', 
+                      borderRadius: '3px',
+                      backgroundColor: cfg.bgColor,
+                      color: cfg.color,
+                      fontWeight: 600,
+                    }}>
+                      {rel.match_rate != null ? `${rel.match_rate}%` : cfg.label}
+                    </span>
+                    {rel.confirmed && (
+                      <CheckCircle size={12} style={{ color: c.success }} />
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', fontWeight: 500, color: c.text }}>{getDisplayName(sourceTable)}</div>
+                  <div style={{ fontSize: '0.7rem', color: c.textMuted }}>↓ {sourceCol} → {targetCol}</div>
+                  <div style={{ fontSize: '0.8rem', color: c.textMuted }}>{getDisplayName(targetTable)}</div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Right Panel - Detail */}
+      <div style={{ flex: 1, minWidth: 0 }}>
+        {!selectedRel ? (
+          <div style={{ 
+            height: '100%', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center',
+            border: `1px solid ${c.border}`,
+            borderRadius: 8,
+            color: c.textMuted,
+          }}>
+            <div style={{ textAlign: 'center' }}>
+              <Link2 size={48} style={{ opacity: 0.3, marginBottom: '16px' }} />
+              <div style={{ fontSize: '1rem', fontWeight: 500 }}>Select a relationship</div>
+              <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>
+                Click one on the left to test and verify
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+            {/* Status Banner */}
+            <div style={{
+              backgroundColor: currentConfig.bgColor,
+              borderLeft: `4px solid ${currentConfig.color}`,
+              borderRadius: '8px',
+              padding: '14px 18px',
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '8px',
+                    fontSize: '1rem', 
+                    fontWeight: 600, 
+                    color: currentConfig.color,
+                    marginBottom: '6px',
+                  }}>
+                    <StatusIcon size={18} />
+                    {currentConfig.label}
+                    {testResult?.statistics?.match_rate_percent != null && (
+                      <span> — {testResult.statistics.match_rate_percent}% Match</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: c.text }}>
+                    <span style={{ color: c.electricBlue, fontWeight: 500 }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</span>
+                    <span style={{ margin: '0 8px', color: c.textMuted }}>→</span>
+                    <span style={{ color: c.electricBlue, fontWeight: 500 }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</span>
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '4px' }}>
+                    Join: {testResult?.join_column_a || selectedRel.source_column || selectedRel.from_column} = {testResult?.join_column_b || selectedRel.target_column || selectedRel.to_column}
+                  </div>
+                  {testResult?.verification?.message && (
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '6px', fontStyle: 'italic' }}>
+                      {testResult.verification.message}
+                    </div>
+                  )}
+                </div>
+                
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <Tooltip title="Confirm" detail="Mark as verified and correct" action="Used for JOIN queries">
+                    <button
+                      onClick={() => onConfirm && onConfirm(selectedRel, true)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: c.primary,
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        color: 'white',
+                        fontWeight: 500,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <CheckCircle size={12} /> Confirm
+                    </button>
+                  </Tooltip>
+                  
+                  <Tooltip title="Reject" detail="Mark as incorrect" action="Excluded from JOINs">
+                    <button
+                      onClick={() => onConfirm && onConfirm(selectedRel, false)}
+                      style={{
+                        padding: '6px 12px',
+                        backgroundColor: c.scarletSage,
+                        border: 'none',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontSize: '0.75rem',
+                        color: 'white',
+                        fontWeight: 500,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                    >
+                      <XCircle size={12} /> Reject
+                    </button>
+                  </Tooltip>
+                  
+                  <Tooltip title="Re-test" detail="Refresh verification">
+                    <button
+                      onClick={() => testRelationship(selectedRel)}
+                      disabled={testing}
+                      style={{
+                        padding: '6px 10px',
+                        backgroundColor: c.background,
+                        border: `1px solid ${c.border}`,
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      {testing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={12} />}
+                    </button>
+                  </Tooltip>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats Row */}
+            {testResult?.statistics && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px' }}>
+                <Tooltip title="Matching Keys" detail="Distinct key values found in both tables" action="Higher = stronger relationship">
+                  <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: c.primary }}>{testResult.statistics.matching_keys || 0}</div>
+                    <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Matching</div>
+                  </div>
+                </Tooltip>
+                <Tooltip title="Only in Source" detail="Keys in source with no match in target" action="May indicate unused codes">
+                  <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: testResult.statistics.orphans_in_a > 0 ? c.warning : c.textMuted }}>{testResult.statistics.orphans_in_a || 0}</div>
+                    <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Source Only</div>
+                  </div>
+                </Tooltip>
+                <Tooltip title="Only in Target" detail="Keys in target with no match in source" action="May indicate data issues">
+                  <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: testResult.statistics.orphans_in_b > 0 ? c.warning : c.textMuted }}>{testResult.statistics.orphans_in_b || 0}</div>
+                    <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Target Only</div>
+                  </div>
+                </Tooltip>
+                <Tooltip title="Match Rate" detail="Percentage of source keys found in target">
+                  <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '1.25rem', fontWeight: 700, color: c.accent }}>{testResult.statistics.match_rate_percent || 0}%</div>
+                    <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Match Rate</div>
+                  </div>
+                </Tooltip>
+              </div>
+            )}
+
+            {/* Sample Data Tables */}
+            {testing ? (
+              <div style={{ padding: '3rem', textAlign: 'center', color: c.textMuted, border: `1px solid ${c.border}`, borderRadius: 8 }}>
+                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '8px' }} />
+                <div>Testing relationship...</div>
+              </div>
+            ) : testResult && !testResult.error ? (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                {/* Source Table */}
+                <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.source_table || selectedRel.from_table)}</div>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>{testResult.statistics?.table_a_rows?.toLocaleString() || 0} rows</div>
+                    </div>
+                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
+                      🔗 {testResult.join_column_a}
+                    </span>
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: c.background }}>
+                          {testResult.table_a_columns?.slice(0, 4).map((col, i) => (
+                            <th key={i} style={{ textAlign: 'left', padding: '6px 10px', fontWeight: 500, color: col === testResult.join_column_a ? c.electricBlue : c.textMuted, borderBottom: `1px solid ${c.border}` }}>{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testResult.table_a_sample?.slice(0, 6).map((row, i) => {
+                          const keyVal = row[testResult.join_column_a];
+                          const isOrphan = testResult.statistics?.orphan_samples_from_a?.includes(keyVal);
+                          return (
+                            <tr key={i} style={{ background: isOrphan ? `${c.warning}10` : 'transparent' }}>
+                              {testResult.table_a_columns?.slice(0, 4).map((col, j) => (
+                                <td key={j} style={{ padding: '6px 10px', borderBottom: `1px solid ${c.border}`, color: col === testResult.join_column_a ? (isOrphan ? c.warning : c.electricBlue) : c.text }}>
+                                  {row[col] ?? '—'}{isOrphan && col === testResult.join_column_a && ' ⚠️'}
+                                </td>
+                              ))}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Target Table */}
+                <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
+                  <div style={{ padding: '10px 14px', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div>
+                      <div style={{ fontSize: '0.8rem', fontWeight: 600, color: c.text }}>{getDisplayName(selectedRel.target_table || selectedRel.to_table)}</div>
+                      <div style={{ fontSize: '0.7rem', color: c.textMuted }}>{testResult.statistics?.table_b_rows?.toLocaleString() || 0} rows</div>
+                    </div>
+                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
+                      🔗 {testResult.join_column_b}
+                    </span>
+                  </div>
+                  <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: c.background }}>
+                          {testResult.table_b_columns?.slice(0, 4).map((col, i) => (
+                            <th key={i} style={{ textAlign: 'left', padding: '6px 10px', fontWeight: 500, color: col === testResult.join_column_b ? c.electricBlue : c.textMuted, borderBottom: `1px solid ${c.border}` }}>{col}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testResult.table_b_sample?.slice(0, 6).map((row, i) => (
+                          <tr key={i}>
+                            {testResult.table_b_columns?.slice(0, 4).map((col, j) => (
+                              <td key={j} style={{ padding: '6px 10px', borderBottom: `1px solid ${c.border}`, color: col === testResult.join_column_b ? c.electricBlue : c.text }}>
+                                {row[col] ?? '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            ) : testResult?.error ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.scarletSage, border: `1px solid ${c.border}`, borderRadius: 8 }}>
+                <XCircle size={24} style={{ marginBottom: '8px' }} />
+                <div>Error: {testResult.error}</div>
+              </div>
+            ) : null}
+
+            {/* Orphan Values */}
+            {testResult?.statistics?.orphan_samples_from_a?.length > 0 && (
+              <div style={{ border: `1px solid ${c.border}`, borderRadius: 8, padding: '12px 16px' }}>
+                <div style={{ fontSize: '0.85rem', fontWeight: 600, color: c.warning, marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <AlertTriangle size={14} />
+                  Orphan Values ({testResult.statistics.orphans_in_a} not in target)
+                </div>
+                <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                  {testResult.statistics.orphan_samples_from_a.map((val, i) => (
+                    <span key={i} style={{ padding: '3px 10px', background: `${c.warning}15`, color: c.warning, borderRadius: 4, fontSize: '0.75rem', fontFamily: 'monospace' }}>{val}</span>
+                  ))}
+                </div>
+                <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '8px' }}>
+                  These values exist in the source but have no match in target.
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
+    </div>
+  );
+}
+
+// ============================================================================
+// RELATIONSHIP EDITOR (Legacy - kept for reference but replaced by DataModelPanel)
+// ============================================================================
+// ============================================================================
+// DATA MODEL PANEL - Enhanced Relationship Verification
+// ============================================================================
+const statusConfig = {
+  good: { color: '#22c55e', bg: 'rgba(34, 197, 94, 0.15)', label: 'GOOD' },
+  partial: { color: '#eab308', bg: 'rgba(234, 179, 8, 0.15)', label: 'PARTIAL' },
+  weak: { color: '#f97316', bg: 'rgba(249, 115, 22, 0.15)', label: 'WEAK' },
+  none: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.15)', label: 'NO MATCH' },
+  unknown: { color: '#64748b', bg: 'rgba(100, 116, 139, 0.15)', label: 'UNTESTED' }
+};
+
+function DataModelPanel({ relationships, projectName, c, onRefresh }) {
+  const [selectedRel, setSelectedRel] = useState(null);
+  const [testResult, setTestResult] = useState(null);
+  const [testing, setTesting] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [filter, setFilter] = useState('all');
+  const [testedRels, setTestedRels] = useState({});
+
+  const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
+
+  // Analyze project to detect relationships
+  const analyzeProject = async () => {
+    if (!projectName) return;
+    setAnalyzing(true);
+    try {
+      await fetch(`${API_BASE}/api/data-model/analyze/${encodeURIComponent(projectName)}`, { method: 'POST' });
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to analyze:', err);
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  // Test a specific relationship
+  const testRelationship = async (rel) => {
+    setTesting(true);
+    setTestResult(null);
+    const sourceTable = rel.source_table || rel.from_table;
+    const targetTable = rel.target_table || rel.to_table;
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/data-model/test-relationship`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          table_a: sourceTable,
+          table_b: targetTable,
+          project: projectName,
+          sample_limit: 8
+        })
+      });
+      const data = await response.json();
+      setTestResult(data);
+      
+      // Cache the verification status
+      const key = `${sourceTable}→${targetTable}`;
+      setTestedRels(prev => ({
+        ...prev,
+        [key]: {
+          status: data.verification?.status || 'unknown',
+          match_rate: data.statistics?.match_rate_percent
+        }
+      }));
+    } catch (err) {
+      console.error('Failed to test:', err);
+      setTestResult({ error: err.message });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  // Confirm/reject relationship
+  const updateRelationship = async (rel, action) => {
+    try {
+      await fetch(`${API_BASE}/api/data-model/relationships/${encodeURIComponent(projectName)}/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          source_table: rel.source_table || rel.from_table,
+          source_column: rel.source_column || rel.from_column,
+          target_table: rel.target_table || rel.to_table,
+          target_column: rel.target_column || rel.to_column,
+          confirmed: action === 'confirm'
+        })
+      });
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to update:', err);
+    }
+  };
+
+  // Select and test
+  const handleSelect = (rel) => {
+    setSelectedRel(rel);
+    testRelationship(rel);
+  };
+
+  // Normalize relationship fields
+  const normalizeRel = (rel) => ({
+    ...rel,
+    source_table: rel.source_table || rel.from_table,
+    source_column: rel.source_column || rel.from_column,
+    target_table: rel.target_table || rel.to_table,
+    target_column: rel.target_column || rel.to_column
+  });
+
+  // Get verification status for a relationship
+  const getRelStatus = (rel) => {
+    const key = `${rel.source_table || rel.from_table}→${rel.target_table || rel.to_table}`;
+    return testedRels[key]?.status || 'unknown';
+  };
+
+  // Filter relationships
+  const filteredRels = filter === 'all' 
+    ? relationships 
+    : relationships.filter(r => getRelStatus(r) === filter);
+
+  // Current status config
+  const currentStatus = testResult?.verification?.status || 'unknown';
+  const currentCfg = statusConfig[currentStatus];
+
+  // Get short table name
+  const shortName = (name) => {
+    if (!name) return '?';
+    const parts = name.split('_');
+    if (parts.length > 4) return parts.slice(-3).join('_');
+    return name;
+  };
+
+  return (
+    <div style={{ display: 'flex', gap: '1rem', minHeight: 500 }}>
+      {/* Left Panel - Relationship List */}
+      <div style={{ width: 320, display: 'flex', flexDirection: 'column', border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
+        {/* Header with Analyze button */}
+        <div style={{ padding: '0.75rem', borderBottom: `1px solid ${c.border}`, background: c.background, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text }}>Relationships ({relationships?.length || 0})</span>
+          <button
+            onClick={analyzeProject}
+            disabled={analyzing || !projectName}
+            style={{
+              padding: '0.4rem 0.75rem',
+              background: analyzing ? c.background : c.primary,
+              color: analyzing ? c.textMuted : 'white',
+              border: 'none',
+              borderRadius: 4,
+              cursor: projectName ? 'pointer' : 'not-allowed',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem'
+            }}
+          >
+            {analyzing ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Sparkles size={12} />}
+            {analyzing ? 'Analyzing...' : 'Analyze'}
+          </button>
+        </div>
+
+        {/* Filter tabs */}
+        <div style={{ padding: '0.5rem', borderBottom: `1px solid ${c.border}`, display: 'flex', gap: '0.25rem', flexWrap: 'wrap' }}>
+          {['all', 'good', 'partial', 'weak', 'unknown'].map(f => (
+            <button
+              key={f}
+              onClick={() => setFilter(f)}
+              style={{
+                padding: '0.25rem 0.5rem',
+                fontSize: '0.7rem',
+                fontWeight: 500,
+                background: filter === f ? c.accent : c.background,
+                color: filter === f ? 'white' : c.textMuted,
+                border: 'none',
+                borderRadius: 3,
+                cursor: 'pointer'
+              }}
+            >
+              {f.charAt(0).toUpperCase() + f.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {/* List */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {filteredRels.length === 0 ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+              <Link2 size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
+              <div style={{ fontSize: '0.85rem' }}>No relationships found</div>
+              <div style={{ fontSize: '0.75rem', marginTop: '0.25rem' }}>Click "Analyze" to detect</div>
+            </div>
+          ) : (
+            filteredRels.map((rel, i) => {
+              const norm = normalizeRel(rel);
+              const status = getRelStatus(rel);
+              const cfg = statusConfig[status];
+              const isSelected = selectedRel && 
+                (selectedRel.source_table || selectedRel.from_table) === norm.source_table &&
+                (selectedRel.target_table || selectedRel.to_table) === norm.target_table;
+              
+              return (
+                <div
+                  key={i}
+                  onClick={() => handleSelect(rel)}
+                  style={{
+                    padding: '0.6rem 0.75rem',
+                    borderBottom: `1px solid ${c.border}`,
+                    cursor: 'pointer',
+                    background: isSelected ? c.background : 'transparent',
+                    borderLeft: isSelected ? `3px solid ${c.accent}` : '3px solid transparent'
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                    <span style={{
+                      fontSize: '0.65rem',
+                      padding: '0.15rem 0.4rem',
+                      borderRadius: 3,
+                      background: cfg.bg,
+                      color: cfg.color,
+                      fontWeight: 600
+                    }}>
+                      {testedRels[`${norm.source_table}→${norm.target_table}`]?.match_rate != null 
+                        ? `${testedRels[`${norm.source_table}→${norm.target_table}`].match_rate}%` 
+                        : cfg.label}
+                    </span>
+                    {rel.confirmed && (
+                      <CheckCircle size={12} color={c.primary} />
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', fontWeight: 500, color: c.text, marginBottom: '0.15rem' }}>
+                    {shortName(norm.source_table)}
+                  </div>
+                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>
+                    ↓ {norm.source_column} → {norm.target_column}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                    {shortName(norm.target_table)}
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {/* Right Panel - Detail */}
+      <div style={{ flex: 1, border: `1px solid ${c.border}`, borderRadius: 8, overflow: 'hidden' }}>
+        {!selectedRel ? (
+          <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.textMuted }}>
+            <div style={{ textAlign: 'center' }}>
+              <Link2 size={40} style={{ opacity: 0.3, marginBottom: '0.75rem' }} />
+              <div style={{ fontSize: '0.9rem' }}>Select a relationship to verify</div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ height: '100%', overflowY: 'auto' }}>
+            {/* Status Banner */}
+            <div style={{
+              padding: '1rem',
+              background: currentCfg.bg,
+              borderBottom: `1px solid ${c.border}`,
+              borderLeft: `4px solid ${currentCfg.color}`
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontSize: '1rem', fontWeight: 600, color: currentCfg.color, marginBottom: '0.5rem' }}>
+                    {currentCfg.label}
+                    {testResult?.statistics?.match_rate_percent != null && ` — ${testResult.statistics.match_rate_percent}%`}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: c.text }}>
+                    {shortName(normalizeRel(selectedRel).source_table)}
+                    <span style={{ margin: '0 0.5rem', color: c.textMuted }}>→</span>
+                    {shortName(normalizeRel(selectedRel).target_table)}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.25rem' }}>
+                    Join: {normalizeRel(selectedRel).source_column} = {normalizeRel(selectedRel).target_column}
+                  </div>
+                  {testResult?.verification?.message && (
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.5rem', fontStyle: 'italic' }}>
+                      {testResult.verification.message}
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: 'flex', gap: '0.5rem' }}>
+                  <button
+                    onClick={() => updateRelationship(selectedRel, 'confirm')}
+                    style={{ padding: '0.4rem 0.75rem', background: c.primary, color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 500 }}
+                  >
+                    ✓ Confirm
+                  </button>
+                  <button
+                    onClick={() => updateRelationship(selectedRel, 'reject')}
+                    style={{ padding: '0.4rem 0.75rem', background: c.scarletSage, color: 'white', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.75rem', fontWeight: 500 }}
+                  >
+                    ✗ Reject
+                  </button>
+                  <button
+                    onClick={() => testRelationship(selectedRel)}
+                    disabled={testing}
+                    style={{ padding: '0.4rem 0.5rem', background: c.background, border: `1px solid ${c.border}`, borderRadius: 4, cursor: 'pointer' }}
+                  >
+                    {testing ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={14} />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Stats */}
+            {testResult?.statistics && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0.75rem', padding: '1rem' }}>
+                <div style={{ background: c.background, borderRadius: 6, padding: '0.75rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: c.primary }}>{testResult.statistics.matching_keys || 0}</div>
+                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Matching</div>
+                </div>
+                <div style={{ background: c.background, borderRadius: 6, padding: '0.75rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: testResult.statistics.orphans_in_a > 0 ? c.warning : c.textMuted }}>{testResult.statistics.orphans_in_a || 0}</div>
+                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Orphans (Source)</div>
+                </div>
+                <div style={{ background: c.background, borderRadius: 6, padding: '0.75rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: testResult.statistics.orphans_in_b > 0 ? c.warning : c.textMuted }}>{testResult.statistics.orphans_in_b || 0}</div>
+                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Orphans (Target)</div>
+                </div>
+                <div style={{ background: c.background, borderRadius: 6, padding: '0.75rem', textAlign: 'center' }}>
+                  <div style={{ fontSize: '1.25rem', fontWeight: 700, color: c.accent }}>{((testResult.statistics.table_a_rows || 0) + (testResult.statistics.table_b_rows || 0)).toLocaleString()}</div>
+                  <div style={{ fontSize: '0.65rem', color: c.textMuted }}>Total Rows</div>
+                </div>
+              </div>
+            )}
+
+            {/* Sample Data */}
+            {testing ? (
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+                <Loader2 size={24} style={{ animation: 'spin 1s linear infinite', marginBottom: '0.5rem' }} />
+                <div>Testing relationship...</div>
+              </div>
+            ) : testResult?.table_a_sample && (
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem', padding: '0 1rem 1rem' }}>
+                {/* Source Table Sample */}
+                <div style={{ border: `1px solid ${c.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ padding: '0.5rem 0.75rem', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>{shortName(testResult.table_a)}</span>
+                    <span style={{ fontSize: '0.65rem', color: c.electricBlue }}>🔗 {testResult.join_column_a}</span>
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: c.background }}>
+                          {testResult.table_a_columns?.slice(0, 4).map((col, i) => (
+                            <th key={i} style={{ padding: '0.35rem 0.5rem', textAlign: 'left', fontWeight: 500, color: col === testResult.join_column_a ? c.electricBlue : c.textMuted }}>
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testResult.table_a_sample?.slice(0, 6).map((row, i) => (
+                          <tr key={i} style={{ borderTop: `1px solid ${c.border}` }}>
+                            {testResult.table_a_columns?.slice(0, 4).map((col, j) => (
+                              <td key={j} style={{ padding: '0.35rem 0.5rem', color: col === testResult.join_column_a ? c.electricBlue : c.text }}>
+                                {row[col] ?? '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Target Table Sample */}
+                <div style={{ border: `1px solid ${c.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                  <div style={{ padding: '0.5rem 0.75rem', background: c.background, borderBottom: `1px solid ${c.border}`, display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontSize: '0.75rem', fontWeight: 500 }}>{shortName(testResult.table_b)}</span>
+                    <span style={{ fontSize: '0.65rem', color: c.electricBlue }}>🔗 {testResult.join_column_b}</span>
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: 'auto' }}>
+                    <table style={{ width: '100%', fontSize: '0.7rem', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr style={{ background: c.background }}>
+                          {testResult.table_b_columns?.slice(0, 4).map((col, i) => (
+                            <th key={i} style={{ padding: '0.35rem 0.5rem', textAlign: 'left', fontWeight: 500, color: col === testResult.join_column_b ? c.electricBlue : c.textMuted }}>
+                              {col}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {testResult.table_b_sample?.slice(0, 6).map((row, i) => (
+                          <tr key={i} style={{ borderTop: `1px solid ${c.border}` }}>
+                            {testResult.table_b_columns?.slice(0, 4).map((col, j) => (
+                              <td key={j} style={{ padding: '0.35rem 0.5rem', color: col === testResult.join_column_b ? c.electricBlue : c.text }}>
+                                {row[col] ?? '—'}
+                              </td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Orphan Values */}
+            {testResult?.statistics?.orphan_samples_from_a?.length > 0 && (
+              <div style={{ margin: '0 1rem 1rem', padding: '0.75rem', background: `${c.warning}10`, borderRadius: 6, border: `1px solid ${c.warning}30` }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 500, color: c.warning, marginBottom: '0.5rem' }}>
+                  ⚠️ Orphan Values ({testResult.statistics.orphans_in_a} not found in target)
+                </div>
+                <div style={{ display: 'flex', gap: '0.35rem', flexWrap: 'wrap' }}>
+                  {testResult.statistics.orphan_samples_from_a.map((val, i) => (
+                    <span key={i} style={{ padding: '0.2rem 0.5rem', background: `${c.warning}20`, color: c.warning, borderRadius: 3, fontSize: '0.7rem', fontFamily: 'monospace' }}>
+                      {val}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// Keep old RelationshipEditor for backward compatibility (not used)
 function RelationshipEditor({ relationships, tables, tableSchemas, c, onConfirm, onDelete, onUpdate, onFetchColumns }) {
   const [expandedConnections, setExpandedConnections] = useState({});
   const [editingRel, setEditingRel] = useState(null);
@@ -664,7 +1606,7 @@ export default function DataExplorer() {
   const tabs = [
     { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
     { id: 'classification', label: '🔍 Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
-    { id: 'relationships', label: '🔗 Relationships', icon: Link2, tooltip: 'View and manage detected joins between tables. Edit or rebuild relationships.' },
+    { id: 'relationships', label: '🔗 Data Model', icon: Link2, tooltip: 'View, verify, and test relationships. Confirm join columns between tables.' },
     { id: 'health', label: '❤️ Data Health', icon: Heart, tooltip: 'Data integrity checks: missing values, format issues, and quality scores.' },
     { id: 'compliance', label: '✅ Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
     { id: 'rules', label: '📜 Rules', icon: BookOpen, tooltip: 'Extracted validation rules from regulatory documents. Used in compliance checks.' },
@@ -971,53 +1913,25 @@ export default function DataExplorer() {
         </div>
       )}
 
-      {/* Relationships Tab */}
+      {/* Relationships Tab - Data Model */}
       {activeTab === 'relationships' && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1.5rem' }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-            <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem' }}>
-              <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.accent }} />
-              Detected Relationships ({relationships?.length || 0})
-            </h3>
-            {relationships && relationships.length > 0 && (
-              <button
-                onClick={async () => {
-                  if (window.confirm('Rebuild all relationships? This will re-analyze your tables.')) {
-                    try {
-                      await api.post(`/status/relationships/rebuild/${activeProject?.id || 'default'}`);
-                      loadTables();
-                    } catch (e) {
-                      console.error('Failed to rebuild relationships:', e);
-                    }
-                  }
-                }}
-                style={{
-                  padding: '0.5rem 1rem',
-                  background: c.background,
-                  color: c.text,
-                  border: `1px solid ${c.border}`,
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.5rem',
-                  fontSize: '0.85rem'
-                }}
-              >
-                <RefreshCw size={14} /> Rebuild All
-              </button>
-            )}
+            <Tooltip title="Data Model" detail="View, verify, and manage table relationships. Test join columns and verify match rates." action="Confirm relationships for accurate JOIN queries">
+              <h3 style={{ margin: 0, color: c.text, fontSize: '1.1rem', cursor: 'help' }}>
+                <Link2 size={18} style={{ marginRight: 8, verticalAlign: 'middle', color: c.accent }} />
+                Data Model
+              </h3>
+            </Tooltip>
           </div>
           
-          <RelationshipEditor 
+          <DataModelPanel 
             relationships={relationships}
             tables={tables}
-            tableSchemas={tableSchemas}
+            projectName={projectName}
             c={c}
             onConfirm={confirmRelationship}
-            onDelete={deleteRelationship}
-            onUpdate={updateRelationship}
-            onFetchColumns={fetchTableColumns}
+            onReload={loadTables}
           />
         </div>
       )}
