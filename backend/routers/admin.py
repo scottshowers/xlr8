@@ -699,3 +699,78 @@ async def clear_rules(confirm: bool = False, user: User = Depends(require_permis
     except Exception as e:
         logger.error(f"[ADMIN] Error clearing rules: {e}")
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# FORCE DELETE PROJECT
+# =============================================================================
+
+@router.delete("/force-delete-project/{project_id}")
+async def force_delete_project(project_id: str):
+    """
+    Force delete a project from Supabase regardless of is_active status.
+    Use this when normal delete fails due to is_active filtering.
+    """
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(500, "Database unavailable")
+        
+        # Check if project exists
+        check = supabase.table('projects').select('id, name').eq('id', project_id).execute()
+        if not check.data:
+            raise HTTPException(404, f"Project {project_id} not found")
+        
+        project_name = check.data[0].get('name', project_id)
+        
+        # Hard delete from projects table
+        result = supabase.table('projects').delete().eq('id', project_id).execute()
+        
+        logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
+        
+        return {
+            'success': True,
+            'message': f'Project {project_name} permanently deleted',
+            'project_id': project_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ADMIN] Force delete failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.delete("/force-delete-project-by-name/{project_name}")
+async def force_delete_project_by_name(project_name: str):
+    """
+    Force delete a project by name from Supabase.
+    """
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(500, "Database unavailable")
+        
+        # Find project
+        check = supabase.table('projects').select('id, name').eq('name', project_name).execute()
+        if not check.data:
+            raise HTTPException(404, f"Project '{project_name}' not found")
+        
+        project_id = check.data[0]['id']
+        
+        # Hard delete
+        supabase.table('projects').delete().eq('id', project_id).execute()
+        
+        logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
+        
+        return {
+            'success': True,
+            'message': f'Project {project_name} permanently deleted',
+            'project_id': project_id
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ADMIN] Force delete failed: {e}")
+        raise HTTPException(500, str(e))
