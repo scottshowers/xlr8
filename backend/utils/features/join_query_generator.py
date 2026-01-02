@@ -118,15 +118,33 @@ class JoinQueryGenerator:
             Tuple of (table_a_col, table_b_col, join_type, confidence) or None
         """
         for rel in self.relationships:
+            # Handle both object and dict formats
+            if hasattr(rel, 'from_table'):
+                # Object format
+                from_table = rel.from_table
+                from_col = rel.from_column
+                to_table = rel.to_table
+                to_col = rel.to_column
+                confidence = getattr(rel, 'confidence', 0.9)
+            elif isinstance(rel, dict):
+                # Dict format from Supabase
+                from_table = rel.get('source_table', '')
+                from_col = rel.get('source_column', '')
+                to_table = rel.get('target_table', '')
+                to_col = rel.get('target_column', '')
+                confidence = rel.get('confidence', 0.9)
+            else:
+                continue
+            
             # Direct relationship A -> B
-            if (rel.from_table.lower() == table_a.lower() and 
-                rel.to_table.lower() == table_b.lower()):
-                return (rel.from_column, rel.to_column, 'LEFT JOIN', rel.confidence)
+            if (from_table.lower() == table_a.lower() and 
+                to_table.lower() == table_b.lower()):
+                return (from_col, to_col, 'LEFT JOIN', confidence)
             
             # Reverse relationship B -> A
-            if (rel.from_table.lower() == table_b.lower() and 
-                rel.to_table.lower() == table_a.lower()):
-                return (rel.to_column, rel.from_column, 'LEFT JOIN', rel.confidence)
+            if (from_table.lower() == table_b.lower() and 
+                to_table.lower() == table_a.lower()):
+                return (to_col, from_col, 'LEFT JOIN', confidence)
         
         # Try to find common key columns
         return self._find_common_key(table_a, table_b)
