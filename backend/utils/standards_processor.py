@@ -359,19 +359,22 @@ Extract rules as a JSON array. Each rule should have:
   "applies_to": {{
     "description": "Who/what this applies to",
     "conditions": [
-      {{"field": "field_name", "operator": ">=|<=|=|>|<|in|not_in", "value": "value"}}
+      {{"field": "field_name", "semantic_type": "type_from_list_below", "operator": ">=|<=|=|>|<|in|not_in", "value": "value"}}
     ]
   }},
   "requirement": {{
     "description": "What must be true",
     "checks": [
-      {{"field": "field_name", "operator": "must_have|must_be|must_not_be", "value": "value or list"}}
+      {{"field": "field_name", "semantic_type": "type_from_list_below", "operator": "must_have|must_be|must_not_be", "value": "value or list"}}
     ]
   }},
   "category": "category like retirement, tax, benefits, compliance",
   "severity": "low|medium|high|critical",
   "source_text": "The exact quote from the document that defines this rule"
 }}
+
+SEMANTIC TYPES - Tag each field with the most appropriate type:
+{semantic_types}
 
 Return ONLY the JSON array of rules. If no rules found, return empty array []."""
 
@@ -390,10 +393,23 @@ def extract_rules_from_text(
         logger.warning(f"[STANDARDS] Text too short ({len(text.strip()) if text else 0} chars), skipping extraction")
         return []
     
+    # Get semantic types from vocabulary (ONE SOURCE OF TRUTH)
+    try:
+        from backend.utils.semantic_vocabulary import get_type_names_for_prompt
+    except ImportError:
+        try:
+            from utils.semantic_vocabulary import get_type_names_for_prompt
+        except ImportError:
+            # Fallback if vocabulary not available
+            get_type_names_for_prompt = lambda: "age, birth_date, hire_date, fica_wages, employee_type_code, company_code, etc."
+    
+    semantic_types_text = get_type_names_for_prompt()
+    
     prompt = EXTRACTION_PROMPT_TEMPLATE.format(
         document_name=document_name,
         section=section,
-        text=text[:8000]  # Limit text size
+        text=text[:8000],  # Limit text size
+        semantic_types=semantic_types_text
     )
     
     logger.warning(f"[STANDARDS] Calling LLM for rule extraction...")
