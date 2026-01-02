@@ -107,6 +107,65 @@ class SQLGenerator:
         self._column_mappings: Dict[str, str] = {}
         self._orchestrator = None
     
+    def _needs_join(self, question: str, tables: List[Dict]) -> bool:
+        """
+        Detect if a question requires a JOIN query.
+        
+        Returns True when:
+        - User explicitly asks to combine/join/cross-reference data
+        - Question references columns from multiple tables
+        - Question asks for enriched/detailed data (e.g., "with department name")
+        """
+        q_lower = question.lower()
+        
+        # Explicit join patterns
+        join_patterns = [
+            r'\bwith\s+(their|the)\s+\w+\s+name',     # "employees with their department name"
+            r'\bincluding\s+\w+\s+(name|description)', # "including location name"
+            r'\bfull\s+(details|information)',         # "full details"
+            r'\benriched?\b',                          # "enriched data"
+            r'\bfrom\s+(\w+)\s+and\s+(\w+)',          # "from employees and departments"
+            r'\bjoin\s+with\b',                        # "join with"
+            r'\bcombine\b',                            # "combine"
+            r'\bcross.?reference',                     # "cross-reference"
+            r'\blink\w*\s+(to|with)',                 # "link to", "linked with"
+        ]
+        
+        for pattern in join_patterns:
+            if re.search(pattern, q_lower):
+                logger.info(f"[SQL-GEN] JOIN needed: pattern '{pattern}' matched")
+                return True
+        
+        return False
+    
+    def _build_relationship_hints(self, tables: List[Dict]) -> str:
+        """
+        Build relationship hints for the LLM prompt.
+        
+        Tells the LLM how tables can be joined based on detected relationships.
+        """
+        if not self.relationships:
+            return ""
+        
+        table_names = {t.get('table_name', '').lower() for t in tables}
+        
+        hints = []
+        for rel in self.relationships:
+            # Check if relationship involves selected tables
+            from_lower = rel.from_table.lower() if hasattr(rel, 'from_table') else ''
+            to_lower = rel.to_table.lower() if hasattr(rel, 'to_table') else ''
+            
+            if from_lower in table_names and to_lower in table_names:
+                hint = (f"  - {rel.from_table}.{rel.from_column} → "
+                       f"{rel.to_table}.{rel.to_column}")
+                if hasattr(rel, 'confidence') and rel.confidence < 0.8:
+                    hint += " (low confidence)"
+                hints.append(hint)
+        
+        if hints:
+            return "\n\nRELATIONSHIPS (use for JOINs):\n" + "\n".join(hints)
+        return ""
+
     def generate(self, question: str, context: Dict[str, Any]) -> Optional[Dict]:
         """
         Generate SQL for a question.
@@ -453,6 +512,17 @@ SELECT"""
         # Build semantic hints
         semantic_text = self._build_semantic_hints(tables, primary_table, q_lower)
         
+        # Check if JOIN is needed and include relationship hints
+        needs_join = self._needs_join(question, tables)
+        relationship_hints = ""
+        join_rules = ""
+        
+        if needs_join and len(tables) > 1:
+            relationship_hints = self._build_relationship_hints(tables)
+            if relationship_hints:
+                join_rules = "\n4. Use LEFT JOIN with relationships provided above"
+                logger.info("[SQL-GEN] Including relationship hints for JOIN query")
+        
         # Build query hints
         query_hints = self._build_query_hints(q_lower, primary_table)
         query_hint = ""
@@ -462,18 +532,29 @@ SELECT"""
         # Build filter instructions
         filter_instructions = self._build_filter_instructions(tables)
         
-        prompt = f"""SCHEMA:
-{schema_text}{semantic_text}
-{query_hint}
-
-QUESTION: {question}
-
-RULES:
+        # Adjust rules based on whether JOIN is needed
+        if needs_join and relationship_hints:
+            rules = """RULES:
+1. Use ONLY columns from SCHEMA - never invent columns
+2. DO NOT add WHERE for status/active/termed - filters injected automatically
+3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
+4. Use LEFT JOIN with the relationships provided to combine tables
+5. ILIKE for text matching"""
+        else:
+            rules = """RULES:
 1. Use ONLY columns from SCHEMA - never invent columns
 2. DO NOT add WHERE for status/active/termed - filters injected automatically
 3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
 4. Keep queries SIMPLE - avoid JOINs unless absolutely needed
-5. ILIKE for text matching
+5. ILIKE for text matching"""
+        
+        prompt = f"""SCHEMA:
+{schema_text}{semantic_text}{relationship_hints}
+{query_hint}
+
+QUESTION: {question}
+
+{rules}
 
 SQL:"""
         
