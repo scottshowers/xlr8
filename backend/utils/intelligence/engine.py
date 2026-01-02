@@ -43,7 +43,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "6.2.0"  # FIXED: Gather ALL Five Truths for ALL questions (no more validation skip)
+__version__ = "6.3.0"  # ADDED: Comparison engine integration
 
 # Try to load ConsultativeSynthesizer
 SYNTHESIS_AVAILABLE = False
@@ -59,6 +59,21 @@ except ImportError:
         logger.info("[ENGINE-V2] ConsultativeSynthesizer loaded (alt path)")
     except ImportError:
         logger.warning("[ENGINE-V2] ConsultativeSynthesizer not available")
+
+# Try to load ComparisonEngine
+COMPARISON_AVAILABLE = False
+ComparisonEngine = None
+try:
+    from utils.features.comparison_engine import ComparisonEngine
+    COMPARISON_AVAILABLE = True
+    logger.info("[ENGINE-V2] ComparisonEngine loaded")
+except ImportError:
+    try:
+        from backend.utils.features.comparison_engine import ComparisonEngine
+        COMPARISON_AVAILABLE = True
+        logger.info("[ENGINE-V2] ComparisonEngine loaded (alt path)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] ComparisonEngine not available")
 
 
 class IntelligenceEngineV2:
@@ -337,6 +352,14 @@ class IntelligenceEngineV2:
         
         logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, validation={is_validation}, config={is_config}")
         
+        # =====================================================================
+        # COMPARISON MODE - Use ComparisonEngine for table comparisons
+        # =====================================================================
+        if mode == IntelligenceMode.COMPARE and COMPARISON_AVAILABLE and self.structured_handler:
+            comparison_result = self._handle_comparison(question, q_lower)
+            if comparison_result:
+                return comparison_result
+        
         # Build analysis context
         analysis = {
             'mode': mode,
@@ -537,6 +560,206 @@ class IntelligenceEngineV2:
             },
             reasoning=['Need to clarify employee status filter']
         )
+    
+    def _handle_comparison(self, question: str, q_lower: str) -> Optional[SynthesizedAnswer]:
+        """
+        Handle comparison queries using the ComparisonEngine.
+        
+        Parses the question to identify two tables, runs the comparison,
+        and formats results as a consultative answer.
+        """
+        logger.warning(f"[ENGINE-V2] Handling comparison query: {question[:60]}...")
+        
+        if not self.schema or not self.schema.get('tables'):
+            logger.warning("[ENGINE-V2] No schema available for comparison")
+            return None
+        
+        # Parse question to find table references
+        table_a, table_b = self._parse_comparison_tables(q_lower)
+        
+        if not table_a or not table_b:
+            logger.warning(f"[ENGINE-V2] Could not identify two tables for comparison")
+            return None
+        
+        logger.warning(f"[ENGINE-V2] Comparing: {table_a} vs {table_b}")
+        
+        try:
+            # Run comparison
+            engine = ComparisonEngine(structured_handler=self.structured_handler)
+            result = engine.compare(
+                table_a=table_a,
+                table_b=table_b,
+                project_id=self.project_id
+            )
+            
+            # Format consultative response
+            answer = self._format_comparison_result(result, question)
+            
+            return SynthesizedAnswer(
+                question=question,
+                answer=answer,
+                confidence=0.92,
+                structured_output={
+                    'type': 'comparison',
+                    'result': result.to_dict()
+                },
+                reasoning=[
+                    f"Compared {result.source_a_rows} rows from source A",
+                    f"Compared {result.source_b_rows} rows from source B",
+                    f"Found {result.matches} matches, {len(result.only_in_a)} only in A, {len(result.only_in_b)} only in B"
+                ]
+            )
+            
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Comparison failed: {e}")
+            return None
+    
+    def _parse_comparison_tables(self, q_lower: str) -> Tuple[Optional[str], Optional[str]]:
+        """
+        Parse question to identify two tables to compare.
+        
+        Looks for patterns like:
+        - "compare X to Y"
+        - "compare X vs Y"
+        - "X compared to Y"
+        - "difference between X and Y"
+        """
+        tables = self.schema.get('tables', [])
+        if not tables:
+            return None, None
+        
+        # Build name -> table_name mapping
+        table_map = {}
+        for t in tables:
+            table_name = t.get('table_name', '')
+            display_name = t.get('display_name', table_name).lower()
+            
+            # Add variations
+            table_map[display_name] = table_name
+            table_map[table_name.lower()] = table_name
+            
+            # Add simplified names
+            for keyword in ['tax_verification', 'master_profile', 'tax_codes', 'earnings', 'deductions']:
+                if keyword in table_name.lower() or keyword in display_name:
+                    table_map[keyword] = table_name
+        
+        # Common comparison patterns
+        patterns = [
+            r'compare\s+(.+?)\s+(?:to|with|vs|versus)\s+(.+?)(?:\s+and|\s*$)',
+            r'(.+?)\s+compared\s+to\s+(.+?)(?:\s+and|\s*$)',
+            r'difference\s+between\s+(.+?)\s+and\s+(.+?)(?:\s*$)',
+            r'(.+?)\s+vs\.?\s+(.+?)(?:\s+and|\s*$)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, q_lower)
+            if match:
+                ref_a = match.group(1).strip()
+                ref_b = match.group(2).strip()
+                
+                # Find matching tables
+                table_a = self._find_table_by_reference(ref_a, table_map)
+                table_b = self._find_table_by_reference(ref_b, table_map)
+                
+                if table_a and table_b:
+                    return table_a, table_b
+        
+        # Fallback: look for known table keywords in question
+        found_tables = []
+        keywords = ['tax_verification', 'master_profile', 'tax_codes', 'earnings_codes', 
+                    'deduction_codes', 'earnings', 'deductions']
+        
+        for kw in keywords:
+            if kw.replace('_', ' ') in q_lower or kw in q_lower:
+                if kw in table_map:
+                    found_tables.append(table_map[kw])
+        
+        if len(found_tables) >= 2:
+            return found_tables[0], found_tables[1]
+        
+        return None, None
+    
+    def _find_table_by_reference(self, ref: str, table_map: Dict[str, str]) -> Optional[str]:
+        """Find table name from a reference string."""
+        ref = ref.lower().strip()
+        
+        # Direct match
+        if ref in table_map:
+            return table_map[ref]
+        
+        # Partial match
+        for key, table_name in table_map.items():
+            if ref in key or key in ref:
+                return table_name
+        
+        # Fuzzy match - check for key words
+        keywords = ref.replace('the ', '').replace('company ', '').split()
+        for kw in keywords:
+            if len(kw) > 3:  # Skip short words
+                for key, table_name in table_map.items():
+                    if kw in key:
+                        return table_name
+        
+        return None
+    
+    def _format_comparison_result(self, result, question: str) -> str:
+        """Format comparison result as consultative answer."""
+        parts = []
+        
+        # Summary
+        parts.append(f"## Comparison: {result.source_a} vs {result.source_b}\n")
+        
+        # Key metrics
+        parts.append(f"**Match Rate:** {result.match_rate:.1%}")
+        parts.append(f"- **Matched:** {result.matches} records")
+        parts.append(f"- **Only in {result.source_a}:** {len(result.only_in_a)} records")
+        parts.append(f"- **Only in {result.source_b}:** {len(result.only_in_b)} records")
+        
+        if result.mismatches:
+            parts.append(f"- **Value Mismatches:** {len(result.mismatches)} records")
+        
+        # Show what's missing
+        if result.only_in_a:
+            parts.append(f"\n### Missing from {result.source_b}:")
+            # Get key column values
+            key_col = result.join_keys[0] if result.join_keys else None
+            if key_col:
+                missing_values = [str(r.get(key_col, ''))[:30] for r in result.only_in_a[:10]]
+                for val in missing_values:
+                    parts.append(f"- `{val}`")
+                if len(result.only_in_a) > 10:
+                    parts.append(f"- *...and {len(result.only_in_a) - 10} more*")
+        
+        if result.only_in_b:
+            parts.append(f"\n### Missing from {result.source_a}:")
+            key_col = result.join_keys[0] if result.join_keys else None
+            if key_col:
+                missing_values = [str(r.get(key_col, ''))[:30] for r in result.only_in_b[:10]]
+                for val in missing_values:
+                    parts.append(f"- `{val}`")
+                if len(result.only_in_b) > 10:
+                    parts.append(f"- *...and {len(result.only_in_b) - 10} more*")
+        
+        # Mismatches
+        if result.mismatches:
+            parts.append(f"\n### Value Differences:")
+            for mismatch in result.mismatches[:5]:
+                keys = mismatch.get('keys', {})
+                key_str = ", ".join([f"{k}={v}" for k, v in keys.items()])
+                parts.append(f"- **{key_str}**:")
+                for diff in mismatch.get('differences', [])[:3]:
+                    parts.append(f"  - {diff['column']}: `{diff['value_a']}` → `{diff['value_b']}`")
+        
+        # Recommendation
+        parts.append("\n### Recommendation:")
+        if result.match_rate >= 0.95:
+            parts.append("✅ **High alignment** - Only minor discrepancies to review.")
+        elif result.match_rate >= 0.7:
+            parts.append("⚠️ **Moderate alignment** - Review the gaps above to ensure data consistency.")
+        else:
+            parts.append("🔴 **Low alignment** - Significant discrepancies require immediate attention.")
+        
+        return "\n".join(parts)
     
     def _handle_export_request(self, question: str, 
                                q_lower: str) -> Optional[SynthesizedAnswer]:
