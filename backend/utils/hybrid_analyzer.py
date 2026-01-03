@@ -468,30 +468,32 @@ Return ONLY valid JSON."""
             logger.info(f"[HYBRID] Calling Claude for {action.get('action_id')}")
             self.stats['claude_calls'] += 1
             
-            # Use orchestrator if available
-            if self.orchestrator:
-                result_text, success = self.orchestrator._call_claude(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    project_id=None,
-                    operation="hybrid_analyzer"
-                )
+            # Use orchestrator for all LLM calls
+            if not self.orchestrator:
+                logger.error("[HYBRID] LLMOrchestrator not available")
+                return None
+            
+            # Use generate_json for structured output
+            result = self.orchestrator.generate_json(
+                prompt=f"{system_prompt}\n\n{prompt}"
+            )
+            
+            if result.get('success') and result.get('json'):
+                parsed_result = result['json']
+                logger.info(f"[HYBRID] Got response from {result.get('model_used', 'unknown')}")
                 
-                if not success:
-                    logger.error(f"[HYBRID] Claude call failed: {result_text}")
-                    return None
+                # LEARNING: Capture this output for future training
+                if self.learning:
+                    quality = 'high' if parsed_result.get('complete') else 'medium'
+                    self.learning.learn_from_claude(text, prompt, parsed_result, action.get('action_id'), quality)
+                
+                return parsed_result
+            elif result.get('response'):
+                # Try to parse raw response
+                result_text = result['response'].strip()
             else:
-                # Fallback to direct call if orchestrator not available
-                import anthropic
-                client = anthropic.Anthropic(api_key=self.claude_api_key)
-                response = client.messages.create(
-                    model="claude-sonnet-4-20250514",
-                    max_tokens=2500,
-                    temperature=0,
-                    system=system_prompt,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                result_text = response.content[0].text
+                logger.error(f"[HYBRID] LLM call failed: {result.get('error')}")
+                return None
             
             result_text = result_text.strip()
             if result_text.startswith("```"):
