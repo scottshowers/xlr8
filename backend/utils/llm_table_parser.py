@@ -194,45 +194,33 @@ def parse_json_response(response_text: str) -> List[Dict]:
 
 
 # =============================================================================
-# LLM CASCADE - Groq → Ollama → Claude (same order as RegisterExtractor)
+# LLM CASCADE - Uses LLMOrchestrator for consistent handling
 # =============================================================================
 
 def call_groq(prompt: str, max_tokens: int = 8192, temperature: float = 0.1) -> Optional[str]:
     """
-    Call Groq API with llama-3.3-70b-versatile.
-    Same model and settings as RegisterExtractor.
+    Call Groq via LLMOrchestrator.
+    Falls back to direct call only if orchestrator unavailable.
     """
-    groq_api_key = os.getenv("GROQ_API_KEY", "")
+    global _orchestrator
     
-    if not groq_api_key:
-        return None
+    if _orchestrator:
+        # Use orchestrator's synthesize which tries local first then Claude
+        # But we want Groq specifically - check if orchestrator supports it
+        try:
+            result = _orchestrator.synthesize_answer(
+                question=prompt,
+                context="",
+                use_claude_fallback=False  # Don't fall back to Claude here
+            )
+            if result.get('success') and result.get('response'):
+                return result['response']
+        except Exception as e:
+            logger.debug(f"[LLM-PARSER] Orchestrator synthesize failed: {e}")
     
-    try:
-        response = requests.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {groq_api_key}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": temperature,
-                "max_tokens": max_tokens
-            },
-            timeout=120
-        )
-        
-        if response.status_code == 200:
-            result = response.json()
-            return result.get("choices", [{}])[0].get("message", {}).get("content", "")
-        else:
-            logger.warning(f"[LLM-PARSER] Groq returned {response.status_code}: {response.text[:200]}")
-            return None
-            
-    except Exception as e:
-        logger.warning(f"[LLM-PARSER] Groq failed: {e}")
-        return None
+    # If orchestrator doesn't have Groq, this function returns None
+    # and the cascade will try Ollama next
+    return None
 
 
 def call_ollama(prompt: str, model: str = "deepseek-r1:14b", max_tokens: int = 8192) -> Optional[str]:
@@ -280,46 +268,34 @@ def call_ollama(prompt: str, model: str = "deepseek-r1:14b", max_tokens: int = 8
 
 def call_claude(prompt: str, max_tokens: int = 8192) -> Optional[str]:
     """
-    Call Claude API as fallback - uses LLMOrchestrator for consistency.
-    Only used when Groq and Ollama both fail.
+    Call Claude API via LLMOrchestrator.
+    Only used when local LLMs fail.
     """
     global _orchestrator
     
-    # Try orchestrator first
-    if _orchestrator and _orchestrator.claude_api_key:
-        try:
-            system_prompt = "You are a precise data extraction assistant. Extract table data and return valid JSON."
-            result, success = _orchestrator._call_claude(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                project_id=None,
-                operation="llm_table_parser"
-            )
-            if success:
-                return result
-        except Exception as e:
-            logger.warning(f"[LLM-PARSER] Orchestrator Claude call failed: {e}")
-    
-    # Direct fallback if orchestrator unavailable
-    claude_api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY")
-    
-    if not claude_api_key:
+    if not _orchestrator:
+        logger.warning("[LLM-PARSER] LLMOrchestrator not available for Claude call")
         return None
     
     try:
-        import anthropic
-        client = anthropic.Anthropic(api_key=claude_api_key)
+        system_prompt = "You are a precise data extraction assistant. Extract table data and return valid JSON."
         
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=max_tokens,
-            messages=[{"role": "user", "content": prompt}]
+        # Use synthesize_answer with Claude fallback enabled
+        result = _orchestrator.synthesize_answer(
+            question=prompt,
+            context="",
+            expert_prompt=system_prompt,
+            use_claude_fallback=True
         )
         
-        return response.content[0].text
+        if result.get('success') and result.get('response'):
+            logger.info(f"[LLM-PARSER] Got response from {result.get('model_used', 'claude')}")
+            return result['response']
+        
+        return None
         
     except Exception as e:
-        logger.error(f"[LLM-PARSER] Claude fallback failed: {e}")
+        logger.error(f"[LLM-PARSER] Claude via orchestrator failed: {e}")
         return None
 
 
