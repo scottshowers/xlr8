@@ -75,132 +75,47 @@ class ProcessingType(str, Enum):
 # =============================================================================
 
 # Metrics Service (for analytics)
-try:
-    from utils.metrics_service import MetricsService
-    METRICS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.metrics_service import MetricsService
-        METRICS_AVAILABLE = True
-    except ImportError:
-        METRICS_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] MetricsService not available - metrics will not be recorded")
+from backend.utils.metrics_service import MetricsService
+METRICS_AVAILABLE = True
 
 # Registration Service (always needed)
-try:
-    from utils.registration_service import RegistrationService, RegistrationSource
-    REGISTRATION_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.registration_service import RegistrationService, RegistrationSource
-        REGISTRATION_AVAILABLE = True
-    except ImportError:
-        REGISTRATION_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] RegistrationService not available")
+from backend.utils.registration_service import RegistrationService, RegistrationSource
+REGISTRATION_AVAILABLE = True
 
 # Structured Data Handler (DuckDB)
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        STRUCTURED_AVAILABLE = True
-    except ImportError:
-        STRUCTURED_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] Structured handler not available")
+from utils.structured_data_handler import get_structured_handler
+STRUCTURED_AVAILABLE = True
 
 # RAG Handler (ChromaDB)
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.rag_handler import RAGHandler
-        RAG_AVAILABLE = True
-    except ImportError:
-        RAG_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] RAG handler not available")
+from utils.rag_handler import RAGHandler
+RAG_AVAILABLE = True
 
 # Smart PDF Analyzer
-try:
-    from utils.smart_pdf_analyzer import process_pdf_intelligently
-    SMART_PDF_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
-        SMART_PDF_AVAILABLE = True
-    except ImportError:
-        SMART_PDF_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] Smart PDF analyzer not available")
+from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
+SMART_PDF_AVAILABLE = True
 
 # Standards Processor
-try:
-    from utils.standards_processor import process_pdf as standards_process_pdf
-    from utils.standards_processor import process_text as standards_process_text
-    from utils.standards_processor import get_rule_registry
-    from utils.standards_processor import StandardsDocument
-    STANDARDS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.standards_processor import process_pdf as standards_process_pdf
-        from backend.utils.standards_processor import process_text as standards_process_text
-        from backend.utils.standards_processor import get_rule_registry
-        from backend.utils.standards_processor import StandardsDocument
-        STANDARDS_AVAILABLE = True
-    except ImportError:
-        STANDARDS_AVAILABLE = False
-        StandardsDocument = None
-        logger.warning("[SMART-ROUTER] Standards processor not available")
+from backend.utils.standards_processor import process_pdf as standards_process_pdf
+from backend.utils.standards_processor import process_text as standards_process_text
+from backend.utils.standards_processor import get_rule_registry
+from backend.utils.standards_processor import StandardsDocument
+STANDARDS_AVAILABLE = True
 
 # Register Extractor
-try:
-    from routers.register_extractor import get_extractor, create_job, process_extraction_job
-    REGISTER_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.routers.register_extractor import get_extractor, create_job, process_extraction_job
-        REGISTER_AVAILABLE = True
-    except ImportError:
-        REGISTER_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] Register extractor not available")
+from backend.routers.register_extractor import get_extractor, create_job, process_extraction_job
+REGISTER_AVAILABLE = True
 
 # Processing Job Model
-try:
-    from utils.database.models import ProcessingJobModel, ProjectModel, DocumentModel
-    MODELS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.database.models import ProcessingJobModel, ProjectModel, DocumentModel
-        MODELS_AVAILABLE = True
-    except ImportError:
-        MODELS_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] Database models not available")
+from utils.database.models import ProcessingJobModel, ProjectModel, DocumentModel
+MODELS_AVAILABLE = True
 
 # Text extraction
-try:
-    from utils.text_extraction import extract_text
-    TEXT_EXTRACTION_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.text_extraction import extract_text
-        TEXT_EXTRACTION_AVAILABLE = True
-    except ImportError:
-        TEXT_EXTRACTION_AVAILABLE = False
-        logger.warning("[SMART-ROUTER] Text extraction not available")
+from utils.text_extraction import extract_text
+TEXT_EXTRACTION_AVAILABLE = True
 
 # Job Queue - SEQUENTIAL processing to prevent Ollama/LLM overload
-try:
-    from routers.upload import job_queue
-    JOB_QUEUE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.routers.upload import job_queue
-        JOB_QUEUE_AVAILABLE = True
-    except ImportError:
-        JOB_QUEUE_AVAILABLE = False
-        job_queue = None
-        logger.warning("[SMART-ROUTER] Job queue not available - uploads will run concurrently (may cause issues)")
+from backend.routers.upload import job_queue
+JOB_QUEUE_AVAILABLE = True
 
 
 # =============================================================================
@@ -952,10 +867,7 @@ async def _route_to_structured(
         job_id = job_result['id']
         
         # Import the background processor
-        try:
-            from routers.upload import process_file_background
-        except ImportError:
-            from backend.routers.upload import process_file_background
+        from backend.routers.upload import process_file_background
         
         # Use sequential job queue to prevent Ollama overload
         if JOB_QUEUE_AVAILABLE and job_queue:
@@ -1049,10 +961,7 @@ async def _route_to_semantic(
         
         job_id = job_result['id']
         
-        try:
-            from routers.upload import process_file_background
-        except ImportError:
-            from backend.routers.upload import process_file_background
+        from backend.routers.upload import process_file_background
         
         # Use sequential job queue to prevent Ollama overload
         if JOB_QUEUE_AVAILABLE and job_queue:

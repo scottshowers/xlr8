@@ -80,19 +80,13 @@ class ReportExecuteRequest(BaseModel):
 
 def get_supabase():
     """Get Supabase client."""
-    try:
-        from utils.database.supabase_client import get_supabase
-    except ImportError:
-        from utils.database.supabase_client import get_supabase
+    from utils.database.supabase_client import get_supabase
     return get_supabase()
 
 
 def get_raas_client(connection_data: Dict):
     """Create RaaS client from connection data."""
-    try:
-        from services.ukg_pro_raas import UKGProRaaSClient, UKGCredentials
-    except ImportError:
-        from backend.services.ukg_pro_raas import UKGProRaaSClient, UKGCredentials
+    from backend.services.ukg_pro_raas import UKGProRaaSClient, UKGCredentials
     
     credentials = UKGCredentials(
         base_url=connection_data['base_url'],
@@ -517,10 +511,7 @@ async def save_to_duckdb(project_name: str, table_name: str, columns: List[str],
     
     Creates a new table with the report data, prefixed with 'pro_'.
     """
-    try:
-        from utils.structured_data_handler import get_structured_handler
-    except ImportError:
-        from backend.utils.structured_data_handler import get_structured_handler
+    from utils.structured_data_handler import get_structured_handler
     
     handler = get_structured_handler()
     

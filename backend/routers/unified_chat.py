@@ -102,194 +102,71 @@ router = APIRouter(tags=["unified-chat"])
 import os
 
 # Modular engine (V2) - THE engine going forward
-IntelligenceEngineV2 = None
-ENGINE_V2_AVAILABLE = False
-try:
-    from utils.intelligence import IntelligenceEngineV2, IntelligenceMode
-    ENGINE_V2_AVAILABLE = True
-    logger.info("[UNIFIED] IntelligenceEngineV2 available")
-except ImportError:
-    try:
-        from backend.utils.intelligence import IntelligenceEngineV2, IntelligenceMode
-        ENGINE_V2_AVAILABLE = True
-        logger.info("[UNIFIED] IntelligenceEngineV2 available")
-    except ImportError:
-        logger.warning("[UNIFIED] IntelligenceEngineV2 not available - CRITICAL")
+from backend.utils.intelligence import IntelligenceEngineV2, IntelligenceMode
+ENGINE_V2_AVAILABLE = True
+logger.info("[UNIFIED] IntelligenceEngineV2 available")
 
 # Legacy alias for compatibility (points to V2)
 IntelligenceEngine = IntelligenceEngineV2
 INTELLIGENCE_AVAILABLE = ENGINE_V2_AVAILABLE
 
 # Learning Module
-try:
-    from utils.learning import get_learning_module
-    LEARNING_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.learning import get_learning_module
-        LEARNING_AVAILABLE = True
-    except ImportError:
-        LEARNING_AVAILABLE = False
-        logger.warning("[UNIFIED] Learning module not available")
+from backend.utils.learning import get_learning_module
+LEARNING_AVAILABLE = True
 
 # Structured Data Handler
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        STRUCTURED_AVAILABLE = True
-    except ImportError:
-        STRUCTURED_AVAILABLE = False
-        logger.warning("[UNIFIED] Structured data handler not available")
+from utils.structured_data_handler import get_structured_handler
+STRUCTURED_AVAILABLE = True
 
 # RAG Handler
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.rag_handler import RAGHandler
-        RAG_AVAILABLE = True
-    except ImportError:
-        RAG_AVAILABLE = False
-        logger.warning("[UNIFIED] RAG handler not available")
+from utils.rag_handler import RAGHandler
+RAG_AVAILABLE = True
 
 # LLM Orchestrator
-try:
-    from utils.llm_orchestrator import LLMOrchestrator
-    LLM_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.llm_orchestrator import LLMOrchestrator
-        LLM_AVAILABLE = True
-    except ImportError:
-        LLM_AVAILABLE = False
-        logger.warning("[UNIFIED] LLM orchestrator not available")
+from utils.llm_orchestrator import LLMOrchestrator
+LLM_AVAILABLE = True
 
 # Persona Manager
-try:
-    from utils.persona_manager import get_persona_manager
-    PERSONAS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.persona_manager import get_persona_manager
-        PERSONAS_AVAILABLE = True
-    except ImportError:
-        PERSONAS_AVAILABLE = False
-        logger.warning("[UNIFIED] Persona manager not available")
+from utils.persona_manager import get_persona_manager
+PERSONAS_AVAILABLE = True
 
 # Expert Context & Domain Inference (Phase 4: Intelligent Context Selection)
-EXPERT_CONTEXT_AVAILABLE = False
-DOMAIN_INFERENCE_AVAILABLE = False
+from backend.utils.expert_context_registry import (
+    select_expert_context,
+    record_expert_feedback,
+    get_expert_selector,
+    get_expert_registry,
+)
+EXPERT_CONTEXT_AVAILABLE = True
 
-try:
-    from utils.expert_context_registry import (
-        select_expert_context,
-        record_expert_feedback,
-        get_expert_selector,
-        get_expert_registry,
-    )
-    EXPERT_CONTEXT_AVAILABLE = True
-    logger.info("[UNIFIED] Expert context system loaded")
-except ImportError:
-    try:
-        from backend.utils.expert_context_registry import (
-            select_expert_context,
-            record_expert_feedback,
-            get_expert_selector,
-            get_expert_registry,
-        )
-        EXPERT_CONTEXT_AVAILABLE = True
-        logger.info("[UNIFIED] Expert context system loaded (alt path)")
-    except ImportError:
-        logger.warning("[UNIFIED] Expert context system not available")
-
-try:
-    from utils.domain_inference_engine import (
-        get_domain_engine,
-        infer_project_domains,
-        get_primary_domain,
-    )
-    DOMAIN_INFERENCE_AVAILABLE = True
-    logger.info("[UNIFIED] Domain inference engine loaded")
-except ImportError:
-    try:
-        from backend.utils.domain_inference_engine import (
-            get_domain_engine,
-            infer_project_domains,
-            get_primary_domain,
-        )
-        DOMAIN_INFERENCE_AVAILABLE = True
-        logger.info("[UNIFIED] Domain inference engine loaded (alt path)")
-    except ImportError:
-        logger.warning("[UNIFIED] Domain inference engine not available")
+from backend.utils.domain_inference_engine import (
+    get_domain_engine,
+    infer_project_domains,
+    get_primary_domain,
+)
+DOMAIN_INFERENCE_AVAILABLE = True
 
 # Supabase
-try:
-    from utils.database.supabase_client import get_supabase
-    SUPABASE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.database.supabase_client import get_supabase
-        SUPABASE_AVAILABLE = True
-    except ImportError:
-        SUPABASE_AVAILABLE = False
-        logger.warning("[UNIFIED] Supabase not available")
+from utils.database.supabase_client import get_supabase
+SUPABASE_AVAILABLE = True
 
 # Metrics Service (for query tracking)
-try:
-    from utils.metrics_service import MetricsService
-    METRICS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.metrics_service import MetricsService
-        METRICS_AVAILABLE = True
-    except ImportError:
-        METRICS_AVAILABLE = False
-        logger.debug("[UNIFIED] MetricsService not available - query metrics will not be recorded")
+from backend.utils.metrics_service import MetricsService
+METRICS_AVAILABLE = True
 
 # Project Intelligence Service (Phase 3)
-try:
-    from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
-    PROJECT_INTELLIGENCE_AVAILABLE = True
-    logger.warning("[UNIFIED] Project intelligence imported successfully")
-except ImportError:
-    try:
-        from utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
-        PROJECT_INTELLIGENCE_AVAILABLE = True
-        logger.warning("[UNIFIED] Project intelligence imported successfully (alt path)")
-    except ImportError:
-        PROJECT_INTELLIGENCE_AVAILABLE = False
-        logger.warning("[UNIFIED] Project intelligence not available - using fallback services")
+from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
+PROJECT_INTELLIGENCE_AVAILABLE = True
 
 # Chat Services (extracted from this file for modularity)
-try:
-    from backend.utils.chat_services import (
-        ReversibleRedactor,
-        DataModelService,
-        DataQualityService,
-        FollowUpGenerator,
-        CitationBuilder
-    )
-    CHAT_SERVICES_AVAILABLE = True
-    logger.info("[UNIFIED] Chat services imported from backend.utils.chat_services")
-except ImportError:
-    try:
-        from utils.chat_services import (
-            ReversibleRedactor,
-            DataModelService,
-            DataQualityService,
-            FollowUpGenerator,
-            CitationBuilder
-        )
-        CHAT_SERVICES_AVAILABLE = True
-        logger.info("[UNIFIED] Chat services imported from utils.chat_services")
-    except ImportError:
-        # Fallback to inline definitions (legacy)
-        CHAT_SERVICES_AVAILABLE = False
-        logger.warning("[UNIFIED] Chat services not available - using inline definitions")
+from backend.utils.chat_services import (
+    ReversibleRedactor,
+    DataModelService,
+    DataQualityService,
+    FollowUpGenerator,
+    CitationBuilder
+)
+CHAT_SERVICES_AVAILABLE = True
 
 
 # =============================================================================
@@ -1246,32 +1123,8 @@ class CitationBuilder:
 # OVERRIDE INLINE CLASSES WITH IMPORTED VERSIONS (if available)
 # =============================================================================
 # The inline classes above serve as fallback. If chat_services import succeeded,
-# we override them here with the imported versions for cleaner code organization.
-
-if CHAT_SERVICES_AVAILABLE:
-    # Import succeeded - use extracted modules
-    try:
-        from backend.utils.chat_services import (
-            ReversibleRedactor,
-            DataModelService,
-            DataQualityService,
-            FollowUpGenerator,
-            CitationBuilder
-        )
-        logger.info("[UNIFIED] Using extracted chat_services modules")
-    except ImportError:
-        try:
-            from utils.chat_services import (
-                ReversibleRedactor,
-                DataModelService,
-                DataQualityService,
-                FollowUpGenerator,
-                CitationBuilder
-            )
-            logger.info("[UNIFIED] Using extracted chat_services modules (alt path)")
-        except ImportError:
-            # Stick with inline definitions
-            logger.warning("[UNIFIED] Failed to re-import chat_services, using inline definitions")
+# we use the imported versions for cleaner code organization.
+# (Import already done at top of file)
 
 
 # =============================================================================

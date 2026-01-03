@@ -31,36 +31,14 @@ router = APIRouter()
 # IMPORTS
 # =============================================================================
 
-try:
-    from utils.classification_service import get_classification_service, ClassificationService
-    CLASSIFICATION_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.classification_service import get_classification_service, ClassificationService
-        CLASSIFICATION_AVAILABLE = True
-    except ImportError:
-        CLASSIFICATION_AVAILABLE = False
-        logger.warning("[CLASSIFICATION-API] Classification service not available")
+from backend.utils.classification_service import get_classification_service, ClassificationService
+CLASSIFICATION_AVAILABLE = True
 
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        STRUCTURED_AVAILABLE = True
-    except ImportError:
-        STRUCTURED_AVAILABLE = False
+from utils.structured_data_handler import get_structured_handler
+STRUCTURED_AVAILABLE = True
 
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.rag_handler import RAGHandler
-        RAG_AVAILABLE = True
-    except ImportError:
-        RAG_AVAILABLE = False
+from utils.rag_handler import RAGHandler
+RAG_AVAILABLE = True
 
 
 def _get_service() -> ClassificationService:

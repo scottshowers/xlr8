@@ -103,47 +103,17 @@ def generate_display_name(table_name: str, sheet: str = None, filename: str = No
 # IMPORTS - Graceful degradation
 # =============================================================================
 
-try:
-    from utils.intelligence import IntelligenceEngine, IntelligenceMode
-    INTELLIGENCE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.intelligence import IntelligenceEngine, IntelligenceMode
-        INTELLIGENCE_AVAILABLE = True
-    except ImportError:
-        INTELLIGENCE_AVAILABLE = False
-        logger.warning("[BI] Intelligence engine not available")
+from backend.utils.intelligence import IntelligenceEngine, IntelligenceMode
+INTELLIGENCE_AVAILABLE = True
 
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        STRUCTURED_AVAILABLE = True
-    except ImportError:
-        STRUCTURED_AVAILABLE = False
-        logger.warning("[BI] Structured data handler not available")
+from utils.structured_data_handler import get_structured_handler
+STRUCTURED_AVAILABLE = True
 
-try:
-    from utils.rag_handler import RAGHandler
-    RAG_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.rag_handler import RAGHandler
-        RAG_AVAILABLE = True
-    except ImportError:
-        RAG_AVAILABLE = False
+from utils.rag_handler import RAGHandler
+RAG_AVAILABLE = True
 
-try:
-    from utils.database.supabase_client import get_supabase
-    SUPABASE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.database.supabase_client import get_supabase
-        SUPABASE_AVAILABLE = True
-    except ImportError:
-        SUPABASE_AVAILABLE = False
+from utils.database.supabase_client import get_supabase
+SUPABASE_AVAILABLE = True
 
 
 # =============================================================================

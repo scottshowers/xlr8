@@ -66,15 +66,7 @@ class DecoderEntryResponse(BaseModel):
 # IMPORT DECODER SERVICE
 # =============================================================================
 
-try:
     from backend.utils.domain_decoder import (
-        get_decoder, 
-        DECODER_CATEGORIES, 
-        DECODER_DOMAINS,
-        seed_initial_knowledge
-    )
-except ImportError:
-    from utils.domain_decoder import (
         get_decoder, 
         DECODER_CATEGORIES, 
         DECODER_DOMAINS,

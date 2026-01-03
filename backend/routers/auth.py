@@ -25,13 +25,7 @@ from pydantic import BaseModel
 import httpx
 
 # Import auth middleware
-try:
     from backend.utils.auth_middleware import (
-        User, require_auth, require_permission, require_role,
-        get_current_user, Permissions
-    )
-except ImportError:
-    from utils.auth_middleware import (
         User, require_auth, require_permission, require_role,
         get_current_user, Permissions
     )

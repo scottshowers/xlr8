@@ -79,66 +79,28 @@ from utils.database.models import (
 )
 
 # Import unified registration service
-try:
-    from utils.registration_service import RegistrationService, RegistrationSource
-    REGISTRATION_SERVICE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.registration_service import RegistrationService, RegistrationSource
-        REGISTRATION_SERVICE_AVAILABLE = True
-    except ImportError:
-        REGISTRATION_SERVICE_AVAILABLE = False
-        logger_temp = logging.getLogger(__name__)
-        logger_temp.warning("RegistrationService not available - using legacy registration")
+from backend.utils.registration_service import RegistrationService, RegistrationSource
+REGISTRATION_SERVICE_AVAILABLE = True
 
 # Import structured data handler for Excel/CSV
-try:
-    from utils.structured_data_handler import get_structured_handler
-    STRUCTURED_HANDLER_AVAILABLE = True
-except ImportError:
-    STRUCTURED_HANDLER_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning("Structured data handler not available - Excel/CSV will use RAG only")
+from utils.structured_data_handler import get_structured_handler
+STRUCTURED_HANDLER_AVAILABLE = True
 
 # Import metrics service for analytics tracking
-try:
-    from utils.metrics_service import MetricsService
-    METRICS_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.metrics_service import MetricsService
-        METRICS_AVAILABLE = True
-    except ImportError:
-        METRICS_AVAILABLE = False
-        logger_temp = logging.getLogger(__name__)
-        logger_temp.warning("[UPLOAD] MetricsService not available - metrics will not be recorded")
+from backend.utils.metrics_service import MetricsService
+METRICS_AVAILABLE = True
 
 # Import smart PDF analyzer for tabular PDFs
-try:
-    from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
-    SMART_PDF_AVAILABLE = True
-except ImportError:
-    SMART_PDF_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning("Smart PDF analyzer not available - PDFs will use RAG only")
+from backend.utils.smart_pdf_analyzer import process_pdf_intelligently
+SMART_PDF_AVAILABLE = True
 
 # Import document analyzer for content-based routing
-try:
-    from backend.utils.document_analyzer import DocumentAnalyzer, DocumentStructure
-    DOCUMENT_ANALYZER_AVAILABLE = True
-except ImportError:
-    DOCUMENT_ANALYZER_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning("Document analyzer not available - DOCX/TXT will use extension-based routing")
+from backend.utils.document_analyzer import DocumentAnalyzer, DocumentStructure
+DOCUMENT_ANALYZER_AVAILABLE = True
 
 # Import intelligence service for Phase 3 analysis
-try:
-    from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
-    INTELLIGENCE_AVAILABLE = True
-except ImportError:
-    INTELLIGENCE_AVAILABLE = False
-    logger_temp = logging.getLogger(__name__)
-    logger_temp.warning("Project intelligence not available - upload analysis disabled")
+from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
+INTELLIGENCE_AVAILABLE = True
 
 logger = logging.getLogger(__name__)
 
@@ -1968,26 +1930,13 @@ async def get_job_status(job_id: str):
 # =============================================================================
 
 # Import standards processor
-try:
-    from backend.utils.standards_processor import (
-        process_pdf as standards_process_pdf,
-        process_text as standards_process_text,
-        get_rule_registry,
-        search_standards
-    )
-    STANDARDS_AVAILABLE = True
-except ImportError:
-    try:
-        from utils.standards_processor import (
-            process_pdf as standards_process_pdf,
-            process_text as standards_process_text,
-            get_rule_registry,
-            search_standards
-        )
-        STANDARDS_AVAILABLE = True
-    except ImportError:
-        STANDARDS_AVAILABLE = False
-        logger.warning("[UPLOAD] Standards processor not available")
+from backend.utils.standards_processor import (
+    process_pdf as standards_process_pdf,
+    process_text as standards_process_text,
+    get_rule_registry,
+    search_standards
+)
+STANDARDS_AVAILABLE = True
 
 
 @router.get("/standards/health")
@@ -2081,16 +2030,8 @@ async def list_standards_documents():
 # =============================================================================
 
 # Import compliance engine
-try:
-    from backend.utils.compliance_engine import get_compliance_engine, run_compliance_scan
-    COMPLIANCE_ENGINE_AVAILABLE = True
-except ImportError:
-    try:
-        from utils.compliance_engine import get_compliance_engine, run_compliance_scan
-        COMPLIANCE_ENGINE_AVAILABLE = True
-    except ImportError:
-        COMPLIANCE_ENGINE_AVAILABLE = False
-        logger.warning("[UPLOAD] Compliance engine not available")
+from backend.utils.compliance_engine import get_compliance_engine, run_compliance_scan
+COMPLIANCE_ENGINE_AVAILABLE = True
 
 
 @router.post("/standards/compliance/check/{project_id}")

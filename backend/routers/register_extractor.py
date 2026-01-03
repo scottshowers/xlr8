@@ -62,67 +62,24 @@ router = APIRouter()
 # =============================================================================
 
 # LLM Orchestrator (local LLM support)
-try:
-    from utils.llm_orchestrator import LLMOrchestrator
-    LLM_ORCHESTRATOR_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.llm_orchestrator import LLMOrchestrator
-        LLM_ORCHESTRATOR_AVAILABLE = True
-    except ImportError:
-        LLM_ORCHESTRATOR_AVAILABLE = False
-        logger.warning("[REGISTER] LLM Orchestrator not available - Claude only mode")
+from utils.llm_orchestrator import LLMOrchestrator
+LLM_ORCHESTRATOR_AVAILABLE = True
 
 # Structured Data Handler (DuckDB storage)
-try:
-    from utils.structured_data_handler import get_structured_handler
-    DUCKDB_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.structured_data_handler import get_structured_handler
-        DUCKDB_AVAILABLE = True
-    except ImportError:
-        DUCKDB_AVAILABLE = False
-        logger.warning("[REGISTER] Structured data handler not available - no DuckDB storage")
+from utils.structured_data_handler import get_structured_handler
+DUCKDB_AVAILABLE = True
 
 # Document Registry (classification tracking)
-try:
-    from utils.database.models import DocumentRegistryModel
-    REGISTRY_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.database.models import DocumentRegistryModel
-        REGISTRY_AVAILABLE = True
-    except ImportError:
-        REGISTRY_AVAILABLE = False
-        logger.warning("[REGISTER] DocumentRegistryModel not available - no registry tracking")
+from utils.database.models import DocumentRegistryModel
+REGISTRY_AVAILABLE = True
 
 # Unified Registration Service
-try:
-    from utils.registration_service import RegistrationService, RegistrationSource
-    REGISTRATION_SERVICE_AVAILABLE = True
-except ImportError:
-    try:
-        from backend.utils.registration_service import RegistrationService, RegistrationSource
-        REGISTRATION_SERVICE_AVAILABLE = True
-    except ImportError:
-        REGISTRATION_SERVICE_AVAILABLE = False
-        logger.warning("[REGISTER] RegistrationService not available - using legacy registration")
+from backend.utils.registration_service import RegistrationService, RegistrationSource
+REGISTRATION_SERVICE_AVAILABLE = True
 
 # Shared PDF utilities (PIIRedactor, JSON parsing)
-# Falls back to local implementation if not available
-try:
-    from utils.pdf_utils import PIIRedactor
-    PDF_UTILS_AVAILABLE = True
-    logger.info("[REGISTER] Using shared PIIRedactor from pdf_utils")
-except ImportError:
-    try:
-        from backend.utils.pdf_utils import PIIRedactor
-        PDF_UTILS_AVAILABLE = True
-        logger.info("[REGISTER] Using shared PIIRedactor from pdf_utils (backend path)")
-    except ImportError:
-        PDF_UTILS_AVAILABLE = False
-        logger.info("[REGISTER] pdf_utils not available, using local PIIRedactor")
+from backend.utils.pdf_utils import PIIRedactor
+PDF_UTILS_AVAILABLE = True
 
 
 # =============================================================================
@@ -190,16 +147,8 @@ if not PDF_UTILS_AVAILABLE:
 
 def get_supabase():
     """Get Supabase client"""
-    try:
-        from utils.database.supabase_client import get_supabase as _get_supabase
-        return _get_supabase()
-    except ImportError:
-        try:
-            from backend.utils.database.supabase_client import get_supabase as _get_supabase
-            return _get_supabase()
-        except ImportError:
-            logger.warning("Supabase client not available")
-            return None
+    from utils.database.supabase_client import get_supabase as _get_supabase
+    return _get_supabase()
 
 
 def _parse_date(date_str: Optional[str]) -> Optional[str]:

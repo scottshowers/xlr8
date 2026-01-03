@@ -14,17 +14,9 @@ import json
 
 logger = logging.getLogger(__name__)
 
-# Try to import LLM orchestrator for consistent Claude calls
-_advisor_orchestrator = None
-try:
-    from utils.llm_orchestrator import LLMOrchestrator
-    _advisor_orchestrator = LLMOrchestrator()
-except ImportError:
-    try:
-        from backend.utils.llm_orchestrator import LLMOrchestrator
-        _advisor_orchestrator = LLMOrchestrator()
-    except ImportError:
-        logger.warning("[ADVISOR] LLMOrchestrator not available")
+# LLM orchestrator for consistent Claude calls
+from utils.llm_orchestrator import LLMOrchestrator
+_advisor_orchestrator = LLMOrchestrator()
 
 router = APIRouter(tags=["advisor"])
 
