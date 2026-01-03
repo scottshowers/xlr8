@@ -23,7 +23,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/api/reference", tags=["reference"])
+router = APIRouter(tags=["reference"])
 
 
 # =============================================================================
