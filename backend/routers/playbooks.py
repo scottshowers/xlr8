@@ -1562,29 +1562,58 @@ DOCUMENTS:
         global _playbooks_orchestrator
         response_text = None
         
-        if _playbooks_orchestrator and _playbooks_orchestrator.claude_api_key:
-            result, success = _playbooks_orchestrator._call_claude(
-                prompt=prompt,
-                system_prompt=system_prompt,
-                project_id=project_id,
-                operation="entity_detection"
+        if _playbooks_orchestrator:
+            # Use generate_json for structured output
+            result = _playbooks_orchestrator.generate_json(
+                prompt=f"{system_prompt}\n\n{prompt}"
             )
-            if success:
-                response_text = result.strip()
+            
+            if result.get('success') and result.get('json'):
+                # Already parsed - jump to entity processing
+                entities = result['json']
+                logger.info(f"[PLAYBOOKS] Entity detection via {result.get('model_used', 'unknown')}")
+                
+                us_entities = entities.get("us", [])
+                ca_entities = entities.get("canada", [])
+                
+                for i, entity in enumerate(us_entities):
+                    entity['id'] = entity.get('fein', f'US-{i}')
+                    entity['type'] = 'fein'
+                    entity['count'] = 1
+                
+                for i, entity in enumerate(ca_entities):
+                    entity['id'] = entity.get('bn', f'CA-{i}')
+                    entity['type'] = 'bn'
+                    entity['count'] = 1
+                
+                warnings = []
+                if ca_entities and playbook_type == 'year-end':
+                    warnings.append("Canada entities detected - requires Canada Year-End Playbook")
+                
+                primary = None
+                for e in us_entities:
+                    if e.get('confidence') == 'high':
+                        primary = e['id']
+                        break
+                
+                return {
+                    "us_entities": us_entities,
+                    "canada_entities": ca_entities,
+                    "primary_entity": primary,
+                    "warnings": warnings
+                }
+            elif result.get('response'):
+                response_text = result['response'].strip()
         
-        # Fallback to direct if orchestrator unavailable
+        # Fallback to parsing text response
         if not response_text:
-            from anthropic import Anthropic
-            client = Anthropic(api_key=os.getenv("CLAUDE_API_KEY"))
-            
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=2000,
-                system=system_prompt,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            response_text = response.content[0].text.strip()
+            logger.warning("[PLAYBOOKS] No LLM response for entity detection, using empty defaults")
+            return {
+                "us_entities": [],
+                "canada_entities": [],
+                "primary_entity": None,
+                "warnings": ["Entity detection unavailable"]
+            }
         
         try:
             if "```json" in response_text:
