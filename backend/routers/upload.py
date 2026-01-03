@@ -961,49 +961,52 @@ def process_file_background(
                     result['intelligence'] = intelligence_summary
                 
                 # =====================================================
-                # SYSTEM/DOMAIN DETECTION - Phase 3.5
-                # Detect what system and domain this data belongs to
+                # UNIFIED ENRICHMENT - Phase 3.5
+                # Detection, relationships, metrics - all in one place
                 # =====================================================
                 try:
-                    from utils.detection_integration import run_project_detection
-                    ProcessingJobModel.update_progress(job_id, 76, "Detecting system context...")
-                    detection_result = run_project_detection(
+                    from backend.utils.upload_enrichment import enrich_structured_upload
+                    
+                    # Get columns and sheet names for detection
+                    all_columns = []
+                    for table in result.get('tables_created', []):
+                        try:
+                            cols = handler.conn.execute(f"PRAGMA table_info('{table}')").fetchall()
+                            all_columns.extend([c[1] for c in cols])
+                        except:
+                            pass
+                    
+                    enrichment = enrich_structured_upload(
                         project=project,
                         project_id=project_id,
                         filename=filename,
                         handler=handler,
+                        tables_created=result.get('tables_created', []),
+                        columns=all_columns,
+                        sheet_names=result.get('sheet_names', []),
                         job_id=job_id
                     )
-                    if detection_result:
-                        result['detection'] = detection_result
-                        # Log primary detections
-                        primary_sys = detection_result.get('primary_system')
-                        primary_dom = detection_result.get('primary_domain')
-                        if primary_sys:
-                            logger.info(f"[BACKGROUND] Detected system: {primary_sys.get('name')}")
-                        if primary_dom:
-                            logger.info(f"[BACKGROUND] Detected domain: {primary_dom.get('name')}")
-                except ImportError:
-                    logger.debug("[BACKGROUND] Detection integration not available")
-                except Exception as det_e:
-                    logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
-                
-                # =====================================================
-                # DOMAIN INFERENCE - Phase 4
-                # Detect what type of data this is for intelligent context
-                # =====================================================
-                try:
-                    from utils.domain_inference_engine import infer_project_domains
-                    ProcessingJobModel.update_progress(job_id, 79, "Analyzing data domains...")
-                    domains = infer_project_domains(project, project_id, handler)
-                    if domains:
-                        result['detected_domains'] = domains
-                        primary = domains.get('primary_domain')
-                        logger.info(f"[BACKGROUND] Domain inference: primary={primary}")
-                except ImportError:
-                    logger.debug("[BACKGROUND] Domain inference not available")
-                except Exception as di_e:
-                    logger.warning(f"[BACKGROUND] Domain inference failed: {di_e}")
+                    
+                    if enrichment.success:
+                        result['enrichment'] = enrichment.to_dict()
+                        # Also populate legacy fields for backward compatibility
+                        if enrichment.primary_system or enrichment.primary_domain:
+                            result['detection'] = {
+                                'primary_system': enrichment.primary_system,
+                                'primary_domain': enrichment.primary_domain,
+                                'systems': enrichment.systems,
+                                'domains': enrichment.domains,
+                                'functional_areas': enrichment.functional_areas
+                            }
+                        if enrichment.relationships_count > 0:
+                            logger.info(f"[BACKGROUND] Detected {enrichment.relationships_count} relationships")
+                    else:
+                        logger.warning(f"[BACKGROUND] Enrichment partial: {enrichment.errors}")
+                        
+                except ImportError as ie:
+                    logger.debug(f"[BACKGROUND] Upload enrichment not available: {ie}")
+                except Exception as enrich_e:
+                    logger.warning(f"[BACKGROUND] Enrichment failed: {enrich_e}")
                 
                 # Store schema summary in documents table for reference
                 if project_id:
@@ -1764,28 +1767,80 @@ def process_file_background(
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
         
-        # Run detection for system/domain identification (works on filename + text content)
-        detection_result = None
+        # =====================================================
+        # UNIFIED ENRICHMENT - Detection, metrics, ChromaDB update
+        # =====================================================
+        enrichment_result = None
         try:
-            from utils.detection_integration import detect_from_file_characteristics
-            detection_result = detect_from_file_characteristics(
+            from backend.utils.upload_enrichment import enrich_upload
+            
+            # Determine upload type
+            upload_type = 'hybrid' if duckdb_success else 'semantic'
+            
+            # Get tables if DuckDB was used
+            tables_created = []
+            if duckdb_success and 'pdf_result' in dir():
+                tables_created = pdf_result.get('duckdb_result', {}).get('tables_created', [])
+            
+            # Get handler if available
+            handler = None
+            if duckdb_success and STRUCTURED_HANDLER_AVAILABLE:
+                try:
+                    handler = get_structured_handler()
+                except:
+                    pass
+            
+            enrichment_result = enrich_upload(
+                project=project,
+                project_id=project_id,
                 filename=filename,
-                columns=None,  # No columns for unstructured
-                sheet_names=None
+                upload_type=upload_type,
+                handler=handler,
+                text_content=text,
+                tables_created=tables_created,
+                chunks_added=chunks_added,
+                job_id=job_id
             )
-            if detection_result:
-                logger.info(f"[BACKGROUND] Detection result: {detection_result.get('primary_system', {}).get('name', 'Unknown')}")
-        except Exception as det_e:
-            logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
+            
+            if enrichment_result.success:
+                logger.info(f"[BACKGROUND] Enrichment complete: "
+                           f"system={enrichment_result.primary_system.get('name') if enrichment_result.primary_system else 'None'}, "
+                           f"relationships={enrichment_result.relationships_count}, "
+                           f"chunks_enriched={enrichment_result.chunks_enriched}")
+            else:
+                logger.warning(f"[BACKGROUND] Enrichment partial: {enrichment_result.errors}")
+                
+        except ImportError as ie:
+            logger.debug(f"[BACKGROUND] Upload enrichment not available: {ie}")
+        except Exception as enrich_e:
+            logger.warning(f"[BACKGROUND] Enrichment failed: {enrich_e}")
         
-        # Build intelligence summary for unstructured files
-        intelligence_summary = {
-            'char_count': len(text) if text else 0,
-            'word_count': len(text.split()) if text else 0,
-            'chunks_created': chunks_added,
-            'document_type': file_ext.upper(),
-            'analyzed_at': datetime.now().isoformat()
-        }
+        # Build intelligence summary from enrichment or fallback
+        if enrichment_result and enrichment_result.success:
+            intelligence_summary = {
+                'char_count': enrichment_result.char_count,
+                'word_count': enrichment_result.word_count,
+                'chunks_created': chunks_added,
+                'document_type': enrichment_result.document_type or file_ext.upper(),
+                'analyzed_at': enrichment_result.enriched_at
+            }
+            detection_result = {
+                'primary_system': enrichment_result.primary_system,
+                'primary_domain': enrichment_result.primary_domain,
+                'systems': enrichment_result.systems,
+                'domains': enrichment_result.domains,
+                'functional_areas': enrichment_result.functional_areas
+            } if (enrichment_result.primary_system or enrichment_result.primary_domain) else None
+        else:
+            # Fallback to basic metrics
+            intelligence_summary = {
+                'char_count': len(text) if text else 0,
+                'word_count': len(text.split()) if text else 0,
+                'chunks_created': chunks_added,
+                'document_type': file_ext.upper(),
+                'analyzed_at': datetime.now().isoformat()
+            }
+            detection_result = None
         
         # Cleanup
         ProcessingJobModel.update_progress(job_id, 95, "Cleaning up...")
