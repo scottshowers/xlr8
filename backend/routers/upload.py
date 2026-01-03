@@ -1108,12 +1108,18 @@ def process_file_background(
                     'tables_created': tables_created,
                     'total_rows': total_rows,
                     'project': project,
-                    'functional_area': functional_area
+                    'functional_area': functional_area,
+                    'uploaded_by': uploaded_by_email,
+                    'uploaded_at': datetime.now().isoformat()
                 }
                 
                 # Add intelligence summary to completion
                 if intelligence_summary:
                     completion_result['intelligence'] = intelligence_summary
+                
+                # Add detection results if available
+                if result.get('detection'):
+                    completion_result['detection'] = result['detection']
                 
                 # Add validation warnings if any
                 validation = result.get('validation', {})
@@ -1429,14 +1435,34 @@ def process_file_background(
                                                 except Exception as e:
                                                     logger.debug(f"Suppressed: {e}")
                                             
-                                            ProcessingJobModel.complete(job_id, {
+                                            # Run detection for system/domain identification
+                                            detection_result = None
+                                            try:
+                                                from utils.detection_integration import run_project_detection
+                                                detection_result = run_project_detection(
+                                                    project=project,
+                                                    project_id=project_id,
+                                                    filename=filename,
+                                                    handler=handler,
+                                                    job_id=job_id
+                                                )
+                                            except Exception as det_e:
+                                                logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
+                                            
+                                            completion_data = {
                                                 'filename': filename,
                                                 'type': 'structured_from_text',
                                                 'original_format': file_ext,
                                                 'rows': result.get('row_count', 0),
                                                 'project': project,
-                                                'intelligence': intelligence_summary
-                                            })
+                                                'intelligence': intelligence_summary,
+                                                'uploaded_by': uploaded_by_email,
+                                                'uploaded_at': datetime.now().isoformat()
+                                            }
+                                            if detection_result:
+                                                completion_data['detection'] = detection_result
+                                            
+                                            ProcessingJobModel.complete(job_id, completion_data)
                                             
                                             logger.info(f"[BACKGROUND] Converted {file_ext} to structured data!")
                                             return
@@ -1478,6 +1504,20 @@ def process_file_background(
                                                 # Run intelligence analysis
                                                 intelligence_summary = run_intelligence_analysis(project, handler, job_id)
                                                 
+                                                # Run detection for system/domain identification
+                                                detection_result = None
+                                                try:
+                                                    from utils.detection_integration import run_project_detection
+                                                    detection_result = run_project_detection(
+                                                        project=project,
+                                                        project_id=project_id,
+                                                        filename=filename,
+                                                        handler=handler,
+                                                        job_id=job_id
+                                                    )
+                                                except Exception as det_e:
+                                                    logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
+                                                
                                                 # Complete as structured
                                                 if file_path and os.path.exists(file_path):
                                                     try:
@@ -1485,14 +1525,20 @@ def process_file_background(
                                                     except Exception as e:
                                                         logger.debug(f"Suppressed: {e}")
                                                 
-                                                ProcessingJobModel.complete(job_id, {
+                                                completion_data = {
                                                     'filename': filename,
                                                     'type': 'structured_from_docx_table',
                                                     'tables_found': len(tables_data),
                                                     'rows': result.get('row_count', 0),
                                                     'project': project,
-                                                    'intelligence': intelligence_summary
-                                                })
+                                                    'intelligence': intelligence_summary,
+                                                    'uploaded_by': uploaded_by_email,
+                                                    'uploaded_at': datetime.now().isoformat()
+                                                }
+                                                if detection_result:
+                                                    completion_data['detection'] = detection_result
+                                                
+                                                ProcessingJobModel.complete(job_id, completion_data)
                                                 
                                                 logger.info(f"[BACKGROUND] Extracted {len(tables_data)} tables from DOCX!")
                                                 return
@@ -1718,6 +1764,29 @@ def process_file_background(
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
         
+        # Run detection for system/domain identification (works on filename + text content)
+        detection_result = None
+        try:
+            from utils.detection_integration import detect_from_file_characteristics
+            detection_result = detect_from_file_characteristics(
+                filename=filename,
+                columns=None,  # No columns for unstructured
+                sheet_names=None
+            )
+            if detection_result:
+                logger.info(f"[BACKGROUND] Detection result: {detection_result.get('primary_system', {}).get('name', 'Unknown')}")
+        except Exception as det_e:
+            logger.warning(f"[BACKGROUND] Detection failed: {det_e}")
+        
+        # Build intelligence summary for unstructured files
+        intelligence_summary = {
+            'char_count': len(text) if text else 0,
+            'word_count': len(text.split()) if text else 0,
+            'chunks_created': chunks_added,
+            'document_type': file_ext.upper(),
+            'analyzed_at': datetime.now().isoformat()
+        }
+        
         # Cleanup
         ProcessingJobModel.update_progress(job_id, 95, "Cleaning up...")
         if file_path and os.path.exists(file_path):
@@ -1726,14 +1795,22 @@ def process_file_background(
             except Exception as e:
                 logger.debug(f"Suppressed: {e}")
         
-        # Complete!
-        ProcessingJobModel.complete(job_id, {
+        # Build completion data
+        completion_data = {
             'filename': filename,
             'type': 'unstructured',
-            'chunks_created': chunks_added,  # Actual count from RAG
+            'chunks_created': chunks_added,
             'project': project,
-            'functional_area': functional_area
-        })
+            'functional_area': functional_area,
+            'intelligence': intelligence_summary,
+            'uploaded_by': uploaded_by_email,
+            'uploaded_at': datetime.now().isoformat()
+        }
+        if detection_result:
+            completion_data['detection'] = detection_result
+        
+        # Complete!
+        ProcessingJobModel.complete(job_id, completion_data)
         
         # Record metrics for analytics dashboard
         if METRICS_AVAILABLE:
