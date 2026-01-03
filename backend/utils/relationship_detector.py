@@ -252,7 +252,7 @@ def get_column_values(project: str) -> Dict[Tuple[str, str], Set[str]]:
                         column_values[(table_name, column_name)] = {
                             str(v).lower().strip() for v in values if v is not None
                         }
-                except:
+                except Exception:
                     pass
                     
     except Exception as e:

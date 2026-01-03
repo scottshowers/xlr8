@@ -370,8 +370,8 @@ def compare(
         from utils.features.comparison_engine import compare
         
         result = compare("tax_verification", "master_profile")
-        print(result.summary)
-        print(result.mismatches)
+        logger.debug(f"Debug output: {result.summary}")
+        logger.debug(f"Debug output: {result.mismatches}")
     """
     engine = get_comparison_engine(handler)
     return engine.compare(

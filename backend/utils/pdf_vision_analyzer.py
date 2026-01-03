@@ -1344,7 +1344,7 @@ def extract_all_tables_with_vision(
                     sample_text += (page.extract_text() or '') + '\n'
                 
             if sample_text:
-                fingerprint = get_document_fingerprint(sample_text)
+                fingerprint = get_document_fingerlogger.debug(f"Debug output: {sample_text}")
                 cached = get_learned_structure(fingerprint)
                 
                 if cached and cached.get('columns'):
@@ -1423,7 +1423,7 @@ def extract_all_tables_with_vision(
                     sample_text += (page.extract_text() or '') + '\n'
             
             if sample_text:
-                fingerprint = get_document_fingerprint(sample_text)
+                fingerprint = get_document_fingerlogger.debug(f"Debug output: {sample_text}")
                 store_learned_structure(
                     fingerprint=fingerprint,
                     columns=result['columns'],

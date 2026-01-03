@@ -206,7 +206,7 @@ async def get_platform_status(
         for coll in collections:
             try:
                 total_chunks += coll.count()
-            except:
+            except Exception:
                 pass
         chroma_latency = int((time.time() - chroma_start) * 1000)
         services["chromadb"] = {
@@ -257,7 +257,7 @@ async def get_platform_status(
                 }
             else:
                 services["ollama"] = {"status": "degraded", "latency_ms": ollama_latency}
-    except:
+    except Exception:
         # Ollama might not be available in production (uses remote or cloud LLMs)
         services["ollama"] = {"status": "healthy", "latency_ms": 150, "uptime_percent": 99.8}
     
@@ -288,7 +288,7 @@ async def get_platform_status(
             response["stats"]["files"] = meta[0] or 0
             response["stats"]["tables"] = meta[1] or 0
             response["stats"]["rows"] = int(meta[2] or 0)
-        except:
+        except Exception:
             pass
         
         # Also check _pdf_tables
@@ -300,7 +300,7 @@ async def get_platform_status(
             response["stats"]["files"] += pdf_meta[0] or 0
             response["stats"]["tables"] += pdf_meta[1] or 0
             response["stats"]["rows"] += int(pdf_meta[2] or 0)
-        except:
+        except Exception:
             pass
         
         # Get column count
@@ -309,7 +309,7 @@ async def get_platform_status(
                 SELECT COUNT(*) FROM _column_profiles
             """).fetchone()
             response["stats"]["columns"] = col_count[0] or 0
-        except:
+        except Exception:
             pass
             
     except Exception as e:
@@ -712,7 +712,7 @@ async def get_platform_status(
             """).fetchone()
             response["classification"]["classified_columns"] = class_stats[0] or 0
             response["classification"]["unclassified_columns"] = class_stats[1] or 0
-        except:
+        except Exception:
             pass
             
     except Exception as e:
@@ -740,7 +740,7 @@ async def get_platform_status(
             try:
                 analyses = supabase.table("jobs").select("id", count="exact").eq("status", "completed").gte("completed_at", month_start.isoformat()).execute()
                 response["value"]["analyses_this_month"] = analyses.count if hasattr(analyses, 'count') else len(analyses.data or [])
-            except:
+            except Exception:
                 pass
             
             # Estimate hours saved (rough: 0.5 hours per successful job)
@@ -985,7 +985,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                     from utils.database.models import ProjectModel
                     proj_record = ProjectModel.get_by_name(project_filter)
                     filter_project_id = proj_record.get('id') if proj_record else None
-                except:
+                except Exception:
                     pass
             
             # Aggregate by source document
@@ -1115,7 +1115,7 @@ async def list_references():
         try:
             coll = rag.client.get_collection(name="documents")
             results = coll.get(include=["metadatas"])
-        except:
+        except Exception:
             return {"files": [], "rules": [], "total": 0}
         
         # Aggregate by source document
@@ -1285,14 +1285,14 @@ async def delete_all_references(
     try:
         from utils.rag_handler import RAGHandler
         rag = RAGHandler()
-    except:
+    except Exception:
         raise HTTPException(503, "RAG handler not available")
     
     try:
         # Get collection
         try:
             coll = rag.client.get_collection(name="documents")
-        except:
+        except Exception:
             raise HTTPException(503, "Documents collection not available")
         
         # Get all reference docs (global/universal project)

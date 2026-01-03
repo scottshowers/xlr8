@@ -289,7 +289,7 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                             sql = f'SELECT "{code_col}", "{desc_col}" FROM "{table.get("table_name")}"'
                             rows = handler.query(sql)
                             lookups[table_name] = {str(r[code_col]): str(r[desc_col]) for r in rows}
-                        except:
+                        except Exception:
                             pass
         except Exception as e:
             logger.warning(f"[BI] Could not load lookups: {e}")
@@ -396,7 +396,7 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
                                 val = 0
                             expr = expr.replace(c, str(float(val)))
                     row[new_col] = eval(expr)  # Safe because we control the formula
-                except:
+                except Exception:
                     row[new_col] = None
             
             if new_col not in new_columns:
@@ -528,7 +528,7 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 try:
                     col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                     columns = [row[1] for row in col_result]
-                except:
+                except Exception:
                     result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
                     columns = [desc[0] for desc in result.description]
                 
@@ -539,7 +539,7 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 try:
                     count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
                     row_count = count_result[0] if count_result else 0
-                except:
+                except Exception:
                     row_count = 0
                 
                 # Use stored display_name if available, otherwise generate
@@ -571,7 +571,7 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except:
+        except Exception:
             pass
         
     except Exception as e:
@@ -615,7 +615,7 @@ async def execute_bi_query(request: BIQueryRequest):
         relationships = []
         try:
             relationships = handler.get_relationships(request.project)
-        except:
+        except Exception:
             pass
         
         # Initialize RAG handler for Reference/Regulatory truths
@@ -623,7 +623,7 @@ async def execute_bi_query(request: BIQueryRequest):
         if RAG_AVAILABLE:
             try:
                 rag = RAGHandler()
-            except:
+            except Exception:
                 pass
         
         # Initialize intelligence engine
@@ -995,7 +995,7 @@ async def get_suggestions(project: str):
                         'category': 'saved'
                     })
                     categories.add('saved')
-            except:
+            except Exception:
                 pass
         
         # Deduplicate by text

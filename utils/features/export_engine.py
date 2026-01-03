@@ -104,7 +104,7 @@ class ExportEngine:
                     try:
                         if len(str(cell.value)) > max_length:
                             max_length = len(str(cell.value))
-                    except:
+                    except Exception:
                         pass
                 ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
         
@@ -317,7 +317,7 @@ class ExportEngine:
                 try:
                     if len(str(cell.value)) > max_length:
                         max_length = len(str(cell.value))
-                except:
+                except Exception:
                     pass
             ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
         

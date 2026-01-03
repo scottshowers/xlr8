@@ -200,9 +200,9 @@ Country Code: USA | Earnings Code: OT | Description: Overtime
 Country Code: USA | Earnings Code: BONUS | Description: Bonus Pay
 """
     
-    print("Testing Excel-like document...")
+    logger.debug("Testing Excel-like document...")
     chunks = chunk_intelligently_simple(excel_sample, "test.xlsx", "xlsx")
-    print(f"  Created {len(chunks)} chunks\n")
+    logger.debug(f"  Created {len(chunks)} chunks\n")
     
     # Test 2: Code
     code_sample = """import sys
@@ -215,9 +215,9 @@ class DataProcessor:
         return data.upper()
 """
     
-    print("Testing Python code...")
+    logger.debug("Testing Python code...")
     chunks = chunk_intelligently_simple(code_sample, "test.py", "py")
-    print(f"  Created {len(chunks)} chunks\n")
+    logger.debug(f"  Created {len(chunks)} chunks\n")
     
     # Test 3: Hierarchical
     doc_sample = """# Introduction
@@ -233,11 +233,11 @@ More detail about background.
 The main content goes here.
 """
     
-    print("Testing hierarchical document...")
+    logger.debug("Testing hierarchical document...")
     chunks = chunk_intelligently_simple(doc_sample, "test.md", "md")
-    print(f"  Created {len(chunks)} chunks\n")
+    logger.debug(f"  Created {len(chunks)} chunks\n")
     
-    print("✅ All tests passed!")
+    logger.debug("✅ All tests passed!")
 
 
 if __name__ == "__main__":

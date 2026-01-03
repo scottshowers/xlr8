@@ -309,21 +309,21 @@ class ClassificationService:
                 if distinct_vals:
                     try:
                         distinct_values = json.loads(distinct_vals) if isinstance(distinct_vals, str) else distinct_vals
-                    except:
+                    except Exception:
                         pass
                 
                 value_distribution = {}
                 if val_dist:
                     try:
                         value_distribution = json.loads(val_dist) if isinstance(val_dist, str) else val_dist
-                    except:
+                    except Exception:
                         pass
                 
                 sample_values = []
                 if samples:
                     try:
                         sample_values = json.loads(samples) if isinstance(samples, str) else samples
-                    except:
+                    except Exception:
                         pass
                 
                 # Calculate fill rate
@@ -380,7 +380,7 @@ class ClassificationService:
                     FROM _intelligence_relationships
                     WHERE LOWER(from_table) = LOWER(?) OR LOWER(to_table) = LOWER(?)
                 """, [table_name, table_name]).fetchall()
-            except:
+            except Exception:
                 return []
             
             relationships = []

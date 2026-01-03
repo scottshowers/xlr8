@@ -74,7 +74,7 @@ class IntelligentQueryRouter:
             try:
                 with open(self.learning_db_path, 'r') as f:
                     return json.load(f)
-            except:
+            except Exception:
                 pass
         return {'queries': {}, 'entities': {}}
     

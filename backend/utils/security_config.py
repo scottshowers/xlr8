@@ -122,7 +122,7 @@ class SecurityConfig:
                 # Merge with defaults (in case new fields added)
                 self.config = {**DEFAULT_CONFIG, **saved}
             except Exception as e:
-                print(f"Warning: Could not load security config: {e}")
+                logger.debug(f"Warning: Could not load security config: {e}")
                 self.config = DEFAULT_CONFIG.copy()
         else:
             self.config = DEFAULT_CONFIG.copy()
@@ -135,7 +135,7 @@ class SecurityConfig:
             with open(self.config_path, 'w') as f:
                 json.dump(self.config, f, indent=2, default=str)
         except Exception as e:
-            print(f"Warning: Could not save security config: {e}")
+            logger.debug(f"Warning: Could not save security config: {e}")
     
     def get(self, key: str, default: Any = None) -> Any:
         """Get a config value."""

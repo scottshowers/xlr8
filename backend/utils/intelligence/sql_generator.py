@@ -772,7 +772,7 @@ SQL:"""
                         samples.append(f"    {col}: {', '.join(list(vals)[:2])}")
                 if samples:
                     return "\n  Sample:\n" + "\n".join(samples[:4])
-        except:
+        except Exception:
             pass
         return ""
     

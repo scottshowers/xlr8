@@ -103,7 +103,7 @@ def check_duckdb_health() -> Dict[str, Any]:
             ).fetchone()[0]
             result["details"]["schema_metadata_count"] = meta_count
             result["details"]["metadata_table_mismatch"] = meta_count != len(data_tables)
-        except:
+        except Exception:
             result["details"]["schema_metadata_count"] = 0
         
         # Determine status
@@ -219,19 +219,19 @@ def check_supabase_health() -> Dict[str, Any]:
         try:
             projects = supabase.table('projects').select('id', count='exact').execute()
             result["details"]["projects_count"] = projects.count if hasattr(projects, 'count') else len(projects.data)
-        except:
+        except Exception:
             result["details"]["projects_count"] = "unknown"
         
         try:
             docs = supabase.table('documents').select('id', count='exact').execute()
             result["details"]["documents_count"] = docs.count if hasattr(docs, 'count') else len(docs.data)
-        except:
+        except Exception:
             result["details"]["documents_count"] = "unknown"
         
         try:
             registry = supabase.table('document_registry').select('id', count='exact').execute()
             result["details"]["registry_count"] = registry.count if hasattr(registry, 'count') else len(registry.data)
-        except:
+        except Exception:
             result["details"]["registry_count"] = "unknown"
         
         # Check for stuck jobs
@@ -240,7 +240,7 @@ def check_supabase_health() -> Dict[str, Any]:
             cutoff = (datetime.utcnow() - timedelta(minutes=15)).isoformat()
             stuck = supabase.table('processing_jobs').select('id').eq('status', 'processing').lt('created_at', cutoff).execute()
             result["details"]["stuck_jobs"] = len(stuck.data) if stuck.data else 0
-        except:
+        except Exception:
             result["details"]["stuck_jobs"] = "unknown"
         
         # Determine status
@@ -331,7 +331,7 @@ def check_llm_health() -> Dict[str, Any]:
                 result["details"]["model_count"] = len(models)
             else:
                 result["details"]["models_available"] = []
-        except:
+        except Exception:
             # Fallback - just check if generate endpoint responds
             try:
                 test_response = requests.post(
@@ -395,7 +395,7 @@ def check_jobs_health() -> Dict[str, Any]:
         try:
             pending = supabase.table('processing_jobs').select('id').eq('status', 'pending').execute()
             result["details"]["pending"] = len(pending.data) if pending.data else 0
-        except:
+        except Exception:
             result["details"]["pending"] = "unknown"
         
         try:
@@ -416,7 +416,7 @@ def check_jobs_health() -> Dict[str, Any]:
                         except Exception as e:
                             logger.debug(f"Suppressed: {e}")
             result["details"]["stuck"] = stuck
-        except:
+        except Exception:
             result["details"]["processing"] = "unknown"
             result["details"]["stuck"] = "unknown"
         
@@ -424,26 +424,26 @@ def check_jobs_health() -> Dict[str, Any]:
         try:
             completed_hour = supabase.table('processing_jobs').select('id').eq('status', 'completed').gte('updated_at', hour_ago).execute()
             result["details"]["completed_last_hour"] = len(completed_hour.data) if completed_hour.data else 0
-        except:
+        except Exception:
             result["details"]["completed_last_hour"] = "unknown"
         
         try:
             failed_hour = supabase.table('processing_jobs').select('id').eq('status', 'failed').gte('updated_at', hour_ago).execute()
             result["details"]["failed_last_hour"] = len(failed_hour.data) if failed_hour.data else 0
-        except:
+        except Exception:
             result["details"]["failed_last_hour"] = "unknown"
         
         # Last 24h stats
         try:
             completed_day = supabase.table('processing_jobs').select('id').eq('status', 'completed').gte('updated_at', day_ago).execute()
             result["details"]["completed_last_24h"] = len(completed_day.data) if completed_day.data else 0
-        except:
+        except Exception:
             result["details"]["completed_last_24h"] = "unknown"
         
         try:
             failed_day = supabase.table('processing_jobs').select('id').eq('status', 'failed').gte('updated_at', day_ago).execute()
             result["details"]["failed_last_24h"] = len(failed_day.data) if failed_day.data else 0
-        except:
+        except Exception:
             result["details"]["failed_last_24h"] = "unknown"
         
         # Determine status

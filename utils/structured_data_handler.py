@@ -229,7 +229,7 @@ class FieldEncryptor:
                         fernet_key = f.read()
                     self.fernet = Fernet(fernet_key)
                     logger.info("Fernet backward compatibility enabled")
-                except:
+                except Exception:
                     pass
                     
         except Exception as e:
@@ -1965,14 +1965,14 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             if thread_conn:
                 try:
                     self._update_mapping_job_threaded(thread_conn, job_id, status='error', error_message=str(e))
-                except:
+                except Exception:
                     pass
         finally:
             if thread_conn:
                 try:
                     thread_conn.close()
                     logger.info("[MAPPING_JOB] Closed background thread connection")
-                except:
+                except Exception:
                     pass
     
     def _infer_column_mappings_threaded(self, thread_conn, project: str, file_name: str, 
@@ -2710,7 +2710,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
                     estimated_rows = sum(1 for _ in f) - 1  # Subtract header
                 logger.info(f"[CSV] Estimated {estimated_rows:,} rows")
-            except:
+            except Exception:
                 pass
             
             report_progress(10, f"Loading {estimated_rows:,} rows..." if estimated_rows else "Loading data...")
@@ -2884,7 +2884,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     try:
                         self.safe_execute(f'DROP TABLE IF EXISTS "{old_table}"')
                         logger.warning(f"[STORE_DF] CLEANUP: Dropped existing table: {old_table}")
-                    except:
+                    except Exception:
                         pass
                 
                 self.safe_execute("""
@@ -3227,7 +3227,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     profile['min_value'] = float(numeric_stats[0]) if numeric_stats[0] is not None else None
                     profile['max_value'] = float(numeric_stats[1]) if numeric_stats[1] is not None else None
                     profile['mean_value'] = float(numeric_stats[2]) if numeric_stats[2] is not None else None
-                except:
+                except Exception:
                     pass
             
             # For categorical (low cardinality), get distinct values and distribution
@@ -3286,7 +3286,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         profile['min_value'] = float(numeric_stats[0]) if numeric_stats[0] is not None else None
                         profile['max_value'] = float(numeric_stats[1]) if numeric_stats[1] is not None else None
                         profile['mean_value'] = float(numeric_stats[2]) if numeric_stats[2] is not None else None
-                except:
+                except Exception:
                     pass
             
             # Try date detection if not already typed
@@ -3305,7 +3305,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                         profile['inferred_type'] = 'date'
                         profile['min_date'] = str(date_stats[0]) if date_stats[0] else None
                         profile['max_date'] = str(date_stats[1]) if date_stats[1] else None
-                except:
+                except Exception:
                     pass
             
             # Detect filter category
@@ -3405,7 +3405,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             if hasattr(distinct_values, 'tolist'):
                 distinct_values = distinct_values.tolist()
             values_set = set(str(v).upper().strip() for v in distinct_values if v is not None and str(v).strip())
-        except:
+        except Exception:
             return profile
         
         if not values_set:
@@ -3525,7 +3525,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 # Try DuckDB syntax
                 try:
                     tables = self.conn.execute("SELECT table_name FROM information_schema.tables WHERE table_name = '_intelligence_lookups'").fetchall()
-                except:
+                except Exception:
                     pass
             
             if not tables:
@@ -3650,7 +3650,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 profile['max_value'] = float(numeric_valid.max())
                 profile['mean_value'] = float(numeric_valid.mean())
                 return profile
-        except:
+        except Exception:
             pass
         
         # Try date
@@ -3666,7 +3666,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 profile['min_date'] = str(date_valid.min())
                 profile['max_date'] = str(date_valid.max())
                 return profile
-        except:
+        except Exception:
             pass
         
         # Check for boolean-like
@@ -3787,7 +3787,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     if profile.get(json_field):
                         try:
                             profile[json_field] = json.loads(profile[json_field])
-                        except:
+                        except Exception:
                             pass
                 profiles.append(profile)
             
@@ -3951,7 +3951,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 # Commit any pending changes to ensure we see them
                 try:
                     self.conn.commit()
-                except:
+                except Exception:
                     pass  # OK if nothing to commit
                 
                 if params:

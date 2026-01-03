@@ -935,7 +935,7 @@ def process_file_background(
                         try:
                             cols = handler.conn.execute(f"PRAGMA table_info('{table}')").fetchall()
                             all_columns.extend([c[1] for c in cols])
-                        except:
+                        except Exception:
                             pass
                     
                     enrichment = enrich_structured_upload(
@@ -1749,7 +1749,7 @@ def process_file_background(
             if duckdb_success and STRUCTURED_HANDLER_AVAILABLE:
                 try:
                     handler = get_structured_handler()
-                except:
+                except Exception:
                     pass
             
             enrichment_result = enrich_upload(

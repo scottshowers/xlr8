@@ -56,7 +56,7 @@ def run_project_detection(
             try:
                 from models.processing_job import ProcessingJobModel
                 ProcessingJobModel.update_progress(job_id, 76, "Detecting system context...")
-            except:
+            except Exception:
                 pass
         
         service = get_detection_service()
@@ -145,7 +145,7 @@ def run_project_detection(
                 else:
                     msg = "Context analyzed"
                 ProcessingJobModel.update_progress(job_id, 77, msg)
-            except:
+            except Exception:
                 pass
         
         return result.to_dict()

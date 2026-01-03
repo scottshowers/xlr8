@@ -64,7 +64,7 @@ class ThreatAssessor:
             return default
         try:
             return self.security_config.get(key, default)
-        except:
+        except Exception:
             return default
     
     def assess_api_gateway(self) -> Dict[str, Any]:

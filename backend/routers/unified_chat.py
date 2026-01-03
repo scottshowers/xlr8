@@ -494,7 +494,7 @@ class DataModelService:
                         count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                         if count <= 500:  # Small table might be a lookup
                             is_reference = True
-                    except:
+                    except Exception:
                         pass
                 
                 if is_reference:
@@ -1299,7 +1299,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                             """, [table_name]).fetchone()
                             if file_result:
                                 source_file = file_result[0]
-                        except:
+                        except Exception:
                             pass
                         
                         if not source_file:
@@ -1309,7 +1309,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                                 """, [table_name]).fetchone()
                                 if file_result:
                                     source_file = file_result[0]
-                            except:
+                            except Exception:
                                 pass
                         
                         if source_file and source_file.lower() not in valid_files:
@@ -1322,11 +1322,11 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                     try:
                         col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                         columns = [row[1] for row in col_result]
-                    except:
+                    except Exception:
                         try:
                             col_result = handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
                             columns = [row[0] for row in col_result]
-                        except:
+                        except Exception:
                             result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
                             columns = [desc[0] for desc in result.description]
                     
@@ -1337,7 +1337,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                     try:
                         count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
                         row_count = count_result[0] if count_result else 0
-                    except:
+                    except Exception:
                         row_count = 0
                     
                     # Try to get display_name from _schema_metadata
@@ -1348,7 +1348,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                         """, [table_name]).fetchone()
                         if dn_result and dn_result[0]:
                             display_name = dn_result[0]
-                    except:
+                    except Exception:
                         pass
                     
                     tables.append({
@@ -1392,11 +1392,11 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                     try:
                         col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                         columns = [row[1] for row in col_result]
-                    except:
+                    except Exception:
                         try:
                             result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
                             columns = [desc[0] for desc in result.description]
-                        except:
+                        except Exception:
                             columns = []
                 
                 row_count = table_info.get('row_count', 0)
@@ -1426,13 +1426,13 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                         if prow[3]:  # distinct_values
                             try:
                                 profile['distinct_values'] = json.loads(prow[3])
-                            except:
+                            except Exception:
                                 pass
                         
                         if prow[4]:  # value_distribution
                             try:
                                 profile['value_distribution'] = json.loads(prow[4])
-                            except:
+                            except Exception:
                                 pass
                         
                         if prow[1] == 'numeric':
@@ -1466,7 +1466,7 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
         # Get filter candidates
         try:
             filter_candidates = handler.get_filter_candidates(project)
-        except:
+        except Exception:
             pass
         
         logger.warning(f"[SCHEMA] Returning {len(tables)} tables for project '{project}' (registry_filtered={registry_available})")
@@ -1775,7 +1775,7 @@ async def unified_chat(request: UnifiedChatRequest):
         if request.mode:
             try:
                 mode = IntelligenceMode(request.mode)
-            except:
+            except Exception:
                 pass
         
         # Check learning for similar queries
@@ -2449,7 +2449,7 @@ async def unified_chat(request: UnifiedChatRequest):
                     project_id=project_id if 'project_id' in dir() else None,
                     error_message=str(e)[:200]
                 )
-            except:
+            except Exception:
                 pass
         
         logger.error(f"[UNIFIED] Error: {e}")
@@ -2582,7 +2582,7 @@ def _decrypt_results(rows: List[Dict], handler) -> List[Dict]:
                 if isinstance(value, str) and (value.startswith('ENC:') or value.startswith('ENC256:')):
                     try:
                         decrypted_row[key] = encryptor.decrypt(value)
-                    except:
+                    except Exception:
                         decrypted_row[key] = '[encrypted]'
                 else:
                     decrypted_row[key] = value
@@ -3183,7 +3183,7 @@ async def get_diagnostics(project: str = None):
             try:
                 count = handler.conn.execute("SELECT COUNT(*) FROM _column_profiles").fetchone()[0]
                 result["profile_status"] = f"✅ {count} column profiles"
-            except:
+            except Exception:
                 result["profile_status"] = "❌ No column profiles - run backfill"
             
             # Sample profiles
@@ -3207,7 +3207,7 @@ async def get_diagnostics(project: str = None):
                         }
                         for s in samples
                     ]
-                except:
+                except Exception:
                     pass
                 
                 # Get detected domains for project
@@ -3284,7 +3284,7 @@ async def get_stats():
             learning = get_learning_module()
             if hasattr(learning, 'get_stats'):
                 stats["learning_stats"] = learning.get_stats()
-        except:
+        except Exception:
             pass
     
     return stats
@@ -3353,7 +3353,7 @@ async def get_chat_models():
                     status["ollama_available"] = True
                     data = r.json()
                     status["ollama_models"] = [m.get("name") for m in data.get("models", [])]
-    except:
+    except Exception:
         pass
     
     # Check Claude
@@ -3361,7 +3361,7 @@ async def get_chat_models():
         import os
         if os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY"):
             status["claude_available"] = True
-    except:
+    except Exception:
         pass
     
     return status

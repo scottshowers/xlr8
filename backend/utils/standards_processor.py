@@ -602,7 +602,7 @@ class RuleRegistry:
                 self.chroma_collection.get(ids=[rule.rule_id])
                 # Already exists, skip
                 return
-            except:
+            except Exception:
                 pass
             
             self.chroma_collection.add(
@@ -721,7 +721,7 @@ class RuleRegistry:
             if self.chroma_collection:
                 try:
                     self.chroma_collection.delete(ids=[rule.rule_id])
-                except:
+                except Exception:
                     pass
         
         # Delete from memory

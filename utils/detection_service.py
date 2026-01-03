@@ -152,7 +152,7 @@ class DetectionSignature:
             try:
                 if self._compiled_pattern.search(text):
                     return True
-            except:
+            except Exception:
                 pass
         elif self._compiled_pattern is None:
             # Not yet compiled, try now

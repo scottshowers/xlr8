@@ -40,7 +40,7 @@ def calculate_is_stuck(status: str, created_at: str, threshold_minutes: int = 15
         created = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
         age_minutes = (datetime.now(timezone.utc) - created).total_seconds() / 60
         return age_minutes > threshold_minutes
-    except:
+    except Exception:
         return False
 
 
@@ -64,7 +64,7 @@ async def get_jobs(limit: int = 50):
             if isinstance(result_data, str):
                 try:
                     result_data = json.loads(result_data)
-                except:
+                except Exception:
                     result_data = {}
             
             # Handle input_data
@@ -72,7 +72,7 @@ async def get_jobs(limit: int = 50):
             if isinstance(input_data, str):
                 try:
                     input_data = json.loads(input_data)
-                except:
+                except Exception:
                     input_data = {}
             
             # Get filename from multiple locations
@@ -153,7 +153,7 @@ async def get_job(job_id: str):
         if isinstance(input_data, str):
             try:
                 input_data = json.loads(input_data)
-            except:
+            except Exception:
                 input_data = {}
         
         status = job.get('status', 'unknown')
@@ -311,7 +311,7 @@ async def clear_job_history(
             try:
                 supabase.table("processing_jobs").delete().eq("id", job['id']).execute()
                 deleted += 1
-            except:
+            except Exception:
                 pass
         
         logger.info(f"[JOBS] Cleared {deleted} jobs from history")

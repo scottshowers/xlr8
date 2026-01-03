@@ -37,14 +37,7 @@ router = APIRouter(tags=["admin"])
 # SUPABASE CLIENT
 # =============================================================================
 
-def get_supabase():
-    """Get Supabase client."""
-    try:
-        from utils.database.supabase_client import get_supabase
-        return get_supabase()
-    except ImportError:
-        from utils.database.supabase_client import get_supabase
-        return get_supabase()
+from utils.database.supabase_client import get_supabase
 
 
 # =============================================================================

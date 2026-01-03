@@ -38,17 +38,9 @@ from openpyxl.utils import get_column_letter
 
 logger = logging.getLogger(__name__)
 
-# Try to import LLM orchestrator for consistent Claude calls
-_playbooks_orchestrator = None
-try:
-    from utils.llm_orchestrator import LLMOrchestrator
-    _playbooks_orchestrator = LLMOrchestrator()
-except ImportError:
-    try:
-        from backend.utils.llm_orchestrator import LLMOrchestrator
-        _playbooks_orchestrator = LLMOrchestrator()
-    except ImportError:
-        logger.warning("[PLAYBOOKS] LLMOrchestrator not available")
+# LLMOrchestrator for consistent calls
+from utils.llm_orchestrator import LLMOrchestrator
+_playbooks_orchestrator = LLMOrchestrator()
 
 router = APIRouter(tags=["playbooks"])
 
@@ -130,14 +122,8 @@ PLAYBOOK_PROGRESS: Dict[str, Dict[str, Any]] = {}
 # Cached structure
 PLAYBOOK_CACHE: Dict[str, Any] = {}
 
-
-def get_supabase():
-    """Get Supabase client."""
-    try:
-        from utils.supabase_client import get_supabase_client
-        return get_supabase_client()
-    except Exception:
-        return None
+# Supabase client
+from utils.database.supabase_client import get_supabase
 
 
 # =============================================================================

@@ -125,17 +125,7 @@ class SignatureCreateRequest(BaseModel):
 # HELPER FUNCTIONS
 # =============================================================================
 
-def get_supabase():
-    """Get Supabase client."""
-    try:
-        from utils.database.supabase_client import get_supabase as _get_supabase
-        return _get_supabase()
-    except ImportError:
-        try:
-            from backend.utils.database.supabase_client import get_supabase as _get_supabase
-            return _get_supabase()
-        except ImportError:
-            return None
+from utils.database.supabase_client import get_supabase
 
 
 def get_detection_service():
@@ -558,7 +548,7 @@ async def run_project_detection(project_id: str):
                 cols = handler.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
                 for col in cols:
                     all_columns.append(col[1])
-            except:
+            except Exception:
                 pass
         
         # Run detection

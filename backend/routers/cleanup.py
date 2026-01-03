@@ -58,12 +58,12 @@ def _get_duckdb(project_id: str = None):
                 from utils.structured_data_handler import get_structured_handler
                 handler = get_structured_handler()
                 return handler.conn
-            except:
+            except Exception:
                 try:
                     from backend.utils.structured_data_handler import get_structured_handler
                     handler = get_structured_handler()
                     return handler.conn
-                except:
+                except Exception:
                     return None
 
 
@@ -75,12 +75,12 @@ def _get_chromadb():
         try:
             from backend.services.chromadb_service import get_collection
             return get_collection()
-        except:
+        except Exception:
             try:
                 import chromadb
                 client = chromadb.PersistentClient(path=os.getenv("CHROMADB_PATH", "./chroma_db"))
                 return client.get_or_create_collection("documents")
-            except:
+            except Exception:
                 return None
 
 
@@ -563,7 +563,7 @@ async def delete_all_project_data(project_id: str):
             if results and results['ids']:
                 collection.delete(ids=results['ids'])
                 deleted["documents"] = len(results['ids'])
-        except:
+        except Exception:
             # Try alternate field name
             try:
                 results = collection.get(where={"project": project_id})
@@ -764,7 +764,7 @@ async def list_documents():
         try:
             coll = rag.client.get_collection(name="documents")
             results = coll.get(include=["metadatas"])
-        except:
+        except Exception:
             return {"documents": [], "total": 0}
         
         # Aggregate by source document
@@ -815,7 +815,7 @@ async def get_chromadb_status():
             coll = rag.client.get_collection(name="documents")
             count = coll.count()
             return {"available": True, "total_chunks": count}
-        except:
+        except Exception:
             return {"available": True, "total_chunks": 0}
     except Exception as e:
         return {"available": False, "total_chunks": 0, "error": str(e)}
@@ -832,7 +832,7 @@ async def get_table_profile(table_name: str):
         # Get row count
         try:
             row_count = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-        except:
+        except Exception:
             return {"error": f"Table {table_name} not found", "columns": []}
         
         # Get column info
@@ -848,7 +848,7 @@ async def get_table_profile(table_name: str):
                     distinct = conn.execute(f'SELECT COUNT(DISTINCT "{col_name}") FROM "{table_name}"').fetchone()[0]
                     samples = conn.execute(f'SELECT DISTINCT "{col_name}" FROM "{table_name}" LIMIT 10').fetchall()
                     sample_values = [str(s[0]) for s in samples if s[0] is not None]
-                except:
+                except Exception:
                     distinct = 0
                     sample_values = []
                 
@@ -895,7 +895,7 @@ async def get_data_integrity():
             try:
                 for row in conn.execute("SELECT DISTINCT table_name FROM _schema_metadata").fetchall():
                     metadata.add(row[0])
-            except:
+            except Exception:
                 pass
             
             # Find orphans

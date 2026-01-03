@@ -542,7 +542,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                 try:
                     columns_data = json.loads(columns_json) if columns_json else []
                     columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
-                except:
+                except Exception:
                     columns = []
                 
                 tables.append({
@@ -579,7 +579,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                     
                     try:
                         columns = json.loads(columns_json) if columns_json else []
-                    except:
+                    except Exception:
                         columns = []
                     
                     tables.append({
@@ -624,7 +624,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                     try:
                         result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
                         columns = [desc[0] for desc in result.description]
-                    except:
+                    except Exception:
                         try:
                             col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
                             columns = [row[1] for row in col_result]
@@ -635,7 +635,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                     try:
                         count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
                         row_count = count_result[0] if count_result else 0
-                    except:
+                    except Exception:
                         row_count = 0
                     
                     tables.append({
@@ -782,7 +782,7 @@ async def list_projects_with_data():
                     try:
                         count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                         prefix_projects[prefix]['rows'] += count
-                    except:
+                    except Exception:
                         pass
             
             # Merge with projects dict
@@ -1239,7 +1239,7 @@ async def preview_table(project: str, table_name: str, limit: int = 20):
                         LIMIT 10
                     ''').fetchall()
                     distributions[col] = [{"value": row[0], "count": row[1]} for row in dist]
-                except:
+                except Exception:
                     pass
         
         return {

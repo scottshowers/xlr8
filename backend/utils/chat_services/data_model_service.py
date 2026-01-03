@@ -148,7 +148,7 @@ class DataModelService:
                         count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                         if count <= 500:  # Small table might be a lookup
                             is_reference = True
-                    except:
+                    except Exception:
                         pass
                 
                 if is_reference:

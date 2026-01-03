@@ -192,7 +192,7 @@ class PIISanitizer:
             elif amount < 100000: return "[~$75K-100K]"
             elif amount < 150000: return "[~$100K-150K]"
             else: return "[~$150K+]"
-        except:
+        except Exception:
             return "[SALARY]"
     
     def sanitize(self, text: str) -> str:

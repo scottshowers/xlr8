@@ -448,7 +448,7 @@ class ComplianceEngine:
                         table_name, display_name, columns_json = row
                         try:
                             columns = json.loads(columns_json) if columns_json else []
-                        except:
+                        except Exception:
                             columns = []
                         raw_schema[table_name] = {
                             'display_name': display_name,

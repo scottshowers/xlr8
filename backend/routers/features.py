@@ -164,7 +164,7 @@ async def list_comparable_tables(project_id: Optional[str] = None):
                         columns = [c.get('name', '') for c in cols_data]
                     else:
                         columns = cols_data
-                except:
+                except Exception:
                     pass
             
             result.append({

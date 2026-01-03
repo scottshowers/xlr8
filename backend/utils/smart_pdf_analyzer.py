@@ -105,7 +105,7 @@ except ImportError:
                     data = json.loads(match.group())
                     if isinstance(data, list):
                         return [d for d in data if isinstance(d, dict)]
-                except:
+                except Exception:
                     pass
             return []
 
@@ -218,7 +218,7 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
             try:
                 from backend.utils.cost_tracker import log_cost, CostService
                 log_cost(CostService.LOCAL_LLM, operation, duration_ms=duration_ms, project_id=project_id)
-            except:
+            except Exception:
                 pass
             
             return llm_response

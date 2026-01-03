@@ -161,7 +161,7 @@ class TrainingDataCollector:
                     ex = json.loads(line.strip())
                     if ex.get('action_id') == action_id and ex.get('quality') in ['high', 'medium']:
                         examples.append(ex)
-                except:
+                except Exception:
                     continue
         
         # Return most recent, highest quality first
@@ -200,7 +200,7 @@ class TrainingDataCollector:
                                 'input': ex.get('input_sample', ''),
                                 'output': json.dumps(ex.get('output', {}))
                             })
-                    except:
+                    except Exception:
                         continue
         
         with open(output_path, 'w') as f:
@@ -565,7 +565,7 @@ class RulesEngine:
                     valid, error = self.validate_sui_rate(rate)
                     if not valid:
                         issues.append({'field': key, 'error': error, 'value': value})
-                except:
+                except Exception:
                     pass
         
         # State validation

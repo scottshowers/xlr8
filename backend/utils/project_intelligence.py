@@ -1876,7 +1876,7 @@ class ProjectIntelligenceService:
                 col_info = self.handler.conn.execute(f"DESCRIBE ({finding.evidence_sql})").fetchall()
                 columns = [c[0] for c in col_info]
                 records = [dict(zip(columns, row)) for row in result[:100]]
-            except:
+            except Exception:
                 pass
         
         return Evidence(
@@ -1950,14 +1950,14 @@ class ProjectIntelligenceService:
                 try:
                     col_result = self.handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
                     columns = [row[0] for row in col_result]
-                except:
+                except Exception:
                     columns = []
                 
                 # Get row count
                 try:
                     count_result = self.handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
                     row_count = count_result[0] if count_result else 0
-                except:
+                except Exception:
                     row_count = 0
                 
                 tables.append({

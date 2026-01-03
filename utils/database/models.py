@@ -47,7 +47,7 @@ class ProjectModel:
             return response.data[0] if response.data else None
         
         except Exception as e:
-            print(f"Error creating project: {e}")
+            logger.error(f"creating project: {e}")
             return None
     
     @staticmethod
@@ -64,7 +64,7 @@ class ProjectModel:
             response = query.execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting projects: {e}")
+            logger.error(f"getting projects: {e}")
             return []
     
     @staticmethod
@@ -78,7 +78,7 @@ class ProjectModel:
             response = supabase.table('projects').select('*').eq('id', project_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error getting project: {e}")
+            logger.error(f"getting project: {e}")
             return None
     
     @staticmethod
@@ -92,7 +92,7 @@ class ProjectModel:
             response = supabase.table('projects').select('*').eq('name', name).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error getting project by name: {e}")
+            logger.error(f"getting project by name: {e}")
             return None
     
     @staticmethod
@@ -107,7 +107,7 @@ class ProjectModel:
             response = supabase.table('projects').update(kwargs).eq('id', project_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error updating project: {e}")
+            logger.error(f"updating project: {e}")
             return None
     
     @staticmethod
@@ -121,7 +121,7 @@ class ProjectModel:
             supabase.table('projects').delete().eq('id', project_id).execute()
             return True
         except Exception as e:
-            print(f"Error deleting project: {e}")
+            logger.error(f"deleting project: {e}")
             return False
 
 
@@ -150,7 +150,7 @@ class DocumentModel:
             response = supabase.table('documents').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error creating document: {e}")
+            logger.error(f"creating document: {e}")
             return None
     
     @staticmethod
@@ -168,7 +168,7 @@ class DocumentModel:
                 .execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting all documents: {e}")
+            logger.error(f"getting all documents: {e}")
             return []
     
     @staticmethod
@@ -182,7 +182,7 @@ class DocumentModel:
             response = supabase.table('documents').select('*').eq('id', document_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error getting document: {e}")
+            logger.error(f"getting document: {e}")
             return None
     
     @staticmethod
@@ -199,7 +199,7 @@ class DocumentModel:
             response = query.execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting documents: {e}")
+            logger.error(f"getting documents: {e}")
             return []
     
     @staticmethod
@@ -213,7 +213,7 @@ class DocumentModel:
             supabase.table('documents').delete().eq('id', document_id).execute()
             return True
         except Exception as e:
-            print(f"Error deleting document: {e}")
+            logger.error(f"deleting document: {e}")
             return False
     
     @staticmethod
@@ -230,7 +230,7 @@ class DocumentModel:
                 supabase.table('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
             return count
         except Exception as e:
-            print(f"Error deleting all documents: {e}")
+            logger.error(f"deleting all documents: {e}")
             return 0
 
 
@@ -561,7 +561,7 @@ class DocumentRegistryModel:
                     query = query.is_('project_id', 'null')
                 existing_resp = query.execute()
                 existing = existing_resp.data[0] if existing_resp.data else None
-            except:
+            except Exception:
                 pass
             
             if existing:
@@ -1296,7 +1296,7 @@ class ChatHistoryModel:
             response = supabase.table('chat_history').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error adding chat message: {e}")
+            logger.error(f"adding chat message: {e}")
             return None
     
     @staticmethod
@@ -1308,7 +1308,7 @@ class ChatHistoryModel:
             response = supabase.table('chat_history').select('*').eq('session_id', session_id).order('created_at', desc=False).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting chat history: {e}")
+            logger.error(f"getting chat history: {e}")
             return []
     
     @staticmethod
@@ -1320,7 +1320,7 @@ class ChatHistoryModel:
             response = supabase.table('chat_history').select('*').eq('project_id', project_id).order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting chat history: {e}")
+            logger.error(f"getting chat history: {e}")
             return []
     
     @staticmethod
@@ -1332,7 +1332,7 @@ class ChatHistoryModel:
             supabase.table('chat_history').delete().eq('session_id', session_id).execute()
             return True
         except Exception as e:
-            print(f"Error deleting session: {e}")
+            logger.error(f"deleting session: {e}")
             return False
 
 
@@ -1354,7 +1354,7 @@ class ProcessingJobModel:
             response = supabase.table('processing_jobs').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error creating job: {e}")
+            logger.error(f"creating job: {e}")
             return None
     
     # Throttle progress updates to reduce Supabase load
@@ -1401,7 +1401,7 @@ class ProcessingJobModel:
             
             return True
         except Exception as e:
-            print(f"Error updating job progress: {e}")
+            logger.error(f"updating job progress: {e}")
             return False
     
     @staticmethod
@@ -1415,7 +1415,7 @@ class ProcessingJobModel:
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
             return True
         except Exception as e:
-            print(f"Error completing job: {e}")
+            logger.error(f"completing job: {e}")
             return False
     
     @staticmethod
@@ -1428,7 +1428,7 @@ class ProcessingJobModel:
             supabase.table('processing_jobs').update(data).eq('id', job_id).execute()
             return True
         except Exception as e:
-            print(f"Error failing job: {e}")
+            logger.error(f"failing job: {e}")
             return False
     
     @staticmethod
@@ -1440,7 +1440,7 @@ class ProcessingJobModel:
             response = supabase.table('processing_jobs').select('*').order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting jobs: {e}")
+            logger.error(f"getting jobs: {e}")
             return []
     
     @staticmethod
@@ -1452,7 +1452,7 @@ class ProcessingJobModel:
             response = supabase.table('processing_jobs').select('*').eq('id', job_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error getting job: {e}")
+            logger.error(f"getting job: {e}")
             return None
     
     @staticmethod
@@ -1464,7 +1464,7 @@ class ProcessingJobModel:
             supabase.table('processing_jobs').delete().eq('id', job_id).execute()
             return True
         except Exception as e:
-            print(f"Error deleting job: {e}")
+            logger.error(f"deleting job: {e}")
             return False
     
     @staticmethod
@@ -1481,7 +1481,7 @@ class ProcessingJobModel:
             }).eq('id', job_id).in_('status', ['queued', 'processing']).execute()
             return True
         except Exception as e:
-            print(f"Error cancelling job: {e}")
+            logger.error(f"cancelling job: {e}")
             return False
     
     @staticmethod
@@ -1508,11 +1508,11 @@ class ProcessingJobModel:
                         'updated_at': datetime.utcnow().isoformat()
                     }).eq('id', job['id']).execute()
                     cancelled += 1
-                except:
+                except Exception:
                     pass
             return cancelled
         except Exception as e:
-            print(f"Error cancelling stuck jobs: {e}")
+            logger.error(f"cancelling stuck jobs: {e}")
             return 0
     
     @staticmethod
@@ -1527,7 +1527,7 @@ class ProcessingJobModel:
                 supabase.table('processing_jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
             return count
         except Exception as e:
-            print(f"Error deleting all jobs: {e}")
+            logger.error(f"deleting all jobs: {e}")
             return 0
     
     @staticmethod
@@ -1544,7 +1544,7 @@ class ProcessingJobModel:
                 supabase.table('processing_jobs').delete().lt('created_at', cutoff).execute()
             return count
         except Exception as e:
-            print(f"Error deleting old jobs: {e}")
+            logger.error(f"deleting old jobs: {e}")
             return 0
     
     @staticmethod
@@ -1558,7 +1558,7 @@ class ProcessingJobModel:
             response = supabase.table('processing_jobs').select('*').gte('created_at', cutoff).order('created_at', desc=True).limit(limit).execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting recent jobs: {e}")
+            logger.error(f"getting recent jobs: {e}")
             return []
 
 
@@ -1600,7 +1600,7 @@ class FindingSuppressionModel:
             response = supabase.table('finding_suppressions').insert(data).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error creating suppression: {e}")
+            logger.error(f"creating suppression: {e}")
             return None
     
     @staticmethod
@@ -1622,7 +1622,7 @@ class FindingSuppressionModel:
                 filtered.append(rule)
             return filtered
         except Exception as e:
-            print(f"Error getting suppression rules: {e}")
+            logger.error(f"getting suppression rules: {e}")
             return []
     
     @staticmethod
@@ -1682,7 +1682,7 @@ class FindingSuppressionModel:
             supabase.table('finding_suppressions').update({'is_active': False, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
             return True
         except Exception as e:
-            print(f"Error deactivating suppression: {e}")
+            logger.error(f"deactivating suppression: {e}")
             return False
     
     @staticmethod
@@ -1694,7 +1694,7 @@ class FindingSuppressionModel:
             supabase.table('finding_suppressions').update({'is_active': True, 'updated_at': datetime.utcnow().isoformat()}).eq('id', rule_id).execute()
             return True
         except Exception as e:
-            print(f"Error reactivating suppression: {e}")
+            logger.error(f"reactivating suppression: {e}")
             return False
     
     @staticmethod
@@ -1709,7 +1709,7 @@ class FindingSuppressionModel:
             response = query.execute()
             return response.data if response.data else []
         except Exception as e:
-            print(f"Error getting suppressions by project: {e}")
+            logger.error(f"getting suppressions by project: {e}")
             return []
     
     @staticmethod
@@ -1731,7 +1731,7 @@ class FindingSuppressionModel:
                 }
             }
         except Exception as e:
-            print(f"Error getting suppression stats: {e}")
+            logger.error(f"getting suppression stats: {e}")
             return {}
 
 
@@ -1757,7 +1757,7 @@ class EntityConfigModel:
             response = supabase.table('project_entity_config').upsert(data, on_conflict='project_id,playbook_type').execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error saving entity config: {e}")
+            logger.error(f"saving entity config: {e}")
             return None
     
     @staticmethod
@@ -1769,7 +1769,7 @@ class EntityConfigModel:
             response = supabase.table('project_entity_config').select('*').eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
             return response.data[0] if response.data else None
         except Exception as e:
-            print(f"Error getting entity config: {e}")
+            logger.error(f"getting entity config: {e}")
             return None
     
     @staticmethod
@@ -1781,7 +1781,7 @@ class EntityConfigModel:
             supabase.table('project_entity_config').delete().eq('project_id', project_id).eq('playbook_type', playbook_type).execute()
             return True
         except Exception as e:
-            print(f"Error deleting entity config: {e}")
+            logger.error(f"deleting entity config: {e}")
             return False
 
 

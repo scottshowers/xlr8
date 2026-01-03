@@ -516,7 +516,7 @@ def parse_year_end_from_duckdb() -> Dict[str, Any]:
                                 if len(row) > idx and row[idx]:
                                     try:
                                         ft_item['sequence'] = int(float(str(row[idx]).strip()))
-                                    except:
+                                    except Exception:
                                         pass
                             
                             # Get UKG action refs (comma-separated)

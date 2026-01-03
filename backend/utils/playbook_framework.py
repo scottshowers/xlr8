@@ -1030,7 +1030,7 @@ class DocumentScanner:
                                         columns = [c.get('name', f'col_{i}') for i, c in enumerate(columns_data)]
                                     else:
                                         columns = columns_data
-                                except:
+                                except Exception:
                                     columns = []
                             else:
                                 columns = []
@@ -1204,7 +1204,7 @@ class FindingsExtractor:
             if doc_content.startswith('[FILE:'):
                 try:
                     source_name = doc_content.split(']')[0].replace('[FILE:', '').strip()
-                except:
+                except Exception:
                     pass
             
             reality_truths.append(Truth(
@@ -1497,7 +1497,7 @@ class FindingsExtractor:
                         {'table_name': t[0], 'display_name': t[1], 'columns': t[2]}
                         for t in tables
                     ]
-                except:
+                except Exception:
                     pass
             
             # Build analysis context for gatherers

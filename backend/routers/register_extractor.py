@@ -145,10 +145,7 @@ if not PDF_UTILS_AVAILABLE:
 # SUPABASE STORAGE (Job metadata only - data goes to DuckDB)
 # =============================================================================
 
-def get_supabase():
-    """Get Supabase client"""
-    from utils.database.supabase_client import get_supabase as _get_supabase
-    return _get_supabase()
+from utils.database.supabase_client import get_supabase
 
 
 def _parse_date(date_str: Optional[str]) -> Optional[str]:
@@ -159,10 +156,10 @@ def _parse_date(date_str: Optional[str]) -> Optional[str]:
         for fmt in ['%m/%d/%Y', '%Y-%m-%d', '%m-%d-%Y', '%d/%m/%Y']:
             try:
                 return datetime.strptime(str(date_str), fmt).date().isoformat()
-            except:
+            except Exception:
                 continue
         return None
-    except:
+    except Exception:
         return None
 
 
@@ -176,7 +173,7 @@ def _safe_decimal(value) -> Optional[float]:
             if not value or value == '-':
                 return None
         return float(value)
-    except:
+    except Exception:
         return None
 
 
@@ -300,17 +297,17 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
                     # Parse JSON arrays
                     try:
                         transformed['earnings'] = json.loads(emp.get('earnings_json', '[]') or '[]')
-                    except:
+                    except Exception:
                         transformed['earnings'] = []
                     
                     try:
                         transformed['taxes'] = json.loads(emp.get('taxes_json', '[]') or '[]')
-                    except:
+                    except Exception:
                         transformed['taxes'] = []
                     
                     try:
                         transformed['deductions'] = json.loads(emp.get('deductions_json', '[]') or '[]')
-                    except:
+                    except Exception:
                         transformed['deductions'] = []
                     
                     employees.append(transformed)
@@ -324,7 +321,7 @@ def get_extraction_by_id(extract_id: str) -> Optional[Dict]:
             try:
                 emp_response = supabase.table('extraction_employees').select('*').eq('extraction_id', extract_id).order('sort_order').execute()
                 job['employees'] = emp_response.data or []
-            except:
+            except Exception:
                 job['employees'] = []
         
         return job

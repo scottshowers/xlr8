@@ -513,7 +513,7 @@ class ConsultativeSynthesizer:
             try:
                 count = int(count)
                 return f"Based on your data, the count is **{count:,}**."
-            except:
+            except Exception:
                 return f"Based on your data, the result is **{count}**."
         
         elif query_type == 'group' and rows:
@@ -955,11 +955,11 @@ if __name__ == "__main__":
         structured_data=test_structured
     )
     
-    print("=" * 60)
-    print("CONSULTATIVE ANSWER:")
-    print("=" * 60)
-    print(result.answer)
-    print("\n" + "=" * 60)
-    print(f"Confidence: {result.confidence:.1%}")
-    print(f"Method: {result.synthesis_method}")
-    print(f"Actions: {result.recommended_actions}")
+    logger.debug("=" * 60)
+    logger.debug("CONSULTATIVE ANSWER:")
+    logger.debug("=" * 60)
+    logger.debug(f"Debug output: {result.answer}")
+    logger.debug("=" * 60)
+    logger.debug(f"Confidence: {result.confidence:.1%}")
+    logger.debug(f"Method: {result.synthesis_method}")
+    logger.debug(f"Actions: {result.recommended_actions}")

@@ -219,7 +219,7 @@ class UKGProRaaSClient:
                 if 'message' in elem.tag.lower():
                     return elem.text or "Unknown error"
             return "Unknown SOAP fault"
-        except:
+        except Exception:
             return xml_response[:200]
     
     async def get_report_list(self, path: str = "/content") -> List[ReportInfo]:
@@ -460,7 +460,7 @@ class UKGProRaaSClient:
             try:
                 decoded = base64.b64decode(content).decode('utf-8')
                 content = decoded
-            except:
+            except Exception:
                 pass  # Not base64, use as-is
             
             # Parse CSV
