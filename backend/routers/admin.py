@@ -825,19 +825,22 @@ async def get_registry_status():
         except Exception as e:
             logger.error(f"[ADMIN] DuckDB scan error: {e}")
         
-        # 2. Get ChromaDB documents
+        # 2. Get ChromaDB documents (same pattern as classification/chunks)
         chromadb_docs = []
         try:
-            collection = rag.get_collection()
+            collection = rag.client.get_collection(name="documents")
             if collection:
                 results = collection.get(include=['metadatas'])
                 sources = {}
                 for meta in results.get('metadatas', []):
-                    source = meta.get('source', meta.get('filename', 'unknown'))
-                    project = meta.get('project_id', meta.get('project'))
-                    if source not in sources:
-                        sources[source] = {'count': 0, 'project_id': project}
-                    sources[source]['count'] += 1
+                    if not meta:
+                        continue
+                    source = meta.get('source') or meta.get('filename')
+                    if source:
+                        project = meta.get('project_id', meta.get('project'))
+                        if source not in sources:
+                            sources[source] = {'count': 0, 'project_id': project}
+                        sources[source]['count'] += 1
                 
                 for source, info in sources.items():
                     chromadb_docs.append({
