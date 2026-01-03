@@ -1716,34 +1716,19 @@ Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
                     result['_analyzed_by'] = 'claude-via-orchestrator'
                     return result
             
-            # Direct fallback if orchestrator not available
-            import anthropic
-            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                logger.error("[EXTRACT] No Claude API key found")
-                return None
+            # Try generate_json if _call_claude didn't work
+            if _framework_orchestrator:
+                json_result = _framework_orchestrator.generate_json(
+                    prompt=f"{system_prompt}\n\n{prompt}"
+                )
+                
+                if json_result.get('success') and json_result.get('json'):
+                    result = json_result['json']
+                    result['_analyzed_by'] = json_result.get('model_used', 'orchestrator')
+                    return result
             
-            client = anthropic.Anthropic(api_key=api_key)
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=1500,
-                temperature=0,
-                system=system_prompt,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            text = response.content[0].text.strip()
-            
-            # Clean markdown
-            if text.startswith("```"):
-                text = text.split("```")[1]
-                if text.startswith("json"):
-                    text = text[4:]
-            text = text.strip()
-            
-            result = json.loads(text)
-            result['_analyzed_by'] = 'claude-direct-fallback'
-            return result
+            logger.warning("[EXTRACT] LLMOrchestrator unavailable for extraction")
+            return None
             
         except Exception as e:
             logger.error(f"[EXTRACT] Failed to extract findings: {e}")
