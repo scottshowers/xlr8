@@ -1065,3 +1065,112 @@ async def repair_registry(dry_run: bool = True):
     except Exception as e:
         logger.error(f"[ADMIN] Registry repair failed: {e}")
         raise HTTPException(500, str(e))
+
+
+@router.post("/registry/sync")
+async def sync_registry_tables():
+    """
+    Sync duckdb_tables field in existing registry entries.
+    
+    This fixes entries that were registered before duckdb_tables was being saved.
+    Matches registry entries to DuckDB tables via source_filename.
+    """
+    try:
+        supabase = get_supabase()
+        if not supabase:
+            raise HTTPException(500, "Database unavailable")
+        
+        # Import handlers
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        try:
+            from utils.classification_service import get_classification_service
+        except ImportError:
+            from backend.utils.classification_service import get_classification_service
+        
+        handler = get_structured_handler()
+        service = get_classification_service(handler, None)
+        
+        # Get all DuckDB tables with their source files
+        tables_by_source = {}
+        rows_by_source = {}
+        try:
+            classifications = service.get_all_table_classifications()
+            for c in classifications:
+                source = c.source_filename
+                if source:
+                    if source not in tables_by_source:
+                        tables_by_source[source] = []
+                        rows_by_source[source] = 0
+                    tables_by_source[source].append(c.table_name)
+                    rows_by_source[source] += c.row_count or 0
+        except Exception as e:
+            logger.error(f"[ADMIN] Error getting table classifications: {e}")
+            raise HTTPException(500, f"Could not get table info: {e}")
+        
+        # Get registry entries
+        registry = supabase.table('document_registry').select('id, filename, duckdb_tables, row_count').execute()
+        
+        updated = []
+        skipped = []
+        errors = []
+        
+        for entry in registry.data or []:
+            filename = entry.get('filename')
+            entry_id = entry.get('id')
+            current_tables = entry.get('duckdb_tables') or []
+            
+            if filename in tables_by_source:
+                expected_tables = tables_by_source[filename]
+                expected_rows = rows_by_source[filename]
+                
+                # Check if update needed
+                if set(current_tables) != set(expected_tables):
+                    try:
+                        supabase.table('document_registry').update({
+                            'duckdb_tables': expected_tables,
+                            'row_count': expected_rows
+                        }).eq('id', entry_id).execute()
+                        
+                        updated.append({
+                            'filename': filename,
+                            'tables_added': expected_tables,
+                            'row_count': expected_rows
+                        })
+                        logger.info(f"[ADMIN] Synced registry: {filename} -> {expected_tables}")
+                    except Exception as e:
+                        errors.append({
+                            'filename': filename,
+                            'error': str(e)
+                        })
+                else:
+                    skipped.append({
+                        'filename': filename,
+                        'reason': 'already_synced'
+                    })
+            else:
+                skipped.append({
+                    'filename': filename,
+                    'reason': 'no_matching_tables'
+                })
+        
+        return {
+            'success': len(errors) == 0,
+            'updated': updated,
+            'skipped': skipped,
+            'errors': errors,
+            'summary': {
+                'total_updated': len(updated),
+                'total_skipped': len(skipped),
+                'total_errors': len(errors)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ADMIN] Registry sync failed: {e}")
+        raise HTTPException(500, str(e))
