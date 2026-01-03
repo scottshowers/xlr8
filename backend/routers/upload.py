@@ -2030,7 +2030,7 @@ async def list_standards_documents():
 # =============================================================================
 
 # Import compliance engine
-from backend.utils.compliance_engine import get_compliance_engine, run_compliance_scan
+from backend.utils.compliance_engine import get_compliance_engine
 COMPLIANCE_ENGINE_AVAILABLE = True
 
 
@@ -2054,7 +2054,7 @@ async def run_compliance_check(
         if not COMPLIANCE_ENGINE_AVAILABLE:
             raise HTTPException(503, "Compliance engine not available")
         
-        # Get rules
+        # Get rules from registry (for logging/filtering)
         registry = get_rule_registry()
         
         if domain:
@@ -2074,8 +2074,9 @@ async def run_compliance_check(
         
         logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {project_id}")
         
-        # Run compliance scan - returns both findings and per-rule check results
-        result = run_compliance_scan(project_id, rules=rules, domain=domain)
+        # Run compliance scan via engine
+        engine = get_compliance_engine()
+        result = engine.run_compliance_scan(project_id)
         
         findings = result.get('findings', [])
         check_results = result.get('check_results', [])
