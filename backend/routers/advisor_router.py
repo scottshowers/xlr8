@@ -315,41 +315,26 @@ If recommending, use one of these exact phrases at the END of your response:
         if not response_text:
             try:
                 global _advisor_orchestrator
-                if _advisor_orchestrator and _advisor_orchestrator.claude_api_key:
+                if _advisor_orchestrator:
                     # Build conversation for orchestrator
                     conversation_text = "\n".join([f"{m['role']}: {m['content']}" for m in messages])
                     
-                    result, success = _advisor_orchestrator._call_claude(
-                        prompt=conversation_text,
-                        system_prompt=full_system,
-                        project_id=None,
-                        operation="work_advisor"
+                    # Use synthesize_answer which handles local->Claude fallback
+                    result = _advisor_orchestrator.synthesize_answer(
+                        question=conversation_text,
+                        context="",  # Context is in the conversation
+                        expert_prompt=full_system,
+                        use_claude_fallback=True
                     )
                     
-                    if success:
-                        response_text = result
-                        logger.info("[ADVISOR] Got response from Claude via orchestrator")
+                    if result.get('success') and result.get('response'):
+                        response_text = result['response']
+                        logger.info(f"[ADVISOR] Got response from {result.get('model_used', 'unknown')}")
                 else:
-                    # Direct fallback
-                    import anthropic
-                    import os
-                    
-                    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-                    
-                    claude_messages = [{"role": m['role'], "content": m['content']} for m in messages]
-                    
-                    claude_response = client.messages.create(
-                        model="claude-3-haiku-20240307",
-                        max_tokens=500,
-                        system=full_system,
-                        messages=claude_messages
-                    )
-                    
-                    response_text = claude_response.content[0].text
-                    logger.info("[ADVISOR] Got response from Claude (direct)")
+                    logger.warning("[ADVISOR] LLMOrchestrator not available")
                 
             except Exception as claude_error:
-                logger.warning(f"[ADVISOR] Claude failed: {claude_error}")
+                logger.warning(f"[ADVISOR] LLM synthesis failed: {claude_error}")
         
         # Final fallback
         if not response_text:
@@ -587,37 +572,27 @@ async def generate_playbook(request: GeneratePlaybookRequest):
         if not response_text:
             try:
                 global _advisor_orchestrator
-                if _advisor_orchestrator and _advisor_orchestrator.claude_api_key:
-                    system_prompt = "You are a playbook architect. Generate well-structured playbook definitions."
+                if _advisor_orchestrator:
+                    system_prompt = "You are a playbook architect. Generate well-structured playbook definitions. Return valid JSON only."
                     
-                    result, success = _advisor_orchestrator._call_claude(
-                        prompt=prompt,
-                        system_prompt=system_prompt,
-                        project_id=None,
-                        operation="playbook_generation"
+                    # Use generate_json for structured output
+                    result = _advisor_orchestrator.generate_json(
+                        prompt=f"{system_prompt}\n\n{prompt}"
                     )
                     
-                    if success:
-                        response_text = result
-                        logger.info("[ADVISOR] Got playbook structure from Claude via orchestrator")
+                    if result.get('success') and result.get('json'):
+                        # Already parsed JSON
+                        logger.info(f"[ADVISOR] Got playbook structure from {result.get('model_used', 'unknown')}")
+                        return result['json']
+                    elif result.get('response'):
+                        # Raw response, try to parse
+                        response_text = result['response']
+                        logger.info(f"[ADVISOR] Got playbook text from {result.get('model_used', 'unknown')}")
                 else:
-                    # Direct fallback
-                    import anthropic
-                    import os
-                    
-                    client = anthropic.Anthropic(api_key=os.environ.get('ANTHROPIC_API_KEY'))
-                    
-                    claude_response = client.messages.create(
-                        model="claude-3-haiku-20240307",
-                        max_tokens=2000,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    
-                    response_text = claude_response.content[0].text
-                    logger.info("[ADVISOR] Got playbook structure from Claude (direct)")
+                    logger.warning("[ADVISOR] LLMOrchestrator not available for playbook gen")
                 
             except Exception as claude_error:
-                logger.warning(f"[ADVISOR] Claude failed for playbook gen: {claude_error}")
+                logger.warning(f"[ADVISOR] LLM failed for playbook gen: {claude_error}")
         
         # Parse JSON from response
         if response_text:
