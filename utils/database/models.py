@@ -533,6 +533,9 @@ class DocumentRegistryModel:
                 'embedding_time_ms': embedding_time_ms,
                 'storage_time_ms': storage_time_ms,
                 'metadata': metadata or {},
+                # DuckDB table tracking
+                'duckdb_tables': duckdb_tables or [],
+                'chromadb_collection': chromadb_collection,
                 # NEW: Enhanced metadata fields
                 'file_hash': file_hash,
                 'file_size_bytes': file_size_bytes,
