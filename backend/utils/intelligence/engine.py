@@ -43,7 +43,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "6.3.0"  # ADDED: Comparison engine integration
+__version__ = "6.4.0"  # ADDED: Compliance engine integration, conflict detection
 
 # Try to load ConsultativeSynthesizer
 SYNTHESIS_AVAILABLE = False
@@ -74,6 +74,21 @@ except ImportError:
         logger.info("[ENGINE-V2] ComparisonEngine loaded (alt path)")
     except ImportError:
         logger.warning("[ENGINE-V2] ComparisonEngine not available")
+
+# Try to load ComplianceEngine
+COMPLIANCE_ENGINE_AVAILABLE = False
+run_compliance_check = None
+try:
+    from backend.utils.compliance_engine import run_compliance_check
+    COMPLIANCE_ENGINE_AVAILABLE = True
+    logger.info("[ENGINE-V2] ComplianceEngine loaded")
+except ImportError:
+    try:
+        from utils.compliance_engine import run_compliance_check
+        COMPLIANCE_ENGINE_AVAILABLE = True
+        logger.info("[ENGINE-V2] ComplianceEngine loaded (alt path)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] ComplianceEngine not available")
 
 
 class IntelligenceEngineV2:
@@ -853,22 +868,142 @@ class IntelligenceEngineV2:
     
     def _detect_conflicts(self, reality, intent, configuration,
                          reference, regulatory, compliance) -> List[Conflict]:
-        """Detect conflicts between truths."""
+        """
+        Detect conflicts between truths.
+        
+        Looks for discrepancies where different truth sources disagree:
+        - Reality vs Configuration (data doesn't match setup)
+        - Reality vs Regulatory (data violates rules)
+        - Configuration vs Reference (setup doesn't match best practice)
+        - Intent vs Reality (what they want vs what they have)
+        """
         conflicts = []
-        # TODO: Implement conflict detection
+        
+        try:
+            # Reality vs Regulatory conflicts
+            for reg_truth in regulatory:
+                for real_truth in reality:
+                    # Check if regulatory requirement mentions something reality contradicts
+                    reg_content = reg_truth.content.lower() if reg_truth.content else ""
+                    real_content = real_truth.content.lower() if real_truth.content else ""
+                    
+                    # Look for value mismatches (e.g., "rate must be X" vs "rate is Y")
+                    if any(kw in reg_content for kw in ['must be', 'required', 'shall not exceed', 'minimum']):
+                        if any(kw in real_content for kw in ['currently', 'actual', 'found', 'shows']):
+                            conflicts.append(Conflict(
+                                truth_a=reg_truth,
+                                truth_b=real_truth,
+                                conflict_type="regulatory_violation",
+                                description=f"Potential compliance gap: {reg_truth.summary[:100]} vs {real_truth.summary[:100]}",
+                                severity="medium"
+                            ))
+            
+            # Configuration vs Reference conflicts  
+            for ref_truth in reference:
+                for config_truth in configuration:
+                    ref_content = ref_truth.content.lower() if ref_truth.content else ""
+                    config_content = config_truth.content.lower() if config_truth.content else ""
+                    
+                    # Look for setup that doesn't match best practice
+                    if any(kw in ref_content for kw in ['best practice', 'recommended', 'should be configured']):
+                        if config_content and 'configured' in config_content:
+                            conflicts.append(Conflict(
+                                truth_a=ref_truth,
+                                truth_b=config_truth,
+                                conflict_type="best_practice_deviation",
+                                description=f"Configuration may deviate from best practice",
+                                severity="low"
+                            ))
+            
+            # Intent vs Reality conflicts
+            for intent_truth in intent:
+                for real_truth in reality:
+                    intent_content = intent_truth.content.lower() if intent_truth.content else ""
+                    real_content = real_truth.content.lower() if real_truth.content else ""
+                    
+                    # Look for gaps between what they want and what they have
+                    if any(kw in intent_content for kw in ['want', 'need', 'require', 'goal']):
+                        if any(kw in real_content for kw in ['currently', 'actual', 'no ', 'not ']):
+                            conflicts.append(Conflict(
+                                truth_a=intent_truth,
+                                truth_b=real_truth,
+                                conflict_type="intent_gap",
+                                description=f"Gap between intent and reality",
+                                severity="medium"
+                            ))
+            
+            if conflicts:
+                logger.info(f"[ENGINE-V2] Detected {len(conflicts)} conflicts")
+                
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Conflict detection error: {e}")
+        
         return conflicts
     
     def _run_proactive_checks(self, analysis: Dict) -> List[Insight]:
-        """Run proactive analysis checks."""
+        """
+        Run proactive analysis checks.
+        
+        Automatically flags potential issues without user asking:
+        - Missing required configurations
+        - Unusual data patterns
+        - Approaching compliance deadlines
+        """
         insights = []
-        # TODO: Implement proactive checks
+        
+        try:
+            # If we have compliance results, surface them as insights
+            if COMPLIANCE_ENGINE_AVAILABLE and self.project_id:
+                compliance_result = self._check_compliance([], [], [])
+                if compliance_result and compliance_result.get('findings'):
+                    for finding in compliance_result['findings'][:3]:  # Top 3
+                        insights.append(Insight(
+                            insight_type="compliance_finding",
+                            description=finding.get('description', 'Compliance issue detected'),
+                            severity=finding.get('severity', 'medium'),
+                            source="compliance_engine",
+                            recommendation=finding.get('recommendation', 'Review and remediate')
+                        ))
+            
+            if insights:
+                logger.info(f"[ENGINE-V2] Generated {len(insights)} proactive insights")
+                
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Proactive check error: {e}")
+        
         return insights
     
     def _check_compliance(self, reality, configuration,
                          regulatory) -> Optional[Dict]:
-        """Check compliance against regulatory rules."""
-        # TODO: Implement compliance checking
-        return None
+        """
+        Check compliance against regulatory rules.
+        
+        Calls the ComplianceEngine to run rule-based checks against
+        the project's data and configuration.
+        """
+        if not COMPLIANCE_ENGINE_AVAILABLE:
+            logger.debug("[ENGINE-V2] ComplianceEngine not available")
+            return None
+        
+        if not self.project_id:
+            logger.debug("[ENGINE-V2] No project_id for compliance check")
+            return None
+        
+        try:
+            result = run_compliance_check(
+                project_id=self.project_id,
+                db_handler=self.structured_handler
+            )
+            
+            if result:
+                finding_count = len(result.get('findings', []))
+                logger.info(f"[ENGINE-V2] Compliance check complete: {finding_count} findings")
+                
+            return result
+            
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Compliance check error: {e}")
+            return None
     
     # =========================================================================
     # FILTER MANAGEMENT
