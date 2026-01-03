@@ -526,33 +526,6 @@ def store_to_duckdb(
                     logger.warning(f"[REGISTER] Registration warning: {reg_result.error}")
             except Exception as reg_err:
                 logger.warning(f"[REGISTER] Could not register document: {reg_err}")
-        elif REGISTRY_AVAILABLE:
-            # Legacy fallback
-            try:
-                DocumentRegistryModel.register(
-                    filename=source_file,
-                    file_type='pdf',
-                    truth_type=DocumentRegistryModel.TRUTH_REALITY,
-                    classification_method=DocumentRegistryModel.CLASS_AUTO_DETECTED,
-                    classification_confidence=0.95,
-                    content_domain=['payroll'],
-                    storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                    project_id=project_id,
-                    is_global=False,
-                    duckdb_tables=[table_name],
-                    row_count=len(df),
-                    parse_status='success',
-                    metadata={
-                        'project_name': project_name,
-                        'vendor_type': vendor_type,
-                        'extraction_method': 'register_extractor',
-                        'employee_count': len(employees),
-                        'columns': list(df.columns)
-                    }
-                )
-                logger.info(f"[REGISTER] Registered (legacy): {source_file}")
-            except Exception as reg_err:
-                logger.warning(f"[REGISTER] Could not register document: {reg_err}")
         
         logger.info(f"[REGISTER] Stored {len(employees)} employees to DuckDB: {table_name}")
         
