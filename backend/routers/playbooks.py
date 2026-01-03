@@ -50,7 +50,7 @@ except ImportError:
     except ImportError:
         logger.warning("[PLAYBOOKS] LLMOrchestrator not available")
 
-router = APIRouter(prefix="/playbooks", tags=["playbooks"])
+router = APIRouter(tags=["playbooks"])
 
 # Job tracking for scan-all background tasks
 SCAN_JOBS: Dict[str, Dict[str, Any]] = {}
