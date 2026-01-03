@@ -55,7 +55,7 @@ import logging
 # Import universal document intelligence system
 try:
     from utils.universal_chunker import chunk_intelligently
-    from utils.document_analyzer import DocumentAnalyzer
+    from backend.utils.document_analyzer import DocumentAnalyzer
     UNIVERSAL_CHUNKING_AVAILABLE = True
     logging.info("✅ Universal Document Intelligence System loaded")
 except ImportError as e:
