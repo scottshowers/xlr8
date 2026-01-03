@@ -66,12 +66,12 @@ class DecoderEntryResponse(BaseModel):
 # IMPORT DECODER SERVICE
 # =============================================================================
 
-    from backend.utils.domain_decoder import (
-        get_decoder, 
-        DECODER_CATEGORIES, 
-        DECODER_DOMAINS,
-        seed_initial_knowledge
-    )
+from backend.utils.domain_decoder import (
+    get_decoder, 
+    DECODER_CATEGORIES, 
+    DECODER_DOMAINS,
+    seed_initial_knowledge
+)
 
 
 # =============================================================================
