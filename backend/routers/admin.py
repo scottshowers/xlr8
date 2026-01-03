@@ -24,14 +24,9 @@ import logging
 import json
 
 # Auth imports - all admin endpoints require authentication
-try:
-    from backend.utils.auth_middleware import (
-        User, require_permission, Permissions
-    )
-except ImportError:
-    from utils.auth_middleware import (
-        User, require_permission, Permissions
-    )
+from backend.utils.auth_middleware import (
+    User, require_permission, Permissions
+)
 
 logger = logging.getLogger(__name__)
 
