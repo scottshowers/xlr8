@@ -19,7 +19,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/metrics", tags=["metrics"])
+router = APIRouter(tags=["metrics"])
 
 # Import MetricsService
 try:
