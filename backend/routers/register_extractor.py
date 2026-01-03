@@ -931,54 +931,37 @@ INSTRUCTIONS:
 
 Return ONLY a valid JSON array. No markdown, no explanation."""
 
-            # Retry logic with exponential backoff + jitter
+            # Use LLMOrchestrator for consistent handling
             max_retries = 3
             
             for attempt in range(max_retries):
                 try:
-                    response = requests.post(
-                        "https://api.groq.com/openai/v1/chat/completions",
-                        headers={
-                            "Authorization": f"Bearer {groq_api_key}",
-                            "Content-Type": "application/json"
-                        },
-                        json={
-                            "model": "llama-3.3-70b-versatile",
-                            "messages": [{"role": "user", "content": page_prompt}],
-                            "temperature": 0.1,
-                            "max_tokens": 8192
-                        },
-                        timeout=90  # Slightly longer timeout for safety
-                    )
-                    
-                    if response.status_code == 200:
-                        result = response.json()
-                        content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                        page_employees = self._parse_json_response(content)
-                        return (page_idx, page_employees, None)
-                    
-                    elif response.status_code == 429:
-                        # Rate limited - exponential backoff with jitter
-                        import random
-                        wait_time = (2 ** attempt) + random.uniform(0, 1)
-                        logger.warning(f"[REGISTER] Page {page_num} rate limited, waiting {wait_time:.1f}s (attempt {attempt + 1})")
-                        time.sleep(wait_time)
-                        continue
-                    
-                    else:
-                        error_msg = f"HTTP {response.status_code}: {response.text[:200]}"
-                        logger.warning(f"[REGISTER] Page {page_num} error: {error_msg}")
-                        return (page_idx, [], error_msg)
+                    # Use orchestrator if available
+                    if self.orchestrator:
+                        result = self.orchestrator.synthesize_answer(
+                            question=page_prompt,
+                            context="",
+                            use_claude_fallback=False  # Keep local for speed in parallel
+                        )
                         
-                except requests.exceptions.Timeout:
-                    logger.warning(f"[REGISTER] Page {page_num} timeout (attempt {attempt + 1})")
-                    if attempt < max_retries - 1:
-                        time.sleep(2)
-                        continue
-                    return (page_idx, [], "Timeout after retries")
-                    
+                        if result.get('success') and result.get('response'):
+                            content = result['response']
+                            page_employees = self._parse_json_response(content)
+                            return (page_idx, page_employees, None)
+                        else:
+                            error_msg = result.get('error', 'Unknown error')
+                            logger.warning(f"[REGISTER] Page {page_num} LLM failed: {error_msg}")
+                            return (page_idx, [], error_msg)
+                    else:
+                        logger.warning(f"[REGISTER] Page {page_num}: No orchestrator available")
+                        return (page_idx, [], "No LLM orchestrator")
+                        
                 except Exception as e:
                     logger.warning(f"[REGISTER] Page {page_num} exception: {e}")
+                    if attempt < max_retries - 1:
+                        import time
+                        time.sleep(2)
+                        continue
                     return (page_idx, [], str(e))
             
             return (page_idx, [], "Max retries exceeded")
