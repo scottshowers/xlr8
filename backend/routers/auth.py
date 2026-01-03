@@ -36,7 +36,7 @@ except ImportError:
         get_current_user, Permissions
     )
 
-router = APIRouter(prefix="/api/auth", tags=["auth"])
+router = APIRouter(tags=["auth"])
 
 # Supabase config
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
