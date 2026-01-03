@@ -870,7 +870,22 @@ async def _route_to_standards(
             except Exception as e:
                 logger.warning(f"[SMART-ROUTER] Registration failed: {e}")
         
-        return {
+        # Run unified enrichment for standards
+        enrichment = None
+        try:
+            from backend.utils.upload_enrichment import enrich_standards_upload
+            enrichment = enrich_standards_upload(
+                filename=filename,
+                text_content=raw_text,
+                chunks_added=chunks_added,
+                domain=domain
+            )
+            if enrichment and enrichment.success:
+                logger.info(f"[SMART-ROUTER] Standards enrichment complete: chunks_enriched={enrichment.chunks_enriched}")
+        except Exception as enrich_e:
+            logger.debug(f"[SMART-ROUTER] Standards enrichment failed: {enrich_e}")
+        
+        result = {
             "success": True,
             "route": "standards",
             "filename": filename,
@@ -881,6 +896,11 @@ async def _route_to_standards(
             "tables_created": tables_created,
             "total_rows": total_rows
         }
+        
+        if enrichment and enrichment.success:
+            result["enrichment"] = enrichment.to_dict()
+        
+        return result
         
     finally:
         shutil.rmtree(temp_dir, ignore_errors=True)
@@ -1087,13 +1107,35 @@ async def _route_to_semantic(
                 metadata=metadata
             )
             
-            return {
+            # Run unified enrichment
+            enrichment = None
+            try:
+                from backend.utils.upload_enrichment import enrich_semantic_upload
+                enrichment = enrich_semantic_upload(
+                    project=project,
+                    project_id=project_id,
+                    filename=filename,
+                    text_content=text,
+                    chunks_added=chunks_added,
+                    job_id=None
+                )
+                if enrichment and enrichment.success:
+                    logger.info(f"[SMART-ROUTER] Enrichment complete: chunks_enriched={enrichment.chunks_enriched}")
+            except Exception as enrich_e:
+                logger.debug(f"[SMART-ROUTER] Enrichment failed: {enrich_e}")
+            
+            result = {
                 "success": True,
                 "route": "semantic",
                 "filename": filename,
                 "chunks_added": chunks_added,
                 "char_count": len(text)
             }
+            
+            if enrichment and enrichment.success:
+                result["enrichment"] = enrichment.to_dict()
+            
+            return result
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
