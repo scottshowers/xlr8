@@ -26,7 +26,7 @@ except ImportError:
     except ImportError:
         logger.warning("[ADVISOR] LLMOrchestrator not available")
 
-router = APIRouter(prefix="/api/advisor", tags=["advisor"])
+router = APIRouter(tags=["advisor"])
 
 
 class AdvisorMessage(BaseModel):
