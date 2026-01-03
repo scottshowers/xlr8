@@ -273,7 +273,7 @@ else:
 
 # Register playbooks router if available
 if PLAYBOOKS_AVAILABLE:
-    app.include_router(playbooks.router, prefix="/api")
+    app.include_router(playbooks.router, prefix="/api/playbooks")
     logger.info("Playbooks router registered at /api/playbooks")
 else:
     logger.warning("Playbooks router not available")
@@ -287,7 +287,7 @@ else:
 
 # Register advisor router if available (Work Advisor - conversational guide)
 if ADVISOR_AVAILABLE:
-    app.include_router(advisor_router.router, tags=["advisor"])
+    app.include_router(advisor_router.router, prefix="/api/advisor", tags=["advisor"])
     logger.info("Advisor router registered at /api/advisor")
 else:
     logger.warning("Advisor router not available")
@@ -301,12 +301,12 @@ else:
 
 # Register security router if available (threat monitoring)
 if SECURITY_AVAILABLE:
-    app.include_router(security.router, tags=["security"])
+    app.include_router(security.router, prefix="/api/security", tags=["security"])
     logger.info("Security router registered at /api/security")
 else:
     # Create inline fallback security endpoints
     from fastapi import APIRouter
-    security_fallback = APIRouter(prefix="/api/security", tags=["security"])
+    security_fallback = APIRouter(tags=["security"])
     
     @security_fallback.get("/threats")
     async def get_threats_fallback():
@@ -357,12 +357,12 @@ else:
                     "last_scan": None,
                 }
     
-    app.include_router(security_fallback)
+    app.include_router(security_fallback, prefix="/api/security")
     logger.info("Security fallback endpoints registered (using threat_assessor directly)")
 
 # Register auth router if available (user management, RBAC)
 if AUTH_AVAILABLE:
-    app.include_router(auth.router, tags=["auth"])
+    app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
     logger.info("Auth router registered at /api/auth")
 else:
     logger.warning("Auth router not available")
@@ -376,7 +376,7 @@ else:
 
 # Register admin router if available (learning system management)
 if ADMIN_AVAILABLE:
-    app.include_router(admin.router, prefix="/api", tags=["admin"])
+    app.include_router(admin.router, prefix="/api/admin", tags=["admin"])
     logger.info("Admin router registered at /api/admin")
 else:
     logger.warning("Admin router not available")
@@ -390,7 +390,7 @@ else:
 
 # Register intelligence router if available (Phase 3 Universal Analysis Engine)
 if INTELLIGENCE_AVAILABLE:
-    app.include_router(intelligence.router, prefix="/api", tags=["intelligence"])
+    app.include_router(intelligence.router, prefix="/api/intelligence", tags=["intelligence"])
     logger.info("Intelligence router registered at /api/intelligence")
 else:
     logger.warning("Intelligence router not available")
@@ -431,7 +431,7 @@ else:
 
 # Register metrics router if available (platform analytics)
 if METRICS_AVAILABLE:
-    app.include_router(metrics_router.router, prefix="/api", tags=["metrics"])
+    app.include_router(metrics_router.router, prefix="/api/metrics", tags=["metrics"])
     logger.info("Metrics router registered at /api/metrics")
 else:
     logger.warning("Metrics router not available")
@@ -459,14 +459,14 @@ else:
 
 # Register domain decoder router if available (consultant knowledge)
 if DECODER_AVAILABLE:
-    app.include_router(decoder_router.router, prefix="/api", tags=["domain-decoder"])
+    app.include_router(decoder_router.router, prefix="/api/decoder", tags=["domain-decoder"])
     logger.info("Domain Decoder router registered at /api/decoder")
 else:
     logger.warning("Domain Decoder router not available")
 
 # Register reference truth router if available (systems, domains, detection)
 if REFERENCE_AVAILABLE:
-    app.include_router(reference.router, tags=["reference"])
+    app.include_router(reference.router, prefix="/api/reference", tags=["reference"])
     logger.info("Reference Truth router registered at /api/reference")
 else:
     logger.warning("Reference Truth router not available")
