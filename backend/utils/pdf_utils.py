@@ -26,6 +26,18 @@ from typing import List, Dict, Any, Optional, Callable
 
 logger = logging.getLogger(__name__)
 
+# Import LLM orchestrator for consistent LLM handling
+_pdf_orchestrator = None
+try:
+    from utils.llm_orchestrator import LLMOrchestrator
+    _pdf_orchestrator = LLMOrchestrator()
+except ImportError:
+    try:
+        from backend.utils.llm_orchestrator import LLMOrchestrator
+        _pdf_orchestrator = LLMOrchestrator()
+    except ImportError:
+        logger.warning("[PDF-UTILS] LLMOrchestrator not available")
+
 
 # =============================================================================
 # PII REDACTION (from register_extractor)
@@ -269,7 +281,7 @@ def try_parse_object(obj_str: str) -> Optional[Dict]:
 
 
 # =============================================================================
-# GROQ API WRAPPER
+# GROQ API WRAPPER - Via LLMOrchestrator
 # =============================================================================
 
 def call_groq(
@@ -282,69 +294,43 @@ def call_groq(
     timeout: int = 60
 ) -> Optional[str]:
     """
-    Call Groq API with retry logic.
+    Call Groq API via LLMOrchestrator.
     
     Args:
         prompt: The prompt to send
-        model: Groq model name
+        model: Groq model name (ignored - orchestrator handles model selection)
         max_tokens: Maximum tokens in response
         temperature: Sampling temperature
-        max_retries: Number of retry attempts on rate limit
-        retry_delay: Base delay between retries (exponential backoff)
+        max_retries: Number of retry attempts (handled by orchestrator)
+        retry_delay: Base delay between retries
         timeout: Request timeout in seconds
         
     Returns:
         Response text or None if failed
     """
-    groq_api_key = os.getenv("GROQ_API_KEY", "")
+    global _pdf_orchestrator
     
-    if not groq_api_key:
-        logger.warning("[GROQ] No GROQ_API_KEY configured")
+    if not _pdf_orchestrator:
+        logger.warning("[GROQ] LLMOrchestrator not available")
         return None
     
-    for attempt in range(max_retries):
-        try:
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {groq_api_key}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "model": model,
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": temperature,
-                    "max_tokens": max_tokens
-                },
-                timeout=timeout
-            )
-            
-            if response.status_code == 200:
-                result = response.json()
-                content = result.get("choices", [{}])[0].get("message", {}).get("content", "")
-                return content
-                
-            elif response.status_code == 429:
-                # Rate limited - wait and retry
-                wait_time = retry_delay * (attempt + 1)
-                logger.warning(f"[GROQ] Rate limited, waiting {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                time.sleep(wait_time)
-                
-            else:
-                logger.error(f"[GROQ] API error: {response.status_code} - {response.text[:200]}")
-                return None
-                
-        except requests.exceptions.Timeout:
-            logger.warning(f"[GROQ] Timeout (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                time.sleep(retry_delay)
-                
-        except Exception as e:
-            logger.error(f"[GROQ] Request failed: {e}")
-            return None
-    
-    logger.error(f"[GROQ] Failed after {max_retries} attempts")
-    return None
+    try:
+        # Use orchestrator's synthesize which tries local first, then Claude
+        result = _pdf_orchestrator.synthesize_answer(
+            question=prompt,
+            context="",
+            use_claude_fallback=False  # Don't fall back to Claude for Groq replacement
+        )
+        
+        if result.get('success') and result.get('response'):
+            return result['response']
+        
+        logger.warning(f"[GROQ] LLM via orchestrator failed: {result.get('error')}")
+        return None
+        
+    except Exception as e:
+        logger.error(f"[GROQ] Request failed: {e}")
+        return None
 
 
 # =============================================================================
