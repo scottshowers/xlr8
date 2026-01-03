@@ -978,23 +978,36 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             coll = rag.client.get_collection(name="documents")
             results = coll.get(include=["metadatas"])
             
+            # Get project_id for comparison if we have a project_filter
+            filter_project_id = None
+            if project_filter:
+                try:
+                    from utils.database.models import ProjectModel
+                    proj_record = ProjectModel.get_by_name(project_filter)
+                    filter_project_id = proj_record.get('id') if proj_record else None
+                except:
+                    pass
+            
             # Aggregate by source document
             chroma_docs = {}
             for meta in results.get('metadatas', []):
                 if not meta:
                     continue
                 source = meta.get('source') or meta.get('filename')
-                proj = meta.get('project_id') or meta.get('project') or ''
+                proj_id = meta.get('project_id') or ''
+                proj_name = meta.get('project') or ''
                 
                 # Include reference library docs OR docs matching current project filter
-                is_reference = proj in ['Global/Universal', 'Reference Library', '__STANDARDS__', '', None]
-                matches_project = project_filter and proj.lower() == project_filter.lower() if project_filter else False
+                is_reference = proj_name in ['Global/Universal', 'Reference Library', '__STANDARDS__', '', None] or \
+                               proj_id in ['', None]
+                matches_project = (filter_project_id and proj_id == filter_project_id) or \
+                                  (project_filter and proj_name.lower() == project_filter.lower() if proj_name else False)
                 
-                if source and (is_reference or matches_project):
+                if source and (is_reference or matches_project or not project_filter):
                     if source not in chroma_docs:
                         chroma_docs[source] = {
                             'count': 0,
-                            'project': proj or 'Reference Library',
+                            'project': proj_name or project_filter or 'Reference Library',
                             'truth_type': meta.get('truth_type', 'reference'),
                             'uploaded_at': meta.get('uploaded_at', '')
                         }
