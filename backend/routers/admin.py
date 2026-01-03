@@ -788,75 +788,87 @@ async def get_registry_status():
     try:
         supabase = get_supabase()
         
-        # Get structured handler for DuckDB
+        # Get structured handler singleton
         try:
-            from utils.structured_data_handler import StructuredDataHandler
-            handler = StructuredDataHandler()
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
         except ImportError:
-            from backend.utils.structured_data_handler import StructuredDataHandler
-            handler = StructuredDataHandler()
+            try:
+                from backend.utils.structured_data_handler import get_structured_handler
+                handler = get_structured_handler()
+            except ImportError:
+                handler = None
+                logger.warning("[ADMIN] StructuredDataHandler not available")
         
         # Get ChromaDB handler
         try:
             from utils.rag_handler import RAGHandler
             rag = RAGHandler()
         except ImportError:
-            from backend.utils.rag_handler import RAGHandler
-            rag = RAGHandler()
+            try:
+                from backend.utils.rag_handler import RAGHandler
+                rag = RAGHandler()
+            except ImportError:
+                rag = None
+                logger.warning("[ADMIN] RAGHandler not available")
         
         # 1. Get DuckDB tables with metadata
         duckdb_tables = []
-        try:
-            tables = handler.list_tables()
-            for table_name in tables:
-                if table_name.startswith('_'):
-                    continue
-                try:
-                    meta = handler.conn.execute(f"""
-                        SELECT * FROM _column_profiles WHERE table_name = '{table_name}' LIMIT 1
-                    """).fetchone()
-                    source_file = meta[1] if meta else None  # source_filename column
-                    
-                    row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
-                    col_count = len(handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall())
-                    
-                    duckdb_tables.append({
-                        'table_name': table_name,
-                        'source_filename': source_file,
-                        'row_count': row_count,
-                        'column_count': col_count
-                    })
-                except Exception as e:
-                    duckdb_tables.append({
-                        'table_name': table_name,
-                        'error': str(e)
-                    })
-        except Exception as e:
-            logger.error(f"[ADMIN] DuckDB scan error: {e}")
+        if handler:
+            try:
+                tables = handler.list_tables()
+                for table_name in tables:
+                    if table_name.startswith('_'):
+                        continue
+                    try:
+                        # Get source filename from _column_profiles
+                        meta = handler.conn.execute(f"""
+                            SELECT source_filename FROM _column_profiles 
+                            WHERE table_name = '{table_name}' LIMIT 1
+                        """).fetchone()
+                        source_file = meta[0] if meta else None
+                        
+                        row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                        col_count = len(handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall())
+                        
+                        duckdb_tables.append({
+                            'table_name': table_name,
+                            'source_filename': source_file,
+                            'row_count': row_count,
+                            'column_count': col_count
+                        })
+                    except Exception as e:
+                        duckdb_tables.append({
+                            'table_name': table_name,
+                            'error': str(e)
+                        })
+            except Exception as e:
+                logger.error(f"[ADMIN] DuckDB scan error: {e}")
         
         # 2. Get ChromaDB documents
         chromadb_docs = []
-        try:
-            collection = rag.get_collection()
-            if collection:
-                # Get all unique sources
-                results = collection.get(include=['metadatas'])
-                sources = {}
-                for meta in results.get('metadatas', []):
-                    source = meta.get('source', meta.get('filename', 'unknown'))
-                    project = meta.get('project_id', meta.get('project'))
-                    if source not in sources:
-                        sources[source] = {'count': 0, 'project_id': project}
-                    sources[source]['count'] += 1
-                
-                for source, info in sources.items():
-                    chromadb_docs.append({
-                        'document_name': source,
-                        'chunk_count': info['count'],
-                        'project_id': info['project_id']
-                    })
-        except Exception as e:
-            logger.error(f"[ADMIN] ChromaDB scan error: {e}")
+        if rag:
+            try:
+                collection = rag.get_collection()
+                if collection:
+                    # Get all unique sources
+                    results = collection.get(include=['metadatas'])
+                    sources = {}
+                    for meta in results.get('metadatas', []):
+                        source = meta.get('source', meta.get('filename', 'unknown'))
+                        project = meta.get('project_id', meta.get('project'))
+                        if source not in sources:
+                            sources[source] = {'count': 0, 'project_id': project}
+                        sources[source]['count'] += 1
+                    
+                    for source, info in sources.items():
+                        chromadb_docs.append({
+                            'document_name': source,
+                            'chunk_count': info['count'],
+                            'project_id': info['project_id']
+                        })
+            except Exception as e:
+                logger.error(f"[ADMIN] ChromaDB scan error: {e}")
         
         # 3. Get registry entries
         registry_entries = []
