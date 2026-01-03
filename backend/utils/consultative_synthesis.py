@@ -601,114 +601,35 @@ Be specific. Quote actual values from the data. Do not be vague."""
         MIN_RESPONSE_LENGTH = 150
         
         # =====================================================================
-        # TRY GROQ FIRST - Most reliable for Railway deployment
+        # USE LLM ORCHESTRATOR - Handles cascade internally
         # =====================================================================
-        logger.warning("[CONSULTATIVE] Trying Groq (llama-3.3-70b)...")
-        result = self._call_groq(question, context, expert_prompt)
+        if not self._orchestrator:
+            logger.warning("[CONSULTATIVE] LLMOrchestrator not available, using template")
+            return self._template_fallback(question, summaries, triangulation), 'template'
+        
+        logger.warning("[CONSULTATIVE] Using LLMOrchestrator for synthesis...")
+        result = self._orchestrator.synthesize_answer(
+            question=question,
+            context=context,
+            expert_prompt=expert_prompt,
+            use_claude_fallback=True
+        )
         
         if result.get('success') and result.get('response'):
             response_len = len(result.get('response', ''))
-            if response_len >= MIN_RESPONSE_LENGTH:
-                logger.warning(f"[CONSULTATIVE] Groq succeeded ({response_len} chars)")
-                return result['response'], 'groq'
-            else:
-                logger.warning(f"[CONSULTATIVE] Groq response too short ({response_len} chars)")
-        else:
-            logger.warning(f"[CONSULTATIVE] Groq failed: {result.get('error', 'unknown')}")
-        
-        # =====================================================================
-        # TRY LOCAL MODELS - If Groq unavailable
-        # =====================================================================
-        model_cascade = [
-            ('deepseek-r1:14b', 'deepseek-r1'),
-            ('qwen2.5-coder:14b', 'qwen-14b'),
-        ]
-        
-        for model_name, method_name in model_cascade:
-            logger.warning(f"[CONSULTATIVE] Trying {model_name}...")
-            result = self._call_local_model(
-                model=model_name,
-                question=question,
-                context=context,
-                expert_prompt=expert_prompt
-            )
+            model_used = result.get('model_used', 'unknown')
             
-            if result.get('success') and result.get('response'):
-                response_len = len(result.get('response', ''))
-                if response_len >= MIN_RESPONSE_LENGTH:
-                    logger.warning(f"[CONSULTATIVE] {model_name} succeeded ({response_len} chars)")
-                    return result['response'], method_name
-                else:
-                    logger.warning(f"[CONSULTATIVE] {model_name} response too short ({response_len} chars)")
+            if response_len >= MIN_RESPONSE_LENGTH:
+                logger.warning(f"[CONSULTATIVE] {model_used} succeeded ({response_len} chars)")
+                return result['response'], model_used
             else:
-                logger.warning(f"[CONSULTATIVE] {model_name} failed: {result.get('error', 'unknown')}")
-        
-        # All local models failed - fall back to Claude
-        logger.warning("[CONSULTATIVE] All models failed, falling back to Claude API")
-        result = self._call_claude_direct(question, context, expert_prompt)
-        
-        if result.get('success') and result.get('response'):
-            logger.warning(f"[CONSULTATIVE] Claude succeeded ({len(result.get('response', ''))} chars)")
-            return result['response'], 'claude'
+                logger.warning(f"[CONSULTATIVE] {model_used} response too short ({response_len} chars)")
+        else:
+            logger.warning(f"[CONSULTATIVE] LLM failed: {result.get('error', 'unknown')}")
         
         # Final fallback - template-based
-        logger.warning(f"[CONSULTATIVE] All LLMs failed: {result.get('error')}, using template")
+        logger.warning("[CONSULTATIVE] All LLMs failed, using template")
         return self._template_fallback(question, summaries, triangulation), 'template'
-    
-    def _call_groq(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
-        """
-        Call Groq API for synthesis.
-        
-        Groq is fast and reliable - preferred for Railway deployment.
-        """
-        try:
-            import requests
-            import os
-            
-            api_key = os.getenv("GROQ_API_KEY")
-            if not api_key:
-                return {"success": False, "error": "No GROQ_API_KEY"}
-            
-            prompt = f"""{expert_prompt}
-
-QUESTION: {question}
-
-DATA:
-{context[:12000]}
-
-Provide a consultative answer based on the data above."""
-
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json"
-            }
-            
-            payload = {
-                "model": "llama-3.3-70b-versatile",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.3,
-                "max_tokens": 1000
-            }
-            
-            response = requests.post(
-                "https://api.groq.com/openai/v1/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60
-            )
-            
-            if response.status_code == 200:
-                answer = response.json()['choices'][0]['message']['content'].strip()
-                if answer and len(answer) > 50:
-                    return {"success": True, "response": answer, "model_used": "groq"}
-                else:
-                    return {"success": False, "error": "Empty response"}
-            else:
-                return {"success": False, "error": f"HTTP {response.status_code}: {response.text[:200]}"}
-                
-        except Exception as e:
-            logger.error(f"[CONSULTATIVE] Groq error: {e}")
-            return {"success": False, "error": str(e)}
     
     def _call_local_model(self, model: str, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
         """
@@ -780,51 +701,15 @@ Provide a direct answer based ONLY on the data above."""
     
     def _call_claude_direct(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
         """
-        Call Claude as fallback when local models fail.
-        Uses LLMOrchestrator for consistent metrics tracking.
+        Call Claude via LLMOrchestrator.
         
-        Only called for complex queries when Qwen 14B fails.
+        This method is kept for backward compatibility but now delegates to orchestrator.
         """
+        if not self._orchestrator:
+            logger.warning("[CONSULTATIVE] LLMOrchestrator not available for Claude call")
+            return {"success": False, "error": "No orchestrator"}
+        
         try:
-            # Use orchestrator if available
-            if self._orchestrator and self._orchestrator.claude_api_key:
-                prompt = f"""{expert_prompt}
-
-QUESTION: {question}
-
-DATA:
-{context}
-
-Provide a direct answer based ONLY on the data above."""
-
-                system_prompt = "You are a senior consultant. Provide direct, factual answers based only on the data provided."
-                
-                result, success = self._orchestrator._call_claude(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    project_id=None,
-                    operation="consultative_synthesis"
-                )
-                
-                if success:
-                    logger.warning(f"[CONSULTATIVE] Claude fallback via orchestrator succeeded ({len(result)} chars)")
-                    return {
-                        "success": True,
-                        "response": result.strip(),
-                        "model_used": "claude-via-orchestrator"
-                    }
-            
-            # Direct fallback if orchestrator unavailable
-            import anthropic
-            import os
-            
-            api_key = os.getenv("CLAUDE_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
-            if not api_key:
-                logger.warning("[CONSULTATIVE] No Claude API key for fallback")
-                return {"success": False, "error": "No API key"}
-            
-            client = anthropic.Anthropic(api_key=api_key)
-            
             prompt = f"""{expert_prompt}
 
 QUESTION: {question}
@@ -834,24 +719,24 @@ DATA:
 
 Provide a direct answer based ONLY on the data above."""
 
-            response = client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=500,
-                temperature=0,
-                messages=[{"role": "user", "content": prompt}]
+            result = self._orchestrator.synthesize_answer(
+                question=prompt,
+                context="",
+                use_claude_fallback=True
             )
             
-            answer = response.content[0].text.strip()
-            logger.warning(f"[CONSULTATIVE] Claude fallback succeeded ({len(answer)} chars)")
+            if result.get('success') and result.get('response'):
+                logger.warning(f"[CONSULTATIVE] Claude via orchestrator succeeded ({len(result['response'])} chars)")
+                return {
+                    "success": True,
+                    "response": result['response'].strip(),
+                    "model_used": result.get('model_used', 'claude-via-orchestrator')
+                }
             
-            return {
-                "success": True,
-                "response": answer,
-                "model_used": "claude-sonnet-fallback"
-            }
+            return {"success": False, "error": result.get('error', 'Unknown error')}
             
         except Exception as e:
-            logger.error(f"[CONSULTATIVE] Claude fallback failed: {e}")
+            logger.error(f"[CONSULTATIVE] Claude call failed: {e}")
             return {"success": False, "error": str(e)}
     
     def _template_fallback(
