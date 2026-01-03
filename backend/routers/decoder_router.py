@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/decoder", tags=["domain-decoder"])
+router = APIRouter(tags=["domain-decoder"])
 
 
 # =============================================================================
