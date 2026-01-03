@@ -30,7 +30,7 @@ sys.path.insert(0, '/app')
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/intelligence", tags=["Intelligence"])
+router = APIRouter(tags=["Intelligence"])
 
 
 # =============================================================================
