@@ -14,7 +14,7 @@ from typing import List, Dict, Any
 import logging
 
 # Import our system components
-from utils.document_analyzer import DocumentAnalyzer, DocumentStructure
+from backend.utils.document_analyzer import DocumentAnalyzer, DocumentStructure
 from utils.specialized_chunkers import (
     TableChunker,
     CodeChunker,
