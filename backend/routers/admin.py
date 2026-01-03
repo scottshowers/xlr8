@@ -788,15 +788,24 @@ async def get_registry_status():
     try:
         supabase = get_supabase()
         
-        # Use classification service - it's already wired up correctly
+        # Import from correct locations
+        # structured_data_handler is in /utils/
+        # classification_service is in /backend/utils/
+        # rag_handler is in /utils/
         try:
-            from utils.classification_service import get_classification_service
             from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        try:
             from utils.rag_handler import RAGHandler
         except ImportError:
-            from backend.utils.classification_service import get_classification_service
-            from backend.utils.structured_data_handler import get_structured_handler
             from backend.utils.rag_handler import RAGHandler
+        
+        try:
+            from utils.classification_service import get_classification_service
+        except ImportError:
+            from backend.utils.classification_service import get_classification_service
         
         handler = get_structured_handler()
         rag = RAGHandler()
