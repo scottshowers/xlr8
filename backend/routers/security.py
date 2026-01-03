@@ -18,7 +18,7 @@ from fastapi import APIRouter, HTTPException
 from typing import Dict, Any, Optional
 from pydantic import BaseModel
 
-router = APIRouter(prefix="/api/security", tags=["security"])
+router = APIRouter(tags=["security"])
 
 
 # =============================================================================
