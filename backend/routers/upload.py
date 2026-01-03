@@ -1031,29 +1031,6 @@ def process_file_background(
                             logger.info(f"[BACKGROUND] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
                         else:
                             logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
-                    else:
-                        # Legacy fallback
-                        DocumentRegistryModel.register(
-                            filename=filename,
-                            file_type=file_ext,
-                            truth_type=truth_type,
-                            classification_method=classification_method,
-                            classification_confidence=classification_confidence,
-                            content_domain=domain_list,
-                            storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                            project_id=project_id if not is_global else None,
-                            is_global=is_global,
-                            duckdb_tables=result.get('tables_created', []),
-                            row_count=total_rows,
-                            sheet_count=tables_created,
-                            parse_status='success',
-                            processing_time_ms=times['processing_time_ms'],
-                            file_hash=file_hash,
-                            file_size_bytes=file_size,
-                            uploaded_by_id=uploaded_by_id,
-                            uploaded_by_email=uploaded_by_email
-                        )
-                        logger.info(f"[BACKGROUND] Registered (legacy): {filename}")
                     
                 except Exception as e:
                     logger.warning(f"[BACKGROUND] Could not register document: {e}")
@@ -1371,25 +1348,6 @@ def process_file_background(
                                                     )
                                                     if not reg_result.success:
                                                         logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
-                                                else:
-                                                    DocumentRegistryModel.register(
-                                                        filename=filename,
-                                                        file_type=file_ext,
-                                                        truth_type=truth_type,
-                                                        classification_method=classification_method,
-                                                        classification_confidence=classification_confidence,
-                                                        content_domain=domain_list,
-                                                        storage_type=DocumentRegistryModel.STORAGE_DUCKDB,
-                                                        project_id=project_id,
-                                                        is_global=is_global,
-                                                        row_count=result.get('row_count', 0),
-                                                        parse_status='success',
-                                                        processing_time_ms=times['processing_time_ms'],
-                                                        file_hash=file_hash,
-                                                        file_size_bytes=file_size,
-                                                        uploaded_by_id=uploaded_by_id,
-                                                        uploaded_by_email=uploaded_by_email
-                                                    )
                                             except Exception as reg_e:
                                                 logger.warning(f"[BACKGROUND] Could not register: {reg_e}")
                                             
@@ -1701,30 +1659,6 @@ def process_file_background(
                     logger.warning(f"[BACKGROUND] Registered: {filename} ({reg_result.lineage_edges} lineage edges)")
                 else:
                     logger.warning(f"[BACKGROUND] Registration warning: {reg_result.error}")
-            else:
-                # Legacy fallback
-                storage_type = DocumentRegistryModel.STORAGE_BOTH if duckdb_success else DocumentRegistryModel.STORAGE_CHROMADB
-                DocumentRegistryModel.register(
-                    filename=filename,
-                    file_type=file_ext,
-                    truth_type=truth_type,
-                    classification_method=classification_method,
-                    classification_confidence=classification_confidence,
-                    content_domain=domain_list,
-                    storage_type=storage_type,
-                    project_id=project_id if not is_global else None,
-                    is_global=is_global,
-                    chunk_count=chunks_added,
-                    parse_status='success',
-                    processing_time_ms=times['processing_time_ms'],
-                    embedding_time_ms=times['embedding_time_ms'],
-                    storage_time_ms=times['storage_time_ms'],
-                    file_hash=file_hash,
-                    file_size_bytes=file_size,
-                    uploaded_by_id=uploaded_by_id,
-                    uploaded_by_email=uploaded_by_email
-                )
-                logger.warning(f"[BACKGROUND] Registered (legacy): {filename} as {truth_type}")
             
         except Exception as e:
             logger.warning(f"[BACKGROUND] Could not register document: {e}")
