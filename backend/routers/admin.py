@@ -774,3 +774,301 @@ async def force_delete_project_by_name(project_name: str):
     except Exception as e:
         logger.error(f"[ADMIN] Force delete failed: {e}")
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# REGISTRY REPAIR - Sync existing data with document_registry
+# =============================================================================
+
+@router.get("/registry/status")
+async def get_registry_status():
+    """
+    Check registry status - what's in DuckDB/ChromaDB vs document_registry.
+    """
+    try:
+        supabase = get_supabase()
+        
+        # Get structured handler for DuckDB
+        try:
+            from utils.structured_data_handler import StructuredDataHandler
+            handler = StructuredDataHandler()
+        except ImportError:
+            from backend.utils.structured_data_handler import StructuredDataHandler
+            handler = StructuredDataHandler()
+        
+        # Get ChromaDB handler
+        try:
+            from utils.rag_handler import RAGHandler
+            rag = RAGHandler()
+        except ImportError:
+            from backend.utils.rag_handler import RAGHandler
+            rag = RAGHandler()
+        
+        # 1. Get DuckDB tables with metadata
+        duckdb_tables = []
+        try:
+            tables = handler.list_tables()
+            for table_name in tables:
+                if table_name.startswith('_'):
+                    continue
+                try:
+                    meta = handler.conn.execute(f"""
+                        SELECT * FROM _column_profiles WHERE table_name = '{table_name}' LIMIT 1
+                    """).fetchone()
+                    source_file = meta[1] if meta else None  # source_filename column
+                    
+                    row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+                    col_count = len(handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall())
+                    
+                    duckdb_tables.append({
+                        'table_name': table_name,
+                        'source_filename': source_file,
+                        'row_count': row_count,
+                        'column_count': col_count
+                    })
+                except Exception as e:
+                    duckdb_tables.append({
+                        'table_name': table_name,
+                        'error': str(e)
+                    })
+        except Exception as e:
+            logger.error(f"[ADMIN] DuckDB scan error: {e}")
+        
+        # 2. Get ChromaDB documents
+        chromadb_docs = []
+        try:
+            collection = rag.get_collection()
+            if collection:
+                # Get all unique sources
+                results = collection.get(include=['metadatas'])
+                sources = {}
+                for meta in results.get('metadatas', []):
+                    source = meta.get('source', meta.get('filename', 'unknown'))
+                    project = meta.get('project_id', meta.get('project'))
+                    if source not in sources:
+                        sources[source] = {'count': 0, 'project_id': project}
+                    sources[source]['count'] += 1
+                
+                for source, info in sources.items():
+                    chromadb_docs.append({
+                        'document_name': source,
+                        'chunk_count': info['count'],
+                        'project_id': info['project_id']
+                    })
+        except Exception as e:
+            logger.error(f"[ADMIN] ChromaDB scan error: {e}")
+        
+        # 3. Get registry entries
+        registry_entries = []
+        if supabase:
+            try:
+                result = supabase.table('document_registry').select('*').execute()
+                registry_entries = result.data or []
+            except Exception as e:
+                logger.error(f"[ADMIN] Registry query error: {e}")
+        
+        # 4. Find orphans (in DuckDB/ChromaDB but not registry)
+        registered_files = {r.get('filename') for r in registry_entries}
+        
+        orphan_tables = []
+        for t in duckdb_tables:
+            source = t.get('source_filename')
+            if source and source not in registered_files:
+                orphan_tables.append(t)
+        
+        orphan_docs = []
+        for d in chromadb_docs:
+            doc_name = d.get('document_name')
+            if doc_name and doc_name not in registered_files:
+                orphan_docs.append(d)
+        
+        return {
+            'success': True,
+            'summary': {
+                'duckdb_tables': len(duckdb_tables),
+                'chromadb_docs': len(chromadb_docs),
+                'registry_entries': len(registry_entries),
+                'orphan_tables': len(orphan_tables),
+                'orphan_docs': len(orphan_docs)
+            },
+            'duckdb_tables': duckdb_tables,
+            'chromadb_docs': chromadb_docs,
+            'registry_entries': [{'filename': r.get('filename'), 'id': r.get('id'), 'storage_type': r.get('storage_type')} for r in registry_entries],
+            'orphans': {
+                'tables': orphan_tables,
+                'documents': orphan_docs
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"[ADMIN] Registry status failed: {e}")
+        raise HTTPException(500, str(e))
+
+
+@router.post("/registry/repair")
+async def repair_registry(dry_run: bool = True):
+    """
+    Repair registry by registering orphaned DuckDB tables and ChromaDB documents.
+    
+    Args:
+        dry_run: If True, only preview what would be registered. If False, actually register.
+    """
+    try:
+        # Get current status
+        status = await get_registry_status()
+        
+        if not status.get('success'):
+            raise HTTPException(500, "Could not get registry status")
+        
+        orphan_tables = status.get('orphans', {}).get('tables', [])
+        orphan_docs = status.get('orphans', {}).get('documents', [])
+        
+        if dry_run:
+            return {
+                'success': True,
+                'dry_run': True,
+                'would_register': {
+                    'tables': len(orphan_tables),
+                    'documents': len(orphan_docs),
+                    'details': {
+                        'tables': orphan_tables,
+                        'documents': orphan_docs
+                    }
+                },
+                'message': 'Set dry_run=false to actually register these items'
+            }
+        
+        # Actually register orphans
+        try:
+            from backend.utils.registration_service import RegistrationService, RegistrationSource
+        except ImportError:
+            from utils.registration_service import RegistrationService, RegistrationSource
+        
+        supabase = get_supabase()
+        registered = []
+        errors = []
+        
+        # Group tables by source file to register as hybrid if needed
+        tables_by_file = {}
+        for t in orphan_tables:
+            source = t.get('source_filename')
+            if source:
+                if source not in tables_by_file:
+                    tables_by_file[source] = {
+                        'tables': [],
+                        'total_rows': 0
+                    }
+                tables_by_file[source]['tables'].append(t.get('table_name'))
+                tables_by_file[source]['total_rows'] += t.get('row_count', 0)
+        
+        # Check if any orphan docs match table source files (hybrid)
+        doc_names = {d.get('document_name') for d in orphan_docs}
+        
+        # Get project_id from first orphan doc or table
+        project_id = None
+        if orphan_docs:
+            project_id = orphan_docs[0].get('project_id')
+        
+        # Register each file
+        for source_file, info in tables_by_file.items():
+            try:
+                # Check if this file also has chunks (hybrid)
+                chunk_count = 0
+                for d in orphan_docs:
+                    if d.get('document_name') == source_file:
+                        chunk_count = d.get('chunk_count', 0)
+                        break
+                
+                if chunk_count > 0:
+                    # Hybrid registration
+                    result = RegistrationService.register_hybrid(
+                        filename=source_file,
+                        project_id=project_id,
+                        tables_created=info['tables'],
+                        row_count=info['total_rows'],
+                        chunk_count=chunk_count,
+                        truth_type='reality',
+                        source=RegistrationSource.MIGRATION
+                    )
+                else:
+                    # Structured only
+                    result = RegistrationService.register_structured(
+                        filename=source_file,
+                        project_id=project_id,
+                        tables_created=info['tables'],
+                        row_count=info['total_rows'],
+                        source=RegistrationSource.MIGRATION
+                    )
+                
+                if result.success:
+                    registered.append({
+                        'filename': source_file,
+                        'type': 'hybrid' if chunk_count > 0 else 'structured',
+                        'tables': len(info['tables']),
+                        'rows': info['total_rows'],
+                        'chunks': chunk_count,
+                        'registry_id': result.registry_id
+                    })
+                else:
+                    errors.append({
+                        'filename': source_file,
+                        'error': result.error
+                    })
+                    
+            except Exception as e:
+                errors.append({
+                    'filename': source_file,
+                    'error': str(e)
+                })
+        
+        # Register any remaining docs that weren't part of hybrid
+        registered_file_names = {r['filename'] for r in registered}
+        for d in orphan_docs:
+            doc_name = d.get('document_name')
+            if doc_name and doc_name not in registered_file_names:
+                try:
+                    result = RegistrationService.register_embedded(
+                        filename=doc_name,
+                        project_id=d.get('project_id') or project_id,
+                        chunk_count=d.get('chunk_count', 0),
+                        truth_type='intent',
+                        source=RegistrationSource.MIGRATION
+                    )
+                    
+                    if result.success:
+                        registered.append({
+                            'filename': doc_name,
+                            'type': 'embedded',
+                            'chunks': d.get('chunk_count', 0),
+                            'registry_id': result.registry_id
+                        })
+                    else:
+                        errors.append({
+                            'filename': doc_name,
+                            'error': result.error
+                        })
+                        
+                except Exception as e:
+                    errors.append({
+                        'filename': doc_name,
+                        'error': str(e)
+                    })
+        
+        logger.info(f"[ADMIN] Registry repair: {len(registered)} registered, {len(errors)} errors")
+        
+        return {
+            'success': len(errors) == 0,
+            'dry_run': False,
+            'registered': registered,
+            'errors': errors,
+            'summary': {
+                'total_registered': len(registered),
+                'total_errors': len(errors)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[ADMIN] Registry repair failed: {e}")
+        raise HTTPException(500, str(e))
