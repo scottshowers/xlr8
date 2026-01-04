@@ -19,7 +19,8 @@ import {
   RefreshCw, Code2, Copy, CheckCheck, Link2,
   Loader2, Activity, BarChart3
 } from 'lucide-react'
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, LineChart, Line } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, PieChart as RePieChart, Pie, Cell, LineChart, Line } from 'recharts'
+import { Tooltip } from '../components/ui'
 
 // =============================================================================
 // CONSTANTS
@@ -525,15 +526,19 @@ export default function QueryBuilderPage() {
         </div>
         
         <div style={styles.headerActions}>
-          <button style={styles.btn} onClick={resetAll}>
-            <RefreshCw size={16} /> Reset
-          </button>
-          <button 
-            style={{ ...styles.btn, ...(showSQL ? styles.btnActive : {}) }} 
-            onClick={() => setShowSQL(!showSQL)}
-          >
-            <Code2 size={16} /> SQL
-          </button>
+          <Tooltip title="Reset Query" detail="Clear all selections and start fresh with a new query." action="Removes tables, columns, and filters">
+            <button style={styles.btn} onClick={resetAll}>
+              <RefreshCw size={16} /> Reset
+            </button>
+          </Tooltip>
+          <Tooltip title="View SQL" detail="Toggle to see the generated SQL query. Useful for learning or copying to other tools." action="Click to show/hide">
+            <button 
+              style={{ ...styles.btn, ...(showSQL ? styles.btnActive : {}) }} 
+              onClick={() => setShowSQL(!showSQL)}
+            >
+              <Code2 size={16} /> SQL
+            </button>
+          </Tooltip>
         </div>
       </div>
       
@@ -545,10 +550,12 @@ export default function QueryBuilderPage() {
             
             {/* Step 1: Tables */}
             <div style={styles.section}>
-              <div style={styles.sectionHeader}>
-                <div style={styles.stepNumber}>1</div>
-                <span style={styles.sectionTitle}>Select Tables</span>
-              </div>
+              <Tooltip title="Select Tables" detail="Choose which data tables to query. Related tables can be auto-joined for combined analysis." action="Click a table to select it">
+                <div style={{...styles.sectionHeader, cursor: 'help'}}>
+                  <div style={styles.stepNumber}>1</div>
+                  <span style={styles.sectionTitle}>Select Tables</span>
+                </div>
+              </Tooltip>
               
               {isLoadingSchema ? (
                 <div style={{ textAlign: 'center', padding: '1.5rem', color: '#1a2332'Dim }}>
@@ -615,12 +622,14 @@ export default function QueryBuilderPage() {
             {/* Step 2: Columns */}
             {selectedTables.length > 0 && (
               <div style={styles.section}>
-                <div style={styles.sectionHeader}>
-                  <div style={styles.stepNumber}>2</div>
-                  <span style={styles.sectionTitle}>
-                    Columns {selectedColumns.length > 0 && `(${selectedColumns.length})`}
-                  </span>
-                </div>
+                <Tooltip title="Select Columns" detail="Choose which columns to include in results. Leave empty for all columns (SELECT *)." action="Click columns to toggle selection">
+                  <div style={{...styles.sectionHeader, cursor: 'help'}}>
+                    <div style={styles.stepNumber}>2</div>
+                    <span style={styles.sectionTitle}>
+                      Columns {selectedColumns.length > 0 && `(${selectedColumns.length})`}
+                    </span>
+                  </div>
+                </Tooltip>
                 
                 {selectedTables.map(table => (
                   <div key={table.sqlName} style={{ marginBottom: '0.75rem' }}>
@@ -853,7 +862,7 @@ export default function QueryBuilderPage() {
                             <CartesianGrid strokeDasharray="3 3" stroke={'#e2e8f0'} />
                             <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
                             <YAxis tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
-                            <Tooltip />
+                            <RechartsTooltip />
                             <Bar dataKey="value" fill={COLORS.primary} radius={[4, 4, 0, 0]} />
                           </BarChart>
                         ) : chartType === 'pie' ? (
@@ -872,14 +881,14 @@ export default function QueryBuilderPage() {
                                 <Cell key={i} fill={CHART_COLORS[i % CHART_COLORS.length]} />
                               ))}
                             </Pie>
-                            <Tooltip />
+                            <RechartsTooltip />
                           </RePieChart>
                         ) : (
                           <LineChart data={getChartData()}>
                             <CartesianGrid strokeDasharray="3 3" stroke={'#e2e8f0'} />
                             <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
                             <YAxis tick={{ fontSize: 10, fill: '#1a2332'Dim }} />
-                            <Tooltip />
+                            <RechartsTooltip />
                             <Line type="monotone" dataKey="value" stroke={COLORS.primary} strokeWidth={2} dot={{ fill: COLORS.primary }} />
                           </LineChart>
                         )}
