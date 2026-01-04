@@ -49,6 +49,15 @@ const brandColors = {
   success: '#285390',
 };
 
+// Five Truths icon & color mapping (consistent across app)
+const TRUTH_ICONS = {
+  reality: { icon: BarChart3, color: '#285390' },
+  intent: { icon: Target, color: '#2766b1' },
+  configuration: { icon: Settings, color: '#7aa866' },
+  reference: { icon: BookOpen, color: '#5f4282' },
+  regulatory: { icon: AlertCircle, color: '#993c44' },
+};
+
 
 // ============================================================================
 // MAIN PAGE
@@ -700,14 +709,7 @@ function FilesPanel({ c, project, targetScope }) {
   const totalTables = structuredFiles.reduce((sum, f) => sum + (f.sheets?.length || 1), 0);
   const totalRows = structuredData?.total_rows || 0;
 
-  // Five Truths icon mapping (Part 14 Visual Standards)
-  const TRUTH_ICONS = {
-    reality: { icon: BarChart3, color: '#285390' },
-    intent: { icon: Target, color: '#2766b1' },
-    configuration: { icon: Settings, color: '#7aa866' },
-    reference: { icon: BookOpen, color: '#5f4282' },
-    regulatory: { icon: AlertCircle, color: '#993c44' },
-  };
+  // Five Truths helpers
   const getTruthIcon = (tt) => {
     const config = TRUTH_ICONS[tt] || { icon: FileText, color: c.textMuted };
     const Icon = config.icon;
