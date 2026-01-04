@@ -119,7 +119,7 @@ function PipelineStatus({ data }) {
           color: allHealthy ? colors.success : colors.error,
           fontWeight: 500
         }}>
-          {allHealthy ? '✓ All Systems Healthy' : '⚠ Issues Detected'}
+          {allHealthy ? 'All Systems Healthy' : 'Issues Detected'}
         </div>
       </div>
       
