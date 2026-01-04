@@ -1,10 +1,9 @@
 /**
- * AI Assist - Chat Interface with Bessie
+ * WorkspacePage.jsx - AI Assist Chat Interface
  * 
- * Clean professional design with:
- * - Light/dark mode support
- * - Customer color accents
- * - Consistent styling with Command Center
+ * Updated: January 4, 2026 - Visual Standards Part 13
+ * - Standard page header with 36x36 icon box
+ * - Lucide icons instead of emojis
  */
 
 import React from 'react';
@@ -22,8 +21,9 @@ const getColors = (dark) => ({
   text: dark ? '#e8eaed' : '#1a2332',
   textMuted: dark ? '#8b95a5' : '#64748b',
   textLight: dark ? '#5f6a7d' : '#94a3b8',
-  primary: '#83b16d',  // Mission Control green
+  primary: '#83b16d',
   primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
+  white: '#ffffff',
 });
 
 // No-project placeholder
@@ -106,19 +106,29 @@ export default function WorkspacePage() {
       fontFamily: "'Inter', system-ui, sans-serif",
       transition: 'background 0.2s ease',
     }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1rem' }}>
-        <h1 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.5rem',
-          fontWeight: 700,
-          color: colors.text,
-          margin: 0,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
+      {/* Header - Standard Pattern */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: '20px', 
+          fontWeight: 600, 
+          color: colors.text, 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          fontFamily: "'Sora', sans-serif"
         }}>
-          <MessageSquare size={24} style={{ color: colors.primary }} />
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '10px', 
+            backgroundColor: colors.primary, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center' 
+          }}>
+            <MessageSquare size={20} color={colors.white} />
+          </div>
           AI Assist
           {hasActiveProject && customerColors && (
             <span style={{
@@ -128,6 +138,7 @@ export default function WorkspacePage() {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
+              marginLeft: '8px',
             }}>
               <span style={{
                 width: 6,
@@ -139,11 +150,9 @@ export default function WorkspacePage() {
             </span>
           )}
         </h1>
-        {!hasActiveProject && (
-          <p style={{ color: colors.textMuted, margin: '0.25rem 0 0 0', fontSize: '0.85rem' }}>
-            Chat with your data and get intelligent insights
-          </p>
-        )}
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>
+          Chat with your data and get intelligent insights
+        </p>
       </div>
 
       {/* Chat Container */}
