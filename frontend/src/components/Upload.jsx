@@ -365,7 +365,7 @@ export default function Upload({ functionalAreas = [] }) {
       {/* Current Project Indicator */}
       {activeProject && (
         <div style={styles.projectBadge}>
-          <span>📁</span>
+          <span></span>
           <span style={styles.projectName}>{activeProject.name}</span>
           <span style={{ color: '#5f6c7b', fontSize: '0.85rem' }}>
             {activeProject.customer}
@@ -412,7 +412,7 @@ export default function Upload({ functionalAreas = [] }) {
             accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
             multiple
           />
-          <div style={styles.dropzoneIcon}>📄</div>
+          <div style={styles.dropzoneIcon}>File</div>
           <p style={styles.dropzoneText}>
             Click to select files
           </p>
@@ -427,7 +427,7 @@ export default function Upload({ functionalAreas = [] }) {
         <div style={styles.fileList}>
           {files.map((file, index) => (
             <div key={index} style={styles.fileItem}>
-              <span style={styles.fileIcon}>📄</span>
+              <span style={styles.fileIcon}>File</span>
               <span style={styles.fileName}>{file.name}</span>
               <span style={styles.fileSize}>{formatFileSize(file.size)}</span>
               <button 
@@ -457,10 +457,10 @@ export default function Upload({ functionalAreas = [] }) {
               }}
             >
               <span style={styles.fileIcon}>
-                {item.status === 'pending' && '⏳'}
+                {item.status === 'pending' && ''}
                 {item.status === 'uploading' && '⬆️'}
-                {item.status === 'success' && '✅'}
-                {item.status === 'error' && '❌'}
+                {item.status === 'success' && ''}
+                {item.status === 'error' && ''}
               </span>
               <span style={styles.fileName}>{item.name}</span>
               <span style={styles.progressMessage}>{item.message}</span>
@@ -479,9 +479,9 @@ export default function Upload({ functionalAreas = [] }) {
         }}
       >
         {uploading ? (
-          <>⏳ Uploading {uploadProgress.filter(p => p.status === 'success').length}/{uploadProgress.length}...</>
+          <>Uploading {uploadProgress.filter(p => p.status === 'success').length}/{uploadProgress.length}...</>
         ) : (
-          <>📤 Upload {files.length > 1 ? `${files.length} Files` : 'File'}</>
+          <>Upload {files.length > 1 ? `${files.length} Files` : 'File'}</>
         )}
       </button>
 
@@ -497,7 +497,7 @@ export default function Upload({ functionalAreas = [] }) {
       {/* Error Message */}
       {error && (
         <div style={styles.errorBox}>
-          <span style={styles.errorIcon}>⚠️</span>
+          <span style={styles.errorIcon}>!</span>
           <span style={styles.errorText}>{error}</span>
         </div>
       )}
