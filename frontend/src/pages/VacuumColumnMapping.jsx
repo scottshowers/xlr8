@@ -542,7 +542,7 @@ export default function VacuumColumnMapping() {
                         {/* Merged column warning and split button */}
                         {isMerged && (
                           <div style={styles.mergedWarning}>
-                            <span style={styles.warningIcon}>⚠️</span>
+                            <span style={styles.warningIcon}></span>
                             <span>Looks merged</span>
                             <button 
                               onClick={(e) => { e.stopPropagation(); openSplitter(headerStr, idx); }}
