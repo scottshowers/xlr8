@@ -957,10 +957,10 @@ def extract_tables_smart(
     Smart PDF table extraction - Vision for structure, text for data.
     
     COST-EFFICIENT APPROACH:
-    1. Render pages 1-2 to images
-    2. Send to Vision to get column structure (~$0.04)
+    1. Render pages 1-2 to images (Vision: ~$0.04)
+    2. Send to Vision to get column structure
     3. Use pdfplumber text extraction for ALL pages
-    4. Parse text using known column structure (free)
+    4. Parse text using known column structure via local LLM (qwen2.5-coder)
     
     Args:
         file_path: Path to PDF file
@@ -1028,8 +1028,7 @@ def extract_tables_smart(
         update_status(f"✓ Detected {len(columns)} columns ({confidence:.0%} confidence)")
         logger.warning(f"[PDF-VISION] Columns: {columns}")
         
-        # Step 2: Extract text from ALL pages and parse with LLM
-        # THIS IS THE SAME APPROACH AS REGISTER EXTRACTOR (which works)
+        # Step 2: Extract text from ALL pages and parse with local LLM
         update_status("Extracting text from all pages...")
         
         try:
@@ -1045,8 +1044,8 @@ def extract_tables_smart(
                         if page_text.strip():
                             pages_text.append(page_text)
                         
-                        # Progress update every 5 pages
-                        if (page_idx + 1) % 5 == 0:
+                        # Progress update every 10 pages
+                        if (page_idx + 1) % 10 == 0:
                             update_status(f"Extracted text from {page_idx + 1}/{total_pages} pages")
                             
                     except Exception as page_error:
@@ -1344,7 +1343,7 @@ def extract_all_tables_with_vision(
                     sample_text += (page.extract_text() or '') + '\n'
                 
             if sample_text:
-                fingerprint = get_document_fingerlogger.debug(f"Debug output: {sample_text}")
+                fingerprint = get_document_fingerprint(sample_text)
                 cached = get_learned_structure(fingerprint)
                 
                 if cached and cached.get('columns'):
@@ -1423,7 +1422,7 @@ def extract_all_tables_with_vision(
                     sample_text += (page.extract_text() or '') + '\n'
             
             if sample_text:
-                fingerprint = get_document_fingerlogger.debug(f"Debug output: {sample_text}")
+                fingerprint = get_document_fingerprint(sample_text)
                 store_learned_structure(
                     fingerprint=fingerprint,
                     columns=result['columns'],
