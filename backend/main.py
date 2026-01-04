@@ -208,6 +208,13 @@ except ImportError as e:
     REFERENCE_AVAILABLE = False
     logging.warning(f"Reference router import failed: {e}")
 
+try:
+    from backend.routers import dashboard
+    DASHBOARD_AVAILABLE = True
+except ImportError as e:
+    DASHBOARD_AVAILABLE = False
+    logging.warning(f"Dashboard router import failed: {e}")
+
 # Standards endpoints are now in upload.py (no separate router needed)
 
 logging.basicConfig(level=logging.INFO)
@@ -470,6 +477,13 @@ if REFERENCE_AVAILABLE:
     logger.info("Reference Truth router registered at /api/reference")
 else:
     logger.warning("Reference Truth router not available")
+
+# Register dashboard router if available (real metrics, lineage, relationships)
+if DASHBOARD_AVAILABLE:
+    app.include_router(dashboard.router, tags=["dashboard"])
+    logger.info("Dashboard router registered at /api/dashboard")
+else:
+    logger.warning("Dashboard router not available")
 
 
 @app.get("/api/debug/imports")
