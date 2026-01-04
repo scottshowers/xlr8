@@ -33,10 +33,10 @@ const ArchitecturePage = () => {
     { id: 'overview', label: '🏠 Overview', color: c.text },
     { id: 'tier1', label: '📥 Tier 1: API', color: c.dustyBlue },
     { id: 'tier2', label: '🚦 Tier 2: Router', color: c.primary },
-    { id: 'tier3', label: '⚙️ Tier 3: Processors', color: c.sage },
-    { id: 'tier4', label: '🧠 Tier 4: Intelligence', color: c.taupe },
+    { id: 'tier3', label: ' Tier 3: Processors', color: c.sage },
+    { id: 'tier4', label: ' Tier 4: Intelligence', color: c.taupe },
     { id: 'tier5', label: '💾 Tier 5: Storage', color: c.slate },
-    { id: 'flows', label: '🔄 Data Flows', color: c.synth },
+    { id: 'flows', label: ' Data Flows', color: c.synth },
     { id: 'wip', label: '🚧 WIP', color: c.wip },
   ];
 
@@ -98,7 +98,7 @@ const ArchitecturePage = () => {
       <h2 style={{ color: c.text, marginBottom: 8 }}>XLR8 Platform Architecture</h2>
       <p style={{ color: c.muted, marginBottom: 24 }}>Level 5 DFD • Function-Level Detail • v3.0 December 2025</p>
       
-      <Explain title="📖 How to Read This">
+      <Explain title=" How to Read This">
         This architecture is organized into 5 tiers that data flows through. Each tier has a specific job.
         Click the tabs above to explore each tier in detail.
       </Explain>
@@ -107,10 +107,10 @@ const ArchitecturePage = () => {
         {[
           { tier: 'Tier 1', name: 'API Entry', desc: 'Receives all requests from the UI', color: c.dustyBlue, icon: '📥' },
           { tier: 'Tier 2', name: 'Smart Router + Security', desc: 'Routes files, redacts PII, encrypts', color: c.primary, icon: '🚦' },
-          { tier: 'Tier 3', name: 'Processors', desc: 'Specialized handlers for each file type', color: c.sage, icon: '⚙️' },
-          { tier: 'Tier 4', name: 'Intelligence', desc: 'Five Truths + Consultative Synthesis', color: c.taupe, icon: '🧠' },
+          { tier: 'Tier 3', name: 'Processors', desc: 'Specialized handlers for each file type', color: c.sage, icon: '' },
+          { tier: 'Tier 4', name: 'Intelligence', desc: 'Five Truths + Consultative Synthesis', color: c.taupe, icon: '' },
           { tier: 'Tier 5', name: 'Storage', desc: 'DuckDB, ChromaDB, Supabase, LLMs', color: c.slate, icon: '💾' },
-          { tier: 'Flows', name: 'Data Flows', desc: '5 critical flows that connect everything', color: c.synth, icon: '🔄' },
+          { tier: 'Flows', name: 'Data Flows', desc: '5 critical flows that connect everything', color: c.synth, icon: '' },
         ].map((t, i) => (
           <div
             key={i}
@@ -217,7 +217,7 @@ const ArchitecturePage = () => {
         </Card>
 
         {/* PII Redaction */}
-        <Card title="🔒 PII Redaction" subtitle="unified_chat.py" color={c.error}>
+        <Card title=" PII Redaction" subtitle="unified_chat.py" color={c.error}>
           <FnBox name="ReversibleRedactor" desc="PII NEVER goes to LLMs" items={['• SSN, Salary, DOB', '• 30+ PII patterns', '• Reversible tokens']} color={c.error} />
           <div style={{ marginTop: 12 }}>
             <FnBox name="Vision PII Redaction" desc="Before Claude Vision API" items={['• Tesseract OCR detect', '• Black box overlay']} color={c.error} />
@@ -228,7 +228,7 @@ const ArchitecturePage = () => {
         </Card>
 
         {/* Encryption */}
-        <Card title="🔐 Encryption" subtitle="structured_data_handler.py" color={c.error}>
+        <Card title=" Encryption" subtitle="structured_data_handler.py" color={c.error}>
           <FnBox name="Field Encryption" desc="AES-GCM per-field" items={['• DUCKDB_ENCRYPTION_KEY', '• Per-field encrypt', '• Audit logging']} color={c.error} />
           <div style={{ marginTop: 12 }}>
             <FnBox name="encryption_status()" desc="Verify & audit" items={['• Verify AESGCM', '• Return PII status']} color={c.error} />
@@ -246,7 +246,7 @@ const ArchitecturePage = () => {
       <h2 style={{ color: c.sage, marginBottom: 8 }}>Tier 3: Processors</h2>
       <p style={{ color: c.muted, marginBottom: 24 }}>Specialized file handlers - each an expert at one thing</p>
       
-      <Explain title="⚙️ The Workers — Specialized File Processors">
+      <Explain title=" The Workers — Specialized File Processors">
         Each processor is an expert at one thing: Register Extractor reads pay stubs using AI.
         Standards Processor extracts rules from policy docs. Structured Handler loads Excel/CSV into the database.
         PDF Vision uses AI to "see" table columns in PDFs with 92% accuracy.
@@ -315,7 +315,7 @@ const ArchitecturePage = () => {
       <h2 style={{ color: c.taupe, marginBottom: 8 }}>Tier 4: Intelligence Layer</h2>
       <p style={{ color: c.muted, marginBottom: 24 }}>Five Truths + Consultative Synthesis - the AI brain</p>
       
-      <Explain title="🧠 The Brain — Where Questions Get Answered">
+      <Explain title=" The Brain — Where Questions Get Answered">
         When you ask "show me SUI rates", the Intelligence Engine searches FIVE sources of truth:
         Reality (actual data), Intent (what customer wanted), Configuration (how it's set up),
         Reference (best practices), and Regulatory (legal requirements).
@@ -494,7 +494,7 @@ const ArchitecturePage = () => {
       <h2 style={{ color: c.synth, marginBottom: 8 }}>Critical Data Flows</h2>
       <p style={{ color: c.muted, marginBottom: 24 }}>Five flows that connect everything — if any breaks, the system suffers</p>
       
-      <Explain title="🔄 How Everything Connects">
+      <Explain title=" How Everything Connects">
         These five flows are the "magic" of XLR8. They're why you can ask natural questions
         and get accurate, consultative answers.
       </Explain>
