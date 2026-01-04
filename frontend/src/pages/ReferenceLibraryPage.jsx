@@ -60,12 +60,32 @@ export default function ReferenceLibraryPage() {
 
   return (
     <div>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>
+      {/* Header - Standard Pattern */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: '20px', 
+          fontWeight: 600, 
+          color: colors.text, 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          fontFamily: "'Sora', sans-serif"
+        }}>
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '10px', 
+            backgroundColor: colors.primary, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center' 
+          }}>
+            <BookOpen size={20} color="#ffffff" />
+          </div>
           Reference Library
         </h1>
-        <p style={{ color: colors.textMuted, marginTop: '0.25rem', fontSize: '0.875rem' }}>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>
           Compliance Standards, Best Practices & Rules
         </p>
       </div>
