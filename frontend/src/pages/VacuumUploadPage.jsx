@@ -295,8 +295,35 @@ export default function VacuumUploadPage() {
   return (
     <div style={{ minHeight: '100vh', background: colors.bg, padding: '1.5rem' }}>
       <div style={{ maxWidth: 1400, margin: '0 auto' }}>
-        <h1 style={{ fontSize: '1.75rem', fontWeight: 700, color: colors.text, marginBottom: '0.5rem' }}>Pay Register Extraction</h1>
-        <p style={{ color: colors.textMuted, marginBottom: '1.5rem' }}>Upload pay registers to extract employee data using AI-powered parsing</p>
+        {/* Header - Standard Pattern */}
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: colors.text, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: colors.primary, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <Upload size={20} color="#ffffff" />
+            </div>
+            Pay Register Extraction
+          </h1>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>
+            Upload pay registers to extract employee data using AI-powered parsing
+          </p>
+        </div>
         
         {/* Upload Section */}
         <div style={cardStyle}>
