@@ -18,7 +18,7 @@ import {
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
   HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search,
-  Settings, BookOpen, AlertCircle, Target, BarChart3
+  Settings, BookOpen, AlertCircle, Target, BarChart3, Server
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -49,12 +49,12 @@ const brandColors = {
   success: '#285390',
 };
 
-// Five Truths icon & color mapping (consistent across app)
+// Five Truths icon & color mapping (consistent across app - matches Dashboard)
 const TRUTH_ICONS = {
-  reality: { icon: BarChart3, color: '#285390' },
+  reality: { icon: Database, color: '#285390' },
   intent: { icon: Target, color: '#2766b1' },
-  configuration: { icon: Settings, color: '#7aa866' },
-  reference: { icon: BookOpen, color: '#5f4282' },
+  configuration: { icon: Server, color: '#7aa866' },
+  reference: { icon: FileText, color: '#5f4282' },
   regulatory: { icon: AlertCircle, color: '#993c44' },
 };
 
