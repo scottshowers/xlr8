@@ -264,7 +264,7 @@ export default function DataCleanup() {
   const clearAllJobs = async () => {
     setLoading(l => ({ ...l, action: true }));
     try {
-      const res = await fetch(`${API_BASE}/api/jobs/all`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/jobs`, { method: 'DELETE' });
       const data = await res.json();
       if (data.success !== false) {
         showResult(true, `Cleared ${data.deleted || 'all'} jobs`);
