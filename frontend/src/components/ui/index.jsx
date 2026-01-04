@@ -159,7 +159,7 @@ export function ErrorState({
   if (compact) {
     return (
       <div style={containerStyle}>
-        <span style={{ fontSize: '1.25rem' }}>⚠️</span>
+        <span style={{ fontSize: '1.25rem' }}></span>
         <div style={{ flex: 1 }}>
           <div style={{ fontWeight: 600, color: COLORS.error, fontSize: '0.875rem' }}>{title}</div>
           <div style={{ color: COLORS.textLight, fontSize: '0.8rem' }}>{message}</div>
@@ -184,7 +184,7 @@ export function ErrorState({
 
   return (
     <div style={containerStyle}>
-      <div style={{ fontSize: fullPage ? '4rem' : '3rem', marginBottom: '1rem', opacity: 0.8 }}>⚠️</div>
+      <div style={{ fontSize: fullPage ? '4rem' : '3rem', marginBottom: '1rem', opacity: 0.8 }}></div>
       <h2 style={{
         fontFamily: "'Sora', sans-serif",
         fontSize: fullPage ? '1.5rem' : '1.25rem',
@@ -213,7 +213,7 @@ export function ErrorState({
           alignItems: 'center',
           gap: '0.5rem',
         }}>
-          🔄 {retryLabel}
+           {retryLabel}
         </button>
       )}
     </div>
@@ -224,7 +224,7 @@ export function ErrorState({
 // EMPTY STATE
 // ============================================================
 export function EmptyState({ 
-  icon = '📭',
+  icon = '',
   title = 'Nothing here yet',
   description = '',
   action = null,
@@ -529,7 +529,7 @@ export function Button({
         ...style,
       }}
     >
-      {loading && <span style={{ animation: 'xlr8-spin 0.8s linear infinite' }}>⏳</span>}
+      {loading && <span style={{ animation: 'xlr8-spin 0.8s linear infinite' }}></span>}
       {children}
     </button>
   );
