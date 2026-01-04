@@ -508,15 +508,15 @@ class RuleRegistry:
             logger.warning("[STANDARDS] Supabase not available - rules will not persist")
     
     def _init_chroma(self):
-        """Initialize ChromaDB for rule search."""
+        """Initialize ChromaDB for rule search using shared singleton."""
         try:
-            import chromadb
-            client = chromadb.Client()
-            self.chroma_collection = client.get_or_create_collection(
-                name="xlr8_standards_rules",
-                metadata={"description": "Extracted compliance rules"}
-            )
-            logger.info("[STANDARDS] ChromaDB initialized for rule search")
+            try:
+                from utils.chromadb_client import get_standards_collection
+            except ImportError:
+                from backend.utils.chromadb_client import get_standards_collection
+            
+            self.chroma_collection = get_standards_collection()
+            logger.info("[STANDARDS] ChromaDB initialized for rule search (using shared client)")
         except Exception as e:
             logger.warning(f"[STANDARDS] ChromaDB not available: {e}")
     
