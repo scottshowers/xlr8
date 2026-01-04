@@ -493,11 +493,33 @@ export default function QueryBuilderPage() {
   
   return (
     <div style={styles.container}>
-      {/* Header */}
-      <div style={styles.header}>
+      {/* Header - Standard Pattern */}
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <h1 style={styles.title}>Smart Analytics</h1>
-          <p style={styles.subtitle}>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: COLORS.text, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: COLORS.primary, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <BarChart3 size={20} color="#ffffff" />
+            </div>
+            Smart Analytics
+          </h1>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: COLORS.textMuted }}>
             {activeProject?.customer || projectName} • {tables.length} tables available
           </p>
         </div>
