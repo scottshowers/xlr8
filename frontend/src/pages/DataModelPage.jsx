@@ -210,8 +210,11 @@ function SampleDataTable({ title, rows, columns, joinColumn, rowCount, orphanVal
               color: c.electricBlue,
               borderRadius: '4px',
               fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '4px',
             }}>
-              🔗 {joinColumn}
+              <Link2 size={12} /> {joinColumn}
             </span>
           </Tooltip>
         )}
