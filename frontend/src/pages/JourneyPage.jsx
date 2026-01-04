@@ -169,9 +169,9 @@ export default function JourneyPage() {
                 maxWidth: 500,
               }}>
                 {[
-                  { icon: '💬', label: 'Slack Threads', sub: 'Decisions buried' },
-                  { icon: '🧠', label: "People's Heads", sub: 'Knowledge walks out' },
-                  { icon: '📊', label: 'Spreadsheets', sub: 'Version chaos' },
+                  { icon: '', label: 'Slack Threads', sub: 'Decisions buried' },
+                  { icon: '', label: "People's Heads", sub: 'Knowledge walks out' },
+                  { icon: '', label: 'Spreadsheets', sub: 'Version chaos' },
                 ].map((item, i) => (
                   <div key={i} style={{
                     padding: '1rem',
@@ -319,11 +319,11 @@ export default function JourneyPage() {
               }} />
               
               {[
-                { icon: '📤', label: 'Upload', time: 'Any file', color: colors.primary },
-                { icon: '🧠', label: 'Classify', time: 'Auto-detect', color: colors.electricBlue },
-                { icon: '⚡', label: 'Extract', time: '90 seconds', color: colors.warning },
-                { icon: '💬', label: 'Query', time: 'Plain English', color: colors.purple },
-                { icon: '✅', label: 'Cite', time: 'With sources', color: colors.accent },
+                { icon: '', label: 'Upload', time: 'Any file', color: colors.primary },
+                { icon: '', label: 'Classify', time: 'Auto-detect', color: colors.electricBlue },
+                { icon: '', label: 'Extract', time: '90 seconds', color: colors.warning },
+                { icon: '', label: 'Query', time: 'Plain English', color: colors.purple },
+                { icon: '', label: 'Cite', time: 'With sources', color: colors.accent },
               ].map((step, i) => (
                 <div key={i} style={{ textAlign: 'center', position: 'relative', zIndex: 1 }}>
                   <div style={{
@@ -382,10 +382,10 @@ export default function JourneyPage() {
             {/* Results grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', margin: '2rem 0' }}>
               {[
-                { value: '80%', label: 'Faster Analysis', icon: '⚡' },
-                { value: '5', label: 'Truth Sources', icon: '🎯' },
-                { value: '∞', label: 'Decision Memory', icon: '🧠' },
-                { value: 'Zero', label: 'Lost Context', icon: '🔒' },
+                { value: '80%', label: 'Faster Analysis', icon: '' },
+                { value: '5', label: 'Truth Sources', icon: '' },
+                { value: '∞', label: 'Decision Memory', icon: '' },
+                { value: 'Zero', label: 'Lost Context', icon: '' },
               ].map((result, i) => (
                 <div key={i} style={{ background: colors.bg, borderRadius: 10, padding: '1.25rem', textAlign: 'center' }}>
                   <div style={{ fontSize: '1.25rem', marginBottom: '0.25rem' }}>{result.icon}</div>
@@ -405,7 +405,7 @@ export default function JourneyPage() {
                 border: `2px solid ${colors.primary}`,
               }}>
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>📊</div>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.25rem' }}></div>
                   <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>Scattered Data</div>
                 </div>
                 <ArrowRight size={24} color={colors.primary} />
@@ -421,7 +421,7 @@ export default function JourneyPage() {
                 </div>
                 <ArrowRight size={24} color={colors.primary} />
                 <div style={{ textAlign: 'center' }}>
-                  <div style={{ fontSize: '2rem', marginBottom: '0.25rem' }}>🎯</div>
+                  <div style={{ fontSize: '2rem', marginBottom: '0.25rem' }}></div>
                   <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>Decisions + Proof</div>
                 </div>
               </div>
