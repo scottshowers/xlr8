@@ -30,7 +30,7 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
       setPersonas([{
         id: 'bessie',
         name: 'Bessie',
-        icon: '🐮',
+        icon: '',
         description: 'Your friendly UKG payroll expert',
         expertise: ['Payroll', 'UKG Pro', 'Compliance']
       }]);
@@ -103,7 +103,7 @@ export function PersonaSwitcher({ currentPersona, onPersonaChange }) {
             style={styles.createButton}
             onClick={() => window.openPersonaCreator && window.openPersonaCreator()}
           >
-            <span style={styles.optionIcon}>➕</span>
+            <span style={styles.optionIcon}></span>
             <span style={styles.createText}>Create Custom Persona</span>
           </div>
         </div>
