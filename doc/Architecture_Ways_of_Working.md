@@ -1,8 +1,8 @@
 # XLR8 ARCHITECTURE WAYS OF WORKING
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Created:** January 2, 2026  
-**Updated:** January 3, 2026 (Parts 9 & 10 added)  
+**Updated:** January 4, 2026 (Parts 11 & 12 added - Frontend Components, Dead Code)  
 **Purpose:** Enforce consistent development patterns across all features
 
 ---
@@ -870,3 +870,135 @@ As of January 3, 2026, all router prefixes have been removed and consolidated to
 **When in doubt, grep the codebase and match existing patterns.**
 
 **If you find yourself writing new infrastructure instead of using existing patterns, STOP and ask why.**
+
+---
+
+# PART 11: FRONTEND COMPONENT STANDARDS
+
+**Added:** January 4, 2026 after finding 5 pages with duplicate local Tooltip components that didn't respect global settings.
+
+## 11.1 The Problem
+
+Pages were copy-pasting component implementations locally instead of using shared components. This led to:
+- Inconsistent behavior (local tooltips ignored global toggle)
+- Duplicated code across 5+ files
+- Style drift between implementations
+- Features not working (tooltip toggle only worked on nav, not page content)
+
+## 11.2 The Rule
+
+**NEVER define UI components locally in page files. Use shared components from `components/ui/`.**
+
+```jsx
+// ❌ WRONG - Local component definition in page file
+function Tooltip({ children, title, detail }) {
+  const [show, setShow] = useState(false);
+  return (
+    <div onMouseEnter={() => setShow(true)}>
+      {children}
+      {show && <div>{title}</div>}
+    </div>
+  );
+}
+
+// ✅ CORRECT - Import shared component
+import { Tooltip } from '../components/ui';
+```
+
+## 11.3 Shared UI Components
+
+All reusable UI components live in `frontend/src/components/ui/`:
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `Tooltip` | `Tooltip.jsx` | Fancy tooltips with title/detail/action, respects global toggle |
+| `SimpleTooltip` | `Tooltip.jsx` | Basic single-line tooltips for nav/buttons |
+| `Card` | `Card.jsx` | Consistent card styling |
+| `Button` | `Button.jsx` | Standard button variants |
+
+### Tooltip Usage
+
+```jsx
+import { Tooltip, SimpleTooltip } from '../components/ui';
+
+// Fancy tooltip (3-part: title, detail, action)
+<Tooltip 
+  title="Pipeline Status" 
+  detail="Real-time health checks for each pipeline stage."
+  action="Click to refresh"
+>
+  <div>Hover me</div>
+</Tooltip>
+
+// Simple tooltip (single line, for nav/buttons)
+<SimpleTooltip text="Sign out of XLR8">
+  <button>Logout</button>
+</SimpleTooltip>
+```
+
+### Tooltip Global Toggle
+
+Tooltips respect `TooltipContext`:
+- Toggle button in nav bar controls all tooltips app-wide
+- Setting persists to localStorage
+- Individual tooltips can be disabled with `disabled` prop
+
+```jsx
+// In components/ui/Tooltip.jsx
+const { tooltipsEnabled } = useTooltips();
+if (!tooltipsEnabled) return children; // No tooltip shown
+```
+
+## 11.4 When Creating New Shared Components
+
+1. **Check if it exists first** - grep `frontend/src/components/`
+2. **If creating new** - put in `components/ui/` and export from `components/ui/index.js`
+3. **Add to this document** - update the table above
+
+## 11.5 Anti-Pattern: Component Duplication
+
+Files that HAD local Tooltip components (now fixed):
+- `DashboardPage.jsx` ❌ → ✅ Uses shared
+- `DataPage.jsx` ❌ → ✅ Uses shared
+- `DataExplorer.jsx` ❌ → ✅ Uses shared
+- `DataModelPage.jsx` ❌ → ✅ Uses shared
+- `MissionControl.jsx` ❌ → Deleted (orphaned file)
+
+**If you find yourself copy-pasting a component into a page file, STOP.**
+
+---
+
+# PART 12: DEAD CODE REMOVAL
+
+**Added:** January 4, 2026
+
+## 12.1 The Rule
+
+**Delete orphaned files. Don't leave them around "just in case."**
+
+Orphaned files cause:
+- Confusion about what's actually used
+- Wasted effort updating dead code
+- False positives in grep/search
+- Technical debt accumulation
+
+## 12.2 How to Identify Orphaned Files
+
+```bash
+# Check if a component is imported anywhere
+grep -rn "import.*MyComponent" frontend/src/
+
+# Check if a page is routed
+grep -n "MyPage" frontend/src/App.jsx
+
+# Check if a backend module is used
+grep -rn "from.*mymodule\|import.*mymodule" backend/
+```
+
+## 12.3 Known Orphaned Files (Deleted)
+
+| File | Reason | Date Removed |
+|------|--------|--------------|
+| `MissionControl.jsx` | Replaced by DashboardPage, not routed | Jan 4, 2026 |
+
+**When you find orphaned code, delete it. Don't comment it out. Git has history.**
