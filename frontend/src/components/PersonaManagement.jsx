@@ -77,20 +77,20 @@ export default function PersonaManagement() {
           style={styles.createButton}
           onClick={() => setIsCreating(true)}
         >
-          ➕ Create New Persona
+          Create New Persona
         </button>
       </div>
 
       {error && (
         <div style={styles.errorBanner}>
-          ❌ {error}
+          {error}
           <button onClick={() => setError('')} style={styles.closeBanner}>✕</button>
         </div>
       )}
 
       {success && (
         <div style={styles.successBanner}>
-          ✅ {success}
+          {success}
           <button onClick={() => setSuccess('')} style={styles.closeBanner}>✕</button>
         </div>
       )}
@@ -207,11 +207,11 @@ function PersonaDetails({ persona, onEdit, onDelete }) {
 
       <div style={styles.detailsActions}>
         <button style={styles.editButton} onClick={onEdit}>
-          ✏️ Edit Persona
+          Edit Persona
         </button>
         {persona.custom && (
           <button style={styles.deleteButton} onClick={() => onDelete(persona.id)}>
-            🗑️ Delete Persona
+            Delete Persona
           </button>
         )}
       </div>
@@ -233,9 +233,9 @@ function PersonaEditor({ persona, onSave, onCancel }) {
 
   const emojis = [
     '🤖', '👨‍💼', '👩‍💼', '🧑‍💻', '👨‍🏫', '👩‍🏫',
-    '🦸', '🧙', '🐮', '🦉', '🦊', '🐘', '🦁', '🐶',
+    '🦸', '🧙', '', '🦉', '🦊', '🐘', '🦁', '🐶',
     '💼', '⚡', '🚀', '🎯', '🔍', '💡', '🎓', '🏆',
-    '👑', '🎨', '⚙️', '🔧', '📊', '💰', '🌟', '✨'
+    '👑', '🎨', '⚙️', '', '', '💰', '🌟', '✨'
   ]
 
   const handleSubmit = async (e) => {
@@ -280,7 +280,7 @@ function PersonaEditor({ persona, onSave, onCancel }) {
   return (
     <div style={styles.editor}>
       <h2 style={styles.editorTitle}>
-        {persona ? '✏️ Edit Persona' : '➕ Create New Persona'}
+        {persona ? 'Edit Persona' : 'Create New Persona'}
       </h2>
 
       <form onSubmit={handleSubmit} style={styles.form}>
