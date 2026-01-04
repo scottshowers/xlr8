@@ -10,6 +10,8 @@
  * - Real-time upload progress
  * - "Just Added" immediate feedback
  * - Mission Control color scheme
+ * 
+ * Updated: January 2026 - Emoji cleanup + comprehensive tooltips
  */
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -18,14 +20,13 @@ import {
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
   HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search,
-  Settings, BookOpen, AlertCircle, Target, BarChart3
+  Settings, BookOpen, AlertCircle, Target, BarChart3, Plus
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import { Tooltip } from '../components/ui';
 import api from '../services/api';
-// import ProjectContext from '../components/ProjectContext'; // TODO: deploy component first
 
 // ============================================================================
 // BRAND COLORS (from Mission Control)
@@ -158,12 +159,12 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
   
   // Built-in domains
   const builtInDomains = [
-    { value: 'auto', label: '🔮 Auto-detect', desc: 'Let AI determine the domain' },
-    { value: 'hr', label: '👥 HR', desc: 'Employee, hire dates, terminations' },
-    { value: 'payroll', label: '💰 Payroll', desc: 'Earnings, deductions, pay periods' },
-    { value: 'tax', label: '📋 Tax', desc: 'Withholdings, W2, FICA, SUI' },
-    { value: 'benefits', label: '🏥 Benefits', desc: 'Plans, coverage, enrollment' },
-    { value: 'time', label: '⏱️ Time', desc: 'Hours, timecards, PTO, overtime' },
+    { value: 'auto', label: 'Auto-detect', desc: 'Let AI determine the domain' },
+    { value: 'hr', label: 'HR', desc: 'Employee, hire dates, terminations' },
+    { value: 'payroll', label: 'Payroll', desc: 'Earnings, deductions, pay periods' },
+    { value: 'tax', label: 'Tax', desc: 'Withholdings, W2, FICA, SUI' },
+    { value: 'benefits', label: 'Benefits', desc: 'Plans, coverage, enrollment' },
+    { value: 'time', label: 'Time', desc: 'Hours, timecards, PTO, overtime' },
   ];
   
   // Load custom domains on mount
@@ -213,7 +214,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
     ? [
         { 
           value: 'reality', 
-          label: '📊 Employee & Transactional Data', 
+          label: 'Employee & Transactional Data', 
           desc: 'Demographics, payroll records, time entries',
           tooltip: {
             title: 'Reality Data',
@@ -223,7 +224,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
         },
         { 
           value: 'intent', 
-          label: '📋 Customer Requirements', 
+          label: 'Customer Requirements', 
           desc: 'SOWs, meeting notes, what they want',
           tooltip: {
             title: 'Customer Requirements',
@@ -233,7 +234,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
         },
         { 
           value: 'configuration', 
-          label: '⚙️ Customer Setup', 
+          label: 'Customer Setup', 
           desc: 'Their code tables and configured values',
           tooltip: {
             title: 'Customer Configuration',
@@ -245,7 +246,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
     : [
         { 
           value: 'reference', 
-          label: '📚 Vendor Docs & How-To', 
+          label: 'Vendor Docs & How-To', 
           desc: 'Product docs, configuration guides',
           tooltip: {
             title: 'Vendor Documentation',
@@ -255,7 +256,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
         },
         { 
           value: 'regulatory', 
-          label: '⚖️ Laws, Rules & Compliance', 
+          label: 'Laws, Rules & Compliance', 
           desc: 'IRS, state, federal, audit requirements',
           tooltip: {
             title: 'Regulatory & Compliance',
@@ -306,14 +307,14 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
       {/* Scope Toggle */}
       <div style={{ display: 'flex', background: c.background, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' }}>
         {[
-          { value: 'project', label: '📁 Project Files', tooltip: 'Customer-specific documents for this project' },
-          { value: 'global', label: '📚 Reference Library', tooltip: 'Global docs shared across all projects' }
+          { value: 'project', label: 'Project Files', tooltip: 'Customer-specific documents for this project' },
+          { value: 'global', label: 'Reference Library', tooltip: 'Global docs shared across all projects' }
         ].map(scope => (
           <Tooltip 
             key={scope.value}
             title={scope.label} 
             detail={scope.tooltip}
-            action={scope.value === 'project' ? 'Requirements & Config' : 'Vendor, Legal, Audit docs'}
+            action={scope.value === 'project' ? 'Upload customer data, requirements, config' : 'Upload vendor docs, laws, audit guides'}
           >
             <button
               onClick={() => setTargetScope(scope.value)}
@@ -348,7 +349,6 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
                 title={tt.tooltip.title}
                 detail={tt.tooltip.detail}
                 action={tt.tooltip.action}
-                position="right"
               >
                 <button
                   onClick={() => setTruthType(tt.value)}
@@ -392,54 +392,58 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
             }}>
               Domain (optional)
             </label>
-            <select
-              value={selectedDomain}
-              onChange={(e) => setSelectedDomain(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '0.6rem 0.75rem',
-                borderRadius: 8,
-                border: `2px solid ${selectedDomain === 'auto' ? c.primary : c.border}`,
-                background: selectedDomain === 'auto' ? `${c.primary}20` : c.background,
-                color: c.text,
-                fontSize: '0.85rem',
-                cursor: 'pointer',
-                marginBottom: '0.5rem',
-                fontWeight: 600
-              }}
-            >
-              {builtInDomains.map(d => (
-                <option key={d.value} value={d.value}>{d.label} - {d.desc}</option>
-              ))}
-              {customDomains.length > 0 && (
-                <optgroup label="Custom Domains">
-                  {customDomains.map(d => (
-                    <option key={d.value} value={d.value}>✨ {d.label}</option>
-                  ))}
-                </optgroup>
-              )}
-            </select>
-            <button
-              onClick={() => setShowDomainModal(true)}
-              style={{
-                width: '100%',
-                padding: '0.6rem',
-                borderRadius: 8,
-                border: `2px solid ${c.accent}`,
-                background: `${c.accent}`,
-                color: c.white,
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.35rem',
-                transition: 'all 0.2s'
-              }}
-            >
-              <Sparkles size={14} /> Create Custom Domain
-            </button>
+            <Tooltip title="Data Domain" detail="Domains help AI understand and classify your data. Auto-detect works for most files." action="Select a domain or let AI decide">
+              <select
+                value={selectedDomain}
+                onChange={(e) => setSelectedDomain(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem 0.75rem',
+                  borderRadius: 8,
+                  border: `2px solid ${selectedDomain === 'auto' ? c.primary : c.border}`,
+                  background: selectedDomain === 'auto' ? `${c.primary}20` : c.background,
+                  color: c.text,
+                  fontSize: '0.85rem',
+                  cursor: 'pointer',
+                  marginBottom: '0.5rem',
+                  fontWeight: 600
+                }}
+              >
+                {builtInDomains.map(d => (
+                  <option key={d.value} value={d.value}>{d.label} - {d.desc}</option>
+                ))}
+                {customDomains.length > 0 && (
+                  <optgroup label="Custom Domains">
+                    {customDomains.map(d => (
+                      <option key={d.value} value={d.value}>{d.label}</option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </Tooltip>
+            <Tooltip title="Custom Domains" detail="Create domain-specific classifiers with signal words for auto-detection on future uploads." action="Define once, auto-detect forever">
+              <button
+                onClick={() => setShowDomainModal(true)}
+                style={{
+                  width: '100%',
+                  padding: '0.6rem',
+                  borderRadius: 8,
+                  border: `2px solid ${c.accent}`,
+                  background: `${c.accent}`,
+                  color: c.white,
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '0.35rem',
+                  transition: 'all 0.2s'
+                }}
+              >
+                <Plus size={14} /> Create Custom Domain
+              </button>
+            </Tooltip>
           </div>
         )}
 
@@ -455,7 +459,7 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
               width: '90%', maxWidth: 400, boxShadow: '0 4px 20px rgba(0,0,0,0.3)'
             }} onClick={e => e.stopPropagation()}>
               <h3 style={{ margin: '0 0 1rem', color: c.text, fontSize: '1.1rem' }}>
-                ✨ Create Custom Domain
+                Create Custom Domain
               </h3>
               <p style={{ fontSize: '0.8rem', color: c.textMuted, marginBottom: '1rem' }}>
                 Custom domains help AI classify your data. Signal words trigger auto-detection on future uploads.
@@ -533,24 +537,26 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
           multiple accept=".pdf,.docx,.doc,.xlsx,.xls,.csv,.txt,.md"
           onChange={(e) => { handleFiles(e.target.files); e.target.value = ''; }}
         />
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-          onDragLeave={() => setDragOver(false)}
-          onDrop={handleDrop}
-          onClick={() => fileInputRef.current?.click()}
-          style={{
-            border: `2px dashed ${dragOver ? c.primary : c.border}`,
-            borderRadius: 10, padding: '1.5rem 1rem', textAlign: 'center',
-            cursor: 'pointer', background: dragOver ? `${c.primary}10` : c.background,
-            transition: 'all 0.2s'
-          }}
-        >
-          <UploadIcon size={28} style={{ color: c.primary, marginBottom: '0.5rem' }} />
-          <p style={{ fontWeight: 600, color: c.text, margin: '0 0 0.25rem', fontSize: '0.9rem' }}>
-            Drop files or click to browse
-          </p>
-          <p style={{ fontSize: '0.75rem', color: c.textMuted, margin: 0 }}>PDF, Excel, Word, CSV</p>
-        </div>
+        <Tooltip title="Upload Files" detail="Drag and drop files or click to browse. Supports PDF, Excel, Word, CSV, and text files." action="Files process in background">
+          <div
+            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+            onDragLeave={() => setDragOver(false)}
+            onDrop={handleDrop}
+            onClick={() => fileInputRef.current?.click()}
+            style={{
+              border: `2px dashed ${dragOver ? c.primary : c.border}`,
+              borderRadius: 10, padding: '1.5rem 1rem', textAlign: 'center',
+              cursor: 'pointer', background: dragOver ? `${c.primary}10` : c.background,
+              transition: 'all 0.2s'
+            }}
+          >
+            <UploadIcon size={28} style={{ color: c.primary, marginBottom: '0.5rem' }} />
+            <p style={{ fontWeight: 600, color: c.text, margin: '0 0 0.25rem', fontSize: '0.9rem' }}>
+              Drop files or click to browse
+            </p>
+            <p style={{ fontSize: '0.75rem', color: c.textMuted, margin: 0 }}>PDF, Excel, Word, CSV</p>
+          </div>
+        </Tooltip>
 
         {/* Active Uploads */}
         {activeUploads.length > 0 && (
@@ -731,19 +737,19 @@ function FilesPanel({ c, project, targetScope }) {
       }}>
         {isGlobalScope ? (
           <>
-            <Tooltip title="Reference Files" detail="Global documents in the Reference Library." action="Standards, laws, vendor docs">
+            <Tooltip title="Reference Files" detail="Global documents in the Reference Library - vendor documentation, compliance standards, audit guides." action="Shared across all projects">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <FileText size={18} style={{ color: c.accent }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.length}</strong> files</span>
               </div>
             </Tooltip>
-            <Tooltip title="Extracted Rules" detail="Compliance rules extracted from regulatory documents." action="Used in Compliance Check">
+            <Tooltip title="Extracted Rules" detail="Compliance rules auto-extracted from regulatory documents using AI." action="Used in Compliance Check playbook">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <span style={{ fontSize: '1rem' }}>⚖️</span>
+                <AlertCircle size={18} style={{ color: c.electricBlue }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{extractedRules.length}</strong> rules</span>
               </div>
             </Tooltip>
-            <Tooltip title="Documents" detail="Global docs chunked for AI retrieval." action="Referenced across all projects">
+            <Tooltip title="AI Chunks" detail="Document sections chunked and indexed for AI retrieval and semantic search." action="Referenced in AI Chat responses">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <Database size={18} style={{ color: c.electricBlue }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.reduce((sum, f) => sum + (f.chunk_count || 0), 0)}</strong> chunks</span>
@@ -752,19 +758,19 @@ function FilesPanel({ c, project, targetScope }) {
           </>
         ) : (
           <>
-            <Tooltip title="Tables" detail="Total structured tables created from uploaded files." action="Click Data Explorer to view details">
+            <Tooltip title="Tables" detail="Structured data tables created from uploaded Excel, CSV, and extracted PDF files." action="Query in Data Explorer or AI Chat">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <Database size={18} style={{ color: c.primary }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalTables}</strong> tables</span>
               </div>
             </Tooltip>
-            <Tooltip title="Rows" detail="Total data rows available for querying." action="Query in AI Chat">
+            <Tooltip title="Data Rows" detail="Total data rows available for querying across all tables in this project." action="Run analytics in AI Chat">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <HardDrive size={18} style={{ color: c.electricBlue }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalRows.toLocaleString()}</strong> rows</span>
               </div>
             </Tooltip>
-            <Tooltip title="Documents" detail="Documents chunked for AI retrieval." action="Referenced in AI responses">
+            <Tooltip title="Documents" detail="Unstructured documents chunked for AI retrieval - SOWs, requirements, meeting notes." action="Referenced in AI responses">
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
                 <FileText size={18} style={{ color: c.accent }} />
                 <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> documents</span>
@@ -773,25 +779,19 @@ function FilesPanel({ c, project, targetScope }) {
           </>
         )}
         <div style={{ flex: 1 }} />
-        <button 
-          onClick={loadData}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '0.35rem',
-            padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${c.border}`,
-            borderRadius: 6, fontSize: '0.8rem', color: c.textMuted, cursor: 'pointer'
-          }}
-        >
-          <RefreshCw size={14} /> Refresh
-        </button>
+        <Tooltip title="Refresh" detail="Reload file list and stats from the server." action="Click after uploads complete">
+          <button 
+            onClick={loadData}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.35rem',
+              padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${c.border}`,
+              borderRadius: 6, fontSize: '0.8rem', color: c.textMuted, cursor: 'pointer'
+            }}
+          >
+            <RefreshCw size={14} /> Refresh
+          </button>
+        </Tooltip>
       </div>
-
-      {/* Project Context - System/Domain Detection (TODO: uncomment after deploying ProjectContext.jsx)
-      {!isGlobalScope && currentProject && (
-        <div style={{ marginBottom: '1rem' }}>
-          <ProjectContext projectName={currentProject} compact />
-        </div>
-      )}
-      */}
 
       {/* Recently Completed */}
       {recentlyCompleted.length > 0 && (
@@ -831,22 +831,24 @@ function FilesPanel({ c, project, targetScope }) {
 
       {/* Structured Data Section */}
       <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, marginBottom: '1rem', overflow: 'hidden' }}>
-        <button
-          onClick={() => toggleSection('structured')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
-            padding: '0.875rem 1rem', background: c.background, border: 'none',
-            borderBottom: expandedSections.structured ? `1px solid ${c.border}` : 'none',
-            cursor: 'pointer', textAlign: 'left'
-          }}
-        >
-          {expandedSections.structured ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
-          <FileSpreadsheet size={18} style={{ color: c.primary }} />
-          <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Structured Data</span>
-          <span style={{ background: `${c.primary}15`, color: c.primary, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
-            {structuredFiles.length}
-          </span>
-        </button>
+        <Tooltip title="Structured Data" detail="Tabular data from Excel, CSV, and extracted PDFs. Queryable in AI Chat and Data Explorer." action="Click to expand/collapse">
+          <button
+            onClick={() => toggleSection('structured')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
+              padding: '0.875rem 1rem', background: c.background, border: 'none',
+              borderBottom: expandedSections.structured ? `1px solid ${c.border}` : 'none',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+          >
+            {expandedSections.structured ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
+            <FileSpreadsheet size={18} style={{ color: c.primary }} />
+            <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Structured Data</span>
+            <span style={{ background: `${c.primary}15`, color: c.primary, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+              {structuredFiles.length}
+            </span>
+          </button>
+        </Tooltip>
         
         {expandedSections.structured && (
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
@@ -880,22 +882,24 @@ function FilesPanel({ c, project, targetScope }) {
 
       {/* Documents Section */}
       <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
-        <button
-          onClick={() => toggleSection('documents')}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
-            padding: '0.875rem 1rem', background: c.background, border: 'none',
-            borderBottom: expandedSections.documents ? `1px solid ${c.border}` : 'none',
-            cursor: 'pointer', textAlign: 'left'
-          }}
-        >
-          {expandedSections.documents ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
-          <FileText size={18} style={{ color: c.accent }} />
-          <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Documents</span>
-          <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
-            {docs.length}
-          </span>
-        </button>
+        <Tooltip title="Documents" detail="Unstructured documents chunked for AI semantic search - PDFs, Word docs, requirements." action="Click to expand/collapse">
+          <button
+            onClick={() => toggleSection('documents')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
+              padding: '0.875rem 1rem', background: c.background, border: 'none',
+              borderBottom: expandedSections.documents ? `1px solid ${c.border}` : 'none',
+              cursor: 'pointer', textAlign: 'left'
+            }}
+          >
+            {expandedSections.documents ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
+            <FileText size={18} style={{ color: c.accent }} />
+            <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Documents</span>
+            <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+              {docs.length}
+            </span>
+          </button>
+        </Tooltip>
         
         {expandedSections.documents && (
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
@@ -929,28 +933,30 @@ function FilesPanel({ c, project, targetScope }) {
       {/* Reference Library Section - Only shown in global scope */}
       {isGlobalScope && (
         <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden', marginTop: '1rem' }}>
-          <button
-            onClick={() => toggleSection('reference')}
-            style={{
-              display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
-              padding: '0.875rem 1rem', background: c.background, border: 'none',
-              borderBottom: expandedSections.reference ? `1px solid ${c.border}` : 'none',
-              cursor: 'pointer', textAlign: 'left'
-            }}
-          >
-            {expandedSections.reference ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
-            <span style={{ fontSize: '1.1rem' }}>⚖️</span>
-            <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Reference Library Files</span>
-            <span style={{ background: `${c.royalPurple}15`, color: c.royalPurple, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
-              {refFiles.length} files • {extractedRules.length} rules
-            </span>
-          </button>
+          <Tooltip title="Reference Library" detail="Global compliance standards, vendor documentation, and regulatory guides shared across all projects." action="Click to expand/collapse">
+            <button
+              onClick={() => toggleSection('reference')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%',
+                padding: '0.875rem 1rem', background: c.background, border: 'none',
+                borderBottom: expandedSections.reference ? `1px solid ${c.border}` : 'none',
+                cursor: 'pointer', textAlign: 'left'
+              }}
+            >
+              {expandedSections.reference ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
+              <AlertCircle size={20} color={c.royalPurple} />
+              <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Reference Library Files</span>
+              <span style={{ background: `${c.royalPurple}15`, color: c.royalPurple, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+                {refFiles.length} files • {extractedRules.length} rules
+              </span>
+            </button>
+          </Tooltip>
           
           {expandedSections.reference && (
             <div style={{ maxHeight: '400px', overflowY: 'auto' }}>
               {refFiles.length === 0 ? (
                 <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
-                  <span style={{ fontSize: '2rem', opacity: 0.3, display: 'block', marginBottom: '0.5rem' }}>⚖️</span>
+                  <AlertCircle size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
                   <p style={{ margin: '0 0 0.5rem', fontWeight: 500 }}>No reference files yet</p>
                   <p style={{ margin: 0, fontSize: '0.85rem' }}>Upload regulatory docs to extract compliance rules</p>
                 </div>
@@ -979,24 +985,26 @@ function FilesPanel({ c, project, targetScope }) {
                           )}
                         </div>
                       </div>
-                      <button
-                        onClick={async () => {
-                          if (window.confirm(`Delete "${file.filename}" and its extracted rules?`)) {
-                            try {
-                              await api.delete(`/status/references/${encodeURIComponent(file.filename)}?confirm=true`);
-                              loadData();
-                            } catch (err) {
-                              alert('Delete failed: ' + (err.response?.data?.detail || err.message));
+                      <Tooltip title="Delete File" detail="Remove this file and any extracted rules from the Reference Library." action="This cannot be undone">
+                        <button
+                          onClick={async () => {
+                            if (window.confirm(`Delete "${file.filename}" and its extracted rules?`)) {
+                              try {
+                                await api.delete(`/status/references/${encodeURIComponent(file.filename)}?confirm=true`);
+                                loadData();
+                              } catch (err) {
+                                alert('Delete failed: ' + (err.response?.data?.detail || err.message));
+                              }
                             }
-                          }
-                        }}
-                        style={{
-                          padding: '0.35rem 0.5rem', background: 'transparent', border: `1px solid ${c.border}`,
-                          borderRadius: 4, cursor: 'pointer', color: c.textMuted, fontSize: '0.75rem'
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                          }}
+                          style={{
+                            padding: '0.35rem 0.5rem', background: 'transparent', border: `1px solid ${c.border}`,
+                            borderRadius: 4, cursor: 'pointer', color: c.textMuted, fontSize: '0.75rem'
+                          }}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </Tooltip>
                     </div>
                   );
                 })
