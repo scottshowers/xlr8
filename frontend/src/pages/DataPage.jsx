@@ -187,7 +187,7 @@ export default function DataPage() {
   const c = { ...colors, ...brandColors };
   
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto', background: c.background, minHeight: '100vh' }}>
+    <div>
       {/* Page Header */}
       <div style={{ marginBottom: '1.5rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
