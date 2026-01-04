@@ -28,6 +28,7 @@ const colors = {
   accent: '#285390',
   accentLight: 'rgba(40, 83, 144, 0.1)',
   electricBlue: '#2766b1',
+  royalPurple: '#5f4282',
   warning: '#d97706',
   warningLight: 'rgba(217, 119, 6, 0.1)',
   red: '#dc2626',
@@ -448,6 +449,38 @@ export default function ProjectsPage() {
             background: colors.inputBg,
             borderBottom: `1px solid ${colors.divider}`,
           }}>
+            {/* Form Header with Close */}
+            <div style={{ 
+              display: 'flex', 
+              justifyContent: 'space-between', 
+              alignItems: 'center', 
+              marginBottom: '1rem',
+              paddingBottom: '0.75rem',
+              borderBottom: `1px solid ${colors.divider}`
+            }}>
+              <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: colors.text }}>
+                {editingProject ? `Edit Project: ${editingProject.name}` : 'New Project'}
+              </h3>
+              <button
+                type="button"
+                onClick={cancelForm}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  width: 32,
+                  height: 32,
+                  background: 'transparent',
+                  border: `1px solid ${colors.inputBorder}`,
+                  borderRadius: 6,
+                  color: colors.textMuted,
+                  cursor: 'pointer',
+                }}
+                title="Close form"
+              >
+                <X size={16} />
+              </button>
+            </div>
             <form onSubmit={handleSubmit}>
               {/* Row 1: AR# and Company */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
@@ -680,7 +713,7 @@ export default function ProjectsPage() {
             {/* Table Header */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 1.2fr 1.5fr 1.5fr 80px 140px',
+              gridTemplateColumns: '1fr 1.2fr 2fr 1.2fr 80px 140px',
               padding: '0.75rem 1rem',
               background: colors.inputBg,
               borderBottom: `1px solid ${colors.divider}`,
@@ -692,7 +725,7 @@ export default function ProjectsPage() {
             }}>
               <span>AR#</span>
               <span>Company</span>
-              <span>Systems</span>
+              <span>Scope</span>
               <span>Playbooks</span>
               <span>Status</span>
               <span>Actions</span>
@@ -703,13 +736,15 @@ export default function ProjectsPage() {
               const customerColors = getCustomerColorPalette(project.customer || project.name);
               const isSelected = activeProject?.id === project.id;
               const projectSystems = project.systems || [];
+              const projectDomains = project.domains || [];
+              const projectFAs = project.functional_areas || [];
               
               return (
                 <div
                   key={project.id}
                   style={{
                     display: 'grid',
-                    gridTemplateColumns: '1fr 1.2fr 1.5fr 1.5fr 80px 140px',
+                    gridTemplateColumns: '1fr 1.2fr 2fr 1.2fr 80px 140px',
                     padding: '0.875rem 1rem',
                     borderBottom: `1px solid ${colors.divider}`,
                     borderLeft: `3px solid ${isSelected ? customerColors.primary : 'transparent'}`,
@@ -732,37 +767,94 @@ export default function ProjectsPage() {
                 >
                   <span style={{ fontWeight: 600, color: customerColors.primary, fontSize: '0.85rem' }}>{project.name}</span>
                   <span style={{ color: colors.text, fontSize: '0.85rem' }}>{project.customer}</span>
+                  
+                  {/* Scope: Systems, Domains, Functional Areas */}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-                    {projectSystems.length > 0 ? (
-                      projectSystems.slice(0, 2).map(code => {
-                        const sys = allSystems.find(s => s.code === code);
-                        return (
-                          <span
-                            key={code}
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '0.2rem',
-                              padding: '0.15rem 0.4rem',
-                              background: `${colors.electricBlue}10`,
-                              border: `1px solid ${colors.electricBlue}30`,
-                              borderRadius: 4,
-                              fontSize: '0.75rem',
-                              color: colors.electricBlue,
-                            }}
-                          >
-                            <Server size={10} />
-                            {sys?.name || code}
-                          </span>
-                        );
-                      })
-                    ) : project.product ? (
-                      <span style={{ color: colors.textMuted, fontSize: '0.75rem' }}>{project.product}</span>
-                    ) : (
-                      <span style={{ color: colors.textLight, fontSize: '0.75rem' }}>—</span>
+                    {/* Systems - Blue */}
+                    {projectSystems.slice(0, 2).map(code => {
+                      const sys = allSystems.find(s => s.code === code);
+                      return (
+                        <span
+                          key={`sys-${code}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                            padding: '0.15rem 0.4rem',
+                            background: `${colors.electricBlue}10`,
+                            border: `1px solid ${colors.electricBlue}30`,
+                            borderRadius: 4,
+                            fontSize: '0.7rem',
+                            color: colors.electricBlue,
+                          }}
+                          title={`System: ${sys?.name || code}`}
+                        >
+                          <Server size={9} />
+                          {sys?.name || code}
+                        </span>
+                      );
+                    })}
+                    {/* Domains - Purple */}
+                    {projectDomains.slice(0, 2).map(code => {
+                      const dom = allDomains.find(d => d.code === code);
+                      return (
+                        <span
+                          key={`dom-${code}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                            padding: '0.15rem 0.4rem',
+                            background: `${colors.royalPurple}10`,
+                            border: `1px solid ${colors.royalPurple}30`,
+                            borderRadius: 4,
+                            fontSize: '0.7rem',
+                            color: colors.royalPurple,
+                          }}
+                          title={`Domain: ${dom?.name || code}`}
+                        >
+                          <Briefcase size={9} />
+                          {dom?.name || code}
+                        </span>
+                      );
+                    })}
+                    {/* Functional Areas - Teal */}
+                    {projectFAs.slice(0, 2).map((fa, i) => {
+                      const faCode = fa.area || fa.code || fa;
+                      return (
+                        <span
+                          key={`fa-${faCode}-${i}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '0.2rem',
+                            padding: '0.15rem 0.4rem',
+                            background: `${colors.accent}10`,
+                            border: `1px solid ${colors.accent}30`,
+                            borderRadius: 4,
+                            fontSize: '0.7rem',
+                            color: colors.accent,
+                          }}
+                          title={`Functional Area: ${faCode}`}
+                        >
+                          <Layers size={9} />
+                          {faCode}
+                        </span>
+                      );
+                    })}
+                    {/* Overflow indicator */}
+                    {(projectSystems.length + projectDomains.length + projectFAs.length) > 6 && (
+                      <span style={{ fontSize: '0.7rem', color: colors.textMuted }}>
+                        +{(projectSystems.length + projectDomains.length + projectFAs.length) - 6}
+                      </span>
                     )}
-                    {projectSystems.length > 2 && (
-                      <span style={{ fontSize: '0.75rem', color: colors.textMuted }}>+{projectSystems.length - 2}</span>
+                    {/* Empty state */}
+                    {projectSystems.length === 0 && projectDomains.length === 0 && projectFAs.length === 0 && (
+                      project.product ? (
+                        <span style={{ color: colors.textMuted, fontSize: '0.75rem' }}>{project.product}</span>
+                      ) : (
+                        <span style={{ color: colors.textLight, fontSize: '0.75rem' }}>—</span>
+                      )
                     )}
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
