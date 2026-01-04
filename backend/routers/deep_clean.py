@@ -356,6 +356,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 logger.warning("[DEEP-CLEAN] Wiping ALL Supabase data...")
                 
                 # Tables to wipe (in order - handle foreign key constraints)
+                # These tables use UUID for id column
                 tables_to_wipe = [
                     "processing_jobs",         # Processing jobs
                     "document_registry",       # File registry (source of truth)
@@ -363,8 +364,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                     "query_feedback",          # User feedback
                     "customer_mappings",       # Column mappings
                     "user_preferences",        # User preferences  
-                    "playbook_runs",           # Playbook scan results
                     "finding_suppressions",    # Suppressed findings
+                    # NOTE: playbook_runs uses bigint id - handled separately
                     # NOTE: lineage_edges, project_relationships, standards_rules, standards_documents 
                     # handled separately below (different key columns / no id)
                 ]
@@ -385,6 +386,20 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                         if "does not exist" not in str(e).lower():
                             results["supabase"]["errors"].append(f"{table}: {str(e)}")
                             logger.warning(f"[DEEP-CLEAN] {table} wipe: {e}")
+                
+                # Handle playbook_runs separately (uses bigint id, not UUID)
+                try:
+                    if project_id:
+                        result = supabase.table("playbook_runs").delete().eq("project_id", project_id).execute()
+                    else:
+                        result = supabase.table("playbook_runs").delete().gt("id", 0).execute()
+                    count = len(result.data) if result.data else 0
+                    if count > 0:
+                        results["supabase"]["cleaned"] += count
+                        logger.info(f"[DEEP-CLEAN] Wiped {count} playbook_runs entries")
+                except Exception as e:
+                    if "does not exist" not in str(e).lower():
+                        logger.debug(f"[DEEP-CLEAN] playbook_runs: {e}")
                 
                 # Handle tables with non-standard keys
                 special_tables = [
