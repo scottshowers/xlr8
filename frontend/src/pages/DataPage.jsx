@@ -848,7 +848,7 @@ function FilesPanel({ c, project, targetScope }) {
         {expandedSections.structured && (
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
             {structuredFiles.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                 <Database size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
                 <p style={{ margin: 0 }}>No structured data yet</p>
               </div>
@@ -897,7 +897,7 @@ function FilesPanel({ c, project, targetScope }) {
         {expandedSections.documents && (
           <div style={{ maxHeight: '300px', overflowY: 'auto' }}>
             {docs.length === 0 ? (
-              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted }}>
+              <div style={{ padding: '2rem', textAlign: 'center', color: c.textMuted, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
                 <FileText size={32} style={{ opacity: 0.3, marginBottom: '0.5rem' }} />
                 <p style={{ margin: 0 }}>No documents yet</p>
               </div>
