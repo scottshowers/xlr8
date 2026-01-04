@@ -115,30 +115,39 @@ except ImportError:
 # =============================================================================
 
 # Model routing by task - uses available RunPod models
+# Available: deepseek-r1:14b, mistral:7b, phi3:medium, phi3:latest, nomic-embed-text:latest, qwen2.5-coder:14b
+#
+# NOTE: deepseek-r1:14b is a REASONING model - outputs <think> tags before response
+#       DO NOT use for JSON/structured output - use qwen2.5-coder:14b instead
 TASK_MODEL_MAP = {
-    # PDF analysis - needs good instruction following
-    'pdf_parse': 'mistral:7b',
-    'pdf_analyze': 'mistral:7b',
+    # PDF/JSON extraction - needs structured output, NO reasoning models
+    'pdf_parse': 'qwen2.5-coder:14b',
+    'pdf_analyze': 'qwen2.5-coder:14b',
+    'json_extract': 'qwen2.5-coder:14b',
     
-    # SQL generation - code model excels here
-    'sql_generate': 'deepseek-coder:6.7b',
-    'sql': 'deepseek-coder:6.7b',
+    # SQL generation - code model
+    'sql_generate': 'qwen2.5-coder:14b',
+    'sql': 'qwen2.5-coder:14b',
     
-    # General code tasks - use larger code model for complex work
+    # General code tasks - code model
     'code': 'qwen2.5-coder:14b',
     'code_complex': 'qwen2.5-coder:14b',
-    'code_simple': 'deepseek-coder:6.7b',
+    'code_simple': 'qwen2.5-coder:14b',
     
     # Chat/synthesis - general purpose
     'chat': 'mistral:7b',
     'synthesis': 'mistral:7b',
     'summarize': 'mistral:7b',
     
+    # Complex reasoning where <think> output is OK (not JSON)
+    'reasoning': 'deepseek-r1:14b',
+    'analysis': 'deepseek-r1:14b',
+    
     # Embeddings - dedicated model
     'embed': 'nomic-embed-text:latest',
     'embedding': 'nomic-embed-text:latest',
     
-    # Default fallback
+    # Default fallback - use mistral for safety
     'default': 'mistral:7b',
 }
 
