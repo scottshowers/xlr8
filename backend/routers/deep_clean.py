@@ -357,17 +357,15 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 
                 # Tables to wipe (in order - handle foreign key constraints)
                 tables_to_wipe = [
-                    "jobs",                    # Processing jobs
+                    "processing_jobs",         # Processing jobs
                     "document_registry",       # File registry (source of truth)
-                    "learning_queries",        # Learned query patterns
-                    "learning_feedback",       # User feedback
-                    "learning_mappings",       # Column mappings
-                    "learning_preferences",    # User preferences  
-                    "learning_clarifications", # Clarification patterns
-                    "playbook_results",        # Playbook scan results
-                    "playbook_suppressions",   # Suppressed findings
-                    "intelligence_findings",   # Analysis findings
-                    "intelligence_tasks",      # Task assignments
+                    "learned_queries",         # Learned query patterns
+                    "query_feedback",          # User feedback
+                    "customer_mappings",       # Column mappings
+                    "user_preferences",        # User preferences  
+                    "playbook_runs",           # Playbook scan results
+                    "finding_suppressions",    # Suppressed findings
+                    "lineage_edges",           # Document lineage
                     # NOTE: project_relationships, standards_rules, standards_documents 
                     # handled separately below (different key columns)
                 ]
