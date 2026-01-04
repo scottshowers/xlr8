@@ -15,6 +15,11 @@
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import { 
+  AlertTriangle, Lightbulb, Clock, RefreshCw, CheckCircle, XCircle, 
+  Search, ClipboardList, Building, FileText, Upload, Folder, Calendar,
+  Trash2, Loader2, Ban
+} from 'lucide-react';
 
 // Error Boundary to catch rendering errors and show them instead of blank screen
 class ErrorBoundary extends Component {
@@ -42,7 +47,10 @@ class ErrorBoundary extends Component {
           borderRadius: '8px',
           margin: '1rem'
         }}>
-          <h3 style={{ color: '#dc2626', marginBottom: '1rem' }}>⚠️ Something went wrong</h3>
+          <h3 style={{ color: '#dc2626', marginBottom: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <AlertTriangle size={20} />
+            Something went wrong
+          </h3>
           <p style={{ color: '#991b1b', marginBottom: '0.5rem' }}>
             {this.state.error?.message || 'Unknown error'}
           </p>
@@ -105,9 +113,9 @@ const STATUS_OPTIONS = [
 
 // Tooltip type configuration
 const TOOLTIP_TYPES = {
-  best_practice: { icon: '⭐', label: 'Best Practice', color: '#eab308', bg: '#fef9c3' },
-  mandatory: { icon: '🚨', label: 'Mandatory', color: '#dc2626', bg: '#fee2e2' },
-  hint: { icon: '💡', label: 'Helpful Hint', color: '#3b82f6', bg: '#dbeafe' },
+  best_practice: { icon: CheckCircle, label: 'Best Practice', color: '#eab308', bg: '#fef9c3' },
+  mandatory: { icon: AlertTriangle, label: 'Mandatory', color: '#dc2626', bg: '#fee2e2' },
+  hint: { icon: Lightbulb, label: 'Helpful Hint', color: '#3b82f6', bg: '#dbeafe' },
 };
 
 // Action dependencies - which actions inherit from which
@@ -126,15 +134,15 @@ const getParentActions = (actionId) => ACTION_DEPENDENCIES[actionId] || [];
 // SCAN PROGRESS COMPONENT (Non-blocking with live updates)
 // =============================================================================
 const SCAN_STATUS_CONFIG = {
-  pending: { color: '#6b7280', bg: '#f3f4f6', icon: '⏳', label: 'Waiting...' },
-  running: { color: '#3b82f6', bg: '#dbeafe', icon: '🔄', label: 'Scanning...' },
-  completed: { color: '#10b981', bg: '#d1fae5', icon: '✅', label: 'Complete' },
-  failed: { color: '#ef4444', bg: '#fee2e2', icon: '❌', label: 'Failed' },
-  timeout: { color: '#f59e0b', bg: '#fef3c7', icon: '⏰', label: 'Timed Out' },
-  cancelled: { color: '#6b7280', bg: '#f3f4f6', icon: '🚫', label: 'Cancelled' },
+  pending: { color: '#6b7280', bg: '#f3f4f6', icon: Clock, label: 'Waiting...' },
+  running: { color: '#3b82f6', bg: '#dbeafe', icon: RefreshCw, label: 'Scanning...' },
+  completed: { color: '#10b981', bg: '#d1fae5', icon: CheckCircle, label: 'Complete' },
+  failed: { color: '#ef4444', bg: '#fee2e2', icon: XCircle, label: 'Failed' },
+  timeout: { color: '#f59e0b', bg: '#fef3c7', icon: Clock, label: 'Timed Out' },
+  cancelled: { color: '#6b7280', bg: '#f3f4f6', icon: Ban, label: 'Cancelled' },
 };
 
-function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 Analyze All", disabled = false }) {
+function ScanAllProgress({ projectId, onComplete, onError, buttonText = "Analyze All", disabled = false }) {
   const [jobId, setJobId] = useState(null);
   const [status, setStatus] = useState(null);
   const [isStarting, setIsStarting] = useState(false);
@@ -279,7 +287,7 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
         }}
         title="Analyze all uploaded documents for the entire playbook"
       >
-        {isStarting ? '⏳ Starting...' : buttonText}
+        {isStarting ? 'Starting...' : buttonText}
       </button>
     );
   }
@@ -295,7 +303,7 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
     }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-        <span style={{ fontSize: '1.1rem' }}>{config.icon}</span>
+        {React.createElement(config.icon, { size: 18, color: config.color })}
         <span style={{ fontWeight: 600, color: config.color, fontSize: '0.9rem' }}>{config.label}</span>
         {isRunning && (
           <button 
@@ -344,8 +352,8 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
 
       {/* Stats */}
       {status?.total_actions > 0 && (
-        <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.75rem', color: '#6b7280', flexWrap: 'wrap' }}>
-          <span>📋 {status.completed_actions || 0}/{status.total_actions}</span>
+        <div style={{ display: 'flex', gap: '0.75rem', fontSize: '0.75rem', color: '#6b7280', flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><ClipboardList size={12} /> {status.completed_actions || 0}/{status.total_actions}</span>
           {status.successful > 0 && <span style={{ color: '#10b981' }}>✓ {status.successful} found</span>}
           {status.failed > 0 && <span style={{ color: '#ef4444' }}>✗ {status.failed} errors</span>}
         </div>
@@ -363,9 +371,12 @@ function ScanAllProgress({ projectId, onComplete, onError, buttonText = "🔍 An
               borderRadius: '4px',
               fontSize: '0.8rem',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.35rem',
             }}
           >
-            🔄 Scan Again
+            <RefreshCw size={14} /> Scan Again
           </button>
         </div>
       )}
@@ -427,7 +438,7 @@ function EntityConfigModal({ detectedEntities, onSave, onCancel, onSkip }) {
         overflow: 'auto'
       }}>
         <h3 style={{ margin: '0 0 1rem', color: '#1f2937' }}>
-          🏢 Select Company Entity
+          Select Company Entity
         </h3>
         <p style={{ color: '#6b7280', fontSize: '0.9rem', marginBottom: '1rem' }}>
           We detected {usEntities.length} FEIN(s) in your documents. Select which entity to analyze:
@@ -503,7 +514,7 @@ function EntityConfigModal({ detectedEntities, onSave, onCancel, onSkip }) {
             marginBottom: '1rem',
             fontSize: '0.85rem'
           }}>
-            ⚠️ {caEntities.length} Canada entity/entities detected. Canada Year-End analysis coming soon.
+            {caEntities.length} Canada entity/entities detected. Canada Year-End analysis coming soon.
           </div>
         )}
         
@@ -570,7 +581,7 @@ function EntityStatusBar({ config, onReconfigure }) {
       alignItems: 'center'
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-        <span>🏢</span>
+        <Building size={16} />
         <span style={{ fontWeight: '600', color: '#1e40af' }}>
           Analyzing: {config.primary_entity || config.selected_entities?.[0]}
         </span>
@@ -707,7 +718,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           {Array.isArray(high_risk_actions) && high_risk_actions.length > 0 && (
             <CollapsibleSection 
               id="pending" 
-              icon="📋" 
+              icon="" 
               title="Actions Pending Analysis" 
               count={high_risk_actions.length}
               color="#6b7280"
@@ -730,7 +741,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           {Array.isArray(conflicts) && conflicts.length > 0 && (
             <CollapsibleSection 
               id="conflicts" 
-              icon="❗" 
+              icon="" 
               title="Data Conflicts" 
               count={conflicts.length}
               color="#dc2626"
@@ -753,7 +764,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           {Array.isArray(review_flags) && review_flags.length > 0 && (
             <CollapsibleSection 
               id="review" 
-              icon="🔄" 
+              icon="" 
               title="Actions Needing Review" 
               count={review_flags.length}
               color="#d97706"
@@ -776,7 +787,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           {Array.isArray(issues) && issues.length > 0 && (
             <CollapsibleSection 
               id="issues" 
-              icon="⚠️" 
+              icon="" 
               title="Issues Identified" 
               count={issues.length}
               color="#d97706"
@@ -813,7 +824,7 @@ function AISummaryDashboard({ summary, expanded, onToggle }) {
           {Array.isArray(recommendations) && recommendations.length > 0 && (
             <CollapsibleSection 
               id="recommendations" 
-              icon="✅" 
+              icon="" 
               title="Recommendations" 
               count={recommendations.length}
               color="#059669"
@@ -1027,7 +1038,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
         style={styles.docItem(isMatched)} 
         title={isMatched ? doc.matched_file : doc.description}
       >
-        <span>{isMatched ? '✅' : '❌'}</span>
+        <span>{isMatched ? <CheckCircle size={14} color="#059669" /> : <XCircle size={14} color="#dc2626" />}</span>
         
         {isEditing ? (
           <>
@@ -1090,7 +1101,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
           color: COLORS.textLight,
           fontWeight: '600'
         }}>
-          📋 Docs ({stats.total_matched || 0}/{stats.total_matched + stats.total_missing || 0})
+          Docs ({stats.total_matched || 0}/{stats.total_matched + stats.total_missing || 0})
         </div>
       </div>
     );
@@ -1102,7 +1113,7 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
       <div style={styles.sidebar}>
         <button style={styles.toggleBtn} onClick={onToggle}>▶</button>
         <div style={styles.header}>
-          <div style={{ fontWeight: '600', color: COLORS.text }}>📁 Project Files</div>
+          <div style={{ fontWeight: '600', color: COLORS.text }}>Project Files</div>
           <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
             {uploaded_files.length} file{uploaded_files.length !== 1 ? 's' : ''} uploaded
           </div>
@@ -1111,13 +1122,13 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
           {uploaded_files.length > 0 ? (
             uploaded_files.map((file, i) => (
               <div key={i} style={styles.docItem(true)} title={file}>
-                <span>📄</span>
+                <FileText size={14} />
                 <span style={{ flex: 1 }}>{truncateFilename(file)}</span>
               </div>
             ))
           ) : (
             <div style={styles.emptyState}>
-              <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>📤</div>
+              <Upload size={32} color="#6b7280" style={{ marginBottom: '0.5rem' }} />
               <div>No files uploaded yet</div>
             </div>
           )}
@@ -1132,13 +1143,13 @@ function DocumentChecklistSidebar({ checklist, collapsed, onToggle, onKeywordUpd
       <button style={styles.toggleBtn} onClick={onToggle}>▶</button>
       
       <div style={styles.header}>
-        <div style={{ fontWeight: '600', color: COLORS.text }}>📋 Document Checklist</div>
+        <div style={{ fontWeight: '600', color: COLORS.text }}>Document Checklist</div>
         <div style={{ fontSize: '0.8rem', color: COLORS.textLight, marginTop: '0.25rem' }}>
           {stats.total_matched || 0} of {(stats.total_matched || 0) + (stats.total_missing || 0)} matched
         </div>
         {stats.required_missing > 0 && (
           <div style={{ fontSize: '0.75rem', color: '#dc2626', marginTop: '0.25rem' }}>
-            ⚠️ {stats.required_missing} required missing
+            {stats.required_missing} required missing
           </div>
         )}
         <div style={{ fontSize: '0.65rem', color: '#9ca3af', marginTop: '0.25rem', fontStyle: 'italic' }}>
@@ -1470,7 +1481,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
                         cursor: 'pointer'
                       }}
                     >
-                      ✏️ Edit
+                      Edit
                     </button>
                     <button
                       onClick={() => { onDelete(tip.id); setActiveTooltip(null); }}
@@ -1484,7 +1495,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
                         cursor: 'pointer'
                       }}
                     >
-                      🗑️ Delete
+                      Delete
                     </button>
                   </div>
                 )}
@@ -1631,7 +1642,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
       console.log('[SCAN] Response:', res.data);
       if (res.data) {
         if (res.data.cached) {
-          console.log('[SCAN] ⚡ Using cached results');
+          console.log('[SCAN] Using cached results');
         }
         const newDocs = res.data.documents?.map(d => d.filename) || [];
         console.log('[SCAN] Found docs:', newDocs);
@@ -1883,7 +1894,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           <div style={styles.description}>{action.description || 'No description'}</div>
           <div style={styles.meta}>
             {action.due_date && (
-              <span style={styles.dueDate}>📅 Due: {action.due_date}</span>
+              <span style={styles.dueDate}>Due: {action.due_date}</span>
             )}
             <span style={styles.actionType}>{action.action_type || 'unknown'}</span>
             {allDocsFound.length > 0 && (
@@ -1922,7 +1933,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                   fontSize: '0.8rem',
                   color: '#1e40af',
                 }}>
-                  <span style={{ marginRight: '0.5rem' }}>💡</span>
+                  <Lightbulb size={16} style={{ marginRight: '0.5rem', flexShrink: 0 }} />
                   <strong>No upload needed</strong> - This action uses data from action{parents.length > 1 ? 's' : ''} {parents.join(', ')}. 
                   Click "Scan Documents" to analyze.
                 </div>
@@ -1939,7 +1950,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                 disabled={scanning}
                 title="Analyze documents with AI Context"
               >
-                {scanning ? '⏳ Analyzing...' : '🔍 Analyze'}
+                {scanning ? 'Analyzing...' : 'Analyze'}
               </button>
               <Link 
                 to="/data"
@@ -1958,7 +1969,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                 }}
                 onClick={(e) => e.stopPropagation()}
               >
-                📤 Upload Files
+                Upload Files
               </Link>
             </div>
           </div>
@@ -2025,7 +2036,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
                       borderRadius: '4px',
                       fontSize: '0.8rem'
                     }}>
-                      <span>{found ? '✅' : '❌'}</span>
+                      <span>{found ? <CheckCircle size={14} color="#059669" /> : <XCircle size={14} color="#dc2626" />}</span>
                       <span style={{ fontWeight: '500' }}>{reportTrimmed}</span>
                       {matchedDoc && (
                         <span style={{ color: '#6b7280', fontSize: '0.75rem', marginLeft: 'auto' }}>
@@ -2052,7 +2063,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               alignItems: 'center',
               gap: '0.5rem'
             }}>
-              <span>🔗</span>
+              <span></span>
               <span>Using data from action{Array.isArray(progress.inherited_from) && progress.inherited_from.length > 1 ? 's' : ''}: <strong>{Array.isArray(progress.inherited_from) ? progress.inherited_from.join(', ') : progress.inherited_from}</strong></span>
             </div>
           )}
@@ -2069,7 +2080,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               border: '1px solid #fcd34d'
             }}>
               <div style={{ fontWeight: '600', marginBottom: '0.25rem' }}>
-                🔄 Review Recommended
+                Review Recommended
               </div>
               <div>{progress.review_flag.reason}</div>
               <div style={{ fontSize: '0.75rem', marginTop: '0.25rem', color: '#b45309' }}>
@@ -2090,7 +2101,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               border: '1px solid #86efac'
             }}>
               <div style={{ fontWeight: '600', marginBottom: '0.5rem' }}>
-                📋 Guidance for this action:
+                Guidance for this action:
               </div>
               <div style={{ whiteSpace: 'pre-wrap' }}>{findings.guidance}</div>
             </div>
@@ -2117,7 +2128,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           {/* Show extracted key values */}
           {findings?.key_values && Object.keys(findings.key_values).length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>📊 Extracted Data</div>
+              <div style={styles.sectionTitle}>Extracted Data</div>
               <div style={{ 
                 background: '#f0f9ff', 
                 border: '1px solid #bae6fd',
@@ -2169,7 +2180,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{ fontWeight: '600', color: '#991b1b', fontSize: '0.85rem' }}>
-                    ⚠️ Issues Identified
+                    Issues Identified
                   </span>
                   <span style={{ 
                     background: activeIssues.length > 0 ? '#dc2626' : '#10b981', 
@@ -2295,7 +2306,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           {/* Show action-specific guidance */}
           {findings?.guidance && Array.isArray(findings.guidance) && findings.guidance.length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>📋 Guidance for This Action</div>
+              <div style={styles.sectionTitle}>Guidance for This Action</div>
               <div style={{ 
                 background: '#f0fdf4', 
                 border: '1px solid #86efac',
@@ -2334,7 +2345,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           {/* Show guidance as text if it's a string */}
           {findings?.guidance && typeof findings.guidance === 'string' && findings.guidance.length > 0 && (
             <div style={styles.section}>
-              <div style={styles.sectionTitle}>📋 Guidance for This Action</div>
+              <div style={styles.sectionTitle}>Guidance for This Action</div>
               <div style={{ 
                 background: '#f0fdf4', 
                 border: '1px solid #86efac',
@@ -2369,7 +2380,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   <span style={{ fontWeight: '600', color: '#1e40af', fontSize: '0.85rem' }}>
-                    💡 Recommendations
+                    Recommendations
                   </span>
                   <span style={{ 
                     background: '#3b82f6', 
@@ -2499,7 +2510,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
           {/* Two text boxes side by side */}
           <div style={{ display: 'flex', gap: '1rem' }}>
             <div style={{ ...styles.section, flex: 1 }}>
-              <div style={styles.sectionTitle}>📝 Consultant Notes</div>
+              <div style={styles.sectionTitle}>Consultant Notes</div>
               <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: '0.25rem' }}>
                 For team handoffs & documentation (not sent to AI)
               </div>
@@ -2515,7 +2526,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             
             <div style={{ ...styles.section, flex: 1 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#7c3aed' }}>🧠 AI Context</span>
+                <span style={{ fontSize: '0.8rem', fontWeight: '600', color: '#7c3aed' }}>AI Context</span>
                 <span 
                   title="Notes you add here will be sent to AI during the next scan. Use this to give the AI additional context it might need - like 'Rate confirmed via email', 'Intentionally blank', or 'Client will fix in January'."
                   style={{ 
@@ -3462,7 +3473,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
         {/* Header */}
         <div style={styles.header}>
           <div style={styles.titleSection}>
-            <h1 style={styles.title}>📅 Year-End Checklist</h1>
+            <h1 style={styles.title}>Year-End Checklist</h1>
             <p style={styles.subtitle}>
               {customerName || 'Customer'} → {projectName || 'Project'}
             </p>
@@ -3479,9 +3490,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             >
               {analyzing 
                 ? (scanProgress 
-                    ? `⏳ Analyzing ${scanProgress.completed}/${scanProgress.total} (${scanProgress.current_action || '...'})` 
-                    : '⏳ Refreshing...')
-                : '🔄 Refresh & Analyze'}
+                    ? `Analyzing ${scanProgress.completed}/${scanProgress.total} (${scanProgress.current_action || '...'})` 
+                    : 'Refreshing...')
+                : 'Refresh & Analyze'}
             </button>
             
             {/* NEW: Non-blocking scan progress component */}
@@ -3489,7 +3500,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               projectId={project.id}
               onComplete={handleScanComplete}
               onError={handleScanError}
-              buttonText="🔍 Analyze All"
+              buttonText="Analyze All"
               disabled={analyzing}
             />
             
@@ -3498,10 +3509,10 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               onClick={handleReset}
               title="Reset all progress for this project"
             >
-              🗑️ Reset
+              Reset
             </button>
             <button style={styles.exportBtn} onClick={handleExport} disabled={exporting}>
-              {exporting ? '⏳ Exporting...' : '📥 Export Progress'}
+              {exporting ? 'Exporting...' : 'Export Progress'}
             </button>
           </div>
         </div>
@@ -3558,7 +3569,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               transition: 'all 0.2s'
             }}
           >
-            📋 UKG Full Checklist
+            UKG Full Checklist
           </button>
           <button
             onClick={() => setViewMode('fasttrack')}
@@ -3574,7 +3585,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               transition: 'all 0.2s'
             }}
           >
-            ⚡ Fast Track (Expert Path)
+            Fast Track (Expert Path)
           </button>
         </div>
 
@@ -3615,7 +3626,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             justifyContent: 'space-between'
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              <span style={{ fontSize: '1.25rem' }}>📋</span>
+              <ClipboardList size={24} color="#1e40af" />
               <div>
                 <div style={{ fontWeight: '600', color: '#1e40af' }}>
                   {actionsReadyToScan.length} action{actionsReadyToScan.length > 1 ? 's' : ''} ready to analyze
@@ -3643,12 +3654,12 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             >
               {scanningAll ? (
                 <>
-                  <span style={{ animation: 'spin 1s linear infinite' }}>⏳</span>
+                  <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
                   Analyzing...
                 </>
               ) : (
                 <>
-                  🔍 Analyze All
+                  Analyze All
                 </>
               )}
             </button>
@@ -3689,7 +3700,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
               paddingBottom: '0.75rem',
               borderBottom: '1px solid #e1e8ed'
             }}>
-              <span style={{ fontSize: '1.5rem' }}>⚡</span>
+              <Rocket size={24} color="#059669" />
               <div>
                 <div style={{ fontWeight: '700', fontSize: '1.1rem', color: '#059669' }}>Fast Track (Expert Path) Checklist</div>
                 <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>HCMPACT's curated essential actions • Status syncs with UKG actions</div>
@@ -3763,13 +3774,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       <div style={{ marginLeft: '32px', display: 'flex', flexWrap: 'wrap', gap: '0.5rem', alignItems: 'center' }}>
                         {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>
-                            🔗 UKG: {ftItem.ukg_action_ref.join(', ')}
+                            UKG: {ftItem.ukg_action_ref.join(', ')}
                           </span>
                         )}
                         
                         {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                           <span style={{ fontSize: '0.75rem', color: '#6b7280' }}>
-                            📄 {ftItem.reports_needed.length} report{ftItem.reports_needed.length > 1 ? 's' : ''}
+                            {ftItem.reports_needed.length} report{ftItem.reports_needed.length > 1 ? 's' : ''}
                           </span>
                         )}
                         
@@ -3781,7 +3792,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                         
                         {ftItem.notes && (
                           <span style={{ fontSize: '0.75rem', color: '#f59e0b' }}>
-                            📝 Has notes
+                            Has notes
                           </span>
                         )}
                       </div>
@@ -3810,7 +3821,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                             }}
                             title={ftItem.sql_script}
                           >
-                            📋 SQL
+                            SQL
                           </button>
                         </div>
                       )}
@@ -3855,7 +3866,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       {ftItem.notes && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
-                            📋 FAST TRACK NOTES (from workbook)
+                            FAST TRACK NOTES (from workbook)
                           </div>
                           <div style={{ 
                             background: '#fffbeb', 
@@ -3904,7 +3915,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                               cursor: 'pointer'
                             }}
                           >
-                            📋 Copy SQL
+                            Copy SQL
                           </button>
                         </div>
                       )}
@@ -3913,7 +3924,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       {Array.isArray(ftItem.reports_needed) && ftItem.reports_needed.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.25rem' }}>
-                            📄 REPORTS NEEDED
+                            REPORTS NEEDED
                           </div>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                             {ftItem.reports_needed.map((report, i) => {
@@ -3944,7 +3955,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       {Array.isArray(ftItem.ukg_action_ref) && ftItem.ukg_action_ref.length > 0 && (
                         <div style={{ marginBottom: '1rem' }}>
                           <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
-                            🔗 LINKED UKG ACTIONS
+                            LINKED UKG ACTIONS
                           </div>
                           {ftItem.ukg_action_ref.map(actionId => {
                             const actionProg = progress[actionId] || {};
@@ -4024,13 +4035,13 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                       {/* Notes Section - Same as UKG Actions */}
                       <div style={{ marginBottom: '1rem' }}>
                         <div style={{ fontSize: '0.75rem', fontWeight: '600', color: '#6b7280', marginBottom: '0.5rem' }}>
-                          ✏️ CONSULTANT NOTES & AI CONTEXT
+                          CONSULTANT NOTES & AI CONTEXT
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0.75rem' }}>
                           {/* Consultant Notes - syncs to primary linked action */}
                           <div>
                             <div style={{ fontSize: '0.7rem', color: '#6b7280', marginBottom: '0.25rem' }}>
-                              📝 Notes (for handoffs)
+                              Notes (for handoffs)
                             </div>
                             <textarea
                               value={primaryActionProgress.notes || ''}
@@ -4062,7 +4073,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                           {/* AI Context - syncs to primary linked action */}
                           <div>
                             <div style={{ fontSize: '0.7rem', color: '#3b82f6', marginBottom: '0.25rem' }}>
-                              🤖 AI Context (sent on re-scan)
+                              AI Context (sent on re-scan)
                             </div>
                             <textarea
                               value={primaryActionProgress.ai_context || ''}
@@ -4123,7 +4134,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
                             gap: '0.5rem'
                           }}
                         >
-                          🔍 Scan Documents for {primaryActionId}
+                          Scan Documents for {primaryActionId}
                         </button>
                       )}
                     </div>
