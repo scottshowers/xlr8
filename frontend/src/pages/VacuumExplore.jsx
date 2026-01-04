@@ -11,6 +11,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
+import { ClipboardList, BarChart3, Folder, Search, BookOpen, CheckCircle } from 'lucide-react';
 
 // API base - adjust for your environment
 const API_BASE = '/api';
@@ -283,20 +284,23 @@ export default function VacuumExplore() {
 
       {/* Header */}
       <div style={styles.header}>
-        <h1 style={styles.title}>🔬 Vacuum Explorer</h1>
+        <h1 style={styles.title}>Vacuum Explorer</h1>
         {learningStats && (
           <div style={styles.statsBar}>
             <span style={styles.stat}>
-              📚 {learningStats.section_patterns} section patterns
+              <BookOpen size={14} style={{ marginRight: '4px' }} />
+              {learningStats.section_patterns} section patterns
             </span>
             <span style={styles.stat}>
-              📊 {learningStats.column_patterns} column patterns
+              <BarChart3 size={14} style={{ marginRight: '4px' }} />
+              {learningStats.column_patterns} column patterns
             </span>
             <span style={styles.stat}>
-              🏢 {learningStats.vendor_signatures} vendors
+              {learningStats.vendor_signatures} vendors
             </span>
             <span style={styles.stat}>
-              ✅ {learningStats.confirmed_mappings} confirmed mappings
+              <CheckCircle size={14} style={{ marginRight: '4px' }} />
+              {learningStats.confirmed_mappings} confirmed mappings
             </span>
           </div>
         )}
@@ -312,7 +316,10 @@ export default function VacuumExplore() {
       <div style={styles.layout}>
         {/* Files Panel */}
         <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>📁 Files</h3>
+          <h3 style={{ ...styles.panelTitle, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Folder size={16} />
+            Files
+          </h3>
           <div style={styles.fileList}>
             {files.length === 0 ? (
               <p style={styles.empty}>No files uploaded yet</p>
@@ -338,7 +345,10 @@ export default function VacuumExplore() {
 
         {/* Extracts Panel */}
         <div style={styles.panel}>
-          <h3 style={styles.panelTitle}>📋 Extracts</h3>
+          <h3 style={{ ...styles.panelTitle, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <ClipboardList size={16} />
+            Extracts
+          </h3>
           {loading && !extractDetail ? (
             <p style={styles.loading}>Loading...</p>
           ) : extracts.length === 0 ? (
@@ -359,7 +369,10 @@ export default function VacuumExplore() {
 
         {/* Detail Panel */}
         <div style={{ ...styles.panel, flex: 2 }}>
-          <h3 style={styles.panelTitle}>🔍 Detail</h3>
+          <h3 style={{ ...styles.panelTitle, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Search size={16} />
+            Detail
+          </h3>
           {extractDetail ? (
             <ExtractDetail
               extract={extractDetail}
