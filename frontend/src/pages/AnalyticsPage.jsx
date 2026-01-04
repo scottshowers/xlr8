@@ -1043,17 +1043,17 @@ function AnalyticsPageInner() {
             )
           })}
         </div>
-      </div>
+        </div>
       
-      {/* ================================================================
-          CENTER PANEL: Main Canvas
-          ================================================================ */}
-      <div className="flex-1 flex flex-col min-w-0">
-        {/* Toolbar with mode toggle */}
-        <div className="bg-gray-50 border-b px-4 py-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
-            {selectedTable ? (
-              <>
+        {/* ================================================================
+            CENTER PANEL: Main Canvas
+            ================================================================ */}
+        <div className="flex-1 flex flex-col min-w-0">
+          {/* Toolbar with mode toggle */}
+          <div className="bg-gray-50 border-b px-4 py-2 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
+              {selectedTable ? (
+                <>
                 <Database size={14} className="text-[#83b16d]" />
                 <span className="font-medium">{selectedTable.display_name || selectedTable.name || 'Table'}</span>
                 <span className="text-gray-400">•</span>
@@ -1400,6 +1400,7 @@ function AnalyticsPageInner() {
             )}
           </div>
         )}
+        </div>
       </div>
     </div>
   )
