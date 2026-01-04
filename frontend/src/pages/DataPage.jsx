@@ -81,7 +81,7 @@ export default function DataPage() {
               width: '36px', 
               height: '36px', 
               borderRadius: '10px', 
-              backgroundColor: c.accent, 
+              backgroundColor: c.primary, 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center' 
