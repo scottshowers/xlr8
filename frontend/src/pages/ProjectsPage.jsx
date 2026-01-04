@@ -1,17 +1,19 @@
 /**
  * ProjectsPage - Project Management
  * 
- * UPDATED: January 2, 2026
+ * UPDATED: January 4, 2026
  * - Added multi-select for Systems, Domains, Functional Areas
  * - Fetches reference data from /api/reference/*
  * - Engagement type selector
  * - Mission Control color palette
+ * - Added breadcrumb navigation for edit mode
  */
 
 import React, { useState, useEffect } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
-import { FolderOpen, Plus, Edit2, Trash2, Check, X, Server, Briefcase, Layers, ChevronDown } from 'lucide-react';
+import { FolderOpen, Plus, Edit2, Trash2, Check, X, Server, Briefcase, Layers, ChevronDown, ChevronRight, Home } from 'lucide-react';
 import { Tooltip } from '../components/ui';
 import api from '../services/api';
 
@@ -60,7 +62,7 @@ const AVAILABLE_PLAYBOOKS = [
 // ============================================================================
 // MULTI-SELECT COMPONENT
 // ============================================================================
-function MultiSelect({ label, icon: Icon, items, selected, onChange, placeholder, groupBy, getColor }) {
+function MultiSelect({ label, icon: Icon, items, selected, onChange, placeholder, groupBy, getColor, tooltip }) {
   const [isOpen, setIsOpen] = useState(false);
   
   const handleToggle = (code) => {
@@ -79,11 +81,19 @@ function MultiSelect({ label, icon: Icon, items, selected, onChange, placeholder
     return acc;
   }, {}) : { all: items };
   
+  const labelElement = (
+    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: tooltip ? 'help' : 'default' }}>
+      {label}
+    </label>
+  );
+  
   return (
     <div style={{ position: 'relative' }}>
-      <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-        {label}
-      </label>
+      {tooltip ? (
+        <Tooltip title={tooltip.title} detail={tooltip.detail} action={tooltip.action}>
+          {labelElement}
+        </Tooltip>
+      ) : labelElement}
       
       {/* Selected chips */}
       <div 
@@ -222,6 +232,7 @@ function MultiSelect({ label, icon: Icon, items, selected, onChange, placeholder
 // ============================================================================
 export default function ProjectsPage() {
   const { projects, createProject, updateProject, deleteProject, selectProject, activeProject } = useProject();
+  const location = useLocation();
   
   const [showForm, setShowForm] = useState(false);
   const [editingProject, setEditingProject] = useState(null);
@@ -242,6 +253,12 @@ export default function ProjectsPage() {
   const [allFunctionalAreas, setAllFunctionalAreas] = useState([]);
   const [engagementTypes, setEngagementTypes] = useState([]);
   const [loadingRef, setLoadingRef] = useState(false);
+  
+  // Reset form when navigating to this page (clicking Projects in nav)
+  useEffect(() => {
+    setShowForm(false);
+    setEditingProject(null);
+  }, [location.key]);
   
   // Load reference data
   useEffect(() => {
@@ -390,6 +407,39 @@ export default function ProjectsPage() {
         </p>
       </div>
 
+      {/* Breadcrumb - shown when in form mode */}
+      {showForm && (
+        <div style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '8px', 
+          marginBottom: '16px',
+          fontSize: '13px'
+        }}>
+          <button
+            onClick={() => { setShowForm(false); setEditingProject(null); }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              background: 'none',
+              border: 'none',
+              padding: 0,
+              color: colors.accent,
+              cursor: 'pointer',
+              fontWeight: 500,
+            }}
+          >
+            <Home size={14} />
+            Projects
+          </button>
+          <ChevronRight size={14} color={colors.textMuted} />
+          <span style={{ color: colors.text, fontWeight: 500 }}>
+            {editingProject ? `Edit: ${editingProject.name}` : 'New Project'}
+          </span>
+        </div>
+      )}
+
       {/* Main Card */}
       <div style={{
         background: colors.card,
@@ -485,9 +535,11 @@ export default function ProjectsPage() {
               {/* Row 1: AR# and Company */}
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Customer AR# *
-                  </label>
+                  <Tooltip title="Customer AR#" detail="Your internal project identifier or engagement number. Used to uniquely identify this customer's implementation." action="e.g., MEY1000, ABC-2024-001">
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                      Customer AR# *
+                    </label>
+                  </Tooltip>
                   <input
                     style={{
                       width: '100%',
@@ -506,9 +558,11 @@ export default function ProjectsPage() {
                   />
                 </div>
                 <div>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Company Name *
-                  </label>
+                  <Tooltip title="Company Name" detail="The customer's company name. This appears throughout the platform to identify whose data you're working with." action="Use official company name">
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                      Company Name *
+                    </label>
+                  </Tooltip>
                   <input
                     style={{
                       width: '100%',
@@ -539,11 +593,14 @@ export default function ProjectsPage() {
                   placeholder="Select systems..."
                   groupBy={(item) => item.vendor}
                   getColor={getSystemColor}
+                  tooltip={{ title: "Systems", detail: "HCM/ERP systems the customer is using or implementing. Determines which reference docs and validation rules apply.", action: "Select all systems in scope" }}
                 />
                 <div>
-                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                    Engagement Type
-                  </label>
+                  <Tooltip title="Engagement Type" detail="The type of consulting engagement. Affects which playbooks and analysis patterns are most relevant." action="Implementation, Optimization, Assessment, etc.">
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                      Engagement Type
+                    </label>
+                  </Tooltip>
                   <select
                     style={{
                       width: '100%',
@@ -577,6 +634,7 @@ export default function ProjectsPage() {
                   onChange={(domains) => setFormData({ ...formData, domains })}
                   placeholder="Select domains..."
                   getColor={getDomainColor}
+                  tooltip={{ title: "Domains", detail: "Business domains being addressed in this project. Helps categorize data and focus analysis on relevant areas.", action: "Payroll, Time, Benefits, HR, etc." }}
                 />
               </div>
               
@@ -591,14 +649,17 @@ export default function ProjectsPage() {
                   placeholder="Select functional areas..."
                   groupBy={(item) => item.domain_name}
                   getColor={getFunctionalAreaColor}
+                  tooltip={{ title: "Functional Areas", detail: "Specific functional areas within each domain. Provides granular categorization for targeted analysis and playbook selection.", action: "Grouped by domain for easy selection" }}
                 />
               </div>
 
               {/* Row 5: Notes */}
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                  Notes
-                </label>
+                <Tooltip title="Project Notes" detail="Free-form notes about this project. Useful for context, special requirements, or key contacts." action="Visible to all users working on this project">
+                  <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                    Notes
+                  </label>
+                </Tooltip>
                 <textarea
                   style={{
                     width: '100%',
@@ -620,37 +681,40 @@ export default function ProjectsPage() {
               
               {/* Row 6: Playbooks */}
               <div style={{ marginBottom: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text }}>
-                  Assign Playbooks
-                </label>
+                <Tooltip title="Assign Playbooks" detail="Playbooks are pre-built analysis workflows. Each playbook guides you through a specific type of analysis like data validation, compliance checking, or optimization." action="Select playbooks relevant to this engagement">
+                  <label style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                    Assign Playbooks
+                  </label>
+                </Tooltip>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
                   {AVAILABLE_PLAYBOOKS.map((playbook) => {
                     const isSelected = (formData.playbooks || []).includes(playbook.id);
                     return (
-                      <div
-                        key={playbook.id}
-                        onClick={() => handlePlaybookToggle(playbook.id)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '0.35rem',
-                          padding: '0.4rem 0.75rem',
-                          background: isSelected ? colors.primaryLight : colors.card,
-                          border: `1px solid ${isSelected ? colors.primary : colors.inputBorder}`,
-                          borderRadius: 6,
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isSelected}
-                          onChange={() => {}}
-                          style={{ accentColor: colors.primary }}
-                        />
-                        <span style={{ fontSize: '1rem' }}>{playbook.icon}</span>
-                        <span style={{ fontSize: '0.8rem', color: colors.text }}>{playbook.name}</span>
-                      </div>
+                      <Tooltip key={playbook.id} title={playbook.name} detail={playbook.description || `Run the ${playbook.name} analysis workflow on this project's data.`} position="bottom">
+                        <div
+                          onClick={() => handlePlaybookToggle(playbook.id)}
+                          style={{
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '0.35rem',
+                            padding: '0.4rem 0.75rem',
+                            background: isSelected ? colors.primaryLight : colors.card,
+                            border: `1px solid ${isSelected ? colors.primary : colors.inputBorder}`,
+                            borderRadius: 6,
+                            cursor: 'pointer',
+                            transition: 'all 0.15s ease',
+                          }}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={isSelected}
+                            onChange={() => {}}
+                            style={{ accentColor: colors.primary }}
+                          />
+                          <span style={{ fontSize: '1rem' }}>{playbook.icon}</span>
+                          <span style={{ fontSize: '0.8rem', color: colors.text }}>{playbook.name}</span>
+                        </div>
+                      </Tooltip>
                     );
                   })}
                 </div>
@@ -723,12 +787,24 @@ export default function ProjectsPage() {
               textTransform: 'uppercase',
               letterSpacing: '0.05em',
             }}>
-              <span>AR#</span>
-              <span>Company</span>
-              <span>Scope</span>
-              <span>Playbooks</span>
-              <span>Status</span>
-              <span>Actions</span>
+              <Tooltip title="AR#" detail="Your internal project identifier or engagement number." position="bottom">
+                <span style={{ cursor: 'help' }}>AR#</span>
+              </Tooltip>
+              <Tooltip title="Company" detail="The customer's company name." position="bottom">
+                <span style={{ cursor: 'help' }}>Company</span>
+              </Tooltip>
+              <Tooltip title="Scope" detail="Systems, domains, and functional areas in scope for this project. Color coded: Blue=Systems, Purple=Domains, Teal=Functional Areas." position="bottom">
+                <span style={{ cursor: 'help' }}>Scope</span>
+              </Tooltip>
+              <Tooltip title="Playbooks" detail="Analysis workflows assigned to this project. Click to run playbook analysis." position="bottom">
+                <span style={{ cursor: 'help' }}>Playbooks</span>
+              </Tooltip>
+              <Tooltip title="Status" detail="Current project status. Green=Active, Yellow=In Progress, Gray=Inactive." position="bottom">
+                <span style={{ cursor: 'help' }}>Status</span>
+              </Tooltip>
+              <Tooltip title="Actions" detail="Select to work with project data, Edit to modify settings, Delete to remove." position="bottom">
+                <span style={{ cursor: 'help' }}>Actions</span>
+              </Tooltip>
             </div>
 
             {/* Project Rows */}
@@ -898,51 +974,57 @@ export default function ProjectsPage() {
                     </span>
                   </div>
                   <div style={{ display: 'flex', gap: '0.4rem', justifyContent: 'flex-start' }}>
-                    <button
-                      onClick={() => selectProject(project)}
-                      style={{
-                        padding: '0.35rem 0.6rem',
-                        background: isSelected ? colors.primary : 'transparent',
-                        border: `1px solid ${colors.primary}`,
-                        borderRadius: 4,
-                        color: isSelected ? 'white' : colors.primary,
-                        fontSize: '0.75rem',
-                        fontWeight: 500,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {isSelected ? 'Selected' : 'Select'}
-                    </button>
-                    <button
-                      onClick={() => handleEdit(project)}
-                      style={{
-                        padding: '0.35rem 0.5rem',
-                        background: 'transparent',
-                        border: `1px solid ${colors.accent}`,
-                        borderRadius: 4,
-                        color: colors.accent,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Edit2 size={12} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(project)}
-                      style={{
-                        padding: '0.35rem 0.5rem',
-                        background: 'transparent',
-                        border: `1px solid ${colors.red}`,
-                        borderRadius: 4,
-                        color: colors.red,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                      }}
-                    >
-                      <Trash2 size={12} />
-                    </button>
+                    <Tooltip title={isSelected ? "Currently Selected" : "Select Project"} detail={isSelected ? "This project is currently active. All data operations will use this project's data." : "Make this the active project. All data uploads and queries will be scoped to this project."} position="left">
+                      <button
+                        onClick={() => selectProject(project)}
+                        style={{
+                          padding: '0.35rem 0.6rem',
+                          background: isSelected ? colors.primary : 'transparent',
+                          border: `1px solid ${colors.primary}`,
+                          borderRadius: 4,
+                          color: isSelected ? 'white' : colors.primary,
+                          fontSize: '0.75rem',
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {isSelected ? 'Selected' : 'Select'}
+                      </button>
+                    </Tooltip>
+                    <Tooltip title="Edit Project" detail="Modify project settings including systems, domains, functional areas, and playbook assignments." position="left">
+                      <button
+                        onClick={() => handleEdit(project)}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          background: 'transparent',
+                          border: `1px solid ${colors.accent}`,
+                          borderRadius: 4,
+                          color: colors.accent,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Edit2 size={12} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip title="Delete Project" detail="Permanently remove this project and all associated data. This action cannot be undone." position="left">
+                      <button
+                        onClick={() => handleDelete(project)}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          background: 'transparent',
+                          border: `1px solid ${colors.red}`,
+                          borderRadius: 4,
+                          color: colors.red,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </Tooltip>
                   </div>
                 </div>
               );
