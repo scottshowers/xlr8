@@ -301,30 +301,32 @@ def call_claude(prompt: str, max_tokens: int = 8192) -> Optional[str]:
 
 def call_llm_cascade(prompt: str, max_tokens: int = 8192) -> Tuple[Optional[str], str]:
     """
-    Call LLMs in cascade order: Groq → Ollama → Claude.
+    Call LLM for TABLE/JSON extraction.
+    
+    Uses qwen2.5-coder:14b ONLY - it's the best model for structured JSON output.
+    No fallback cascade - if qwen fails, other models won't do better.
+    
+    NOTE: Does NOT use deepseek-r1 (reasoning model, outputs <think> tags)
+    NOTE: Does NOT use mistral:7b (poor JSON output quality)
+    NOTE: Does NOT fall back to Claude API (too expensive for bulk)
     
     Returns:
         Tuple of (response_text, llm_used)
     """
-    # Try Groq first (fast, cheap)
+    # Try Groq first if available (fast, cheap)
     logger.info("[LLM-PARSER] Trying Groq...")
     response = call_groq(prompt, max_tokens)
     if response:
         return response, "groq"
     
-    # Try Ollama models
-    for model in ['deepseek-r1:14b', 'qwen2.5-coder:14b']:
-        logger.info(f"[LLM-PARSER] Trying Ollama {model}...")
-        response = call_ollama(prompt, model, max_tokens)
-        if response:
-            return response, f"ollama-{model}"
-    
-    # Fall back to Claude
-    logger.warning("[LLM-PARSER] Falling back to Claude API...")
-    response = call_claude(prompt, max_tokens)
+    # Use qwen2.5-coder:14b - best model for structured JSON output
+    logger.info("[LLM-PARSER] Trying qwen2.5-coder:14b...")
+    response = call_ollama(prompt, 'qwen2.5-coder:14b', max_tokens)
     if response:
-        return response, "claude"
+        return response, "ollama-qwen2.5-coder:14b"
     
+    # No fallback - if qwen fails, other local models won't do better
+    logger.warning("[LLM-PARSER] qwen2.5-coder:14b unavailable - text parsing skipped")
     return None, "none"
 
 
