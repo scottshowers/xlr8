@@ -106,7 +106,7 @@ export default function AdminDashboard() {
   ]
 
   return (
-    <div style={{ padding: '1.5rem', background: '#f0f2f5', minHeight: 'calc(100vh - 60px)' }}>
+    <div style={{ padding: '1.5rem', background: '#ffffff', minHeight: 'calc(100vh - 60px)' }}>
       {/* Header - Standard Pattern */}
       <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
