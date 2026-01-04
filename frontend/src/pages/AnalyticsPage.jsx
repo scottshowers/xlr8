@@ -7,7 +7,7 @@
  * REPLACES: BIBuilderPage.jsx and BIQueryBuilder.jsx
  * 
  * FEATURES:
- * - 3-way mode toggle: Natural Language, Visual Builder, SQL
+ * - 2-way mode toggle: Visual Builder, SQL
  * - Drag-and-drop query building
  * - Smart chart visualization (table, bar, line, pie)
  * - Data catalog organized by domain
@@ -976,33 +976,34 @@ function AnalyticsPageInner() {
           CENTER PANEL: Main Canvas
           ================================================================ */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header with 3-way toggle */}
-        <div className="bg-white border-b px-4 py-2 flex items-center justify-between shadow-sm">
+        {/* Header with toggle */}
+        <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
           <div className="flex items-center gap-3">
-            <h1 className="text-sm font-semibold text-gray-800">
-              {selectedTable ? (selectedTable.display_name || selectedTable.name || 'Table') : 'Analytics'}
-            </h1>
-            {selectedTable && (
-              <span className="text-xs text-gray-400">
-                {selectedTable.rows?.toLocaleString() || 0} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
-              </span>
-            )}
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: '#83b16d', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <BarChart3 size={20} color="#ffffff" />
+            </div>
+            <div>
+              <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#1a2332', fontFamily: "'Sora', sans-serif" }}>
+                Smart Analytics
+              </h1>
+              {selectedTable && (
+                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
+                  {selectedTable.display_name || selectedTable.name || 'Table'} • {selectedTable.rows?.toLocaleString() || 0} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
+                </p>
+              )}
+            </div>
           </div>
           
-          {/* 3-Way Mode Toggle */}
+          {/* 2-Way Mode Toggle */}
           <div className="flex bg-gray-100 rounded-lg p-0.5">
-            <button
-              onClick={() => setMode('natural')}
-              title="Ask questions in plain English - AI generates and runs the query"
-              className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
-                mode === 'natural' 
-                  ? 'bg-white shadow-sm text-gray-800' 
-                  : 'text-gray-500 hover:text-gray-700'
-              }`}
-            >
-              <MessageSquare size={12} />
-              Natural Language
-            </button>
             <button
               onClick={() => setMode('builder')}
               title="Drag and drop columns to build queries visually"
@@ -1029,54 +1030,6 @@ function AnalyticsPageInner() {
             </button>
           </div>
         </div>
-        
-        {/* ============================================
-            MODE: Natural Language
-            ============================================ */}
-        {mode === 'natural' && (
-          <div className="flex-1 flex flex-col">
-            <div className="flex-1 overflow-auto p-4">
-              {nlMessages.length === 0 ? (
-                <NLEmptyState selectedTable={selectedTable} onQuickQuery={handleQuickQuery} />
-              ) : (
-                <div className="max-w-2xl mx-auto space-y-3">
-                  {nlMessages.map((msg, i) => (
-                    <NLMessageBubble key={i} message={msg} />
-                  ))}
-                  {isAnalyzing && (
-                    <div className="flex items-center gap-2 text-gray-500 text-xs">
-                      <div className="w-5 h-5 rounded-full bg-[rgba(131,177,109,0.1)] flex items-center justify-center">
-                        <Sparkles size={10} className="text-[#83b16d] animate-pulse" />
-                      </div>
-                      <span>Analyzing...</span>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-            
-            {/* NL Input */}
-            <div className="bg-white border-t p-3">
-              <div className="max-w-2xl mx-auto flex gap-2">
-                <input
-                  type="text"
-                  value={nlQuery}
-                  onChange={(e) => setNlQuery(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && runNLQuery()}
-                  placeholder={selectedTable ? `Ask about ${selectedTable.name}...` : "Ask a question about your data..."}
-                  className="flex-1 px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
-                />
-                <button
-                  onClick={runNLQuery}
-                  disabled={!nlQuery?.trim() || isAnalyzing}
-                  className="px-3 py-2 rounded-lg bg-[#83b16d] text-white disabled:opacity-50 hover:bg-[#6b9b5a] transition-colors"
-                >
-                  <Send size={14} />
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
         
         {/* ============================================
             MODE: SQL
