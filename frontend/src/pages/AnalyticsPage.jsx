@@ -34,7 +34,7 @@ import {
   DollarSign, Users, Clock, Shield, Table2, BarChart3, PieChart, LineChart,
   Layers, Eye, X, Play, Code, Copy, Check, Download, Hash,
   Calendar, FileText, MessageSquare, Sparkles, Send, Filter, Loader2,
-  AlertCircle, RefreshCw
+  AlertCircle, RefreshCw, Settings, BookOpen, Target
 } from 'lucide-react'
 
 // =============================================================================
@@ -110,13 +110,13 @@ const COLORS = {
 const CHART_PALETTE = ['#83b16d', '#285390', '#d97706', '#0891b2', '#993c44', '#5f4282', '#7c9a5e', '#4a7a9a']
 const AGGREGATIONS = ['SUM', 'AVG', 'COUNT', 'MIN', 'MAX', 'COUNT DISTINCT']
 
-// Truth Type icons and labels (Five Truths)
+// Truth Type icons and labels (Five Truths - Part 14 Visual Standards)
 const TRUTH_TYPE_CONFIG = {
-  configuration: { icon: '⚙️', label: 'Configuration', color: '#285390' },
-  reality: { icon: '📊', label: 'Reality', color: '#83b16d' },
-  intent: { icon: '📋', label: 'Intent', color: '#d97706' },
-  reference: { icon: '📚', label: 'Reference', color: '#0891b2' },
-  regulatory: { icon: '⚖️', label: 'Regulatory', color: '#993c44' },
+  reality: { icon: Database, label: 'Reality', color: '#285390' },
+  intent: { icon: Target, label: 'Intent', color: '#2766b1' },
+  configuration: { icon: Settings, label: 'Configuration', color: '#7aa866' },
+  reference: { icon: BookOpen, label: 'Reference', color: '#5f4282' },
+  regulatory: { icon: AlertCircle, label: 'Regulatory', color: '#993c44' },
 }
 
 // Domain detection and icons (fallback for auto-detection)
@@ -857,7 +857,7 @@ function AnalyticsPageInner() {
                   className="w-full px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
                   style={{ borderLeft: `3px solid ${truthTypeGroup.color || '#83b16d'}` }}
                 >
-                  <span className="text-base">{truthTypeGroup.icon}</span>
+                  {truthTypeGroup.icon && React.createElement(truthTypeGroup.icon, { size: 16, color: truthTypeGroup.color || '#83b16d' })}
                   <div className="flex-1 text-left min-w-0">
                     <div className="text-sm font-semibold text-gray-800">{truthTypeGroup.label}</div>
                     <div className="text-xs text-gray-400">{truthTypeGroup.tableCount} tables • {files.length} files</div>
