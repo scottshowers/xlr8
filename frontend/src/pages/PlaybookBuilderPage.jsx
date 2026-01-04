@@ -14,7 +14,8 @@ import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
 import { 
   Wrench, ClipboardList, Search, Building, RefreshCw, FileText, 
-  Puzzle, Copy, CheckCircle, PartyPopper
+  Puzzle, Copy, CheckCircle, PartyPopper, Rocket, Edit3, BarChart3, Link2,
+  HelpCircle, DollarSign, Users
 } from 'lucide-react';
 
 // Mission Control Colors
@@ -76,21 +77,21 @@ function StartScreen({ onSelectMode }) {
   const modes = [
     {
       id: 'template',
-      icon: '📝',
+      icon: Edit3,
       title: 'Create from Template',
       description: 'Pick a playbook type and fill in the details. Best for standard workflows.',
       color: '#83b16d',
     },
     {
       id: 'components',
-      icon: '🧩',
+      icon: Puzzle,
       title: 'Build Custom',
       description: 'Mix and match components to create a unique playbook. For power users.',
       color: COLORS.accent,
     },
     {
       id: 'clone',
-      icon: '📋',
+      icon: Copy,
       title: 'Clone Existing',
       description: 'Copy an existing playbook and customize it. Fastest way to get started.',
       color: COLORS.accentLight,
@@ -107,7 +108,9 @@ function StartScreen({ onSelectMode }) {
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.5rem', maxWidth: '900px', margin: '0 auto' }}>
-        {modes.map(mode => (
+        {modes.map(mode => {
+          const Icon = mode.icon;
+          return (
           <div
             key={mode.id}
             onClick={() => onSelectMode(mode.id)}
@@ -131,7 +134,9 @@ function StartScreen({ onSelectMode }) {
               e.currentTarget.style.boxShadow = 'none';
             }}
           >
-            <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>{mode.icon}</div>
+            <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'center' }}>
+              <Icon size={48} color={mode.color} />
+            </div>
             <h3 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.1rem', color: COLORS.text, marginBottom: '0.5rem' }}>
               {mode.title}
             </h3>
@@ -139,7 +144,7 @@ function StartScreen({ onSelectMode }) {
               {mode.description}
             </p>
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -157,7 +162,7 @@ function TemplateMode({ onBack, onSave }) {
     name: '',
     description: '',
     category: 'Custom',
-    icon: '📋',
+    icon: '',
     estimated_time: '10-15 minutes',
     modules: ['All'],
     inputs: {},
@@ -424,9 +429,13 @@ function TemplateMode({ onBack, onSave }) {
               fontWeight: '600',
               fontSize: '1rem',
               cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
             }}
           >
-            🚀 Create Playbook
+            <Rocket size={18} />
+            Create Playbook
           </button>
         </div>
       </div>
@@ -555,14 +564,14 @@ function AnalysisConfig({ config, updateConfig }) {
   };
 
   const areas = [
-    { id: 'missing_values', label: 'Missing Values', icon: '❓' },
-    { id: 'duplicates', label: 'Duplicates', icon: '👯' },
-    { id: 'format_issues', label: 'Format Issues', icon: '📝' },
-    { id: 'outliers', label: 'Outliers', icon: '📊' },
-    { id: 'referential_integrity', label: 'Referential Integrity', icon: '🔗' },
-    { id: 'date_issues', label: 'Date Issues', icon: '📅' },
-    { id: 'numeric_anomalies', label: 'Numeric Anomalies', icon: '🔢' },
-    { id: 'text_quality', label: 'Text Quality', icon: '📄' },
+    { id: 'missing_values', label: 'Missing Values', icon: HelpCircle },
+    { id: 'duplicates', label: 'Duplicates', icon: Copy },
+    { id: 'format_issues', label: 'Format Issues', icon: Edit3 },
+    { id: 'outliers', label: 'Outliers', icon: BarChart3 },
+    { id: 'referential_integrity', label: 'Referential Integrity', icon: Link2 },
+    { id: 'date_issues', label: 'Date Issues', icon: FileText },
+    { id: 'numeric_anomalies', label: 'Numeric Anomalies', icon: BarChart3 },
+    { id: 'text_quality', label: 'Text Quality', icon: FileText },
   ];
 
   return (
@@ -572,7 +581,9 @@ function AnalysisConfig({ config, updateConfig }) {
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
-        {areas.map(area => (
+        {areas.map(area => {
+          const Icon = area.icon;
+          return (
           <div
             key={area.id}
             onClick={() => toggleArea(area.id)}
@@ -587,11 +598,11 @@ function AnalysisConfig({ config, updateConfig }) {
               gap: '0.5rem',
             }}
           >
-            <span>{area.icon}</span>
+            <Icon size={18} color={focusAreas.includes(area.id) ? '#83b16d' : COLORS.textMuted} />
             <span>{area.label}</span>
-            {focusAreas.includes(area.id) && <span style={{ marginLeft: 'auto', color: '#83b16d' }}>✓</span>}
+            {focusAreas.includes(area.id) && <CheckCircle size={16} style={{ marginLeft: 'auto', color: '#83b16d' }} />}
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -609,12 +620,12 @@ function ComplianceConfig({ config, updateConfig }) {
   };
 
   const domainOptions = [
-    { id: 'retirement', label: 'Retirement / 401(k)', icon: '🏦' },
-    { id: 'tax', label: 'Tax Compliance', icon: '📋' },
-    { id: 'benefits', label: 'Benefits', icon: '🏥' },
-    { id: 'payroll', label: 'Payroll', icon: '💰' },
-    { id: 'hr', label: 'HR / Employment', icon: '👥' },
-    { id: 'general', label: 'General', icon: '📄' },
+    { id: 'retirement', label: 'Retirement / 401(k)', icon: Building },
+    { id: 'tax', label: 'Tax Compliance', icon: ClipboardList },
+    { id: 'benefits', label: 'Benefits', icon: Building },
+    { id: 'payroll', label: 'Payroll', icon: DollarSign },
+    { id: 'hr', label: 'HR / Employment', icon: Users },
+    { id: 'general', label: 'General', icon: FileText },
   ];
 
   return (
@@ -624,7 +635,9 @@ function ComplianceConfig({ config, updateConfig }) {
       </p>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '0.75rem' }}>
-        {domainOptions.map(domain => (
+        {domainOptions.map(domain => {
+          const Icon = domain.icon;
+          return (
           <div
             key={domain.id}
             onClick={() => toggleDomain(domain.id)}
@@ -639,11 +652,11 @@ function ComplianceConfig({ config, updateConfig }) {
               gap: '0.5rem',
             }}
           >
-            <span>{domain.icon}</span>
+            <Icon size={18} color={domains.includes(domain.id) ? '#83b16d' : COLORS.textMuted} />
             <span>{domain.label}</span>
-            {domains.includes(domain.id) && <span style={{ marginLeft: 'auto', color: '#83b16d' }}>✓</span>}
+            {domains.includes(domain.id) && <CheckCircle size={16} style={{ marginLeft: 'auto', color: '#83b16d' }} />}
           </div>
-        ))}
+        )})}
       </div>
     </div>
   );
@@ -793,9 +806,12 @@ function CloneMode({ onBack, onSave }) {
                   borderRadius: '8px',
                   fontWeight: '600',
                   cursor: (!newId || !newName || saving) ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
                 }}
               >
-                {saving ? 'Cloning...' : '📋 Clone Playbook'}
+                {saving ? 'Cloning...' : <><Copy size={16} /> Clone Playbook</>}
               </button>
             </div>
           </div>
@@ -819,7 +835,7 @@ function ComponentMode({ onBack, onSave }) {
     description: '',
     playbook_type: 'hybrid',
     category: 'Custom',
-    icon: '🧩',
+    icon: '',
     estimated_time: '10-15 minutes',
     components: [],
   });
@@ -923,9 +939,13 @@ function ComponentMode({ onBack, onSave }) {
             borderRadius: '8px',
             fontWeight: '600',
             cursor: (!config.playbook_id || !config.name) ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
           }}
         >
-          🚀 Create Playbook
+          <Rocket size={18} />
+          Create Playbook
         </button>
       </div>
     </div>
