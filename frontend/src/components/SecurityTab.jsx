@@ -336,7 +336,7 @@ export default function SecurityTab() {
       {/* Header */}
       <div style={styles.header}>
         <div>
-          <h2 style={styles.title}>🔒 Security Settings</h2>
+          <h2 style={styles.title}> Security Settings</h2>
           <p style={styles.subtitle}>Configure security features and view threat status</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
@@ -378,13 +378,13 @@ export default function SecurityTab() {
       {/* Section Tabs */}
       <div style={styles.tabs}>
         <button style={styles.tab(activeSection === 'toggles')} onClick={() => setActiveSection('toggles')}>
-          ⚡ Feature Toggles
+           Feature Toggles
         </button>
         <button style={styles.tab(activeSection === 'rates')} onClick={() => setActiveSection('rates')}>
           🚦 Rate Limits
         </button>
         <button style={styles.tab(activeSection === 'audit')} onClick={() => setActiveSection('audit')}>
-          📋 Audit Log
+           Audit Log
         </button>
       </div>
 
@@ -394,7 +394,7 @@ export default function SecurityTab() {
           {/* Middleware Toggles */}
           <div style={styles.card}>
             <div style={styles.cardTitle}>
-              🛡️ Security Middleware
+               Security Middleware
               <span style={{ fontSize: '0.7rem', color: '#64748b', fontWeight: 'normal' }}>
                 (applies to all API requests)
               </span>
@@ -432,7 +432,7 @@ export default function SecurityTab() {
           {/* PII & Prompt */}
           <div style={styles.card}>
             <div style={styles.cardTitle}>
-              🔐 Data Protection
+               Data Protection
             </div>
             
             <ToggleItem
@@ -505,7 +505,7 @@ export default function SecurityTab() {
       {/* Audit Log Section */}
       {activeSection === 'audit' && (
         <div style={styles.card}>
-          <div style={styles.cardTitle}>📋 Recent Activity (Last 20 Events)</div>
+          <div style={styles.cardTitle}> Recent Activity (Last 20 Events)</div>
           
           {recentAudit.length === 0 ? (
             <p style={{ color: '#64748b', textAlign: 'center', padding: '2rem' }}>
