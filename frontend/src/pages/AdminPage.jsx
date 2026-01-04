@@ -1,8 +1,12 @@
 /**
  * AdminPage.jsx - System Administration
  * 
+ * Updated: January 4, 2026 - Visual Standards Part 13
+ * - Standard page header with icon
+ * - Lucide icons instead of emojis
+ * 
  * Tabs:
- * - System: Operations Center (moved from main nav)
+ * - System: Operations Center
  * - Personas: AI persona management
  * - Security: Security settings
  * - Users: User management
@@ -10,8 +14,6 @@
  * - Integrations: UKG Connections
  * - Data Cleanup: Mass delete functionality
  * - Endpoints: API testing tool
- * 
- * REMOVED: Global Data (use Reference Library), Settings (was empty)
  */
 
 import React, { useState } from 'react';
@@ -25,6 +27,10 @@ import { useAuth, Permissions } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
 import { PageHeader, EmptyState } from '../components/ui';
 import { SimpleTooltip } from '../components/ui/Tooltip';
+import { 
+  Settings, BarChart3, Users, Shield, Lock, Plug, Trash2, Wrench,
+  Building2, Clock, Rocket, HardDrive, Zap
+} from 'lucide-react';
 
 const COLORS = {
   primary: '#83b16d',
@@ -33,6 +39,19 @@ const COLORS = {
   bg: '#f0f2f5',
   card: '#ffffff',
   border: '#e2e8f0',
+  white: '#ffffff',
+};
+
+// Tab icon mapping
+const TAB_ICONS = {
+  system: BarChart3,
+  personas: Users,
+  security: Lock,
+  users: Users,
+  permissions: Shield,
+  integrations: Plug,
+  cleanup: Trash2,
+  endpoints: Wrench,
 };
 
 // ==================== INTEGRATIONS TAB (UKG Connections) ====================
@@ -40,52 +59,70 @@ function IntegrationsTab() {
   const { activeProject } = useProject();
   
   const products = [
-    { id: 'pro', name: 'UKG Pro', icon: '🏢', description: 'Core HR, Payroll, Benefits', connected: false },
-    { id: 'wfm', name: 'UKG WFM', icon: '⏰', description: 'Workforce Management', connected: false },
-    { id: 'ready', name: 'UKG Ready', icon: '🚀', description: 'SMB HR & Payroll', connected: false },
+    { id: 'pro', name: 'UKG Pro', icon: Building2, description: 'Core HR, Payroll, Benefits', connected: false },
+    { id: 'wfm', name: 'UKG WFM', icon: Clock, description: 'Workforce Management', connected: false },
+    { id: 'ready', name: 'UKG Ready', icon: Rocket, description: 'SMB HR & Payroll', connected: false },
   ];
 
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🔌 UKG API Connections</h3>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Plug size={18} color={COLORS.primary} />
+          UKG API Connections
+        </h3>
         <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Connect to customer UKG instances to pull configuration and data directly
         </p>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1rem', marginBottom: '1.5rem' }}>
-        {products.map((product) => (
-          <div key={product.id} style={{
-            background: product.connected ? '#f0fdf4' : '#f8fafc',
-            border: `2px solid ${product.connected ? '#86efac' : '#e1e8ed'}`,
-            borderRadius: '12px', padding: '1.5rem', textAlign: 'center',
-          }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '0.75rem' }}>{product.icon}</div>
-            <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>{product.name}</div>
-            <div style={{ fontSize: '0.8rem', color: COLORS.textMuted, marginBottom: '1rem' }}>{product.description}</div>
-            <div style={{ fontSize: '0.75rem', color: product.connected ? '#166534' : COLORS.textMuted, marginBottom: '1rem' }}>
-              {product.connected ? '✓ Connected' : 'Not connected'}
-            </div>
-            <button disabled={!activeProject} style={{
-              padding: '0.5rem 1rem',
-              background: product.connected ? '#f0f4f7' : COLORS.primary,
-              border: product.connected ? '1px solid #e1e8ed' : 'none',
-              borderRadius: '6px',
-              color: product.connected ? COLORS.textMuted : 'white',
-              fontWeight: 600,
-              cursor: activeProject ? 'pointer' : 'not-allowed',
-              opacity: activeProject ? 1 : 0.5,
+        {products.map((product) => {
+          const Icon = product.icon;
+          return (
+            <div key={product.id} style={{
+              background: product.connected ? '#f0fdf4' : '#f8fafc',
+              border: `2px solid ${product.connected ? '#86efac' : '#e1e8ed'}`,
+              borderRadius: '12px', padding: '1.5rem', textAlign: 'center',
             }}>
-              {product.connected ? 'Configure' : 'Connect'}
-            </button>
-          </div>
-        ))}
+              <div style={{ 
+                width: '48px', 
+                height: '48px', 
+                borderRadius: '12px',
+                background: product.connected ? 'rgba(22, 163, 74, 0.1)' : 'rgba(131, 177, 109, 0.1)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                margin: '0 auto 0.75rem',
+              }}>
+                <Icon size={24} color={product.connected ? '#16a34a' : COLORS.primary} />
+              </div>
+              <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>{product.name}</div>
+              <div style={{ fontSize: '0.8rem', color: COLORS.textMuted, marginBottom: '1rem' }}>{product.description}</div>
+              <div style={{ fontSize: '0.75rem', color: product.connected ? '#166534' : COLORS.textMuted, marginBottom: '1rem' }}>
+                {product.connected ? '✓ Connected' : 'Not connected'}
+              </div>
+              <button disabled={!activeProject} style={{
+                padding: '0.5rem 1rem',
+                background: product.connected ? '#f0f4f7' : COLORS.primary,
+                border: product.connected ? '1px solid #e1e8ed' : 'none',
+                borderRadius: '6px',
+                color: product.connected ? COLORS.textMuted : 'white',
+                fontWeight: 600,
+                cursor: activeProject ? 'pointer' : 'not-allowed',
+                opacity: activeProject ? 1 : 0.5,
+              }}>
+                {product.connected ? 'Configure' : 'Connect'}
+              </button>
+            </div>
+          );
+        })}
       </div>
 
       {!activeProject && (
-        <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontSize: '0.9rem' }}>
-          ⚠️ Select a project from the top bar to configure UKG connections.
+        <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '8px', color: '#92400e', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Shield size={16} />
+          Select a project from the top bar to configure UKG connections.
         </div>
       )}
 
@@ -107,7 +144,10 @@ function CleanupTab() {
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🗑️ Data Cleanup</h3>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Trash2 size={18} color={COLORS.primary} />
+          Data Cleanup
+        </h3>
         <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Delete tables, documents, and orphaned data. Use Force Wipe to reset all backend storage.
         </p>
@@ -120,7 +160,18 @@ function CleanupTab() {
           borderRadius: '12px',
           padding: '1.5rem',
         }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>💾</div>
+          <div style={{ 
+            width: '40px', 
+            height: '40px', 
+            borderRadius: '10px',
+            background: 'rgba(220, 38, 38, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '0.5rem',
+          }}>
+            <HardDrive size={20} color="#dc2626" />
+          </div>
           <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Selective Delete</div>
           <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginBottom: '1rem' }}>
             Choose specific tables or documents to remove
@@ -133,7 +184,18 @@ function CleanupTab() {
           borderRadius: '12px',
           padding: '1.5rem',
         }}>
-          <div style={{ fontSize: '2rem', marginBottom: '0.5rem' }}>⚡</div>
+          <div style={{ 
+            width: '40px', 
+            height: '40px', 
+            borderRadius: '10px',
+            background: 'rgba(220, 38, 38, 0.1)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            marginBottom: '0.5rem',
+          }}>
+            <Zap size={20} color="#dc2626" />
+          </div>
           <div style={{ fontWeight: 700, color: COLORS.text, marginBottom: '0.25rem' }}>Force Full Wipe</div>
           <div style={{ fontSize: '0.85rem', color: COLORS.textMuted, marginBottom: '1rem' }}>
             Clear ALL data: DuckDB, ChromaDB, Supabase
@@ -155,7 +217,8 @@ function CleanupTab() {
           alignItems: 'center',
           gap: '0.5rem',
         }}>
-          🗑️ Open Data Cleanup Tool
+          <Trash2 size={16} />
+          Open Data Cleanup Tool
         </button>
       </Link>
     </div>
@@ -167,7 +230,10 @@ function EndpointsTab() {
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text }}>🔧 API Endpoints</h3>
+        <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: COLORS.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <Wrench size={18} color={COLORS.primary} />
+          API Endpoints
+        </h3>
         <p style={{ margin: '0.25rem 0 0', color: COLORS.textMuted, fontSize: '0.9rem' }}>
           Test and explore API endpoints. View responses, debug issues, and verify functionality.
         </p>
@@ -181,7 +247,7 @@ function EndpointsTab() {
           padding: '1rem',
           textAlign: 'center',
         }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>GET</div>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontWeight: 700, color: '#16a34a' }}>GET</div>
           <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Read data</div>
         </div>
         <div style={{
@@ -191,7 +257,7 @@ function EndpointsTab() {
           padding: '1rem',
           textAlign: 'center',
         }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>POST</div>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontWeight: 700, color: '#2563eb' }}>POST</div>
           <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Create/Update</div>
         </div>
         <div style={{
@@ -201,7 +267,7 @@ function EndpointsTab() {
           padding: '1rem',
           textAlign: 'center',
         }}>
-          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem' }}>DELETE</div>
+          <div style={{ fontSize: '1.5rem', marginBottom: '0.25rem', fontWeight: 700, color: '#dc2626' }}>DELETE</div>
           <div style={{ fontSize: '0.8rem', color: COLORS.textMuted }}>Remove data</div>
         </div>
       </div>
@@ -235,7 +301,8 @@ function EndpointsTab() {
           alignItems: 'center',
           gap: '0.5rem',
         }}>
-          🔧 Open Endpoints Tool
+          <Wrench size={16} />
+          Open Endpoints Tool
         </button>
       </Link>
     </div>
@@ -248,14 +315,14 @@ export default function AdminPage() {
   const { hasPermission, isAdmin } = useAuth();
 
   const ALL_TABS = [
-    { id: 'system', label: 'System', icon: '📊', permission: Permissions.OPS_CENTER, tooltip: 'Platform health, database status, and system monitoring' },
-    { id: 'personas', label: 'Personas', icon: '🎭', permission: null, tooltip: 'Create and manage AI personas for different consulting contexts' },
-    { id: 'security', label: 'Security', icon: '🔒', permission: Permissions.SECURITY_SETTINGS, tooltip: 'Security settings, MFA, and access controls' },
-    { id: 'users', label: 'Users', icon: '👥', permission: Permissions.USER_MANAGEMENT, tooltip: 'Manage user accounts, roles, and project assignments' },
-    { id: 'permissions', label: 'Permissions', icon: '🛡️', permission: Permissions.ROLE_PERMISSIONS, tooltip: 'Configure role-based permissions and access levels' },
-    { id: 'integrations', label: 'Integrations', icon: '🔌', permission: Permissions.OPS_CENTER, tooltip: 'Connect to external systems like UKG APIs' },
-    { id: 'cleanup', label: 'Data Cleanup', icon: '🗑️', permission: Permissions.OPS_CENTER, tooltip: 'Mass delete files and cleanup orphaned data' },
-    { id: 'endpoints', label: 'Endpoints', icon: '🔧', permission: Permissions.OPS_CENTER, tooltip: 'Test and debug API endpoints directly' },
+    { id: 'system', label: 'System', icon: BarChart3, permission: Permissions.OPS_CENTER, tooltip: 'Platform health, database status, and system monitoring' },
+    { id: 'personas', label: 'Personas', icon: Users, permission: null, tooltip: 'Create and manage AI personas for different consulting contexts' },
+    { id: 'security', label: 'Security', icon: Lock, permission: Permissions.SECURITY_SETTINGS, tooltip: 'Security settings, MFA, and access controls' },
+    { id: 'users', label: 'Users', icon: Users, permission: Permissions.USER_MANAGEMENT, tooltip: 'Manage user accounts, roles, and project assignments' },
+    { id: 'permissions', label: 'Permissions', icon: Shield, permission: Permissions.ROLE_PERMISSIONS, tooltip: 'Configure role-based permissions and access levels' },
+    { id: 'integrations', label: 'Integrations', icon: Plug, permission: Permissions.OPS_CENTER, tooltip: 'Connect to external systems like UKG APIs' },
+    { id: 'cleanup', label: 'Data Cleanup', icon: Trash2, permission: Permissions.OPS_CENTER, tooltip: 'Mass delete files and cleanup orphaned data' },
+    { id: 'endpoints', label: 'Endpoints', icon: Wrench, permission: Permissions.OPS_CENTER, tooltip: 'Test and debug API endpoints directly' },
   ];
 
   const visibleTabs = ALL_TABS.filter(tab => {
@@ -302,22 +369,29 @@ export default function AdminPage() {
 
   return (
     <div data-tour="admin-header">
-      <PageHeader title="Admin" subtitle="System administration and configuration" />
+      <PageHeader 
+        icon={Settings}
+        title="Admin" 
+        subtitle="System administration and configuration" 
+      />
 
       <div style={styles.card}>
         <div style={styles.tabs}>
-          {visibleTabs.map(tab => (
-            <SimpleTooltip key={tab.id} text={tab.tooltip}>
-              <button
-                data-tour={`admin-tab-${tab.id}`}
-                style={styles.tab(activeTab === tab.id)}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                <span>{tab.icon}</span>
-                {tab.label}
-              </button>
-            </SimpleTooltip>
-          ))}
+          {visibleTabs.map(tab => {
+            const Icon = tab.icon;
+            return (
+              <SimpleTooltip key={tab.id} text={tab.tooltip}>
+                <button
+                  data-tour={`admin-tab-${tab.id}`}
+                  style={styles.tab(activeTab === tab.id)}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  <Icon size={16} />
+                  {tab.label}
+                </button>
+              </SimpleTooltip>
+            );
+          })}
         </div>
 
         <div style={styles.tabContent}>
