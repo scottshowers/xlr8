@@ -41,7 +41,7 @@ export default function ProtectedRoute({
         color: '#5f6c7b',
       }}>
         <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>🔐</div>
+          <div style={{ fontSize: '2rem', marginBottom: '1rem' }}></div>
           <div>Checking access...</div>
         </div>
       </div>
