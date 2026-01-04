@@ -15,6 +15,7 @@ import React, { useState, useEffect } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import ColumnSplitter from '../components/ColumnSplitter';
 import { useTheme } from '../context/ThemeContext';
+import { ClipboardList, BarChart3 } from 'lucide-react';
 
 const API_BASE = '/api';
 
@@ -392,7 +393,10 @@ export default function VacuumColumnMapping() {
         <div style={styles.leftPanel}>
           {/* Header Metadata */}
           <div style={styles.metadataCard}>
-            <h3 style={styles.metadataTitle}>📋 Header Metadata</h3>
+            <h3 style={{ ...styles.metadataTitle, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <ClipboardList size={18} color="#83b16d" />
+              Header Metadata
+            </h3>
             <div style={styles.metadataFields}>
               <div style={styles.fieldGroup}>
                 <label style={styles.label}>Company</label>
@@ -479,7 +483,7 @@ export default function VacuumColumnMapping() {
         <div style={styles.rightPanel}>
           {!currentExtract ? (
             <div style={styles.emptySection}>
-              <div style={styles.emptyIcon}>📋</div>
+              <ClipboardList size={48} color="#9ca3af" style={{ opacity: 0.5 }} />
               <h3 style={styles.emptyTitle}>No Data Detected for {currentSection?.label}</h3>
               <p style={styles.emptyText}>
                 This section wasn't automatically detected in the PDF.<br/>
@@ -595,7 +599,10 @@ export default function VacuumColumnMapping() {
                   style={styles.previewHeader}
                   onClick={() => setShowPreview(!showPreview)}
                 >
-                  <span>📊 Live Preview</span>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <BarChart3 size={16} />
+                    Live Preview
+                  </span>
                   <span>{showPreview ? '▼' : '▶'}</span>
                 </div>
                 {showPreview && (
