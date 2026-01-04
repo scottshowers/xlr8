@@ -5,18 +5,19 @@
  * Main: Command Center | Projects | Data | Playbooks | AI Assist
  * Admin: Collapsible dropdown with Standards, Work Advisor, Playbook Builder, Learning, System
  * 
- * Includes: Upload status indicator, theme toggle, help button, Customer Genome
+ * Includes: Upload status indicator, tooltip toggle, Customer Genome
  * 
- * Updated: December 20, 2025 - Added Customer Genome button
+ * Updated: January 4, 2026 - Replaced tour toggle with tooltip toggle
  */
 
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, HelpCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Rocket, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
 import { useOnboarding } from '../context/OnboardingContext';
+import { useTooltips } from '../context/TooltipContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
 import { SimpleTooltip } from './ui/Tooltip';
 
@@ -149,7 +150,8 @@ const HLogoGreen = () => (
 function Navigation({ onOpenGenome }) {
   const location = useLocation();
   const { hasPermission, user, isAdmin, logout } = useAuth();
-  const { startCurrentPageTour, tourEnabled, setTourEnabled } = useOnboarding();
+  useOnboarding(); // Keep for data-tour attributes
+  const { tooltipsEnabled, toggleTooltips } = useTooltips();
   const [adminExpanded, setAdminExpanded] = useState(false);
 
   const isActive = (path) => {
@@ -411,25 +413,18 @@ function Navigation({ onOpenGenome }) {
           {/* Customer Genome Button */}
           <GenomeButton onClick={onOpenGenome} />
           
-          {/* Tour Guide Toggle */}
-          <SimpleTooltip text={tourEnabled ? 'Turn off guided tour' : 'Turn on guided tour'}>
+          {/* Tooltip Toggle */}
+          <SimpleTooltip text={tooltipsEnabled ? 'Turn off tooltips' : 'Turn on tooltips'}>
             <button
-              onClick={() => {
-                if (tourEnabled) {
-                  setTourEnabled(false);
-                } else {
-                  setTourEnabled(true);
-                  startCurrentPageTour();
-                }
-              }}
+              onClick={toggleTooltips}
               style={{
                 ...styles.helpBtn,
-                background: tourEnabled ? COLORS.primary : '#f8fafc',
-                color: tourEnabled ? 'white' : COLORS.textLight,
-                borderColor: tourEnabled ? COLORS.primary : '#e1e8ed',
+                background: tooltipsEnabled ? COLORS.primary : '#f8fafc',
+                color: tooltipsEnabled ? 'white' : COLORS.textLight,
+                borderColor: tooltipsEnabled ? COLORS.primary : '#e1e8ed',
               }}
             >
-              <HelpCircle size={16} />
+              <MessageSquare size={16} />
             </button>
           </SimpleTooltip>
           
