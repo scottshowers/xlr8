@@ -6,13 +6,52 @@
  * 
  * Deploy to: frontend/src/pages/AdminEndpoints.jsx
  * 
- * Last Updated: January 3, 2026
+ * Last Updated: January 4, 2026
+ * Visual Standards: Part 13 - lucide icons
  * Total Endpoints: 259
  */
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowLeft, ExternalLink, Copy, Check, Search } from 'lucide-react';
+import { 
+  ArrowLeft, ExternalLink, Copy, Check, Search, Rocket, Heart, Upload,
+  Clock, ClipboardList, Folder, FileText, BarChart3, Brain, MessageSquare,
+  Wrench, Settings, Plug, Link2, ScrollText, Database, Shield, ChevronDown,
+  Tag, BookOpen, Key, Target, Trash2, TrendingUp, Lock
+} from 'lucide-react';
+
+// Icon mapping for categories (lucide icons instead of emojis)
+const CATEGORY_ICONS = {
+  platform: Rocket,
+  health: Heart,
+  upload: Upload,
+  progress: Clock,
+  jobs: ClipboardList,
+  projects: Folder,
+  files: FileText,
+  classification: Search,
+  domains: Tag,
+  chat: MessageSquare,
+  query: BarChart3,
+  intelligence: Brain,
+  relationships: Link2,
+  regulatory: ScrollText,
+  reference: BookOpen,
+  maintenance: Wrench,
+  library: Database,
+  auth: Key,
+  standards: ClipboardList,
+  metrics: TrendingUp,
+  cleanup: Trash2,
+  admin: Settings,
+  security: Lock,
+  security_new: Shield,
+  llm: Target,
+  integration: Plug,
+  logs: FileText,
+  vacuum: Trash2,
+  export: Upload,
+};
 
 const PRODUCTION_URL = 'https://hcmpact-xlr8-production.up.railway.app';
 
@@ -601,7 +640,10 @@ export default function AdminEndpoints() {
         <Link to="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: c.primary, textDecoration: 'none', marginBottom: '1rem' }}>
           <ArrowLeft size={16} /> Back to Admin
         </Link>
-        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 600 }}>🔗 API Endpoints Reference</h1>
+        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Link2 size={24} color={c.primary} />
+          API Endpoints Reference
+        </h1>
         <p style={{ margin: '0.5rem 0 0', color: c.textMuted }}>Complete reference of all {totalEndpoints} API endpoints</p>
       </div>
 
@@ -634,7 +676,7 @@ export default function AdminEndpoints() {
           <div key={category.id} style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, overflow: 'hidden' }}>
             <button onClick={() => setExpandedCategory(expandedCategory === category.id ? null : category.id)} style={{ width: '100%', padding: '1rem 1.25rem', background: c.background, border: 'none', borderBottom: expandedCategory === category.id ? `1px solid ${c.border}` : 'none', display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer', textAlign: 'left' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <span style={{ fontSize: '1.25rem' }}>{category.icon}</span>
+                {CATEGORY_ICONS[category.id] && React.createElement(CATEGORY_ICONS[category.id], { size: 20, color: c.primary })}
                 <div>
                   <div style={{ fontWeight: 600, fontSize: '0.95rem', color: c.text }}>{category.name}</div>
                   <div style={{ fontSize: '0.75rem', color: c.textMuted }}>{category.description}</div>
