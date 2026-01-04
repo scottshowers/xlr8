@@ -379,7 +379,7 @@ function Navigation({ onOpenGenome }) {
                     onBlur={() => setTimeout(() => setAdminExpanded(false), 200)}
                     style={styles.adminToggle(isAdminActive, adminExpanded)}
                   >
-                    <span>🔧</span>
+                    <span></span>
                     Admin
                     {adminExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
                   </button>
