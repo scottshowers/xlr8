@@ -157,7 +157,7 @@ export default function ColumnSplitter({
       <div style={styles.modal}>
         {/* Header */}
         <div style={styles.header}>
-          <h2 style={styles.title}>🔧 Split Merged Column</h2>
+          <h2 style={styles.title}> Split Merged Column</h2>
           <button onClick={onCancel} style={styles.closeBtn}>×</button>
         </div>
 
@@ -178,7 +178,7 @@ export default function ColumnSplitter({
         {/* AI Suggestions */}
         {suggestions.length > 0 && (
           <div style={styles.suggestionsBox}>
-            <div style={styles.suggestionsTitle}>🤖 AI Detected Patterns</div>
+            <div style={styles.suggestionsTitle}>AI Detected Patterns</div>
             <div style={styles.suggestionsList}>
               {suggestions.map((sug, i) => (
                 <div 
@@ -195,7 +195,7 @@ export default function ColumnSplitter({
                   </div>
                   {sug.is_row_merge && (
                     <div style={styles.rowMergeWarning}>
-                      ⚠️ Multiple rows detected in single cell
+                       Multiple rows detected in single cell
                     </div>
                   )}
                 </div>
@@ -218,7 +218,7 @@ export default function ColumnSplitter({
                   color: splitMethod === method ? '#fff' : '#374151'
                 }}
               >
-                {method === 'pattern' && '🎯 Pattern (Regex)'}
+                {method === 'pattern' && ' Pattern (Regex)'}
                 {method === 'positions' && '📏 Character Positions'}
                 {method === 'delimiter' && '✂️ Delimiter'}
               </button>
@@ -303,7 +303,7 @@ export default function ColumnSplitter({
         {/* Live Preview */}
         {preview.length > 0 && (
           <div style={styles.previewSection}>
-            <div style={styles.previewTitle}>📊 Preview</div>
+            <div style={styles.previewTitle}> Preview</div>
             <div style={styles.previewTable}>
               <table style={styles.table}>
                 <thead>
