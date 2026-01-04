@@ -1663,7 +1663,6 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
         )}
       </div>
     </div>
-    </div>
   )
 }
 
