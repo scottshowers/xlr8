@@ -18,7 +18,8 @@ import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, FileText, Link2, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
-  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2
+  Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2,
+  Search, ClipboardList, BarChart3
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -608,8 +609,8 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                       <div style={{ fontSize: '0.55rem', color: c.silver, fontFamily: 'monospace', marginTop: '2px' }} title={selectedRel.source_table || selectedRel.from_table}>{getTruncatedName(selectedRel.source_table || selectedRel.from_table, 35)}</div>
                       <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '2px' }}>{testResult.statistics?.table_a_rows?.toLocaleString() || 0} rows</div>
                     </div>
-                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
-                      🔗 {testResult.join_column_a}
+                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Link2 size={12} /> {testResult.join_column_a}
                     </span>
                   </div>
                   <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
@@ -648,8 +649,8 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                       <div style={{ fontSize: '0.55rem', color: c.silver, fontFamily: 'monospace', marginTop: '2px' }} title={selectedRel.target_table || selectedRel.to_table}>{getTruncatedName(selectedRel.target_table || selectedRel.to_table, 35)}</div>
                       <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '2px' }}>{testResult.statistics?.table_b_rows?.toLocaleString() || 0} rows</div>
                     </div>
-                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4 }}>
-                      🔗 {testResult.join_column_b}
+                    <span style={{ fontSize: '0.65rem', padding: '3px 6px', background: `${c.electricBlue}15`, color: c.electricBlue, borderRadius: 4, display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Link2 size={12} /> {testResult.join_column_b}
                     </span>
                   </div>
                   <div style={{ maxHeight: '200px', overflowY: 'auto' }}>
@@ -1311,11 +1312,11 @@ export default function DataExplorer() {
 
   // UPDATED: Added classification tab with tooltips
   const tabs = [
-    { id: 'tables', label: '📊 Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
-    { id: 'classification', label: '🔍 Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
-    { id: 'relationships', label: '🔗 Data Model', icon: Link2, tooltip: 'View, verify, and test relationships. Confirm join columns between tables.' },
-    { id: 'compliance', label: '✅ Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
-    { id: 'rules', label: '📜 Rules', icon: BookOpen, tooltip: 'Extracted validation rules from regulatory documents. Used in compliance checks.' },
+    { id: 'tables', label: 'Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
+    { id: 'classification', label: 'Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
+    { id: 'relationships', label: 'Data Model', icon: Link2, tooltip: 'View, verify, and test relationships. Confirm join columns between tables.' },
+    { id: 'compliance', label: 'Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
+    { id: 'rules', label: 'Rules', icon: BookOpen, tooltip: 'Extracted validation rules from regulatory documents. Used in compliance checks.' },
   ];
 
   const totalTables = tables.length;
@@ -1417,7 +1418,7 @@ export default function DataExplorer() {
         
         <Tooltip title="Columns" detail="Total columns across all tables." action="Check fill rates in table detail">
           <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
-            <span style={{ fontSize: '1.5rem' }}>📋</span>
+            <ClipboardList size={28} color={c.primary} />
             <div>
               <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{totalColumns}</div>
               <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Columns</div>
@@ -1427,7 +1428,7 @@ export default function DataExplorer() {
         
         <Tooltip title="Relationships" detail="Detected joins between tables based on matching columns." action="Used for smart SQL generation">
           <div style={{ background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10, padding: '1rem 1.25rem', display: 'flex', alignItems: 'center', gap: '1rem', cursor: 'help' }}>
-            <span style={{ fontSize: '1.5rem' }}>🔗</span>
+            <Link2 size={28} color={c.electricBlue} />
             <div>
               <div style={{ fontSize: '1.5rem', fontWeight: 700, color: c.text }}>{relationships?.length || 0}</div>
               <div style={{ fontSize: '0.8rem', color: c.textMuted }}>Relationships</div>
