@@ -11,7 +11,7 @@
  *   <Route path="/admin/cleanup" element={<DataCleanup />} />
  * 
  * Add to navigation:
- *   { path: '/admin/cleanup', label: 'Data Cleanup', icon: '🗑️' }
+ *   { path: '/admin/cleanup', label: 'Data Cleanup', icon: '' }
  * 
  * Last Updated: December 27, 2025
  */
@@ -762,7 +762,7 @@ export default function DataCleanup() {
 
       {confirmDelete?.type === 'forceWipe' && (
         <ConfirmModal
-          title="⚠️ FORCE FULL WIPE"
+          title=" FORCE FULL WIPE"
           message="This will delete ALL data from DuckDB and ChromaDB, regardless of registry status. This is IRREVERSIBLE. Are you absolutely sure?"
           onConfirm={() => deepClean(true)}
           onCancel={() => setConfirmDelete(null)}
