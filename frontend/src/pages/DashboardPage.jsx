@@ -123,7 +123,7 @@ function PipelineStatus({ data }) {
         </div>
       </div>
       
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr auto 1fr auto 1fr auto 1fr', alignItems: 'center', gap: '12px' }}>
         {stageConfig.map((stage, i) => {
           const stageData = stages[stage.key] || {};
           const Icon = stage.icon;
@@ -139,8 +139,7 @@ function PipelineStatus({ data }) {
               >
                 <div 
                   style={{
-                    flex: 1,
-                    padding: '12px',
+                    padding: '16px 12px',
                     borderRadius: '8px',
                     backgroundColor: healthy ? `${colors.success}08` : `${colors.error}08`,
                     border: `1px solid ${healthy ? colors.success : colors.error}30`,
@@ -148,9 +147,9 @@ function PipelineStatus({ data }) {
                     cursor: 'help'
                   }}
                 >
-                  <Icon size={18} color={healthy ? colors.success : colors.error} style={{ marginBottom: '6px' }} />
-                  <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text }}>{stage.label}</div>
-                  <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
+                  <Icon size={20} color={healthy ? colors.success : colors.error} style={{ marginBottom: '8px' }} />
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: colors.text }}>{stage.label}</div>
+                  <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '4px' }}>
                     {stageData.latency_ms ? `${stageData.latency_ms}ms` : '—'}
                   </div>
                 </div>
