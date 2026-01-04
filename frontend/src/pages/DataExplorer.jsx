@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
+import { Tooltip } from '../components/ui';
 import api from '../services/api';
 
 // NEW: Import ClassificationPanel
@@ -49,43 +50,6 @@ const brandColors = {
   success: '#285390',
 };
 
-// ============================================================================
-// TOOLTIP COMPONENT (from Mission Control)
-// ============================================================================
-function Tooltip({ children, title, detail, action }) {
-  const [show, setShow] = useState(false);
-  
-  return (
-    <div 
-      style={{ position: 'relative', display: 'inline-block' }}
-      onMouseEnter={() => setShow(true)} 
-      onMouseLeave={() => setShow(false)}
-    >
-      {children}
-      {show && (
-        <div style={{
-          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
-          marginBottom: '8px', padding: '12px 16px', backgroundColor: brandColors.text, color: brandColors.white,
-          borderRadius: '8px', fontSize: '12px', width: '260px', zIndex: 1000,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
-          <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
-          {action && (
-            <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(255,255,255,0.2)', color: brandColors.skyBlue, fontWeight: 500 }}>
-              💡 {action}
-            </div>
-          )}
-          <div style={{ position: 'absolute', bottom: '-6px', left: '50%', transform: 'translateX(-50%)',
-            width: 0, height: 0, borderLeft: '6px solid transparent', borderRight: '6px solid transparent', 
-            borderTop: `6px solid ${brandColors.text}` }} />
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================================================
 // STATUS CONFIG for relationship verification
 // ============================================================================
 const statusConfig = {
