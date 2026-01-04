@@ -342,43 +342,47 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
             Document Type
           </label>
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-            {truthTypes.map(tt => (
-              <Tooltip 
-                key={tt.value}
-                title={tt.tooltip.title}
-                detail={tt.tooltip.detail}
-                action={tt.tooltip.action}
-                position="right"
-              >
-                <button
-                  onClick={() => setTruthType(tt.value)}
-                  style={{
-                    display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
-                    padding: '0.75rem', borderRadius: 8, textAlign: 'left',
-                    border: truthType === tt.value 
-                      ? `2px solid ${c.primary}` 
-                      : `1px solid ${c.border}`,
-                    background: truthType === tt.value ? `${c.primary}15` : 'transparent',
-                    cursor: 'pointer', transition: 'all 0.15s', width: '100%'
-                  }}
+            {truthTypes.map(tt => {
+              const truthColor = TRUTH_ICONS[tt.value]?.color || c.primary;
+              const isSelected = truthType === tt.value;
+              const TruthIcon = TRUTH_ICONS[tt.value]?.icon || FileText;
+              return (
+                <Tooltip 
+                  key={tt.value}
+                  title={tt.tooltip.title}
+                  detail={tt.tooltip.detail}
+                  action={tt.tooltip.action}
+                  position="right"
                 >
-                  <div style={{
-                    width: 18, height: 18, borderRadius: '50%',
-                    border: `2px solid ${truthType === tt.value ? c.primary : c.border}`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    flexShrink: 0, marginTop: 2
-                  }}>
-                    {truthType === tt.value && (
-                      <div style={{ width: 8, height: 8, borderRadius: '50%', background: c.primary }} />
-                    )}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem', color: c.text }}>{tt.label}</div>
-                    <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.15rem' }}>{tt.desc}</div>
-                  </div>
-                </button>
-              </Tooltip>
-            ))}
+                  <button
+                    onClick={() => setTruthType(tt.value)}
+                    style={{
+                      display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
+                      padding: '0.75rem', borderRadius: 8, textAlign: 'left',
+                      border: isSelected 
+                        ? `2px solid ${truthColor}` 
+                        : `1px solid ${c.border}`,
+                      borderLeft: `4px solid ${truthColor}`,
+                      background: isSelected ? `${truthColor}12` : 'transparent',
+                      cursor: 'pointer', transition: 'all 0.15s', width: '100%'
+                    }}
+                  >
+                    <div style={{
+                      width: 32, height: 32, borderRadius: 6,
+                      background: isSelected ? truthColor : `${truthColor}15`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      flexShrink: 0
+                    }}>
+                      <TruthIcon size={16} color={isSelected ? '#ffffff' : truthColor} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: c.text }}>{tt.label}</div>
+                      <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.15rem' }}>{tt.desc}</div>
+                    </div>
+                  </button>
+                </Tooltip>
+              );
+            })}
           </div>
         </div>
 
