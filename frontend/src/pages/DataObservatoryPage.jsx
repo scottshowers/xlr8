@@ -73,10 +73,34 @@ export default function DataObservatoryPage({ embedded = false }) {
   return (
     <div>
       {!embedded && (
-        <div style={{ marginBottom: '1.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
           <div>
-            <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.5rem', fontWeight: 700, color: colors.text, margin: 0 }}>Data Observatory</h1>
-            <p style={{ color: colors.textMuted, marginTop: '0.25rem', fontSize: '0.875rem' }}>Unified view of all data stores</p>
+            <h1 style={{ 
+              margin: 0, 
+              fontSize: '20px', 
+              fontWeight: 600, 
+              color: colors.text, 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '10px',
+              fontFamily: "'Sora', sans-serif"
+            }}>
+              <div style={{ 
+                width: '36px', 
+                height: '36px', 
+                borderRadius: '10px', 
+                backgroundColor: colors.primary, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Eye size={20} color="#ffffff" />
+              </div>
+              Data Observatory
+            </h1>
+            <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: colors.textMuted }}>
+              Unified view of all data stores
+            </p>
           </div>
           <button onClick={loadAllData} disabled={loading} style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', padding: '0.5rem 1rem', background: 'transparent', border: `1px solid ${colors.divider}`, borderRadius: 8, color: colors.textMuted, fontSize: '0.85rem', cursor: 'pointer' }}>
             <RefreshCw size={16} style={{ animation: loading ? 'spin 1s linear infinite' : 'none' }} /> Refresh
