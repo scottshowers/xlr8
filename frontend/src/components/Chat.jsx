@@ -22,6 +22,7 @@ import {
   CheckCircle, ChevronDown, ChevronRight, Lightbulb, Download,
   ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2, Eye, EyeOff
 } from 'lucide-react'
+import { Tooltip } from './ui'
 
 // Theme-aware colors - Mission Control palette
 const getColors = (dark) => ({
@@ -86,15 +87,15 @@ export default function Chat({ functionalAreas = [] }) {
   const [currentPersona, setCurrentPersona] = useState({
     id: 'bessie',
     name: 'Bessie',
-    icon: '🐮',
+    icon: 'AI',
     description: 'Your friendly payroll expert'
   })
   const [showPersonaCreator, setShowPersonaCreator] = useState(false)
 
   const scopeLabels = {
-    project: '📁 Project',
-    global: '🌐 Global',
-    all: '📊 All'
+    project: 'Project',
+    global: 'Global',
+    all: 'All'
   }
 
   useEffect(() => {
@@ -140,8 +141,8 @@ export default function Chat({ functionalAreas = [] }) {
           role: 'assistant',
           type: 'system',
           content: resetType === 'learned' 
-            ? '🔄 Preferences cleared. I\'ll ask clarifying questions again.'
-            : '🔄 Session filters reset. Ask your question again.',
+            ? 'Preferences cleared. I\'ll ask clarifying questions again.'
+            : 'Session filters reset. Ask your question again.',
           timestamp: new Date().toISOString()
         }])
       }
@@ -288,7 +289,7 @@ export default function Chat({ functionalAreas = [] }) {
       console.error('Intelligent chat error:', err)
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '❌ ' + (err.response?.data?.detail || err.message || 'Failed to get intelligent response'),
+        content: '' +  + (err.response?.data?.detail || err.message || 'Failed to get intelligent response'),
         error: true,
         timestamp: new Date().toISOString()
       }])
@@ -362,82 +363,102 @@ export default function Chat({ functionalAreas = [] }) {
           />
           
           {/* Always using Intelligent Mode - indicator badge */}
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              padding: '0.375rem 0.75rem',
-              borderRadius: 8,
-              fontSize: '0.85rem',
-              fontWeight: 500,
-              background: colors.primary,
-              color: 'white',
-            }}
+          <Tooltip 
+            title="Intelligent Mode" 
+            detail="AI synthesizes answers from your structured data, documents, and reference library for comprehensive responses."
+            action="Uses all available sources"
           >
-            <Brain size={16} />
-            Intelligent
-          </div>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.375rem 0.75rem',
+                borderRadius: 8,
+                fontSize: '0.85rem',
+                fontWeight: 500,
+                background: colors.primary,
+                color: 'white',
+                cursor: 'help',
+              }}
+            >
+              <Brain size={16} />
+              Intelligent
+            </div>
+          </Tooltip>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           {/* Engine V2 Toggle (experimental) */}
-          <label
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.375rem',
-              padding: '0.375rem 0.5rem',
-              fontSize: '0.75rem',
-              borderRadius: 6,
-              cursor: 'pointer',
-              background: useEngineV2 ? colors.successLight : colors.inputBg,
-              border: `1px solid ${useEngineV2 ? colors.success : colors.divider}`,
-              color: useEngineV2 ? colors.success : colors.textMuted,
-            }}
-            title="Experimental: Use new modular intelligence engine"
+          <Tooltip 
+            title="Engine V2 (Beta)" 
+            detail="Experimental modular intelligence engine with improved query routing and source synthesis."
+            action="Toggle to test new engine"
           >
-            <input
-              type="checkbox"
-              checked={useEngineV2}
-              onChange={(e) => setUseEngineV2(e.target.checked)}
-              style={{ margin: 0, cursor: 'pointer' }}
-            />
-            V2
-          </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.375rem',
+                padding: '0.375rem 0.5rem',
+                fontSize: '0.75rem',
+                borderRadius: 6,
+                cursor: 'pointer',
+                background: useEngineV2 ? colors.successLight : colors.inputBg,
+                border: `1px solid ${useEngineV2 ? colors.success : colors.divider}`,
+                color: useEngineV2 ? colors.success : colors.textMuted,
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={useEngineV2}
+                onChange={(e) => setUseEngineV2(e.target.checked)}
+                style={{ margin: 0, cursor: 'pointer' }}
+              />
+              V2
+            </label>
+          </Tooltip>
           
           {/* Scope Selector */}
-          <select
-            value={scope}
-            onChange={(e) => setScope(e.target.value)}
-            style={{
-              padding: '0.375rem 0.75rem',
-              fontSize: '0.85rem',
-              border: `1px solid ${colors.divider}`,
-              borderRadius: 8,
-              background: colors.card,
-              color: colors.text,
-            }}
+          <Tooltip 
+            title="Query Scope" 
+            detail="Project: Current project data only. Global: Reference library only. All: Both sources combined."
+            action="Select data sources to search"
           >
-            {Object.entries(scopeLabels).map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
+            <select
+              value={scope}
+              onChange={(e) => setScope(e.target.value)}
+              style={{
+                padding: '0.375rem 0.75rem',
+                fontSize: '0.85rem',
+                border: `1px solid ${colors.divider}`,
+                borderRadius: 8,
+                background: colors.card,
+                color: colors.text,
+                cursor: 'pointer',
+              }}
+            >
+              {Object.entries(scopeLabels).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </Tooltip>
 
-          <button
-            onClick={clearChat}
-            style={{
-              padding: '0.5rem',
-              background: 'transparent',
-              border: 'none',
-              borderRadius: 8,
-              cursor: 'pointer',
-              color: colors.textMuted,
-            }}
-            title="Clear chat"
-          >
-            <Trash2 size={18} />
-          </button>
+          <Tooltip title="Clear Chat" detail="Remove all messages from this conversation." action="Start fresh">
+            <button
+              onClick={clearChat}
+              style={{
+                padding: '0.5rem',
+                background: 'transparent',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                color: colors.textMuted,
+              }}
+            >
+              <Trash2 size={18} />
+            </button>
+          </Tooltip>
         </div>
       </div>
 
@@ -460,8 +481,8 @@ export default function Chat({ functionalAreas = [] }) {
           </div>
           {learningStats?.available && (
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem', color: colors.primary }}>
-              <span title="Learned query patterns">🧠 {learningStats.learned_queries || 0} patterns</span>
-              <span title="Feedback records">👍 {learningStats.feedback_records || 0} feedback</span>
+              <span title="Learned query patterns">{learningStats.learned_queries || 0} patterns</span>
+              <span title="Feedback records">{learningStats.feedback_records || 0} feedback</span>
             </div>
           )}
         </div>
@@ -476,7 +497,7 @@ export default function Chat({ functionalAreas = [] }) {
           fontSize: '0.75rem',
           fontFamily: 'monospace',
         }}>
-          <strong>🔧 DEBUG:</strong> needs_clarification={String(debugInfo.needs_clarification)} | 
+          <strong>DEBUG:</strong> needs_clarification={String(debugInfo.needs_clarification)} | 
           has_answer={String(debugInfo.has_answer)} | 
           len={debugInfo.answer_length} | 
           reality={debugInfo.from_reality} | 
@@ -514,7 +535,7 @@ export default function Chat({ functionalAreas = [] }) {
             color: colors.textMuted,
           }}>
             <div style={{ fontSize: '3.5rem', marginBottom: '1rem', opacity: 0.5 }}>
-              {intelligentMode ? '🧠' : '💬'}
+              {intelligentMode ? 'AI' : 'Chat'}
             </div>
             <h3 style={{ fontSize: '1rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>
               {intelligentMode ? 'Intelligent Analysis Ready' : 'Start a Conversation'}
@@ -527,15 +548,21 @@ export default function Chat({ functionalAreas = [] }) {
             </p>
             {intelligentMode && (
               <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.75rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.blue }}>
-                  <Database size={14} /> Data
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.primary }}>
-                  <FileText size={14} /> Docs
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.amber }}>
-                  <BookOpen size={14} /> Reference
-                </div>
+                <Tooltip title="Structured Data" detail="SQL queries against your uploaded tables - employee records, payroll data, configurations." action="DuckDB analytics">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.blue, cursor: 'help' }}>
+                    <Database size={14} /> Data
+                  </div>
+                </Tooltip>
+                <Tooltip title="Documents" detail="Semantic search across uploaded PDFs, Word docs, and text files." action="ChromaDB retrieval">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.primary, cursor: 'help' }}>
+                    <FileText size={14} /> Docs
+                  </div>
+                </Tooltip>
+                <Tooltip title="Reference Library" detail="Global knowledge base - vendor documentation, regulatory guides, best practices." action="Shared across projects">
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.amber, cursor: 'help' }}>
+                    <BookOpen size={14} /> Reference
+                  </div>
+                </Tooltip>
               </div>
             )}
           </div>
@@ -701,7 +728,7 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
           color: colors.primary
         })
       }}>
-        {isUser ? '👤' : persona?.icon || '🐮'}
+        {isUser ? 'U' : persona?.icon || 'AI'}
       </div>
       
       {/* Bubble */}
@@ -751,7 +778,7 @@ function MessageBubble({ message, index, persona, expandedSources, toggleSources
               <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                 {message.sources.slice(0, 5).map((src, i) => (
                   <div key={i} style={{ fontSize: '0.75rem', color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    📄 {src.filename || src.source || 'Unknown'}
+                    {src.filename || src.source || 'Unknown'}
                   </div>
                 ))}
               </div>
@@ -1020,7 +1047,7 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
               alignItems: 'center',
               gap: '0.25rem',
             }}>
-              🧠 Learned
+              Learned
             </span>
           )}
         </div>
@@ -1121,7 +1148,7 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
             <div key={i} style={{ fontSize: '0.85rem', color: colors.text, marginBottom: '0.5rem' }}>
               <div>{conflict.description}</div>
               <div style={{ color: colors.red, fontSize: '0.75rem', marginTop: '0.25rem' }}>
-                💡 Recommendation: {conflict.recommendation}
+                Recommendation: {conflict.recommendation}
               </div>
             </div>
           ))}
@@ -1147,8 +1174,8 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
           >
             <span style={{ color: colors.textMuted }}>Sources of Truth</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              {hasReality && <span style={{ color: colors.blue, fontSize: '0.75rem' }}>📊 Data</span>}
-              {hasIntent && <span style={{ color: colors.primary, fontSize: '0.75rem' }}>📄 Docs</span>}
+              {hasReality && <span style={{ color: colors.blue, fontSize: '0.75rem' }}>Data</span>}
+              {hasIntent && <span style={{ color: colors.primary, fontSize: '0.75rem' }}>Docs</span>}
               {hasBestPractice && <span style={{ color: colors.amber, fontSize: '0.75rem' }}>📘 Reference</span>}
               {showSources ? <ChevronDown size={16} style={{ color: colors.textMuted }} /> : <ChevronRight size={16} style={{ color: colors.textMuted }} />}
             </div>
