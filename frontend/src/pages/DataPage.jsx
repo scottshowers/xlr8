@@ -22,6 +22,7 @@ import {
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
+import { Tooltip } from '../components/ui';
 import api from '../services/api';
 // import ProjectContext from '../components/ProjectContext'; // TODO: deploy component first
 
@@ -47,131 +48,6 @@ const brandColors = {
   success: '#285390',
 };
 
-// ============================================================================
-// TOOLTIP COMPONENT (from Mission Control)
-// ============================================================================
-function Tooltip({ children, title, detail, action, position = 'top' }) {
-  const [show, setShow] = useState(false);
-  
-  // Position-specific styles
-  const getPositionStyles = () => {
-    switch (position) {
-      case 'left':
-        return {
-          right: '100%',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          marginRight: '8px',
-        };
-      case 'right':
-        return {
-          left: '100%',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          marginLeft: '8px',
-        };
-      case 'bottom':
-        return {
-          top: '100%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          marginTop: '8px',
-        };
-      default: // top
-        return {
-          bottom: '100%',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          marginBottom: '8px',
-        };
-    }
-  };
-  
-  const getArrowStyles = () => {
-    switch (position) {
-      case 'left':
-        return {
-          right: '-6px',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          borderTop: '6px solid transparent',
-          borderBottom: '6px solid transparent',
-          borderLeft: `6px solid ${brandColors.text}`,
-        };
-      case 'right':
-        return {
-          left: '-6px',
-          top: '50%',
-          transform: 'translateY(-50%)',
-          borderTop: '6px solid transparent',
-          borderBottom: '6px solid transparent',
-          borderRight: `6px solid ${brandColors.text}`,
-        };
-      case 'bottom':
-        return {
-          top: '-6px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          borderLeft: '6px solid transparent',
-          borderRight: '6px solid transparent',
-          borderBottom: `6px solid ${brandColors.text}`,
-        };
-      default: // top
-        return {
-          bottom: '-6px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          borderLeft: '6px solid transparent',
-          borderRight: '6px solid transparent',
-          borderTop: `6px solid ${brandColors.text}`,
-        };
-    }
-  };
-  
-  return (
-    <div 
-      style={{ position: 'relative', display: 'inline-block', width: '100%' }}
-      onMouseEnter={() => setShow(true)} 
-      onMouseLeave={() => setShow(false)}
-    >
-      {children}
-      {show && (
-        <div style={{
-          position: 'absolute',
-          ...getPositionStyles(),
-          padding: '12px 16px',
-          backgroundColor: brandColors.text,
-          color: brandColors.white,
-          borderRadius: '8px',
-          fontSize: '12px',
-          width: '260px',
-          zIndex: 9999,
-          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
-        }}>
-          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
-          <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
-          {action && (
-            <div style={{ 
-              marginTop: '8px', 
-              paddingTop: '8px', 
-              borderTop: '1px solid rgba(255,255,255,0.2)', 
-              color: brandColors.skyBlue, 
-              fontWeight: 500 
-            }}>
-              💡 {action}
-            </div>
-          )}
-          <div style={{ 
-            position: 'absolute', 
-            width: 0, 
-            height: 0,
-            ...getArrowStyles(),
-          }} />
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ============================================================================
 // MAIN PAGE
