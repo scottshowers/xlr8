@@ -17,7 +17,8 @@ import { Link } from 'react-router-dom';
 import { 
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
-  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search
+  HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search,
+  Settings, BookOpen, AlertCircle, Target, BarChart3
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -254,22 +255,12 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
         },
         { 
           value: 'regulatory', 
-          label: '⚖️ Laws & Government Rules', 
-          desc: 'IRS, state, federal requirements',
+          label: '⚖️ Laws, Rules & Compliance', 
+          desc: 'IRS, state, federal, audit requirements',
           tooltip: {
-            title: 'Regulatory Requirements',
-            detail: 'Official government requirements - IRS publications, state tax rules, federal mandates. The LAW.',
-            action: 'Upload IRS Pub 15, Secure 2.0, FLSA rules'
-          }
-        },
-        { 
-          value: 'compliance', 
-          label: '🔒 Audit & Controls', 
-          desc: 'SOC 2, audit requirements',
-          tooltip: {
-            title: 'Compliance & Audit',
-            detail: 'Audit requirements and internal controls. What must be PROVEN for compliance.',
-            action: 'Upload SOC 2 checklists, audit guides'
+            title: 'Regulatory & Compliance',
+            detail: 'Official government requirements, audit controls, and compliance mandates - IRS publications, state tax rules, SOC 2 checklists.',
+            action: 'Upload IRS Pub 15, Secure 2.0, SOC 2, audit guides'
           }
         },
       ];
@@ -288,8 +279,8 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
     }
     
     Array.from(files).forEach(file => {
-      // For regulatory/compliance docs, trigger rule extraction
-      const isRuleSource = truthType === 'regulatory' || truthType === 'compliance';
+      // For regulatory docs, trigger rule extraction
+      const isRuleSource = truthType === 'regulatory';
       addUpload(file, projectId, projectName, { 
         truth_type: truthType,
         standards_mode: isRuleSource,
@@ -705,8 +696,20 @@ function FilesPanel({ c, project, targetScope }) {
   const totalTables = structuredFiles.reduce((sum, f) => sum + (f.sheets?.length || 1), 0);
   const totalRows = structuredData?.total_rows || 0;
 
-  const getTruthIcon = (tt) => ({ intent: '📋', configuration: '⚙️', reference: '📚', regulatory: '⚖️', compliance: '🔒' }[tt] || '📄');
-  const getTruthLabel = (tt) => ({ intent: 'Requirements', configuration: 'Setup', reference: 'Vendor', regulatory: 'Legal', compliance: 'Audit' }[tt] || '');
+  // Five Truths icon mapping (Part 14 Visual Standards)
+  const TRUTH_ICONS = {
+    reality: { icon: BarChart3, color: '#285390' },
+    intent: { icon: Target, color: '#2766b1' },
+    configuration: { icon: Settings, color: '#7aa866' },
+    reference: { icon: BookOpen, color: '#5f4282' },
+    regulatory: { icon: AlertCircle, color: '#993c44' },
+  };
+  const getTruthIcon = (tt) => {
+    const config = TRUTH_ICONS[tt] || { icon: FileText, color: c.textMuted };
+    const Icon = config.icon;
+    return <Icon size={18} color={config.color} />;
+  };
+  const getTruthLabel = (tt) => ({ reality: 'Data', intent: 'Requirements', configuration: 'Setup', reference: 'Vendor', regulatory: 'Legal/Compliance' }[tt] || '');
   const toggleSection = (section) => setExpandedSections(prev => ({ ...prev, [section]: !prev[section] }));
 
   if (loading) {
@@ -855,7 +858,7 @@ function FilesPanel({ c, project, targetScope }) {
             ) : (
               structuredFiles.map((file, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
-                  <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
+                  {getTruthIcon(file.truth_type)}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.filename}</div>
                     <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
@@ -904,7 +907,7 @@ function FilesPanel({ c, project, targetScope }) {
             ) : (
               docs.map((doc, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', padding: '0.75rem 1rem', borderBottom: `1px solid ${c.border}` }}>
-                  <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(doc.truth_type)}</span>
+                  {getTruthIcon(doc.truth_type)}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{doc.filename}</div>
                     <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
@@ -961,7 +964,7 @@ function FilesPanel({ c, project, targetScope }) {
                       borderBottom: `1px solid ${c.border}`,
                       background: fileRules.length > 0 ? `${c.royalPurple}05` : 'transparent'
                     }}>
-                      <span style={{ fontSize: '1.1rem' }}>{getTruthIcon(file.truth_type)}</span>
+                      {getTruthIcon(file.truth_type)}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {file.filename}
