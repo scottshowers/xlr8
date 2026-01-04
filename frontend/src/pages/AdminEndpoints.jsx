@@ -90,10 +90,8 @@ const ENDPOINT_CATEGORIES = [
       { method: 'POST', path: '/api/jobs/{job_id}/cancel', description: 'Cancel running job', priority: 'medium', param: 'job_id' },
       { method: 'POST', path: '/api/jobs/cleanup', description: 'Cleanup stuck jobs', priority: 'medium' },
       { method: 'DELETE', path: '/api/jobs/{job_id}', description: 'Delete single job', priority: 'low', param: 'job_id', dangerous: true },
-      { method: 'DELETE', path: '/api/jobs/range', description: 'Delete jobs in range', priority: 'low', dangerous: true },
-      { method: 'DELETE', path: '/api/jobs/all', description: 'Delete all jobs', priority: 'low', dangerous: true },
       { method: 'DELETE', path: '/api/jobs', description: 'Clear job history', priority: 'low', dangerous: true },
-      { method: 'POST', path: '/api/jobs/clear-all', description: 'Delete all (POST)', priority: 'low', dangerous: true },
+      { method: 'POST', path: '/api/jobs/clear-all', description: 'Delete all jobs', priority: 'low', dangerous: true },
     ]
   },
   {
