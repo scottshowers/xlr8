@@ -425,7 +425,7 @@ export default function UserManagement() {
                   </span>
                 </td>
                 <td style={styles.td}>
-                  {user.mfa_method === 'sms' ? '💬 SMS' : '📱 App'}
+                  {user.mfa_method === 'sms' ? ' SMS' : '📱 App'}
                 </td>
                 <td style={styles.td}>
                   <button
@@ -543,7 +543,7 @@ export default function UserManagement() {
                 onChange={e => setFormData(prev => ({ ...prev, mfa_method: e.target.value }))}
               >
                 <option value="totp">📱 Authenticator App (TOTP)</option>
-                <option value="sms">💬 SMS Text Message</option>
+                <option value="sms"> SMS Text Message</option>
               </select>
             </div>
 
