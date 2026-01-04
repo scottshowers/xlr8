@@ -1,7 +1,7 @@
 """
 Projects Router - Complete CRUD
 Fixed to use correct ProjectModel methods: get_all(), create(), update(), delete()
-Updated: Added playbooks array support
+Updated: January 4, 2026 - Added systems, domains, functional_areas, engagement_type support
 """
 
 from fastapi import APIRouter, HTTPException
@@ -25,10 +25,15 @@ class ProjectCreate(BaseModel):
     name: str
     customer: str
     product: Optional[str] = None  # UKG Pro, WFM Dimensions, UKG Ready
-    type: str  # Frontend sends 'type'
+    type: str = "Implementation"  # Frontend sends 'type'
     start_date: Optional[str] = None
     notes: Optional[str] = None
     playbooks: Optional[List[str]] = []  # Array of playbook IDs
+    # New scope fields
+    systems: Optional[List[str]] = []  # Array of system codes
+    domains: Optional[List[str]] = []  # Array of domain codes
+    functional_areas: Optional[List[dict]] = []  # Array of {domain, area} objects
+    engagement_type: Optional[str] = None  # Engagement type code
 
 
 class ProjectUpdate(BaseModel):
@@ -41,6 +46,11 @@ class ProjectUpdate(BaseModel):
     notes: Optional[str] = None
     status: Optional[str] = None
     playbooks: Optional[List[str]] = None  # Array of playbook IDs
+    # New scope fields
+    systems: Optional[List[str]] = None  # Array of system codes
+    domains: Optional[List[str]] = None  # Array of domain codes
+    functional_areas: Optional[List[dict]] = None  # Array of {domain, area} objects
+    engagement_type: Optional[str] = None  # Engagement type code
 
 
 @router.get("/list")
@@ -65,7 +75,13 @@ async def list_projects():
                 'start_date': proj.get('start_date'),
                 'status': proj.get('status', 'active'),
                 'notes': metadata.get('notes', ''),
-                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
+                'playbooks': metadata.get('playbooks', []),
+                # Scope fields
+                'systems': metadata.get('systems', []),
+                'domains': metadata.get('domains', []),
+                'functional_areas': metadata.get('functional_areas', []),
+                'engagement_type': metadata.get('engagement_type', ''),
+                # Other fields
                 'is_active': proj.get('is_active', False),
                 'created_at': proj.get('created_at'),
                 'updated_at': proj.get('updated_at'),
@@ -99,12 +115,23 @@ async def create_project(project: ProjectCreate):
         if not new_project:
             raise HTTPException(status_code=500, detail="Failed to create project")
         
-        # ✅ Update metadata with playbooks if provided
+        # ✅ Update metadata with all additional fields
+        existing_metadata = new_project.get('metadata', {})
+        
         if project.playbooks:
-            existing_metadata = new_project.get('metadata', {})
             existing_metadata['playbooks'] = project.playbooks
-            ProjectModel.update(new_project['id'], metadata=existing_metadata)
-            new_project['metadata'] = existing_metadata
+        if project.systems:
+            existing_metadata['systems'] = project.systems
+        if project.domains:
+            existing_metadata['domains'] = project.domains
+        if project.functional_areas:
+            existing_metadata['functional_areas'] = project.functional_areas
+        if project.engagement_type:
+            existing_metadata['engagement_type'] = project.engagement_type
+        
+        # Save updated metadata
+        ProjectModel.update(new_project['id'], metadata=existing_metadata)
+        new_project['metadata'] = existing_metadata
         
         # Extract metadata for response
         metadata = new_project.get('metadata', {})
@@ -118,7 +145,11 @@ async def create_project(project: ProjectCreate):
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
-                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
+                'playbooks': metadata.get('playbooks', []),
+                'systems': metadata.get('systems', []),
+                'domains': metadata.get('domains', []),
+                'functional_areas': metadata.get('functional_areas', []),
+                'engagement_type': metadata.get('engagement_type', ''),
                 'status': new_project.get('status', 'active'),
                 'created_at': new_project.get('created_at')
             },
@@ -152,8 +183,19 @@ async def update_project(project_id: str, updates: ProjectUpdate):
         if updates.start_date is not None:
             update_dict['start_date'] = updates.start_date
         
-        # Metadata updates (type, product, notes, and playbooks go in metadata JSON)
-        if updates.type is not None or updates.notes is not None or updates.product is not None or updates.playbooks is not None:
+        # Metadata updates - check if ANY metadata field is being updated
+        metadata_fields_present = any([
+            updates.type is not None,
+            updates.notes is not None,
+            updates.product is not None,
+            updates.playbooks is not None,
+            updates.systems is not None,
+            updates.domains is not None,
+            updates.functional_areas is not None,
+            updates.engagement_type is not None,
+        ])
+        
+        if metadata_fields_present:
             # Get existing project to merge metadata
             existing = ProjectModel.get_by_id(project_id)
             if existing:
@@ -168,9 +210,21 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 if updates.product is not None:
                     existing_metadata['product'] = updates.product
                 
-                # ✅ Handle playbooks update
                 if updates.playbooks is not None:
                     existing_metadata['playbooks'] = updates.playbooks
+                
+                # New scope fields
+                if updates.systems is not None:
+                    existing_metadata['systems'] = updates.systems
+                
+                if updates.domains is not None:
+                    existing_metadata['domains'] = updates.domains
+                
+                if updates.functional_areas is not None:
+                    existing_metadata['functional_areas'] = updates.functional_areas
+                
+                if updates.engagement_type is not None:
+                    existing_metadata['engagement_type'] = updates.engagement_type
                 
                 update_dict['metadata'] = existing_metadata
         
@@ -192,7 +246,11 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
                 'notes': metadata.get('notes', ''),
-                'playbooks': metadata.get('playbooks', []),  # ✅ Include playbooks
+                'playbooks': metadata.get('playbooks', []),
+                'systems': metadata.get('systems', []),
+                'domains': metadata.get('domains', []),
+                'functional_areas': metadata.get('functional_areas', []),
+                'engagement_type': metadata.get('engagement_type', ''),
                 'status': updated.get('status', 'active'),
                 'updated_at': updated.get('updated_at')
             },
