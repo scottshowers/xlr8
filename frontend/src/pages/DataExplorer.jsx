@@ -1368,7 +1368,7 @@ export default function DataExplorer() {
   }
 
   return (
-    <div style={{ padding: '1.5rem', maxWidth: '1400px', margin: '0 auto', background: c.background, minHeight: '100vh' }}>
+    <div>
       {/* Breadcrumb */}
       <div style={{ marginBottom: '1rem' }}>
         <Link to="/data" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: c.textMuted, textDecoration: 'none', fontSize: '0.85rem' }}>
