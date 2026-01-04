@@ -101,10 +101,9 @@ export default function WorkspacePage() {
   return (
     <div style={{ 
       padding: '1.5rem', 
-      background: colors.bg, 
+      background: '#ffffff',
       minHeight: 'calc(100vh - 60px)',
       fontFamily: "'Inter', system-ui, sans-serif",
-      transition: 'background 0.2s ease',
     }}>
       {/* Header - Standard Pattern */}
       <div style={{ marginBottom: '20px' }}>
@@ -155,21 +154,19 @@ export default function WorkspacePage() {
         </p>
       </div>
 
-      {/* Chat Container */}
-      <div style={{
-        background: colors.card,
-        border: `1px solid ${colors.cardBorder}`,
-        borderRadius: 12,
-        overflow: 'hidden',
-        minHeight: '60vh',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
-      }}>
-        {hasActiveProject ? (
-          <Chat />
-        ) : (
+      {/* Chat - handles its own styling */}
+      {hasActiveProject ? (
+        <Chat />
+      ) : (
+        <div style={{
+          background: colors.card,
+          border: `1px solid ${colors.cardBorder}`,
+          borderRadius: 12,
+          minHeight: '60vh',
+        }}>
           <SelectProjectPrompt colors={colors} />
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
