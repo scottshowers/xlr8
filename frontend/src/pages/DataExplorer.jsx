@@ -19,7 +19,7 @@ import {
   Database, FileSpreadsheet, FileText, Link2, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
   Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2,
-  Search, ClipboardList, BarChart3
+  Search, ClipboardList, BarChart3, Tags
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -448,7 +448,7 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
             color: c.textMuted,
           }}>
             <div style={{ textAlign: 'center' }}>
-              <Link2 size={48} style={{ opacity: 0.3, marginBottom: '16px' }} />
+              <Link2 size={48} style={{ opacity: 0.3, display: 'block', margin: '0 auto 16px' }} />
               <div style={{ fontSize: '1rem', fontWeight: 500 }}>Select a relationship</div>
               <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>
                 Click one on the left to test and verify
@@ -1790,7 +1790,13 @@ export default function DataExplorer() {
               color: c.textMuted,
               padding: '3rem'
             }}>
-              Select a table to view its classification
+              <div style={{ textAlign: 'center' }}>
+                <Tags size={48} style={{ opacity: 0.3, marginBottom: '16px', display: 'block', margin: '0 auto 16px' }} />
+                <div style={{ fontSize: '1rem', fontWeight: 500 }}>Select a table</div>
+                <div style={{ fontSize: '0.85rem', marginTop: '4px' }}>
+                  Click one on the left to view its classification
+                </div>
+              </div>
             </div>
           )}
         </div>
