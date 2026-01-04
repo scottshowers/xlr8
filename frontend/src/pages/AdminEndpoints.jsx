@@ -59,7 +59,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'platform',
     name: 'Platform (Primary)',
-    icon: '🚀',
+
     description: 'Comprehensive platform status - USE THIS for dashboards',
     endpoints: [
       { method: 'GET', path: '/api/platform', description: 'COMPREHENSIVE status. Use ?include=files,relationships for full data', priority: 'high' },
@@ -70,7 +70,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'health',
     name: 'Health & System',
-    icon: '💚',
+
     description: 'System health checks, diagnostics, and operational status (18 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/health', description: 'Full system health check with all subsystems', priority: 'high' },
@@ -97,7 +97,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'upload',
     name: 'Upload & Processing',
-    icon: '📤',
+
     description: 'File upload and processing (5 endpoints)',
     endpoints: [
       { method: 'POST', path: '/api/upload', description: 'Smart upload - auto-routes to correct processor', priority: 'high' },
@@ -110,7 +110,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'progress',
     name: 'Job Progress',
-    icon: '⏳',
+
     description: 'Real-time job progress tracking (3 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/progress/{job_id}', description: 'Get job progress', priority: 'high', param: 'job_id' },
@@ -121,7 +121,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'jobs',
     name: 'Job Management',
-    icon: '📋',
+
     description: 'Job history and management (9 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/jobs', description: 'List all jobs', priority: 'high' },
@@ -136,7 +136,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'projects',
     name: 'Projects',
-    icon: '📁',
+
     description: 'Project management (5 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/projects/list', description: 'List all projects', priority: 'high' },
@@ -149,7 +149,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'files',
     name: 'Files & Status',
-    icon: '📄',
+
     description: 'File listing and status (8 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/files', description: 'Fast file listing', priority: 'high' },
@@ -165,7 +165,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'classification',
     name: 'Classification (FIVE TRUTHS)',
-    icon: '🔍',
+
     description: 'Table/column classification and transparency (9 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/classification/health', description: 'Classification service health', priority: 'high' },
@@ -182,7 +182,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'custom-domains',
     name: 'Custom Domains',
-    icon: '🏷️',
+
     description: 'Custom domain definitions (3 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/custom-domains', description: 'List custom domains', priority: 'medium' },
@@ -193,7 +193,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'chat',
     name: 'Chat & Analysis',
-    icon: '💬',
+
     description: 'Unified chat and query (25 endpoints)',
     endpoints: [
       { method: 'POST', path: '/api/chat/unified', description: 'Main chat - FIVE TRUTHS analysis', priority: 'high' },
@@ -217,7 +217,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'bi',
     name: 'BI Builder',
-    icon: '📊',
+
     description: 'Business Intelligence query builder (8 endpoints)',
     endpoints: [
       { method: 'POST', path: '/api/bi/query', description: 'Execute BI query', priority: 'high' },
@@ -233,7 +233,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'intelligence',
     name: 'Intelligence Engine',
-    icon: '🧠',
+
     description: 'Project analysis and insights (13 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/intelligence/health', description: 'Engine health', priority: 'high' },
@@ -254,7 +254,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'data-model',
     name: 'Data Model',
-    icon: '🔗',
+
     description: 'Relationship detection and data modeling (12 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/data-model/projects', description: 'Projects with data', priority: 'high' },
@@ -274,7 +274,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'compare',
     name: 'Table Compare',
-    icon: '⚖️',
+
     description: 'Compare tables (2 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/compare/tables', description: 'List comparable tables', priority: 'medium' },
@@ -284,7 +284,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'playbooks',
     name: 'Playbooks',
-    icon: '📖',
+
     description: 'Year-end and custom playbooks (21 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/playbooks/health', description: 'Playbooks health', priority: 'high' },
@@ -312,7 +312,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'playbook-builder',
     name: 'Playbook Builder',
-    icon: '🔧',
+
     description: 'Custom playbook configuration (9 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/playbook-builder/health', description: 'Builder health', priority: 'high' },
@@ -329,7 +329,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'reference',
     name: 'Reference Data',
-    icon: '📚',
+
     description: 'Systems, vendors, domains (16 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/reference/systems', description: 'List HCM systems', priority: 'high' },
@@ -353,7 +353,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'decoder',
     name: 'Domain Decoder',
-    icon: '🔓',
+
     description: 'Domain knowledge and code decoding (10 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/decoder/decode', description: 'Decode text/codes', priority: 'high' },
@@ -371,7 +371,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'standards',
     name: 'Standards',
-    icon: '📋',
+
     description: 'Standards and compliance (5 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/standards/health', description: 'Standards health', priority: 'high' },
@@ -384,7 +384,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'metrics',
     name: 'Metrics & Analytics',
-    icon: '📈',
+
     description: 'Platform metrics, costs, analytics (16 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/metrics/summary', description: 'Platform summary', priority: 'high' },
@@ -408,7 +408,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'cleanup',
     name: 'Cleanup & Deletion',
-    icon: '🗑️',
+
     description: 'Data deletion and cleanup (8 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/deep-clean/preview', description: 'Preview orphaned data', priority: 'high' },
@@ -424,7 +424,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'admin',
     name: 'Admin & Learning',
-    icon: '⚙️',
+
     description: 'Admin operations and learning system (24 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/admin/registry/status', description: 'Registry status (orphans)', priority: 'high' },
@@ -456,7 +456,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'auth',
     name: 'Authentication',
-    icon: '🔐',
+
     description: 'User authentication (9 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/auth/me', description: 'Get current user', priority: 'high' },
@@ -473,7 +473,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'security',
     name: 'Security',
-    icon: '🛡️',
+
     description: 'Security scanning (14 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/security/config', description: 'Security config', priority: 'high' },
@@ -495,7 +495,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'advisor',
     name: 'Advisor',
-    icon: '🎯',
+
     description: 'HCM advisor (3 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/advisor/features', description: 'Advisor features', priority: 'high' },
@@ -506,7 +506,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'connections',
     name: 'External Connections',
-    icon: '🔌',
+
     description: 'External system connections (11 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/connections/{project_name}', description: 'List connections', priority: 'medium', param: 'project_name' },
@@ -525,7 +525,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'register',
     name: 'Register Extractor',
-    icon: '📝',
+
     description: 'Payroll register extraction (9 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/register/health', description: 'Extractor health', priority: 'high' },
@@ -542,7 +542,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'vacuum',
     name: 'Vacuum (Alias)',
-    icon: '🧹',
+
     description: 'Vacuum endpoints (7 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/vacuum/health', description: 'Vacuum health', priority: 'medium' },
@@ -557,7 +557,7 @@ const ENDPOINT_CATEGORIES = [
   {
     id: 'export',
     name: 'Export',
-    icon: '📤',
+
     description: 'Data export (3 endpoints)',
     endpoints: [
       { method: 'GET', path: '/api/export/formats', description: 'Export formats', priority: 'medium' },
