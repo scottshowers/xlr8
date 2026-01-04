@@ -193,7 +193,7 @@ const Tooltip = ({ children, title, detail, action, T }) => {
           <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
           {action && (
             <div style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid rgba(128,128,128,0.3)', color: T.green, fontWeight: 500, fontSize: '11px' }}>
-              💡 {action}
+              {action}
             </div>
           )}
           <div style={{ position: 'absolute', bottom: '-6px', left: '50%', transform: 'translateX(-50%)',
@@ -306,9 +306,9 @@ const Button = ({ children, onClick, variant = 'default', size = 'md', T, style 
 function NavTabs({ active, onChange, T }) {
   const tabs = [
     { id: 'overview', label: 'OVERVIEW', icon: '◉' },
-    { id: 'security', label: 'SECURITY', icon: '🛡️' },
-    { id: 'performance', label: 'PERFORMANCE', icon: '⚡' },
-    { id: 'costs', label: 'COSTS', icon: '💰' },
+    { id: 'security', label: 'SECURITY', icon: '' },
+    { id: 'performance', label: 'PERFORMANCE', icon: '' },
+    { id: 'costs', label: 'COSTS', icon: '' },
   ];
 
   return (
@@ -475,7 +475,7 @@ function SettingsModal({ open, onClose, T, onSave }) {
           alignItems: 'center',
         }}>
           <div>
-            <div style={{ fontSize: '1rem', fontWeight: 600, color: T.text }}>⚙️ Settings</div>
+            <div style={{ fontSize: '1rem', fontWeight: 600, color: T.text }}> Settings</div>
             <div style={{ fontSize: '0.7rem', color: T.textDim, marginTop: '0.2rem' }}>Manage subscriptions and costs</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', color: T.textDim, cursor: 'pointer', fontSize: '1.2rem' }}>✕</button>
@@ -674,11 +674,11 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
     reality: { x: 370, y: 90, icon: '▣', label: 'REALITY', color: T.green, encrypted: true, threat: threatData?.duckdb, desc: 'DuckDB' },
     intent: { x: 480, y: 90, icon: '◎', label: 'INTENT', color: T.cyan, threat: threatData?.chromadb, desc: 'ChromaDB' },
     config: { x: 590, y: 90, icon: '⚙', label: 'CONFIG', color: T.cyan, desc: 'ChromaDB' },
-    reference: { x: 425, y: 175, icon: '📚', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
-    regulatory: { x: 535, y: 175, icon: '📋', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
+    reference: { x: 425, y: 175, icon: '', label: 'REFERENCE', color: T.cyan, desc: 'ChromaDB' },
+    regulatory: { x: 535, y: 175, icon: '', label: 'REGULATORY', color: T.cyan, desc: 'ChromaDB' },
     
     // Intelligence Engine
-    intelligence: { x: 700, y: 135, icon: '🧠', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
+    intelligence: { x: 700, y: 135, icon: '', label: 'INTEL ENGINE', color: T.orange, threat: threatData?.rag },
     
     // LLM Router
     router: { x: 820, y: 135, icon: '⬢', label: 'LLM ROUTER', color: T.yellow },
@@ -736,7 +736,7 @@ function SystemTopology({ flow, onNodeClick, selectedNode, T, fullWidth = false,
         {data.encrypted && (
           <g transform="translate(12, -12)">
             <circle r={6} fill={T.panel} stroke={T.green} strokeWidth={1} />
-            <text textAnchor="middle" dominantBaseline="middle" fontSize={7} fill={T.green}>🔒</text>
+            <text textAnchor="middle" dominantBaseline="middle" fontSize={7} fill={T.green}>*</text>
           </g>
         )}
         <text textAnchor="middle" dominantBaseline="middle" fontSize={14} fill={data.color}>{data.icon}</text>
@@ -1263,7 +1263,7 @@ function CostsPage({ T, data, onSettingsClick }) {
       </Panel>
 
       <div style={{ gridColumn: 'span 4', display: 'flex', justifyContent: 'flex-end' }}>
-        <Button onClick={onSettingsClick} T={T}>⚙️ Manage Subscriptions</Button>
+        <Button onClick={onSettingsClick} T={T}> Manage Subscriptions</Button>
       </div>
     </div>
   );
@@ -1515,7 +1515,7 @@ export default function SystemMonitor() {
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-          <Button onClick={() => setShowSettings(true)} size="sm" T={T}>⚙️ Settings</Button>
+          <Button onClick={() => setShowSettings(true)} size="sm" T={T}> Settings</Button>
           <Button onClick={toggleFullscreen} size="sm" T={T}>{isFullscreen ? '⊙ Exit' : '⛶ Kiosk'}</Button>
           <ThemeToggle theme={T} onToggle={toggleTheme} />
           <div style={{ textAlign: 'right' }}>
