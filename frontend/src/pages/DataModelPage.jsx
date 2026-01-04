@@ -443,13 +443,32 @@ export default function DataModelPage() {
           <div style={{ width: '1px', height: '24px', backgroundColor: c.border }} />
           
           <div>
-            <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: c.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <GitBranch size={20} style={{ color: c.primary }} />
+            <h1 style={{ 
+              margin: 0, 
+              fontSize: '20px', 
+              fontWeight: 600, 
+              color: c.text, 
+              display: 'flex', 
+              alignItems: 'center', 
+              gap: '10px',
+              fontFamily: "'Sora', sans-serif"
+            }}>
+              <div style={{ 
+                width: '36px', 
+                height: '36px', 
+                borderRadius: '10px', 
+                backgroundColor: c.accent, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <GitBranch size={20} color="#ffffff" />
+              </div>
               Data Model
             </h1>
-            <div style={{ fontSize: '12px', color: c.textMuted }}>
+            <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: c.textMuted }}>
               {selectedProject || 'No project selected'} • {relationships.length} relationships
-            </div>
+            </p>
           </div>
         </div>
         
