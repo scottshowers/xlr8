@@ -12,7 +12,8 @@ import { useProject } from '../context/ProjectContext';
 import { Tooltip } from '../components/ui';
 import api from '../services/api';
 import { 
-  ScrollText, Upload, Library, ClipboardList, Search, FolderOpen 
+  ScrollText, Upload, Library, ClipboardList, Search, FolderOpen,
+  FileText, Trash2, CheckCircle, XCircle, Loader2, AlertTriangle, Play, Rocket, Folder
 } from 'lucide-react';
 
 // Brand Colors
@@ -134,7 +135,10 @@ function UploadTab({ onUploadSuccess }) {
   return (
     <div>
       <div style={{ marginBottom: '1.5rem' }}>
-        <h3 style={{ margin: '0 0 0.25rem 0', color: '#2a3441' }}>📄 Upload Standards Document</h3>
+        <h3 style={{ margin: '0 0 0.25rem 0', color: '#2a3441', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <FileText size={18} color={COLORS.primary} />
+          Upload Standards Document
+        </h3>
         <p style={{ margin: 0, color: '#5f6c7b', fontSize: '0.9rem' }}>
           Upload compliance documents (PDF, DOCX). XLR8 will extract actionable rules.
         </p>
@@ -182,19 +186,32 @@ function UploadTab({ onUploadSuccess }) {
             opacity: (!file || uploading) ? 0.5 : 1,
           }}
         >
-          {uploading ? '⏳ Processing...' : '🚀 Upload & Extract Rules'}
+          {uploading ? (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+              Processing...
+            </span>
+          ) : (
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <Rocket size={16} />
+              Upload & Extract Rules
+            </span>
+          )}
         </button>
       </form>
 
       {error && (
-        <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem' }}>
-          ❌ {error}
+        <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <XCircle size={18} /> {error}
         </div>
       )}
 
       {result && (
         <div style={{ padding: '1rem', background: '#d4edda', color: '#155724', borderRadius: '8px', marginTop: '1rem' }}>
-          <h4 style={{ margin: '0 0 0.5rem 0' }}>✅ Document Processed</h4>
+          <h4 style={{ margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <CheckCircle size={18} />
+            Document Processed
+          </h4>
           <p style={{ margin: '0.25rem 0' }}><strong>Title:</strong> {result.title}</p>
           <p style={{ margin: '0.25rem 0' }}><strong>Domain:</strong> {result.domain}</p>
           <p style={{ margin: '0.25rem 0' }}><strong>Rules Extracted:</strong> {result.rules_extracted}</p>
@@ -223,7 +240,10 @@ function RulesTab() {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0' }}>📋 Extracted Rules ({rules.length})</h3>
+      <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <ClipboardList size={18} color={COLORS.primary} />
+        Extracted Rules ({rules.length})
+      </h3>
       {rules.length === 0 ? (
         <p style={{ color: '#5f6c7b' }}>No rules yet. Upload a standards document first.</p>
       ) : (
@@ -249,9 +269,9 @@ function RulesTab() {
                 </span>
               </div>
               <p style={{ margin: '0 0 0.5rem 0', color: '#5f6c7b', fontSize: '0.9rem' }}>{rule.description}</p>
-              <div style={{ fontSize: '0.8rem', color: '#5f6c7b' }}>
-                <span style={{ marginRight: '1rem' }}>📁 {rule.category || 'general'}</span>
-                <span>📄 {rule.source_document}</span>
+              <div style={{ fontSize: '0.8rem', color: '#5f6c7b', display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><Folder size={14} /> {rule.category || 'general'}</span>
+                <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}><FileText size={14} /> {rule.source_document}</span>
               </div>
             </div>
           ))}
@@ -336,7 +356,10 @@ function DocumentsTab({ onDeleteSuccess }) {
     <div>
       {/* Header with actions */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-        <h3 style={{ margin: 0 }}>📚 Documents ({documents.length})</h3>
+        <h3 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <Library size={18} color={COLORS.primary} />
+          Documents ({documents.length})
+        </h3>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
           {documents.length > 0 && (
             <button 
@@ -347,7 +370,7 @@ function DocumentsTab({ onDeleteSuccess }) {
                 color: COLORS.red, fontSize: '0.8rem', cursor: 'pointer', fontWeight: '500' 
               }}
             >
-              🗑️ Clear All
+              <Trash2 size={14} /> Clear All
             </button>
           )}
           <button 
@@ -358,7 +381,7 @@ function DocumentsTab({ onDeleteSuccess }) {
               color: COLORS.textLight, fontSize: '0.8rem', cursor: 'pointer' 
             }}
           >
-            🔄 Refresh
+            Refresh
           </button>
         </div>
       </div>
@@ -371,8 +394,8 @@ function DocumentsTab({ onDeleteSuccess }) {
           border: `1px solid ${actionStatus.type === 'success' ? '#c3e6cb' : '#f5c6cb'}`, 
           borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' 
         }}>
-          <span style={{ color: actionStatus.type === 'success' ? '#155724' : '#721c24', fontSize: '0.9rem' }}>
-            {actionStatus.type === 'success' ? '✅' : '❌'} {actionStatus.message}
+          <span style={{ color: actionStatus.type === 'success' ? '#155724' : '#721c24', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            {actionStatus.type === 'success' ? <CheckCircle size={16} /> : <XCircle size={16} />} {actionStatus.message}
           </span>
           <button 
             onClick={() => setActionStatus(null)} 
@@ -421,7 +444,7 @@ function DocumentsTab({ onDeleteSuccess }) {
                 }}
                 title="Delete document"
               >
-                {deleting === doc.filename ? '⏳' : '🗑️'} Delete
+                {deleting === doc.filename ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Trash2 size={14} />} Delete
               </button>
             </div>
           ))}
@@ -439,7 +462,8 @@ function DocumentsTab({ onDeleteSuccess }) {
             maxWidth: '420px', margin: '1rem', boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
           }}>
             <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              ⚠️ Clear All Documents?
+              <AlertTriangle size={20} color={COLORS.red} />
+              Clear All Documents?
             </h3>
             
             <p style={{ color: COLORS.textLight, fontSize: '0.9rem', margin: '0 0 1rem 0' }}>
@@ -523,7 +547,10 @@ function ComplianceTab({ activeProject, projectName, customerName }) {
 
   return (
     <div>
-      <h3 style={{ margin: '0 0 1rem 0' }}>🔍 Run Compliance Check</h3>
+      <h3 style={{ margin: '0 0 1rem 0', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+        <Search size={18} color={COLORS.primary} />
+        Run Compliance Check
+      </h3>
       
       {/* Show current project context */}
       <div style={{ 
@@ -535,7 +562,7 @@ function ComplianceTab({ activeProject, projectName, customerName }) {
         alignItems: 'center',
         gap: '1rem'
       }}>
-        <div style={{ fontSize: '1.5rem' }}>📋</div>
+        <ClipboardList size={28} color={COLORS.primary} />
         <div>
           <div style={{ fontWeight: '600', color: COLORS.text }}>{projectName}</div>
           <div style={{ fontSize: '0.85rem', color: COLORS.textLight }}>{customerName}</div>
@@ -555,14 +582,27 @@ function ComplianceTab({ activeProject, projectName, customerName }) {
           cursor: 'pointer', 
           opacity: running ? 0.5 : 1,
           fontSize: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem',
         }}
       >
-        {running ? '⏳ Running...' : '▶️ Run Compliance Check'}
+        {running ? (
+          <>
+            <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+            Running...
+          </>
+        ) : (
+          <>
+            <Play size={16} />
+            Run Compliance Check
+          </>
+        )}
       </button>
 
       {error && (
-        <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem' }}>
-          ❌ {error}
+        <div style={{ padding: '1rem', background: '#f8d7da', color: '#721c24', borderRadius: '8px', marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+          <XCircle size={18} /> {error}
         </div>
       )}
 
