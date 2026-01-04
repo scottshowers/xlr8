@@ -106,64 +106,97 @@ export default function AdminDashboard() {
   ]
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <div className="bg-white border-b sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-[rgba(90,138,90,0.15)] rounded-lg">
-                <Shield className="text-[#5a8a5a]" size={24} />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold text-gray-900">Learning Admin</h1>
-                <p className="text-sm text-gray-500">Manage AI learning patterns and preferences</p>
-              </div>
+    <div style={{ padding: '1.5rem', background: '#f0f2f5', minHeight: 'calc(100vh - 60px)' }}>
+      {/* Header - Standard Pattern */}
+      <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+        <div>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: '#1a2332', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: '#83b16d', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <Brain size={20} color="#ffffff" />
             </div>
-            
-            <div className="flex items-center gap-3">
-              <button
-                onClick={loadDashboardData}
-                className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
-                title="Refresh"
-              >
-                <RefreshCw size={20} className={loading ? 'animate-spin' : ''} />
-              </button>
-              <button
-                onClick={() => exportData('all')}
-                className="flex items-center gap-2 px-4 py-2 bg-[#83b16d] text-white rounded-lg hover:bg-[#6b9b5a]"
-              >
-                <Download size={18} />
-                Export All
-              </button>
-            </div>
-          </div>
+            Learning Admin
+          </h1>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: '#64748b' }}>
+            Manage AI learning patterns and preferences
+          </p>
+        </div>
+        
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <button
+            onClick={loadDashboardData}
+            disabled={loading}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 1rem', background: 'white', border: '1px solid #e2e8f0',
+              borderRadius: 8, cursor: loading ? 'wait' : 'pointer', color: '#64748b',
+              fontSize: '0.85rem'
+            }}
+          >
+            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            Refresh
+          </button>
+          <button
+            onClick={() => exportData('all')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 1rem', background: '#83b16d', border: 'none',
+              borderRadius: 8, cursor: 'pointer', color: 'white',
+              fontSize: '0.85rem', fontWeight: 500
+            }}
+          >
+            <Download size={16} />
+            Export All
+          </button>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        {/* Tabs */}
-        <div className="flex gap-1 mb-6 bg-white rounded-lg p-1 shadow-sm border overflow-x-auto">
-          {tabs.map(tab => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-                activeTab === tab.id
-                  ? 'bg-[#83b16d] text-white'
-                  : 'text-gray-600 hover:bg-gray-100'
-              }`}
-            >
-              <tab.icon size={16} />
-              {tab.label}
-            </button>
-          ))}
-        </div>
+      {/* Tabs */}
+      <div style={{ 
+        display: 'flex', gap: '4px', marginBottom: '1.5rem', 
+        background: 'white', borderRadius: 10, padding: '4px', 
+        border: '1px solid #e2e8f0', overflowX: 'auto'
+      }}>
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
+              fontSize: '0.85rem', fontWeight: 500, whiteSpace: 'nowrap',
+              cursor: 'pointer', transition: 'all 0.15s',
+              background: activeTab === tab.id ? '#83b16d' : 'transparent',
+              color: activeTab === tab.id ? 'white' : '#64748b'
+            }}
+          >
+            <tab.icon size={16} />
+            {tab.label}
+          </button>
+        ))}
+      </div>
 
-        {/* Content */}
+      {/* Content */}
+      <div style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', padding: '1.5rem' }}>
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <RefreshCw className="animate-spin text-[#5a8a5a]" size={32} />
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5rem' }}>
+            <RefreshCw className="animate-spin" size={32} style={{ color: '#83b16d' }} />
           </div>
         ) : (
           <>
