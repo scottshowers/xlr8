@@ -340,7 +340,7 @@ export default function VacuumUploadPage() {
               const custColors = getCustomerColorPalette(activeProject.customer || activeProject.name);
               return (
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', background: custColors.bg, border: `1px solid ${custColors.border}`, borderRadius: 8, marginBottom: '1rem' }}>
-                  <span style={{ color: custColors.primary }}>📁</span>
+                  <span style={{ color: custColors.primary }}></span>
                   <span style={{ fontWeight: 600, color: custColors.primary }}>{activeProject.name}</span>
                   <span style={{ color: custColors.primary, fontSize: '0.85rem' }}>{activeProject.customer}</span>
                 </div>
@@ -366,7 +366,7 @@ export default function VacuumUploadPage() {
             <div>
               <label style={labelStyle}>Vendor</label>
               <select value={vendorType} onChange={(e) => setVendorType(e.target.value)} style={inputStyle}>
-                <option value="unknown">🔍 Auto-Detect</option>
+                <option value="unknown"> Auto-Detect</option>
                 <option value="paycom">Paycom</option>
                 <option value="dayforce">Dayforce / Ceridian</option>
                 <option value="adp">ADP</option>
@@ -380,8 +380,8 @@ export default function VacuumUploadPage() {
             <div>
               <label style={labelStyle}>Extraction Method</label>
               <select value={useTextract ? 'textract' : 'pymupdf'} onChange={(e) => setUseTextract(e.target.value === 'textract')} style={inputStyle}>
-                <option value="pymupdf">🔒 PyMuPDF (Local/Free)</option>
-                <option value="textract">☁️ Textract (Scanned PDFs)</option>
+                <option value="pymupdf"> PyMuPDF (Local/Free)</option>
+                <option value="textract"> Textract (Scanned PDFs)</option>
               </select>
             </div>
           </div>
@@ -399,7 +399,7 @@ export default function VacuumUploadPage() {
                 <span style={{ color: colors.divider }}>|</span>
                 <span>Est. cost: <strong>${estimatedCost}</strong></span>
                 <span style={{ color: colors.divider }}>|</span>
-                <span style={{ color: colors.amber }}>⚠️ Data sent to AWS</span>
+                <span style={{ color: colors.amber }}> Data sent to AWS</span>
               </>
             ) : (
               <>
@@ -511,7 +511,7 @@ export default function VacuumUploadPage() {
                     <div key={ext.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem', border: `1px solid ${colors.divider}`, borderRadius: 8, marginBottom: '0.5rem' }}>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontWeight: 500, fontSize: '0.9rem', color: colors.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{ext.source_file}</div>
-                        <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{ext.employee_count} employees • {ext.pages_processed} pages • {ext.extraction_method === 'pymupdf' ? '🔒 Local' : '☁️ AWS'} • {new Date(ext.created_at).toLocaleDateString()}</div>
+                        <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{ext.employee_count} employees • {ext.pages_processed} pages • {ext.extraction_method === 'pymupdf' ? ' Local' : ' AWS'} • {new Date(ext.created_at).toLocaleDateString()}</div>
                       </div>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                         <span style={{ padding: '0.15rem 0.5rem', borderRadius: 4, fontSize: '0.7rem', fontWeight: 600, background: ext.confidence >= 0.8 ? colors.greenLight : colors.amberLight, color: ext.confidence >= 0.8 ? colors.green : colors.amber }}>{(ext.confidence * 100).toFixed(0)}%</span>
