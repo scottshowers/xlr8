@@ -18,7 +18,6 @@ import time
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from fastapi import APIRouter, Query
 
@@ -523,52 +522,46 @@ async def get_dashboard(
     
     start_time = time.time()
     
-    # Run pipeline tests in parallel
-    pipeline = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(test_pipeline_upload): 'upload',
-            executor.submit(test_pipeline_process): 'process',
-            executor.submit(test_pipeline_query): 'query',
-            executor.submit(test_pipeline_semantic): 'semantic',
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                pipeline[key] = future.result()
-            except Exception as e:
-                pipeline[key] = {"healthy": False, "error": str(e)}
+    # Run pipeline tests SEQUENTIALLY (DuckDB is NOT thread-safe)
+    # Each test is fast (ms), so sequential is fine
+    pipeline = {
+        'upload': test_pipeline_upload(),
+        'process': test_pipeline_process(),
+        'query': test_pipeline_query(),
+        'semantic': test_pipeline_semantic(),  # ChromaDB - could be parallel but keep simple
+    }
     
-    # Run other queries in parallel
+    # Run data queries SEQUENTIALLY (all touch DuckDB)
     data_summary = {}
     lineage = {}
     relationships = {}
     attention = []
     activity = {}
     
-    with ThreadPoolExecutor(max_workers=5) as executor:
-        futures = {
-            executor.submit(get_data_by_truth_type): 'data_summary',
-            executor.submit(get_lineage_summary): 'lineage',
-            executor.submit(get_relationship_summary): 'relationships',
-            executor.submit(get_attention_items): 'attention',
-            executor.submit(get_activity_history, days): 'activity',
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                if key == 'data_summary':
-                    data_summary = future.result()
-                elif key == 'lineage':
-                    lineage = future.result()
-                elif key == 'relationships':
-                    relationships = future.result()
-                elif key == 'attention':
-                    attention = future.result()
-                elif key == 'activity':
-                    activity = future.result()
-            except Exception as e:
-                logger.warning(f"[DASHBOARD] {key} failed: {e}")
+    try:
+        data_summary = get_data_by_truth_type()
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] data_summary failed: {e}")
+    
+    try:
+        lineage = get_lineage_summary()
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] lineage failed: {e}")
+    
+    try:
+        relationships = get_relationship_summary()
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] relationships failed: {e}")
+    
+    try:
+        attention = get_attention_items()
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] attention failed: {e}")
+    
+    try:
+        activity = get_activity_history(days)
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] activity failed: {e}")
     
     # Calculate overall health
     all_healthy = all(p.get("healthy", False) for p in pipeline.values())
@@ -620,20 +613,13 @@ async def run_pipeline_test() -> Dict[str, Any]:
     """
     start_time = time.time()
     
-    pipeline = {}
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {
-            executor.submit(test_pipeline_upload): 'upload',
-            executor.submit(test_pipeline_process): 'process',
-            executor.submit(test_pipeline_query): 'query',
-            executor.submit(test_pipeline_semantic): 'semantic',
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                pipeline[key] = future.result()
-            except Exception as e:
-                pipeline[key] = {"healthy": False, "error": str(e)}
+    # Run sequentially (DuckDB is NOT thread-safe)
+    pipeline = {
+        'upload': test_pipeline_upload(),
+        'process': test_pipeline_process(),
+        'query': test_pipeline_query(),
+        'semantic': test_pipeline_semantic(),
+    }
     
     all_healthy = all(p.get("healthy", False) for p in pipeline.values())
     
