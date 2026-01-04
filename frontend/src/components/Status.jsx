@@ -187,7 +187,7 @@ export default function Status() {
   const getProjectDisplay = (projectValue) => {
     if (!projectValue) return '-'
     if (projectValue === '__GLOBAL__' || projectValue === 'GLOBAL' || projectValue === 'global' || projectValue === 'Global/Universal') {
-      return '🌐 Global'
+      return 'Global'
     }
     // Check if it's a UUID (has dashes and is 36 chars)
     if (projectValue.length === 36 && projectValue.includes('-')) {
@@ -247,7 +247,7 @@ export default function Status() {
             className="border rounded px-3 py-2 text-sm"
           >
             <option value="all">All Projects</option>
-            <option value="__GLOBAL__">🌐 Global</option>
+            <option value="__GLOBAL__">Global</option>
             {projects.map(p => (
               <option key={p.id} value={p.name}>{p.name}</option>
             ))}
