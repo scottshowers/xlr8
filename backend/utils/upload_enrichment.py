@@ -324,11 +324,11 @@ def _run_detection(
                 logger.debug(f"[ENRICHMENT] Could not query project tables: {e}")
         
         # Run detection
+        # NOTE: all_filenames was removed - detect() only accepts filename, columns, values, sheet_names
         detection_result = service.detect(
             filename=filename,
             columns=all_columns,
-            sheet_names=all_sheet_names,
-            all_filenames=list(all_filenames)
+            sheet_names=all_sheet_names
         )
         
         return detection_result.to_dict() if detection_result else None
@@ -524,25 +524,13 @@ def _enrich_chromadb_by_filename(
     """
     
     try:
-        import chromadb
-        from chromadb.config import Settings
+        # Use shared ChromaDB client singleton
+        try:
+            from utils.chromadb_client import get_chromadb_collection
+        except ImportError:
+            from backend.utils.chromadb_client import get_chromadb_collection
         
-        # Get ChromaDB client
-        chroma_path = os.getenv('CHROMADB_PATH', '/data/chromadb')
-        
-        if not os.path.exists(chroma_path):
-            logger.debug(f"[ENRICHMENT] ChromaDB path doesn't exist: {chroma_path}")
-            return 0
-        
-        client = chromadb.PersistentClient(
-            path=chroma_path,
-            settings=Settings(anonymized_telemetry=False)
-        )
-        
-        collection = client.get_or_create_collection(
-            name="documents",
-            metadata={"hnsw:space": "cosine"}
-        )
+        collection = get_chromadb_collection("documents")
         
         # Build query - try multiple approaches since metadata structure may vary
         try:
