@@ -774,11 +774,52 @@ function AnalyticsPageInner() {
   
   if (!projectName) {
     return (
-      <div className="h-full flex items-center justify-center bg-gray-50">
-        <div className="text-center p-8">
-          <Database size={48} className="mx-auto text-gray-300 mb-4" />
-          <h2 className="text-xl font-semibold text-gray-600 mb-2">Select a Project</h2>
-          <p className="text-gray-500">Choose a project from the header to analyze data</p>
+      <div style={{ padding: '1.5rem', background: '#f0f2f5', minHeight: 'calc(100vh - 60px)' }}>
+        {/* Header - Standard Pattern */}
+        <div style={{ marginBottom: '20px' }}>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: '#1a2332', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: '#83b16d', 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <BarChart3 size={20} color="#ffffff" />
+            </div>
+            Smart Analytics
+          </h1>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: '#64748b' }}>
+            Build queries visually or write SQL directly
+          </p>
+        </div>
+        
+        {/* Empty State Card */}
+        <div style={{ 
+          background: 'white', 
+          borderRadius: '12px', 
+          border: '1px solid #e2e8f0',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: '400px'
+        }}>
+          <div style={{ textAlign: 'center', padding: '2rem' }}>
+            <Database size={48} style={{ color: '#e2e8f0', marginBottom: '16px' }} />
+            <h2 style={{ fontSize: '18px', fontWeight: 600, color: '#64748b', margin: '0 0 8px' }}>Select a Project</h2>
+            <p style={{ fontSize: '14px', color: '#94a3b8', margin: 0 }}>Choose a project from the header to analyze data</p>
+          </div>
         </div>
       </div>
     )
@@ -789,11 +830,43 @@ function AnalyticsPageInner() {
   // ===========================================
   
   return (
-    <div className="flex bg-gray-100 text-sm overflow-hidden" style={{ height: 'calc(100vh - 56px)' }}>
-      {/* ================================================================
-          LEFT PANEL: Data Catalog
-          ================================================================ */}
-      <div className="w-96 bg-white border-r flex flex-col shadow-sm overflow-hidden">
+    <div style={{ padding: '1.5rem', background: '#f0f2f5', minHeight: 'calc(100vh - 60px)' }}>
+      {/* Header - Standard Pattern */}
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: '20px', 
+          fontWeight: 600, 
+          color: '#1a2332', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          fontFamily: "'Sora', sans-serif"
+        }}>
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '10px', 
+            backgroundColor: '#83b16d', 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center' 
+          }}>
+            <BarChart3 size={20} color="#ffffff" />
+          </div>
+          Smart Analytics
+        </h1>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: '#64748b' }}>
+          Build queries visually or write SQL directly
+        </p>
+      </div>
+
+      {/* Main Content */}
+      <div className="flex bg-white text-sm overflow-hidden rounded-xl border border-gray-200" style={{ height: 'calc(100vh - 180px)' }}>
+        {/* ================================================================
+            LEFT PANEL: Data Catalog
+            ================================================================ */}
+        <div className="w-96 bg-white border-r flex flex-col overflow-hidden">
         {/* Header */}
         <div className="p-3 border-b bg-gray-50 flex-shrink-0">
           <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
@@ -976,40 +1049,31 @@ function AnalyticsPageInner() {
           CENTER PANEL: Main Canvas
           ================================================================ */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header with toggle */}
-        <div className="bg-white border-b px-4 py-3 flex items-center justify-between shadow-sm">
-          <div className="flex items-center gap-3">
-            <div style={{ 
-              width: '36px', 
-              height: '36px', 
-              borderRadius: '10px', 
-              backgroundColor: '#83b16d', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>
-              <BarChart3 size={20} color="#ffffff" />
-            </div>
-            <div>
-              <h1 style={{ margin: 0, fontSize: '18px', fontWeight: 600, color: '#1a2332', fontFamily: "'Sora', sans-serif" }}>
-                Smart Analytics
-              </h1>
-              {selectedTable && (
-                <p style={{ margin: '2px 0 0', fontSize: '12px', color: '#64748b' }}>
-                  {selectedTable.display_name || selectedTable.name || 'Table'} • {selectedTable.rows?.toLocaleString() || 0} rows • {Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns
-                </p>
-              )}
-            </div>
+        {/* Toolbar with mode toggle */}
+        <div className="bg-gray-50 border-b px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            {selectedTable ? (
+              <>
+                <Database size={14} className="text-[#83b16d]" />
+                <span className="font-medium">{selectedTable.display_name || selectedTable.name || 'Table'}</span>
+                <span className="text-gray-400">•</span>
+                <span className="text-gray-400">{selectedTable.rows?.toLocaleString() || 0} rows</span>
+                <span className="text-gray-400">•</span>
+                <span className="text-gray-400">{Array.isArray(selectedTable.columns) ? selectedTable.columns.length : 0} columns</span>
+              </>
+            ) : (
+              <span className="text-gray-400">Select a table from the catalog</span>
+            )}
           </div>
           
           {/* 2-Way Mode Toggle */}
-          <div className="flex bg-gray-100 rounded-lg p-0.5">
+          <div className="flex bg-white rounded-lg p-0.5 border">
             <button
               onClick={() => setMode('builder')}
               title="Drag and drop columns to build queries visually"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                 mode === 'builder' 
-                  ? 'bg-white shadow-sm text-gray-800' 
+                  ? 'bg-[#83b16d] text-white' 
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -1021,7 +1085,7 @@ function AnalyticsPageInner() {
               title="Write or paste SQL directly for full control"
               className={`px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition-all ${
                 mode === 'sql' 
-                  ? 'bg-white shadow-sm text-gray-800' 
+                  ? 'bg-[#83b16d] text-white' 
                   : 'text-gray-500 hover:text-gray-700'
               }`}
             >
@@ -1597,6 +1661,7 @@ function ResultsPanel({ results, chartType, setChartType, onExport }) {
           </>
         )}
       </div>
+    </div>
     </div>
   )
 }
