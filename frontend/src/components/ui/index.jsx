@@ -291,11 +291,12 @@ export function EmptyState({
 }
 
 // ============================================================
-// PAGE HEADER
+// PAGE HEADER (Updated January 4, 2026 - Visual Standards Part 13.1)
 // ============================================================
 export function PageHeader({ 
   title,
   subtitle = null,
+  icon: Icon = null,  // Lucide icon component
   breadcrumbs = [],
   action = null,
   badge = null,
@@ -317,7 +318,7 @@ export function PageHeader({
   };
 
   return (
-    <div style={{ marginBottom: '1.5rem' }}>
+    <div style={{ marginBottom: '20px' }}>
       {breadcrumbs.length > 0 && (
         <div style={{
           display: 'flex',
@@ -347,14 +348,30 @@ export function PageHeader({
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <h1 style={{
-              fontFamily: "'Sora', sans-serif",
-              fontSize: '1.75rem',
-              fontWeight: 700,
-              color: COLORS.text,
-              margin: 0,
-            }}>{title}</h1>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: COLORS.text, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            {Icon && (
+              <div style={{ 
+                width: '36px', 
+                height: '36px', 
+                borderRadius: '10px', 
+                backgroundColor: COLORS.grassGreen, 
+                display: 'flex', 
+                alignItems: 'center', 
+                justifyContent: 'center' 
+              }}>
+                <Icon size={20} color="#ffffff" />
+              </div>
+            )}
+            {title}
             {badge && (
               <span style={{
                 padding: '0.25rem 0.75rem',
@@ -365,11 +382,16 @@ export function PageHeader({
                 borderRadius: '20px',
                 textTransform: 'uppercase',
                 letterSpacing: '0.05em',
+                marginLeft: '8px',
               }}>{badge.label}</span>
             )}
-          </div>
+          </h1>
           {subtitle && (
-            <p style={{ color: COLORS.textLight, marginTop: '0.25rem', fontSize: '0.95rem' }}>{subtitle}</p>
+            <p style={{ 
+              margin: '6px 0 0 46px', 
+              fontSize: '13px', 
+              color: COLORS.textLight 
+            }}>{subtitle}</p>
           )}
         </div>
 
