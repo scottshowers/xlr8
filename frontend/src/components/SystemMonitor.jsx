@@ -11,6 +11,7 @@
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import api from '../services/api';
+import { Tooltip as SharedTooltip } from './ui';
 
 // =============================================================================
 // THEMES
