@@ -62,7 +62,6 @@ import WelcomePage from './pages/WelcomePage';
 import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
 import HypeVideo from './pages/HypeVideo';
-import IntelligenceDemo from './pages/IntelligenceDemo';
 import ArchitecturePage from './pages/ArchitecturePage';
 
 // CSS
@@ -89,7 +88,6 @@ function AppRoutes() {
         <Route path="/journey" element={<JourneyPage />} />
         
         {/* Intelligence Demo - Watch XLR8 Think */}
-        <Route path="/intelligence-demo" element={<IntelligenceDemo />} />
         
         {/* Hype Video */}
         <Route path="/hype" element={<HypeVideo />} />
