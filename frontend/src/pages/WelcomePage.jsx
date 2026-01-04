@@ -455,7 +455,7 @@ export default function WelcomePage() {
         color: colors.textLight,
         fontSize: '0.8rem',
       }}>
-        Built with 💚 by <span style={{ color: colors.primary, fontWeight: 600 }}>XLR8</span> · 
+        Built with  by <span style={{ color: colors.primary, fontWeight: 600 }}>XLR8</span> · 
         Intelligence without compromise
       </footer>
     </div>
