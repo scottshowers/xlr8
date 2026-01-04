@@ -89,7 +89,7 @@ export default function Tooltip({
           fontWeight: 500,
           fontSize: '11px'
         }}>
-          💡 {action}
+           {action}
         </div>
       )}
       {/* Arrow */}
