@@ -274,7 +274,7 @@ export default function RolePermissions() {
   if (error && !data) {
     return (
       <div style={styles.error}>
-        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}>⚠️</div>
+        <div style={{ fontSize: '2rem', marginBottom: '1rem' }}></div>
         <div>{error}</div>
       </div>
     );
@@ -342,7 +342,7 @@ export default function RolePermissions() {
         {hasChanges && (
           <div style={styles.saveBar}>
             <span style={{ color: '#92400e', fontWeight: '500' }}>
-              ⚠️ You have {Object.keys(changes).length} unsaved change(s)
+               You have {Object.keys(changes).length} unsaved change(s)
             </span>
             <div>
               <button
