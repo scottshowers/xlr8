@@ -62,6 +62,78 @@ const truthColors = {
 const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
 
 // ============================================================================
+// TOOLTIP COMPONENT
+// ============================================================================
+function Tooltip({ children, title, detail, action, position = 'top' }) {
+  const [show, setShow] = useState(false);
+  
+  const getPositionStyles = () => {
+    switch (position) {
+      case 'left':
+        return { right: '100%', top: '50%', transform: 'translateY(-50%)', marginRight: '8px' };
+      case 'right':
+        return { left: '100%', top: '50%', transform: 'translateY(-50%)', marginLeft: '8px' };
+      case 'bottom':
+        return { top: '100%', left: '50%', transform: 'translateX(-50%)', marginTop: '8px' };
+      default:
+        return { bottom: '100%', left: '50%', transform: 'translateX(-50%)', marginBottom: '8px' };
+    }
+  };
+  
+  const getArrowStyles = () => {
+    switch (position) {
+      case 'left':
+        return { right: '-6px', top: '50%', transform: 'translateY(-50%)', borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: `6px solid ${colors.text}` };
+      case 'right':
+        return { left: '-6px', top: '50%', transform: 'translateY(-50%)', borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderRight: `6px solid ${colors.text}` };
+      case 'bottom':
+        return { top: '-6px', left: '50%', transform: 'translateX(-50%)', borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderBottom: `6px solid ${colors.text}` };
+      default:
+        return { bottom: '-6px', left: '50%', transform: 'translateX(-50%)', borderLeft: '6px solid transparent', borderRight: '6px solid transparent', borderTop: `6px solid ${colors.text}` };
+    }
+  };
+  
+  return (
+    <div 
+      style={{ position: 'relative', display: 'inline-block' }}
+      onMouseEnter={() => setShow(true)} 
+      onMouseLeave={() => setShow(false)}
+    >
+      {children}
+      {show && (
+        <div style={{
+          position: 'absolute',
+          ...getPositionStyles(),
+          padding: '12px 16px',
+          backgroundColor: colors.text,
+          color: colors.white,
+          borderRadius: '8px',
+          fontSize: '12px',
+          width: '260px',
+          zIndex: 9999,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.2)',
+        }}>
+          <div style={{ fontWeight: 600, marginBottom: '4px' }}>{title}</div>
+          <div style={{ opacity: 0.85, lineHeight: 1.4 }}>{detail}</div>
+          {action && (
+            <div style={{ 
+              marginTop: '8px', 
+              paddingTop: '8px', 
+              borderTop: '1px solid rgba(255,255,255,0.2)', 
+              color: colors.skyBlue, 
+              fontWeight: 500 
+            }}>
+              💡 {action}
+            </div>
+          )}
+          <div style={{ position: 'absolute', width: 0, height: 0, ...getArrowStyles() }} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================================================
 // HELPER FUNCTIONS
 // ============================================================================
 function formatNumber(n) {
@@ -88,22 +160,29 @@ function PipelineStatus({ data }) {
   const allHealthy = data?.healthy;
   
   const stageConfig = [
-    { key: 'upload', label: 'Upload', icon: Upload, tooltip: 'Tests file ingestion and DuckDB table creation' },
-    { key: 'process', label: 'Process', icon: Database, tooltip: 'Tests schema metadata and column profiling' },
-    { key: 'query', label: 'Query', icon: Zap, tooltip: 'Tests intelligence engine query capability' },
-    { key: 'semantic', label: 'Semantic', icon: Layers, tooltip: 'Tests ChromaDB vector search and embeddings' },
+    { key: 'upload', label: 'Upload', icon: Upload, 
+      tooltip: { title: 'Upload Pipeline', detail: 'Tests file ingestion and DuckDB table creation. Validates that uploaded files can be processed into queryable tables.', action: 'Green = files processing correctly' }},
+    { key: 'process', label: 'Process', icon: Database, 
+      tooltip: { title: 'Process Pipeline', detail: 'Tests schema metadata extraction and column profiling. Ensures table structures are being analyzed for intelligent queries.', action: 'Green = metadata being captured' }},
+    { key: 'query', label: 'Query', icon: Zap, 
+      tooltip: { title: 'Query Pipeline', detail: 'Tests intelligence engine query capability. Validates that natural language questions can be translated to SQL.', action: 'Green = queries executing correctly' }},
+    { key: 'semantic', label: 'Semantic', icon: Layers, 
+      tooltip: { title: 'Semantic Pipeline', detail: 'Tests ChromaDB vector search and embeddings. Ensures reference docs and regulatory content is searchable.', action: 'Green = semantic search operational' }},
   ];
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h3 
-          style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-          title="Real-time health checks for each pipeline stage. Tests actual operations, not just connectivity."
+        <Tooltip 
+          title="Pipeline Status" 
+          detail="Real-time health checks for each pipeline stage. Tests actual operations, not just connectivity pings."
+          action="Hover each stage for details"
         >
-          <Activity size={16} color={colors.primary} />
-          Pipeline Status
-        </h3>
+          <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+            <Activity size={16} color={colors.primary} />
+            Pipeline Status
+          </h3>
+        </Tooltip>
         <div style={{ 
           fontSize: '11px', 
           padding: '4px 10px', 
@@ -124,24 +203,30 @@ function PipelineStatus({ data }) {
           
           return (
             <React.Fragment key={stage.key}>
-              <div 
-                style={{
-                  flex: 1,
-                  padding: '12px',
-                  borderRadius: '8px',
-                  backgroundColor: healthy ? `${colors.success}08` : `${colors.error}08`,
-                  border: `1px solid ${healthy ? colors.success : colors.error}30`,
-                  textAlign: 'center',
-                  cursor: 'help'
-                }}
-                title={stage.tooltip}
+              <Tooltip 
+                title={stage.tooltip.title} 
+                detail={stage.tooltip.detail} 
+                action={stage.tooltip.action}
+                position="bottom"
               >
-                <Icon size={18} color={healthy ? colors.success : colors.error} style={{ marginBottom: '6px' }} />
-                <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text }}>{stage.label}</div>
-                <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
-                  {stageData.latency_ms ? `${stageData.latency_ms}ms` : '—'}
+                <div 
+                  style={{
+                    flex: 1,
+                    padding: '12px',
+                    borderRadius: '8px',
+                    backgroundColor: healthy ? `${colors.success}08` : `${colors.error}08`,
+                    border: `1px solid ${healthy ? colors.success : colors.error}30`,
+                    textAlign: 'center',
+                    cursor: 'help'
+                  }}
+                >
+                  <Icon size={18} color={healthy ? colors.success : colors.error} style={{ marginBottom: '6px' }} />
+                  <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text }}>{stage.label}</div>
+                  <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
+                    {stageData.latency_ms ? `${stageData.latency_ms}ms` : '—'}
+                  </div>
                 </div>
-              </div>
+              </Tooltip>
               {i < stageConfig.length - 1 && (
                 <ArrowRight size={16} color={colors.silver} />
               )}
@@ -166,22 +251,30 @@ function DataByTruthType({ data }) {
   const byType = data?.by_truth_type || {};
   
   const truthTypes = [
-    { key: 'reality', label: 'Reality', icon: Database, desc: 'Transactional data' },
-    { key: 'configuration', label: 'Configuration', icon: Server, desc: 'System setup' },
-    { key: 'reference', label: 'Reference', icon: FileText, desc: 'Product docs' },
-    { key: 'regulatory', label: 'Regulatory', icon: AlertCircle, desc: 'Compliance rules' },
-    { key: 'intent', label: 'Intent', icon: Target, desc: 'Customer goals' },
+    { key: 'reality', label: 'Reality', icon: Database, desc: 'Transactional data',
+      tooltip: { title: 'Reality Truth', detail: 'Customer transactional data - employee records, payroll, time tracking. Stored in DuckDB for fast SQL queries.', action: 'Upload CSV/Excel files to populate' }},
+    { key: 'configuration', label: 'Configuration', icon: Server, desc: 'System setup',
+      tooltip: { title: 'Configuration Truth', detail: 'Customer system settings - pay codes, earning codes, tax setups. Used to validate data against intended config.', action: 'Upload config exports from HCM systems' }},
+    { key: 'reference', label: 'Reference', icon: FileText, desc: 'Product docs',
+      tooltip: { title: 'Reference Truth', detail: 'Product documentation and best practices. Enables AI to provide context-aware recommendations.', action: 'Stored in ChromaDB for semantic search' }},
+    { key: 'regulatory', label: 'Regulatory', icon: AlertCircle, desc: 'Compliance rules',
+      tooltip: { title: 'Regulatory Truth', detail: 'Tax rules, labor laws, compliance requirements. Powers automated compliance checking.', action: 'Regulations by jurisdiction' }},
+    { key: 'intent', label: 'Intent', icon: Target, desc: 'Customer goals',
+      tooltip: { title: 'Intent Truth', detail: 'Customer requirements, SOWs, project goals. Helps identify gaps between what customer wants and what they have.', action: 'Upload requirements documents' }},
   ];
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 
-        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-        title="Five Truths architecture: Reality (transactional), Configuration (setup), Reference (docs), Regulatory (rules), Intent (goals)"
+      <Tooltip 
+        title="Five Truths Architecture" 
+        detail="XLR8's data model separates information into five truth types, each serving a distinct analytical purpose."
+        action="Hover each type for details"
       >
-        <PieChart size={16} color={colors.primary} />
-        Data by Truth Type
-      </h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+          <PieChart size={16} color={colors.primary} />
+          Data by Truth Type
+        </h3>
+      </Tooltip>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {truthTypes.map(truth => {
@@ -193,36 +286,45 @@ function DataByTruthType({ data }) {
           const Icon = truth.icon;
           
           return (
-            <div key={truth.key} style={{
-              display: 'flex',
-              alignItems: 'center',
-              padding: '10px 12px',
-              borderRadius: '8px',
-              backgroundColor: `${truthColors[truth.key]}08`,
-              border: `1px solid ${truthColors[truth.key]}20`
-            }}>
+            <Tooltip 
+              key={truth.key}
+              title={truth.tooltip.title} 
+              detail={truth.tooltip.detail} 
+              action={truth.tooltip.action}
+              position="right"
+            >
               <div style={{
-                width: '32px', height: '32px', borderRadius: '8px',
-                backgroundColor: truthColors[truth.key],
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                marginRight: '12px'
+                display: 'flex',
+                alignItems: 'center',
+                padding: '10px 12px',
+                borderRadius: '8px',
+                backgroundColor: `${truthColors[truth.key]}08`,
+                border: `1px solid ${truthColors[truth.key]}20`,
+                cursor: 'help'
               }}>
-                <Icon size={16} color={colors.white} />
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: '13px', fontWeight: 500, color: colors.text }}>{truth.label}</div>
-                <div style={{ fontSize: '11px', color: colors.textMuted }}>{truth.desc}</div>
-              </div>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontSize: '13px', fontWeight: 600, color: colors.text }}>
-                  {files} files
+                <div style={{
+                  width: '32px', height: '32px', borderRadius: '8px',
+                  backgroundColor: truthColors[truth.key],
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  marginRight: '12px'
+                }}>
+                  <Icon size={16} color={colors.white} />
                 </div>
-                <div style={{ fontSize: '11px', color: colors.textMuted }}>
-                  {tables > 0 ? `${tables} tables • ${formatNumber(rows)} rows` : 
-                   chunks > 0 ? `${formatNumber(chunks)} chunks` : '—'}
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: '13px', fontWeight: 500, color: colors.text }}>{truth.label}</div>
+                  <div style={{ fontSize: '11px', color: colors.textMuted }}>{truth.desc}</div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '13px', fontWeight: 600, color: colors.text }}>
+                    {files} files
+                  </div>
+                  <div style={{ fontSize: '11px', color: colors.textMuted }}>
+                    {tables > 0 ? `${tables} tables • ${formatNumber(rows)} rows` : 
+                     chunks > 0 ? `${formatNumber(chunks)} chunks` : '—'}
+                  </div>
                 </div>
               </div>
-            </div>
+            </Tooltip>
           );
         })}
       </div>
@@ -255,27 +357,36 @@ function DataByTruthType({ data }) {
 function LineageTracking({ data }) {
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 
-        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-        title="Tracks data provenance: which files produced which tables. Essential for audit trails and debugging."
+      <Tooltip 
+        title="Data Lineage" 
+        detail="Tracks data provenance: which files produced which tables. Essential for audit trails, debugging, and demonstrating data governance to buyers."
+        action="Click files to see full lineage chain"
       >
-        <GitBranch size={16} color={colors.primary} />
-        Data Lineage
-      </h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+          <GitBranch size={16} color={colors.primary} />
+          Data Lineage
+        </h3>
+      </Tooltip>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '12px', marginBottom: '16px' }}>
-        <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.files_tracked || 0}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted }}>Files Tracked</div>
-        </div>
-        <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.tables_created || 0}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted }}>Tables Created</div>
-        </div>
-        <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center' }}>
-          <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.total_edges || 0}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted }}>Lineage Edges</div>
-        </div>
+        <Tooltip title="Files Tracked" detail="Number of uploaded files with lineage recorded. Each file's journey through the pipeline is tracked." position="bottom">
+          <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center', cursor: 'help' }}>
+            <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.files_tracked || 0}</div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>Files Tracked</div>
+          </div>
+        </Tooltip>
+        <Tooltip title="Tables Created" detail="Number of DuckDB tables generated from uploaded files. One file can create multiple tables (multi-sheet Excel, etc)." position="bottom">
+          <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center', cursor: 'help' }}>
+            <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.tables_created || 0}</div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>Tables Created</div>
+          </div>
+        </Tooltip>
+        <Tooltip title="Lineage Edges" detail="Total connections in the lineage graph. Edges connect files → tables → analyses → outputs." position="bottom">
+          <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', textAlign: 'center', cursor: 'help' }}>
+            <div style={{ fontSize: '20px', fontWeight: 600, color: colors.accent }}>{data?.total_edges || 0}</div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>Lineage Edges</div>
+          </div>
+        </Tooltip>
       </div>
       
       <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text, marginBottom: '8px' }}>Recent Provenance</div>
@@ -320,13 +431,16 @@ function RelationshipCoverage({ data }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 
-        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-        title="Shows how well tables are connected via detected relationships. Higher coverage = better query intelligence."
+      <Tooltip 
+        title="Table Relationships" 
+        detail="Shows how well tables are connected via detected foreign keys and column matches. Higher coverage enables better cross-table queries."
+        action="80%+ = optimal for intelligent joins"
       >
-        <Link2 size={16} color={colors.primary} />
-        Table Relationships
-      </h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+          <Link2 size={16} color={colors.primary} />
+          Table Relationships
+        </h3>
+      </Tooltip>
       
       {/* Coverage Bar */}
       <div style={{ marginBottom: '16px' }}>
@@ -348,16 +462,20 @@ function RelationshipCoverage({ data }) {
       </div>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-        <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px' }}>
-          <div style={{ fontSize: '18px', fontWeight: 600, color: colors.success }}>{data?.tables_with_relationships || 0}</div>
-          <div style={{ fontSize: '11px', color: colors.textMuted }}>Connected Tables</div>
-        </div>
-        <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px' }}>
-          <div style={{ fontSize: '18px', fontWeight: 600, color: data?.tables_orphaned > 0 ? colors.warning : colors.success }}>
-            {data?.tables_orphaned || 0}
+        <Tooltip title="Connected Tables" detail="Tables that have at least one detected relationship to another table. These can be joined intelligently in queries." position="bottom">
+          <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', cursor: 'help' }}>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: colors.success }}>{data?.tables_with_relationships || 0}</div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>Connected Tables</div>
           </div>
-          <div style={{ fontSize: '11px', color: colors.textMuted }}>Orphaned Tables</div>
-        </div>
+        </Tooltip>
+        <Tooltip title="Orphaned Tables" detail="Tables with no detected relationships. These can still be queried individually but won't be joined automatically." position="bottom">
+          <div style={{ padding: '12px', backgroundColor: colors.background, borderRadius: '8px', cursor: 'help' }}>
+            <div style={{ fontSize: '18px', fontWeight: 600, color: data?.tables_orphaned > 0 ? colors.warning : colors.success }}>
+              {data?.tables_orphaned || 0}
+            </div>
+            <div style={{ fontSize: '11px', color: colors.textMuted }}>Orphaned Tables</div>
+          </div>
+        </Tooltip>
       </div>
       
       <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -384,18 +502,19 @@ function AttentionItems({ items }) {
     info: { bg: `${colors.accent}10`, border: colors.accent, icon: Bell },
   };
   
-  const tooltipText = "Issues that need your attention: failed uploads, stuck jobs, missing column profiles, unclassified tables.";
-  
   if (!items || items.length === 0) {
     return (
       <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-        <h3 
-          style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-          title={tooltipText}
+        <Tooltip 
+          title="Attention Required" 
+          detail="Monitors for issues that need action: failed uploads, stuck processing jobs, tables missing column profiles, unclassified data."
+          action="Green = no issues detected"
         >
-          <Bell size={16} color={colors.primary} />
-          Attention Required
-        </h3>
+          <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+            <Bell size={16} color={colors.primary} />
+            Attention Required
+          </h3>
+        </Tooltip>
         <div style={{ 
           padding: '24px', 
           textAlign: 'center', 
@@ -413,23 +532,26 @@ function AttentionItems({ items }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 
-        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-        title={tooltipText}
+      <Tooltip 
+        title="Attention Required" 
+        detail="Issues that need your action: failed uploads, stuck processing jobs, tables missing column profiles, unclassified data."
+        action="Click items to resolve"
       >
-        <Bell size={16} color={colors.primary} />
-        Attention Required
-        <span style={{ 
-          marginLeft: 'auto', 
-          fontSize: '11px', 
-          padding: '2px 8px', 
-          borderRadius: '10px',
-          backgroundColor: colors.warning,
-          color: colors.white
-        }}>
-          {items.length}
-        </span>
-      </h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+          <Bell size={16} color={colors.primary} />
+          Attention Required
+          <span style={{ 
+            marginLeft: 'auto', 
+            fontSize: '11px', 
+            padding: '2px 8px', 
+            borderRadius: '10px',
+            backgroundColor: colors.warning,
+            color: colors.white
+          }}>
+            {items.length}
+          </span>
+        </h3>
+      </Tooltip>
       
       <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
         {items.map((item, i) => {
@@ -487,22 +609,27 @@ function ActivityChart({ data }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 
-        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
-        title="Historical view of platform usage. Uploads track file processing, Queries track intelligence engine usage."
+      <Tooltip 
+        title="Activity History" 
+        detail="Historical view of platform usage over the past 30 days. Uploads track file processing jobs, Queries track intelligence engine usage."
+        action="Hover bars for daily counts"
       >
-        <BarChart3 size={16} color={colors.primary} />
-        Activity History
-        <span style={{ marginLeft: 'auto', fontSize: '11px', color: colors.textMuted }}>Last 30 days</span>
-      </h3>
+        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}>
+          <BarChart3 size={16} color={colors.primary} />
+          Activity History
+          <span style={{ marginLeft: 'auto', fontSize: '11px', color: colors.textMuted }}>Last 30 days</span>
+        </h3>
+      </Tooltip>
       
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '16px' }}>
         {/* Uploads */}
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: colors.textMuted }}>Uploads</span>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: colors.accent }}>{totalUploads}</span>
-          </div>
+          <Tooltip title="Uploads" detail="File processing jobs completed. Orange bars indicate days with failed uploads." position="bottom">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', cursor: 'help' }}>
+              <span style={{ fontSize: '12px', color: colors.textMuted }}>Uploads</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: colors.accent }}>{totalUploads}</span>
+            </div>
+          </Tooltip>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '40px' }}>
             {recentUploads.length > 0 ? recentUploads.map((d, i) => (
               <div
@@ -526,10 +653,12 @@ function ActivityChart({ data }) {
         
         {/* Queries */}
         <div>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontSize: '12px', color: colors.textMuted }}>Queries</span>
-            <span style={{ fontSize: '14px', fontWeight: 600, color: colors.primary }}>{totalQueries}</span>
-          </div>
+          <Tooltip title="Queries" detail="Intelligence engine queries from chat. Each bar represents questions asked that day." position="bottom">
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px', cursor: 'help' }}>
+              <span style={{ fontSize: '12px', color: colors.textMuted }}>Queries</span>
+              <span style={{ fontSize: '14px', fontWeight: 600, color: colors.primary }}>{totalQueries}</span>
+            </div>
+          </Tooltip>
           <div style={{ display: 'flex', alignItems: 'flex-end', gap: '2px', height: '40px' }}>
             {recentQueries.length > 0 ? recentQueries.map((d, i) => (
               <div
