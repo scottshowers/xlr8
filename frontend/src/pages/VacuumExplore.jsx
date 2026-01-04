@@ -11,7 +11,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
-import { ClipboardList, BarChart3, Folder, Search, BookOpen, CheckCircle } from 'lucide-react';
+import { 
+  ClipboardList, BarChart3, Folder, Search, BookOpen, CheckCircle,
+  User, DollarSign, Building, HelpCircle
+} from 'lucide-react';
 
 // API base - adjust for your environment
 const API_BASE = '/api';
@@ -50,12 +53,12 @@ const CONFIDENCE = {
 
 // Section type display info - muted colors
 const SECTION_INFO = {
-  employee_info: { label: 'Employee Info', color: '#285390', icon: '👤' },
-  earnings: { label: 'Earnings', color: '#5a8a5a', icon: '💰' },
-  taxes: { label: 'Taxes', color: '#993c44', icon: '🏛️' },
-  deductions: { label: 'Deductions', color: '#d97706', icon: '📋' },
-  pay_info: { label: 'Pay Info', color: '#6b5a7a', icon: '💵' },
-  unknown: { label: 'Unknown', color: '#6b7280', icon: '❓' }
+  employee_info: { label: 'Employee Info', color: '#285390', icon: User },
+  earnings: { label: 'Earnings', color: '#5a8a5a', icon: DollarSign },
+  taxes: { label: 'Taxes', color: '#993c44', icon: Building },
+  deductions: { label: 'Deductions', color: '#d97706', icon: ClipboardList },
+  pay_info: { label: 'Pay Info', color: '#6b5a7a', icon: DollarSign },
+  unknown: { label: 'Unknown', color: '#6b7280', icon: HelpCircle }
 };
 
 // ============================================================================
@@ -267,9 +270,9 @@ export default function VacuumExplore() {
           ← Back to Upload
         </button>
         <div style={styles.navTabs}>
-          <button style={styles.navTabActive}>🔬 Explore</button>
+          <button style={styles.navTabActive}> Explore</button>
           <button style={styles.navTab} onClick={() => navigate('/vacuum/map')}>
-            🗺️ Map Columns
+            Map Columns
           </button>
         </div>
         {selectedFile && (
@@ -401,6 +404,7 @@ function ExtractCard({ extract, selected, onClick }) {
   const section = extract.detected_section || 'unknown';
   const info = SECTION_INFO[section] || SECTION_INFO.unknown;
   const confidence = extract.section_confidence || 0;
+  const Icon = info.icon;
   
   return (
     <div
@@ -412,7 +416,7 @@ function ExtractCard({ extract, selected, onClick }) {
       onClick={onClick}
     >
       <div style={styles.extractHeader}>
-        <span style={styles.extractIcon}>{info.icon}</span>
+        <Icon size={16} color={info.color} />
         <span style={styles.extractSection}>{info.label}</span>
         <ConfidenceBadge confidence={confidence} />
       </div>
@@ -448,6 +452,7 @@ function ExtractDetail({
   
   const section = extract.detected_section || 'unknown';
   const info = SECTION_INFO[section] || SECTION_INFO.unknown;
+  const Icon = info.icon;
   const columns = extract.column_classifications || [];
   const preview = extract.preview || [];
   const headers = extract.raw_headers || [];
@@ -463,8 +468,8 @@ function ExtractDetail({
       {/* Section Detection */}
       <div style={styles.detectionBox}>
         <div style={styles.detectionHeader}>
-          <span style={{ ...styles.sectionBadge, backgroundColor: info.color }}>
-            {info.icon} {info.label}
+          <span style={{ ...styles.sectionBadge, backgroundColor: info.color, display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+            <Icon size={14} color="white" /> {info.label}
           </span>
           <ConfidenceBadge confidence={extract.section_confidence} showLabel />
           
@@ -514,7 +519,7 @@ function ExtractDetail({
               disabled={loading}
               title="Re-run detection with updated patterns"
             >
-              🔄 Re-detect
+               Re-detect
             </button>
           </div>
         </div>
