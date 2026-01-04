@@ -526,10 +526,10 @@ export default function Landing() {
             }}>
               <div style={{ fontSize: '0.75rem', opacity: 0.8, marginBottom: '0.75rem' }}>Example: Why is earnings code 401K configured this way?</div>
               {[
-                { label: 'Configuration', value: '401K mapped to GL 5200', icon: '⚙️' },
-                { label: 'Regulatory', value: 'Secure 2.0 §603 applies', icon: '⚖️' },
+                { label: 'Configuration', value: '401K mapped to GL 5200', icon: '' },
+                { label: 'Regulatory', value: 'Secure 2.0 §603 applies', icon: '' },
                 { label: 'Decision', value: 'VP Finance approved 12/14', icon: '✓' },
-                { label: 'Precedent', value: 'Same as Acme Corp setup', icon: '🔗' },
+                { label: 'Precedent', value: 'Same as Acme Corp setup', icon: '' },
               ].map((item, i) => (
                 <div key={i} style={{ 
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
