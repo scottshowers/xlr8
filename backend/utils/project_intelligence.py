@@ -628,15 +628,17 @@ class ProjectIntelligenceService:
         earnings_tables = intelligence.get_tables_by_domain(TableDomain.EARNINGS)
     """
     
-    def __init__(self, project: str, handler=None):
+    def __init__(self, project: str, handler=None, project_id: str = None):
         """
         Initialize the intelligence service.
         
         Args:
-            project: Project identifier
+            project: Project identifier (name)
             handler: DuckDB structured data handler (optional for retrieval-only)
+            project_id: Project UUID (optional, defaults to project name if not provided)
         """
         self.project = project
+        self.project_id = project_id or project  # Fall back to project name if UUID not provided
         self.handler = handler
         
         # Analysis results (populated by analyze())
@@ -2483,14 +2485,19 @@ class ProjectIntelligenceService:
 # CONVENIENCE FUNCTION
 # =============================================================================
 
-def get_project_intelligence(project: str, handler=None) -> ProjectIntelligenceService:
+def get_project_intelligence(project: str, handler=None, project_id: str = None) -> ProjectIntelligenceService:
     """
     Get intelligence service for a project.
     
     If analysis exists in database, loads it.
     If not, returns empty service (call .analyze() to populate).
+    
+    Args:
+        project: Project name
+        handler: DuckDB handler (optional)
+        project_id: Project UUID (optional)
     """
-    service = ProjectIntelligenceService(project, handler)
+    service = ProjectIntelligenceService(project, handler, project_id)
     service.load_from_database()
     return service
 
