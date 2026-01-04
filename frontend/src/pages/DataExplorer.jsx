@@ -630,7 +630,7 @@ function DataModelPanel({ relationships, tables, c, projectName, onConfirm, onRe
                             <tr key={i} style={{ background: isOrphan ? `${c.warning}10` : 'transparent' }}>
                               {testResult.table_a_columns?.slice(0, 4).map((col, j) => (
                                 <td key={j} style={{ padding: '6px 10px', borderBottom: `1px solid ${c.border}`, color: col === testResult.join_column_a ? (isOrphan ? c.warning : c.electricBlue) : c.text }}>
-                                  {row[col] ?? '—'}{isOrphan && col === testResult.join_column_a && ' ⚠️'}
+                                  {row[col] ?? '—'}{isOrphan && col === testResult.join_column_a && ' '}
                                 </td>
                               ))}
                             </tr>
