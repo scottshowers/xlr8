@@ -560,7 +560,7 @@ function FeedbackTab({ feedback, onDelete }) {
                       {item.was_intelligent_mode && (
                         <>
                           <span>•</span>
-                          <span className="text-[#5a8a5a]">🧠 Intelligent</span>
+                          <span className="text-[#5a8a5a] flex items-center gap-1"><Brain size={12} /> Intelligent</span>
                         </>
                       )}
                     </div>
