@@ -52,11 +52,11 @@ const domainColors = {
 
 // Available playbooks - must match PlaybooksPage
 const AVAILABLE_PLAYBOOKS = [
-  { id: 'year-end-checklist', name: 'Year-End Checklist', icon: '📅' },
-  { id: 'secure-2.0', name: 'SECURE 2.0 Compliance', icon: '🏛️' },
-  { id: 'one-big-bill', name: 'One Big Beautiful Bill', icon: '📜' },
-  { id: 'payroll-audit', name: 'Payroll Configuration Audit', icon: '🔎' },
-  { id: 'data-validation', name: 'Pre-Load Data Validation', icon: '✅' },
+  { id: 'year-end-checklist', name: 'Year-End Checklist', icon: '' },
+  { id: 'secure-2.0', name: 'SECURE 2.0 Compliance', icon: '' },
+  { id: 'one-big-bill', name: 'One Big Beautiful Bill', icon: '' },
+  { id: 'payroll-audit', name: 'Payroll Configuration Audit', icon: '' },
+  { id: 'data-validation', name: 'Pre-Load Data Validation', icon: '' },
 ];
 
 // ============================================================================
@@ -377,7 +377,7 @@ export default function ProjectsPage() {
 
   const getPlaybookIcon = (id) => {
     const pb = AVAILABLE_PLAYBOOKS.find(p => p.id === id);
-    return pb ? pb.icon : '📋';
+    return pb ? pb.icon : '';
   };
   
   const getSystemColor = () => colors.electricBlue;
