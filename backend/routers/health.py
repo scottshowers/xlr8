@@ -1945,3 +1945,430 @@ async def get_node_lineage(node_type: str, node_id: str, project: str = Query(No
     
     result["check_time_ms"] = int((time.time() - start) * 1000)
     return result
+
+
+# =============================================================================
+# SMOKE TEST ENDPOINTS
+# =============================================================================
+# These actually EXERCISE components, not just check if they exist.
+# Would have caught the 4 enrichment bugs before they hit production.
+
+@router.get("/health/smoke")
+async def run_smoke_tests():
+    """
+    Run functional smoke tests on critical pipelines.
+    
+    Unlike basic health checks that just ping services, these tests
+    actually exercise the code paths to catch:
+    - Import errors (renamed functions)
+    - Missing attributes
+    - Signature mismatches
+    - Integration failures
+    
+    Returns:
+        Dict with pass/fail for each component tested
+    """
+    results = {
+        "status": "healthy",
+        "tests_run": 0,
+        "tests_passed": 0,
+        "tests_failed": 0,
+        "components": {},
+        "check_time_ms": 0
+    }
+    
+    start = time.time()
+    
+    # Test 1: DuckDB Handler Singleton
+    results["components"]["duckdb_handler"] = _smoke_test_duckdb_handler()
+    
+    # Test 2: Relationship Detector Imports
+    results["components"]["relationship_detector"] = _smoke_test_relationship_detector()
+    
+    # Test 3: Project Intelligence Service
+    results["components"]["project_intelligence"] = _smoke_test_project_intelligence()
+    
+    # Test 4: Detection Service
+    results["components"]["detection_service"] = _smoke_test_detection_service()
+    
+    # Test 5: Upload Enrichment Pipeline
+    results["components"]["upload_enrichment"] = _smoke_test_upload_enrichment()
+    
+    # Test 6: ChromaDB Client Singleton
+    results["components"]["chromadb_client"] = _smoke_test_chromadb_client()
+    
+    # Aggregate results
+    for name, test_result in results["components"].items():
+        results["tests_run"] += 1
+        if test_result.get("passed"):
+            results["tests_passed"] += 1
+        else:
+            results["tests_failed"] += 1
+    
+    # Overall status
+    if results["tests_failed"] > 0:
+        results["status"] = "unhealthy"
+    
+    results["check_time_ms"] = int((time.time() - start) * 1000)
+    return results
+
+
+@router.get("/health/smoke/{component}")
+async def run_single_smoke_test(component: str):
+    """
+    Run smoke test for a single component.
+    
+    Args:
+        component: One of: duckdb_handler, relationship_detector, 
+                   project_intelligence, detection_service, 
+                   upload_enrichment, chromadb_client
+    """
+    test_map = {
+        "duckdb_handler": _smoke_test_duckdb_handler,
+        "relationship_detector": _smoke_test_relationship_detector,
+        "project_intelligence": _smoke_test_project_intelligence,
+        "detection_service": _smoke_test_detection_service,
+        "upload_enrichment": _smoke_test_upload_enrichment,
+        "chromadb_client": _smoke_test_chromadb_client,
+    }
+    
+    if component not in test_map:
+        return {
+            "error": f"Unknown component: {component}",
+            "available": list(test_map.keys())
+        }
+    
+    start = time.time()
+    result = test_map[component]()
+    result["check_time_ms"] = int((time.time() - start) * 1000)
+    return result
+
+
+# =============================================================================
+# SMOKE TEST IMPLEMENTATIONS
+# =============================================================================
+
+def _smoke_test_duckdb_handler() -> Dict[str, Any]:
+    """
+    Test DuckDB handler can be imported and instantiated.
+    
+    Would catch: Function rename issues (get_handler vs get_structured_handler)
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        # Check 1: Import works
+        from utils.structured_data_handler import get_structured_handler
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: Singleton works
+        handler = get_structured_handler()
+        result["checks"].append({
+            "name": "singleton", 
+            "passed": handler is not None,
+            "handler_id": id(handler) if handler else None
+        })
+        
+        # Check 3: Connection works
+        if handler and hasattr(handler, 'conn'):
+            test = handler.conn.execute("SELECT 1").fetchone()
+            result["checks"].append({
+                "name": "connection", 
+                "passed": test == (1,)
+            })
+        else:
+            result["checks"].append({"name": "connection", "passed": False, "error": "No conn attribute"})
+        
+        # All checks passed?
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _smoke_test_relationship_detector() -> Dict[str, Any]:
+    """
+    Test relationship detector imports and dependencies.
+    
+    Would catch: Issue #1 - get_handler import error
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        # Check 1: Module imports without error
+        from backend.utils.relationship_detector import (
+            analyze_project_relationships,
+            get_semantic_types,
+            get_column_values,
+            build_column_index
+        )
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: Functions are callable
+        result["checks"].append({
+            "name": "functions_callable",
+            "passed": all(callable(f) for f in [
+                analyze_project_relationships, 
+                get_semantic_types, 
+                get_column_values,
+                build_column_index
+            ])
+        })
+        
+        # Check 3: Internal imports work (this is what was broken)
+        # Call get_semantic_types with a fake project - it will try to import get_structured_handler
+        try:
+            _ = get_semantic_types("__smoke_test__")
+            result["checks"].append({"name": "internal_imports", "passed": True})
+        except ImportError as e:
+            result["checks"].append({"name": "internal_imports", "passed": False, "error": str(e)})
+        
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _smoke_test_project_intelligence() -> Dict[str, Any]:
+    """
+    Test ProjectIntelligenceService has required attributes.
+    
+    Would catch: Issue #2 - missing project_id attribute
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        # Check 1: Import works
+        from backend.utils.project_intelligence import ProjectIntelligenceService
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: Can instantiate with project_id
+        svc = ProjectIntelligenceService(
+            project="__smoke_test__",
+            handler=None,
+            project_id="smoke-test-uuid"
+        )
+        result["checks"].append({"name": "instantiate", "passed": True})
+        
+        # Check 3: Has project_id attribute (this was missing!)
+        has_project_id = hasattr(svc, 'project_id')
+        result["checks"].append({
+            "name": "has_project_id",
+            "passed": has_project_id,
+            "value": getattr(svc, 'project_id', None) if has_project_id else "MISSING"
+        })
+        
+        # Check 4: project_id has correct value
+        if has_project_id:
+            result["checks"].append({
+                "name": "project_id_value",
+                "passed": svc.project_id == "smoke-test-uuid"
+            })
+        
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except TypeError as e:
+        # Would catch if __init__ doesn't accept project_id
+        result["checks"].append({"name": "instantiate", "passed": False, "error": str(e)})
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _smoke_test_detection_service() -> Dict[str, Any]:
+    """
+    Test DetectionService.detect() signature.
+    
+    Would catch: Issue #3 - unexpected keyword argument
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        import inspect
+        from utils.detection_service import DetectionService, get_detection_service
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: Get signature of detect()
+        sig = inspect.signature(DetectionService.detect)
+        params = list(sig.parameters.keys())
+        result["checks"].append({
+            "name": "signature",
+            "passed": True,
+            "parameters": params
+        })
+        
+        # Check 3: Verify all_filenames is NOT in signature (it was being passed incorrectly)
+        has_bad_param = 'all_filenames' in params
+        result["checks"].append({
+            "name": "no_all_filenames_param",
+            "passed": not has_bad_param,
+            "error": "all_filenames should not be a parameter" if has_bad_param else None
+        })
+        
+        # Check 4: Can call detect() with valid params
+        service = get_detection_service()
+        try:
+            detection_result = service.detect(
+                filename="smoke_test.xlsx",
+                columns=["employee_id", "pay_rate"],
+                sheet_names=["Sheet1"]
+            )
+            result["checks"].append({
+                "name": "detect_callable",
+                "passed": detection_result is not None
+            })
+        except TypeError as e:
+            result["checks"].append({
+                "name": "detect_callable",
+                "passed": False,
+                "error": str(e)
+            })
+        
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _smoke_test_upload_enrichment() -> Dict[str, Any]:
+    """
+    Test upload enrichment pipeline integration.
+    
+    Would catch: Issues with _run_detection calling detect() with wrong params
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        # Check 1: Import works
+        from backend.utils.upload_enrichment import (
+            enrich_upload,
+            _run_detection,
+            _run_relationship_detection,
+            EnrichmentResult
+        )
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: EnrichmentResult can be created
+        er = EnrichmentResult()
+        result["checks"].append({
+            "name": "enrichment_result",
+            "passed": er is not None and hasattr(er, 'to_dict')
+        })
+        
+        # Check 3: _run_detection can be called (will use detection service internally)
+        # This exercises the fix for Issue #3
+        try:
+            detection = _run_detection(
+                project="__smoke_test__",
+                project_id=None,
+                filename="smoke_test.xlsx",
+                handler=None,
+                columns=["test_col"],
+                sheet_names=None
+            )
+            # Detection might return None if no signatures match - that's OK
+            result["checks"].append({
+                "name": "run_detection",
+                "passed": True,  # No exception = success
+                "result_type": type(detection).__name__ if detection else "None"
+            })
+        except TypeError as e:
+            # This is what Issue #3 would cause
+            result["checks"].append({
+                "name": "run_detection",
+                "passed": False,
+                "error": str(e)
+            })
+        
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
+
+
+def _smoke_test_chromadb_client() -> Dict[str, Any]:
+    """
+    Test ChromaDB singleton client.
+    
+    Would catch: Issue #4 - multiple client instantiations with different settings
+    """
+    result = {"passed": False, "checks": []}
+    
+    try:
+        # Check 1: Import works
+        from utils.chromadb_client import (
+            get_chromadb_client,
+            get_chromadb_collection,
+            get_documents_collection
+        )
+        result["checks"].append({"name": "import", "passed": True})
+        
+        # Check 2: Singleton returns same instance
+        client1 = get_chromadb_client()
+        client2 = get_chromadb_client()
+        same_instance = client1 is client2
+        result["checks"].append({
+            "name": "singleton",
+            "passed": same_instance,
+            "client1_id": id(client1),
+            "client2_id": id(client2)
+        })
+        
+        # Check 3: Can get collection
+        try:
+            collection = get_documents_collection()
+            result["checks"].append({
+                "name": "get_collection",
+                "passed": collection is not None,
+                "collection_name": collection.name if collection else None
+            })
+        except Exception as e:
+            result["checks"].append({
+                "name": "get_collection",
+                "passed": False,
+                "error": str(e)
+            })
+        
+        # Check 4: Client has heartbeat (basic connectivity)
+        if hasattr(client1, 'heartbeat'):
+            try:
+                hb = client1.heartbeat()
+                result["checks"].append({
+                    "name": "heartbeat",
+                    "passed": True,
+                    "heartbeat": hb
+                })
+            except Exception as e:
+                result["checks"].append({
+                    "name": "heartbeat",
+                    "passed": False,
+                    "error": str(e)
+                })
+        
+        result["passed"] = all(c.get("passed") for c in result["checks"])
+        
+    except ImportError as e:
+        result["checks"].append({"name": "import", "passed": False, "error": str(e)})
+    except Exception as e:
+        result["error"] = str(e)
+    
+    return result
