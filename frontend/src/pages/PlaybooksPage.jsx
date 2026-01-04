@@ -1,11 +1,10 @@
 /**
  * PlaybooksPage - Analysis Playbooks
  * 
- * UPDATED: Added Configure button for admins to link standards to playbooks
- * 
- * - Run pre-built analysis playbooks against project data
- * - Create new playbooks via Work Advisor
- * - Configure playbooks to link standards (admin only)
+ * Updated: January 4, 2026 - Visual Standards Part 13
+ * - Standard page header with icon
+ * - Lucide icons instead of emojis
+ * - Configure button for admins to link standards to playbooks
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
@@ -16,6 +15,11 @@ import YearEndPlaybook from '../components/YearEndPlaybook';
 import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card, Tooltip } from '../components/ui';
 import api from '../services/api';
 import { getCustomerColorPalette } from '../utils/customerColors';
+import {
+  ClipboardList, Calendar, Building, ScrollText, Search, CheckCircle,
+  Clock, Settings, Shield, FileText, Plus, Play, Loader2, Inbox,
+  Lightbulb, ChevronUp, ChevronDown, X
+} from 'lucide-react';
 
 // Mission Control Colors
 const colors = {
@@ -39,6 +43,7 @@ const colors = {
   purpleLight: 'rgba(124, 58, 237, 0.1)',
   divider: '#e2e8f0',
   inputBg: '#f8fafc',
+  white: '#ffffff',
 };
 
 // Category colors - Mission Control palette
@@ -50,6 +55,15 @@ const CATEGORY_COLORS = {
   'Implementation': { color: '#0891b2', bg: 'rgba(8, 145, 178, 0.1)' },
 };
 
+// Playbook icon mapping
+const PLAYBOOK_ICONS = {
+  'year-end-checklist': { icon: Calendar, color: '#83b16d' },
+  'secure-2.0': { icon: Building, color: '#285390' },
+  'one-big-bill': { icon: ScrollText, color: '#d97706' },
+  'payroll-audit': { icon: Search, color: '#7c3aed' },
+  'data-validation': { icon: CheckCircle, color: '#0891b2' },
+};
+
 // Playbook Definitions
 const PLAYBOOKS = [
   {
@@ -57,7 +71,6 @@ const PLAYBOOKS = [
     name: 'Year-End Checklist',
     description: 'Comprehensive year-end processing workbook. Analyzes tax setup, earnings/deductions, outstanding items, and generates action-centric checklist with findings and required actions.',
     category: 'Year-End',
-    icon: '📅',
     modules: ['Payroll', 'Tax', 'Benefits'],
     outputs: ['Action Checklist', 'Tax Verification', 'Earnings Analysis', 'Deductions Review', 'Outstanding Items', 'Arrears Summary'],
     estimatedTime: '5-15 minutes',
@@ -69,19 +82,17 @@ const PLAYBOOKS = [
     name: 'SECURE 2.0 Compliance',
     description: 'Analyze retirement plan configurations against SECURE 2.0 requirements. Identifies gaps, generates compliance checklist, and provides configuration recommendations.',
     category: 'Compliance',
-    icon: '🏛️',
     modules: ['Payroll', 'Benefits'],
     outputs: ['Executive Summary', 'Gap Analysis', 'Configuration Guide', 'Action Items'],
     estimatedTime: '5-10 minutes',
     dataRequired: ['Employee Census', 'Benefit Plans', 'Deduction Codes'],
-    hasRunner: true,  // Now enabled with standards linkage!
+    hasRunner: true,
   },
   {
     id: 'one-big-bill',
     name: 'One Big Beautiful Bill',
     description: 'Comprehensive analysis of tax and regulatory changes impact on your configuration. Generates complete documentation package for customer review.',
     category: 'Regulatory',
-    icon: '📜',
     modules: ['Payroll', 'Tax'],
     outputs: ['Executive Summary', 'Detailed Next Steps', 'Configuration Guide', 'High Priority Items', 'Import Templates'],
     estimatedTime: '10-15 minutes',
@@ -93,7 +104,6 @@ const PLAYBOOKS = [
     name: 'Payroll Configuration Audit',
     description: 'Deep dive into payroll setup. Identifies inconsistencies, missing configurations, and optimization opportunities.',
     category: 'Audit',
-    icon: '🔍',
     modules: ['Payroll'],
     outputs: ['Audit Report', 'Issue List', 'Recommendations', 'Best Practices'],
     estimatedTime: '8-12 minutes',
@@ -105,7 +115,6 @@ const PLAYBOOKS = [
     name: 'Pre-Load Data Validation',
     description: 'Validate employee conversion data before loading. Checks required fields, formats, cross-references, and business rules.',
     category: 'Implementation',
-    icon: '✅',
     modules: ['All'],
     outputs: ['Validation Report', 'Error List', 'Warning List', 'Ready-to-Load Files'],
     estimatedTime: '3-5 minutes',
@@ -132,6 +141,8 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
   const [executionResult, setExecutionResult] = useState(null);
 
   const playbook_id = playbook?.id;
+  const iconConfig = PLAYBOOK_ICONS[playbook_id] || { icon: ClipboardList, color: colors.primary };
+  const PlaybookIcon = iconConfig.icon;
 
   useEffect(() => {
     if (playbook_id) {
@@ -144,7 +155,6 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     setError(null);
     
     try {
-      // Load playbook info with linked standards
       try {
         const infoRes = await api.get(`/playbooks/${playbook_id}/info`);
         setLinkedStandards(infoRes.data.linked_standards || []);
@@ -155,7 +165,6 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
         setRules([]);
       }
       
-      // Load available standards
       try {
         const availRes = await api.get('/playbooks/available-standards');
         setAvailableStandards(availRes.data.standards || []);
@@ -215,23 +224,22 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
     setExecutionResult(null);
     
     try {
-      const res = await api.post(`/playbooks/execute/${playbook_id}`, {
-        project_id: projectId,
-        run_by: 'user'
+      const res = await api.post(`/playbooks/${playbook_id}/execute`, {
+        project_id: projectId
       });
       setExecutionResult(res.data);
-      setSuccessMsg(`Playbook complete! ${res.data.violations_found} issues found.`);
+      setSuccessMsg('Playbook executed successfully!');
     } catch (err) {
       console.error('Execution failed:', err);
-      setError('Failed to run playbook: ' + (err.response?.data?.detail || err.message));
+      setError(err.response?.data?.detail || 'Execution failed');
     } finally {
       setExecuting(false);
     }
   };
 
-  // Filter out already linked standards
-  const linkedIds = linkedStandards.map(ls => ls.id);
-  const unlinkedStandards = availableStandards.filter(s => !linkedIds.includes(s.id));
+  const unlinkedStandards = availableStandards.filter(
+    s => !linkedStandards.find(ls => ls.id === s.id)
+  );
 
   const modalStyles = {
     overlay: {
@@ -245,25 +253,23 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       alignItems: 'center',
       justifyContent: 'center',
       zIndex: 1000,
-      padding: '2rem',
     },
     modal: {
       background: 'white',
       borderRadius: '16px',
-      width: '100%',
-      maxWidth: '640px',
-      maxHeight: '85vh',
-      overflow: 'hidden',
+      width: '600px',
+      maxWidth: '90vw',
+      maxHeight: '80vh',
       display: 'flex',
       flexDirection: 'column',
-      boxShadow: '0 20px 60px rgba(0, 0, 0, 0.3)',
+      boxShadow: '0 20px 40px rgba(0,0,0,0.15)',
     },
     header: {
-      padding: '1.5rem',
-      borderBottom: '1px solid #e8ecef',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
+      padding: '1.25rem 1.5rem',
+      borderBottom: '1px solid #e8ecef',
     },
     headerLeft: {
       display: 'flex',
@@ -271,39 +277,41 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       gap: '1rem',
     },
     icon: {
-      width: '52px',
-      height: '52px',
+      width: '48px',
+      height: '48px',
       borderRadius: '12px',
-      background: 'linear-gradient(135deg, #83b16d 0%, #6b9b5a 100%)',
+      background: iconConfig.color + '15',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '1.5rem',
     },
     title: {
-      margin: 0,
+      fontFamily: "'Sora', sans-serif",
       fontSize: '1.25rem',
       fontWeight: '700',
       color: '#2a3441',
+      margin: 0,
     },
     subtitle: {
-      margin: 0,
       fontSize: '0.85rem',
       color: '#6b7280',
+      margin: 0,
     },
     closeBtn: {
-      padding: '0.5rem',
-      background: '#f5f7f9',
+      background: 'none',
       border: 'none',
-      borderRadius: '8px',
+      fontSize: '1.5rem',
+      color: '#9ca3af',
       cursor: 'pointer',
-      color: '#6b7280',
-      fontSize: '1.25rem',
+      padding: '0.5rem',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     body: {
-      flex: 1,
-      overflow: 'auto',
       padding: '1.5rem',
+      overflowY: 'auto',
+      flex: 1,
     },
     section: {
       marginBottom: '1.5rem',
@@ -315,20 +323,19 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       marginBottom: '0.75rem',
     },
     sectionTitle: {
-      fontSize: '0.9rem',
       fontWeight: '600',
       color: '#2a3441',
+      fontSize: '0.95rem',
       display: 'flex',
       alignItems: 'center',
       gap: '0.5rem',
     },
     badge: {
-      padding: '0.25rem 0.6rem',
-      background: rules.length > 0 ? '#dcfce7' : '#f3f4f6',
-      color: rules.length > 0 ? '#4a6a4a' : '#6b7280',
-      borderRadius: '12px',
+      padding: '0.2rem 0.5rem',
+      background: '#e8ecef',
+      borderRadius: '4px',
       fontSize: '0.75rem',
-      fontWeight: '600',
+      color: '#6b7280',
     },
     linkedItem: {
       display: 'flex',
@@ -337,48 +344,50 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       padding: '0.75rem 1rem',
       background: '#f8faf9',
       borderRadius: '10px',
-      border: '1px solid #e8ecef',
       marginBottom: '0.5rem',
+      border: '1px solid #e8ecef',
     },
     linkedIcon: {
-      width: '36px',
-      height: '36px',
+      width: '32px',
+      height: '32px',
       borderRadius: '8px',
-      background: '#285390',
+      background: 'rgba(40, 83, 144, 0.1)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      color: 'white',
       marginRight: '0.75rem',
     },
     unlinkBtn: {
-      padding: '0.4rem 0.75rem',
-      background: 'white',
+      padding: '0.35rem 0.75rem',
+      background: '#fef2f2',
       border: '1px solid #fecaca',
       borderRadius: '6px',
-      color: '#8a4a4a',
-      cursor: 'pointer',
+      color: '#dc2626',
       fontSize: '0.8rem',
+      fontWeight: '600',
+      cursor: 'pointer',
     },
     addBtn: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: '0.5rem',
       width: '100%',
       padding: '0.75rem',
-      background: showAvailable ? '#f0f4f7' : 'white',
+      background: 'transparent',
       border: '2px dashed #d1d5db',
       borderRadius: '10px',
       color: '#6b7280',
-      cursor: 'pointer',
-      fontSize: '0.85rem',
+      fontSize: '0.9rem',
       fontWeight: '600',
-      marginTop: '0.5rem',
+      cursor: 'pointer',
+      marginTop: '0.75rem',
     },
     dropdown: {
       marginTop: '0.75rem',
-      background: '#f8faf9',
-      borderRadius: '10px',
       border: '1px solid #e8ecef',
-      maxHeight: '180px',
-      overflow: 'auto',
+      borderRadius: '10px',
+      overflow: 'hidden',
     },
     dropdownItem: {
       display: 'flex',
@@ -393,9 +402,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       border: 'none',
       borderRadius: '6px',
       color: 'white',
-      cursor: 'pointer',
       fontSize: '0.8rem',
       fontWeight: '600',
+      cursor: 'pointer',
     },
     alert: (type) => ({
       padding: '0.75rem 1rem',
@@ -423,6 +432,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
       fontSize: '0.9rem',
       cursor: 'pointer',
       boxShadow: '0 2px 8px rgba(131, 177, 109, 0.3)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
     },
     resultCard: {
       padding: '1rem',
@@ -449,20 +461,25 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
         {/* Header */}
         <div style={modalStyles.header}>
           <div style={modalStyles.headerLeft}>
-            <div style={modalStyles.icon}>{playbook?.icon || '📋'}</div>
+            <div style={modalStyles.icon}>
+              <PlaybookIcon size={24} color={iconConfig.color} />
+            </div>
             <div>
               <h2 style={modalStyles.title}>{playbook?.name || 'Configure Playbook'}</h2>
               <p style={modalStyles.subtitle}>Link standards for compliance checking</p>
             </div>
           </div>
-          <button style={modalStyles.closeBtn} onClick={onClose}>×</button>
+          <button style={modalStyles.closeBtn} onClick={onClose}>
+            <X size={20} />
+          </button>
         </div>
 
         {/* Body */}
         <div style={modalStyles.body}>
           {loading ? (
             <div style={{ textAlign: 'center', padding: '2rem' }}>
-              <p style={{ color: '#6b7280' }}>Loading...</p>
+              <Loader2 size={24} style={{ animation: 'spin 1s linear infinite' }} color={colors.primary} />
+              <p style={{ color: '#6b7280', marginTop: '0.5rem' }}>Loading...</p>
             </div>
           ) : (
             <>
@@ -474,7 +491,8 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
               <div style={modalStyles.section}>
                 <div style={modalStyles.sectionHeader}>
                   <div style={modalStyles.sectionTitle}>
-                    🛡️ Linked Standards
+                    <Shield size={16} color={colors.primary} />
+                    Linked Standards
                   </div>
                   <span style={modalStyles.badge}>{rules.length} rules</span>
                 </div>
@@ -483,7 +501,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                   linkedStandards.map(ls => (
                     <div key={ls.id} style={modalStyles.linkedItem}>
                       <div style={{ display: 'flex', alignItems: 'center' }}>
-                        <div style={modalStyles.linkedIcon}>📄</div>
+                        <div style={modalStyles.linkedIcon}>
+                          <FileText size={16} color={colors.accent} />
+                        </div>
                         <div>
                           <div style={{ fontWeight: '600', color: '#2a3441' }}>
                             {ls.name || `Standard ${ls.id}`}
@@ -511,7 +531,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                 {availableStandards.length > 0 && (
                   <>
                     <button style={modalStyles.addBtn} onClick={() => setShowAvailable(!showAvailable)}>
-                      ➕ Link a Standard {showAvailable ? '▲' : '▼'}
+                      <Plus size={16} />
+                      Link a Standard
+                      {showAvailable ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
                     </button>
 
                     {showAvailable && (
@@ -539,8 +561,8 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
                 )}
 
                 {availableStandards.length === 0 && linkedStandards.length === 0 && (
-                  <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '8px', marginTop: '0.75rem', fontSize: '0.85rem' }}>
-                    ⚠️ No standards uploaded yet. Go to <strong>Standards</strong> page to upload compliance documents first.
+                  <div style={{ padding: '1rem', background: '#fef3c7', borderRadius: '8px', marginTop: '0.75rem', fontSize: '0.85rem', color: '#92400e' }}>
+                    No standards uploaded yet. Go to <strong>Standards</strong> page to upload compliance documents first.
                   </div>
                 )}
               </div>
@@ -548,22 +570,32 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
               {/* Rules Preview */}
               {rules.length > 0 && (
                 <div style={modalStyles.section}>
-                  <button 
-                    style={{ ...modalStyles.addBtn, border: '1px solid #e8ecef' }}
-                    onClick={() => setShowRules(!showRules)}
-                  >
-                    ✓ View {rules.length} Rules {showRules ? '▲' : '▼'}
-                  </button>
+                  <div style={modalStyles.sectionHeader}>
+                    <button 
+                      onClick={() => setShowRules(!showRules)}
+                      style={{ 
+                        background: 'none', 
+                        border: 'none', 
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.5rem',
+                        fontWeight: '600',
+                        color: '#2a3441',
+                        fontSize: '0.95rem',
+                      }}
+                    >
+                      {showRules ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      Preview Rules ({rules.length})
+                    </button>
+                  </div>
                   
                   {showRules && (
-                    <div style={{ ...modalStyles.dropdown, marginTop: '0.5rem' }}>
+                    <div style={{ maxHeight: '200px', overflowY: 'auto', background: '#f8faf9', borderRadius: '10px', padding: '0.75rem' }}>
                       {rules.map((rule, i) => (
-                        <div key={i} style={{ padding: '0.6rem 1rem', borderBottom: '1px solid #e8ecef', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          <span style={{
-                            width: '8px', height: '8px', borderRadius: '50%',
-                            background: { critical: '#8a4a4a', high: '#8a6b4a', medium: '#7a6a3a', low: '#5a8a5a' }[rule.severity] || '#9ca3af'
-                          }} />
-                          <span style={{ fontSize: '0.85rem', color: '#2a3441' }}>{rule.title}</span>
+                        <div key={i} style={{ padding: '0.5rem', borderBottom: i < rules.length - 1 ? '1px solid #e8ecef' : 'none' }}>
+                          <div style={{ fontWeight: '600', fontSize: '0.85rem', color: '#2a3441' }}>{rule.condition}</div>
+                          {rule.criteria && <div style={{ fontSize: '0.8rem', color: '#6b7280' }}>{rule.criteria}</div>}
                         </div>
                       ))}
                     </div>
@@ -574,29 +606,20 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
               {/* Execution Result */}
               {executionResult && (
                 <div style={modalStyles.resultCard}>
-                  <div style={modalStyles.resultTitle}>
-                    ✅ Playbook Complete
+                  <div style={modalStyles.resultTitle}>Execution Results</div>
+                  <div style={{ fontSize: '0.85rem', color: '#4a6a4a' }}>
+                    {executionResult.rules_checked || 0} rules checked • {executionResult.findings?.length || 0} findings
                   </div>
-                  <div style={{ fontSize: '0.9rem', marginBottom: '0.5rem' }}>
-                    <strong>{executionResult.total_rules_checked}</strong> rules checked • 
-                    <strong style={{ color: executionResult.violations_found > 0 ? '#8a4a4a' : '#4a6a4a' }}> {executionResult.violations_found}</strong> violations • 
-                    <strong style={{ color: '#8a6b4a' }}> {executionResult.warnings_found}</strong> warnings
-                  </div>
-                  {executionResult.findings?.length > 0 && (
+                  {executionResult.findings && executionResult.findings.length > 0 && (
                     <div style={{ marginTop: '0.75rem' }}>
-                      <div style={{ fontWeight: '600', fontSize: '0.85rem', marginBottom: '0.5rem' }}>Findings:</div>
                       {executionResult.findings.slice(0, 5).map((f, i) => (
                         <div key={i} style={modalStyles.findingItem}>
-                          <span style={{
-                            display: 'inline-block', width: '8px', height: '8px', borderRadius: '50%', marginRight: '0.5rem',
-                            background: { critical: '#8a4a4a', high: '#8a6b4a', medium: '#7a6a3a', low: '#5a8a5a' }[f.severity] || '#9ca3af'
-                          }} />
-                          {f.title} ({f.affected_count} affected)
+                          <strong>{f.condition}</strong>: {f.cause || 'Issue found'}
                         </div>
                       ))}
                       {executionResult.findings.length > 5 && (
                         <div style={{ fontSize: '0.8rem', color: '#6b7280', marginTop: '0.5rem' }}>
-                          ...and {executionResult.findings.length - 5} more
+                          +{executionResult.findings.length - 5} more findings
                         </div>
                       )}
                     </div>
@@ -610,12 +633,9 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
         {/* Footer */}
         <div style={modalStyles.footer}>
           <div style={{ fontSize: '0.85rem', color: '#6b7280' }}>
-            {linkedStandards.length > 0 
-              ? `${linkedStandards.length} standard${linkedStandards.length > 1 ? 's' : ''} linked`
-              : 'Link standards to run compliance checks'
-            }
+            {rules.length > 0 ? `${rules.length} rules available` : 'Link standards to get rules'}
           </div>
-          <button 
+          <button
             style={{
               ...modalStyles.executeBtn,
               opacity: (rules.length === 0 || executing) ? 0.5 : 1,
@@ -624,7 +644,17 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
             onClick={handleExecute}
             disabled={rules.length === 0 || executing}
           >
-            {executing ? '⏳ Running...' : '▶️ Run Playbook'}
+            {executing ? (
+              <>
+                <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} />
+                Running...
+              </>
+            ) : (
+              <>
+                <Play size={16} />
+                Run Playbook
+              </>
+            )}
           </button>
         </div>
       </div>
@@ -637,13 +667,16 @@ function PlaybookConfigModal({ playbook, projectId, onClose, onExecute }) {
 // =============================================================================
 
 function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, isAdmin }) {
+  const iconConfig = PLAYBOOK_ICONS[playbook.id] || { icon: ClipboardList, color: colors.primary };
+  const PlaybookIcon = iconConfig.icon;
+  
   const styles = {
     card: {
       background: 'white',
       borderRadius: '12px',
       padding: '1.5rem',
       boxShadow: '0 1px 3px rgba(42, 52, 65, 0.08)',
-      border: playbook.hasRunner ? `2px solid '#83b16d'` : '1px solid #e1e8ed',
+      border: playbook.hasRunner ? `2px solid ${colors.primary}` : '1px solid #e1e8ed',
       transition: 'all 0.2s ease',
       cursor: 'pointer',
       position: 'relative',
@@ -666,13 +699,12 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       marginBottom: '1rem',
     },
     icon: {
-      fontSize: '2rem',
       width: '48px',
       height: '48px',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: '#e8ecf1',
+      background: iconConfig.color + '15',
       borderRadius: '10px',
     },
     title: {
@@ -684,7 +716,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
     },
     category: {
       fontSize: '0.75rem',
-      color: '#83b16d',
+      color: iconConfig.color,
       fontWeight: '600',
       textTransform: 'uppercase',
       letterSpacing: '0.05em',
@@ -718,6 +750,9 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
     time: {
       fontSize: '0.8rem',
       color: '#6b7280',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.35rem',
     },
     buttons: {
       display: 'flex',
@@ -738,7 +773,7 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
     },
     button: {
       padding: '0.5rem 1rem',
-      background: playbook.hasRunner ? '#83b16d' : '#6b7280',
+      background: playbook.hasRunner ? colors.primary : '#6b7280',
       border: 'none',
       borderRadius: '6px',
       color: 'white',
@@ -768,7 +803,9 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
       )}
       
       <div style={styles.header}>
-        <div style={styles.icon}>{playbook.icon}</div>
+        <div style={styles.icon}>
+          <PlaybookIcon size={24} color={iconConfig.color} />
+        </div>
         <div>
           <h3 style={styles.title}>{playbook.name}</h3>
           <span style={styles.category}>{playbook.category}</span>
@@ -785,7 +822,10 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
 
       <div style={styles.footer}>
         <Tooltip title="Estimated Time" detail={`This playbook typically takes ${playbook.estimatedTime} to complete.`} action="Time varies based on data complexity">
-          <span style={styles.time}>⏱️ {playbook.estimatedTime}</span>
+          <span style={styles.time}>
+            <Clock size={14} />
+            {playbook.estimatedTime}
+          </span>
         </Tooltip>
         <div style={styles.buttons}>
           {isAdmin && (
@@ -797,7 +837,8 @@ function PlaybookCard({ playbook, onRun, onConfigure, hasProgress, isAssigned, i
                   onConfigure(playbook);
                 }}
               >
-                ⚙️ Configure
+                <Settings size={14} />
+                Configure
               </button>
             </Tooltip>
           )}
@@ -848,34 +889,45 @@ export default function PlaybooksPage() {
       setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': hasStarted }));
     } catch (err) {
       if (err.response?.status !== 404) {
-        console.error('Failed to fetch playbook progress:', err);
+        console.error('Failed to fetch progress:', err);
+        setError('Failed to load playbook progress');
       }
-      setPlaybookProgress(prev => ({ ...prev, 'year-end-checklist': false }));
     } finally {
       setLoading(false);
     }
   }, [activeProject?.id]);
 
   useEffect(() => {
-    fetchPlaybookProgress();
-  }, [fetchPlaybookProgress]);
+    if (activeProject?.id) {
+      fetchPlaybookProgress();
+    }
+  }, [activeProject?.id, fetchPlaybookProgress]);
 
-  if (projectLoading || loading) {
-    return <LoadingSpinner fullPage message="Loading playbooks..." />;
+  // Loading state
+  if (projectLoading) {
+    return <LoadingSpinner fullPage message="Loading project..." />;
   }
 
+  // No project selected
   if (!hasActiveProject) {
     return (
-      <EmptyState
-        fullPage
-        icon="📋"
-        title="Select a Project First"
-        description="Choose a project from the selector above to run playbooks."
-        action={{ label: 'Go to Projects', to: '/projects' }}
-      />
+      <>
+        <PageHeader
+          icon={ClipboardList}
+          title="Playbooks"
+          subtitle="Run pre-built analysis templates to generate deliverables"
+        />
+        <EmptyState
+          fullPage
+          icon={<Inbox size={48} />}
+          title="Select a Project"
+          description="Choose a project from the selector above to view available playbooks."
+        />
+      </>
     );
   }
 
+  // Active playbook runner
   if (activePlaybook) {
     if (activePlaybook.id === 'year-end-checklist') {
       return (
@@ -896,8 +948,9 @@ export default function PlaybooksPage() {
     return (
       <>
         <PageHeader
+          icon={ClipboardList}
           title="Playbooks"
-          subtitle="Run pre-built analysis templates to generate deliverables."
+          subtitle="Run pre-built analysis templates to generate deliverables"
           breadcrumbs={[
             { label: customerName },
             { label: projectName },
@@ -905,7 +958,7 @@ export default function PlaybooksPage() {
         />
         <EmptyState
           fullPage
-          icon="📭"
+          icon={<Inbox size={48} />}
           title="No Playbooks Assigned"
           description={
             isAdmin 
@@ -940,7 +993,7 @@ export default function PlaybooksPage() {
     },
     filterButton: (active) => ({
       padding: '0.5rem 1rem',
-      background: active ? '#83b16d' : '#f0f4f7',
+      background: active ? colors.primary : '#f0f4f7',
       border: 'none',
       borderRadius: '20px',
       color: active ? 'white' : '#6b7280',
@@ -959,15 +1012,16 @@ export default function PlaybooksPage() {
   return (
     <div>
       <PageHeader
+        icon={ClipboardList}
         title="Playbooks"
-        subtitle="Run pre-built analysis templates to generate deliverables."
+        subtitle="Run pre-built analysis templates to generate deliverables"
         breadcrumbs={[
           { label: customerName },
           { label: projectName },
         ]}
         action={isAdmin ? {
           label: 'Work Advisor',
-          icon: '💡',
+          icon: <Lightbulb size={16} />,
           to: '/advisor',
         } : null}
       />
@@ -1018,6 +1072,13 @@ export default function PlaybooksPage() {
           }}
         />
       )}
+
+      <style>{`
+        @keyframes spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+      `}</style>
     </div>
   );
 }
