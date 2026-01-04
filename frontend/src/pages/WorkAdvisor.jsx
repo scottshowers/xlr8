@@ -827,7 +827,7 @@ function PlaybookBuilderFlow({ draft, conversationContext, onBack, onComplete })
             </button>
             <div>
               <h1 style={{ margin: 0, fontSize: '1.25rem', fontWeight: '700', color: COLORS.text }}>
-                {isGenerating ? '✨ Designing Your Playbook...' : 'Build Playbook'}
+                {isGenerating ? ' Designing Your Playbook...' : 'Build Playbook'}
               </h1>
               <p style={{ margin: 0, fontSize: '0.875rem', color: COLORS.textMuted }}>
                 {isGenerating 
@@ -1296,7 +1296,7 @@ function StepReview({ playbook }) {
       
       {playbook.steps.length > 0 && (
         <div style={{ marginBottom: '1rem' }}>
-          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📋 Steps</h4>
+          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}> Steps</h4>
           <ol style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted }}>
             {playbook.steps.map((s, idx) => <li key={idx}>{s.title || 'Unnamed'}</li>)}
           </ol>
@@ -1305,7 +1305,7 @@ function StepReview({ playbook }) {
       
       {playbook.outputs.length > 0 && (
         <div>
-          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}>📤 Outputs</h4>
+          <h4 style={{ margin: '0 0 0.5rem', color: COLORS.text, fontSize: '0.9rem' }}> Outputs</h4>
           <ul style={{ margin: 0, paddingLeft: '1.25rem', color: COLORS.textMuted }}>
             {playbook.outputs.map((o, idx) => <li key={idx}>{o.name || 'Unnamed'} ({o.format})</li>)}
           </ul>
