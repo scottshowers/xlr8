@@ -12,7 +12,11 @@
 
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Rocket, MessageSquare, ChevronDown, ChevronUp } from 'lucide-react';
+import { 
+  Rocket, MessageSquare, ChevronDown, ChevronUp,
+  Target, FolderOpen, Database, ClipboardList, BarChart3,
+  Lightbulb, Wrench, GraduationCap, Settings
+} from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
@@ -94,20 +98,20 @@ const COLORS = {
 
 // Main nav items - core workflow
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Mission Control', icon: '🏠', permission: null, tooltip: 'Platform health, metrics, and system status at a glance' },
-  { path: '/projects', label: 'Projects', icon: '🏢', permission: null, tooltip: 'Create and manage customer implementation projects' },
-  { path: '/data', label: 'Data', icon: '📂', permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
-  { path: '/playbooks', label: 'Playbooks', icon: '📋', permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
-  { path: '/analytics', label: 'Smart Analytics', icon: '📊', permission: null, tooltip: 'Query your data with natural language or SQL' },
-  { path: '/workspace', label: 'AI Assist', icon: '💬', permission: null, tooltip: 'Chat with AI about your project data' },
+  { path: '/dashboard', label: 'Mission Control', icon: Target, permission: null, tooltip: 'Platform health, metrics, and system status at a glance' },
+  { path: '/projects', label: 'Projects', icon: FolderOpen, permission: null, tooltip: 'Create and manage customer implementation projects' },
+  { path: '/data', label: 'Data', icon: Database, permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
+  { path: '/playbooks', label: 'Playbooks', icon: ClipboardList, permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
+  { path: '/analytics', label: 'Smart Analytics', icon: BarChart3, permission: null, tooltip: 'Query your data with natural language or SQL' },
+  { path: '/workspace', label: 'AI Assist', icon: MessageSquare, permission: null, tooltip: 'Chat with AI about your project data' },
 ];
 
 // Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/advisor', label: 'Work Advisor', icon: '💡', permission: Permissions.OPS_CENTER, tooltip: 'AI-powered recommendations for tasks and next steps' },
-  { path: '/playbooks/builder', label: 'Playbook Builder', icon: '🔧', permission: Permissions.OPS_CENTER, tooltip: 'Create and customize analysis playbooks' },
-  { path: '/learning-admin', label: 'Learning', icon: '🧠', permission: Permissions.OPS_CENTER, tooltip: 'Train the system with domain knowledge' },
-  { path: '/admin', label: 'System', icon: '⚙️', permission: Permissions.OPS_CENTER, tooltip: 'System settings, users, and configuration' },
+  { path: '/advisor', label: 'Work Advisor', icon: Lightbulb, permission: Permissions.OPS_CENTER, tooltip: 'AI-powered recommendations for tasks and next steps' },
+  { path: '/playbooks/builder', label: 'Playbook Builder', icon: Wrench, permission: Permissions.OPS_CENTER, tooltip: 'Create and customize analysis playbooks' },
+  { path: '/learning-admin', label: 'Learning', icon: GraduationCap, permission: Permissions.OPS_CENTER, tooltip: 'Train the system with domain knowledge' },
+  { path: '/admin', label: 'System', icon: Settings, permission: Permissions.OPS_CENTER, tooltip: 'System settings, users, and configuration' },
 ];
 
 // Logo SVG
@@ -348,18 +352,21 @@ function Navigation({ onOpenGenome }) {
           <div style={styles.navGroup}>
             {/* Main Nav Items */}
             <div style={styles.navItems}>
-              {mainItems.map((item) => (
-                <SimpleTooltip key={item.path} text={item.tooltip}>
-                  <Link
-                    to={item.path}
-                    data-tour={getTourAttr(item.path)}
-                    style={styles.navLink(isActive(item.path))}
-                  >
-                    <span>{item.icon}</span>
-                    {item.label}
-                  </Link>
-                </SimpleTooltip>
-              ))}
+              {mainItems.map((item) => {
+                const IconComponent = item.icon;
+                return (
+                  <SimpleTooltip key={item.path} text={item.tooltip}>
+                    <Link
+                      to={item.path}
+                      data-tour={getTourAttr(item.path)}
+                      style={styles.navLink(isActive(item.path))}
+                    >
+                      <IconComponent size={16} />
+                      {item.label}
+                    </Link>
+                  </SimpleTooltip>
+                );
+              })}
             </div>
 
             {/* Admin Dropdown */}
@@ -379,19 +386,22 @@ function Navigation({ onOpenGenome }) {
 
                   {adminExpanded && (
                     <div style={styles.adminDropdown}>
-                      {adminItems.map((item) => (
-                        <SimpleTooltip key={item.path} text={item.tooltip}>
-                          <Link
-                            to={item.path}
-                            style={styles.adminDropdownItem(isActive(item.path))}
-                            onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
-                            onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
-                          >
-                            <span>{item.icon}</span>
-                            {item.label}
-                          </Link>
-                        </SimpleTooltip>
-                      ))}
+                      {adminItems.map((item) => {
+                        const IconComponent = item.icon;
+                        return (
+                          <SimpleTooltip key={item.path} text={item.tooltip}>
+                            <Link
+                              to={item.path}
+                              style={styles.adminDropdownItem(isActive(item.path))}
+                              onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
+                              onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
+                            >
+                              <IconComponent size={14} />
+                              {item.label}
+                            </Link>
+                          </SimpleTooltip>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
