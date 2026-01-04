@@ -15,6 +15,7 @@ import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 import { getCustomerColor, getCustomerInitials, getContrastText } from '../utils/customerColors';
 import { LoadingSpinner } from './ui';
+import { Globe } from 'lucide-react';
 
 // Brand Colors
 const COLORS = {
@@ -304,7 +305,7 @@ export default function ContextBar() {
               </>
             ) : (
               <div style={styles.globalMode}>
-                <span style={{ fontSize: '1.1rem' }}>🌐</span>
+                <Globe size={18} style={{ color: '#285390' }} />
                 <span>All Projects</span>
               </div>
             )}
@@ -337,7 +338,7 @@ export default function ContextBar() {
                       e.currentTarget.style.background = !activeProject ? `${COLORS.primary}15` : 'white';
                     }}
                   >
-                    <div style={styles.allProjectsIcon}>🌐</div>
+                    <Globe size={16} style={{ color: '#285390' }} />
                     <div style={{ flex: 1 }}>
                       <div style={styles.projectItemName}>All Projects</div>
                       <div style={styles.projectItemCustomer}>View global / aggregate data</div>
