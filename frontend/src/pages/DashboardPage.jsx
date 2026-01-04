@@ -88,16 +88,19 @@ function PipelineStatus({ data }) {
   const allHealthy = data?.healthy;
   
   const stageConfig = [
-    { key: 'upload', label: 'Upload', icon: Upload },
-    { key: 'process', label: 'Process', icon: Database },
-    { key: 'query', label: 'Query', icon: Zap },
-    { key: 'semantic', label: 'Semantic', icon: Layers },
+    { key: 'upload', label: 'Upload', icon: Upload, tooltip: 'Tests file ingestion and DuckDB table creation' },
+    { key: 'process', label: 'Process', icon: Database, tooltip: 'Tests schema metadata and column profiling' },
+    { key: 'query', label: 'Query', icon: Zap, tooltip: 'Tests intelligence engine query capability' },
+    { key: 'semantic', label: 'Semantic', icon: Layers, tooltip: 'Tests ChromaDB vector search and embeddings' },
   ];
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
-        <h3 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <h3 
+          style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+          title="Real-time health checks for each pipeline stage. Tests actual operations, not just connectivity."
+        >
           <Activity size={16} color={colors.primary} />
           Pipeline Status
         </h3>
@@ -121,14 +124,18 @@ function PipelineStatus({ data }) {
           
           return (
             <React.Fragment key={stage.key}>
-              <div style={{
-                flex: 1,
-                padding: '12px',
-                borderRadius: '8px',
-                backgroundColor: healthy ? `${colors.success}08` : `${colors.error}08`,
-                border: `1px solid ${healthy ? colors.success : colors.error}30`,
-                textAlign: 'center'
-              }}>
+              <div 
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: '8px',
+                  backgroundColor: healthy ? `${colors.success}08` : `${colors.error}08`,
+                  border: `1px solid ${healthy ? colors.success : colors.error}30`,
+                  textAlign: 'center',
+                  cursor: 'help'
+                }}
+                title={stage.tooltip}
+              >
                 <Icon size={18} color={healthy ? colors.success : colors.error} style={{ marginBottom: '6px' }} />
                 <div style={{ fontSize: '12px', fontWeight: 500, color: colors.text }}>{stage.label}</div>
                 <div style={{ fontSize: '11px', color: colors.textMuted, marginTop: '2px' }}>
@@ -168,7 +175,10 @@ function DataByTruthType({ data }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 
+        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+        title="Five Truths architecture: Reality (transactional), Configuration (setup), Reference (docs), Regulatory (rules), Intent (goals)"
+      >
         <PieChart size={16} color={colors.primary} />
         Data by Truth Type
       </h3>
@@ -245,7 +255,10 @@ function DataByTruthType({ data }) {
 function LineageTracking({ data }) {
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 
+        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+        title="Tracks data provenance: which files produced which tables. Essential for audit trails and debugging."
+      >
         <GitBranch size={16} color={colors.primary} />
         Data Lineage
       </h3>
@@ -307,7 +320,10 @@ function RelationshipCoverage({ data }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 
+        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+        title="Shows how well tables are connected via detected relationships. Higher coverage = better query intelligence."
+      >
         <Link2 size={16} color={colors.primary} />
         Table Relationships
       </h3>
@@ -368,10 +384,15 @@ function AttentionItems({ items }) {
     info: { bg: `${colors.accent}10`, border: colors.accent, icon: Bell },
   };
   
+  const tooltipText = "Issues that need your attention: failed uploads, stuck jobs, missing column profiles, unclassified tables.";
+  
   if (!items || items.length === 0) {
     return (
       <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+        <h3 
+          style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+          title={tooltipText}
+        >
           <Bell size={16} color={colors.primary} />
           Attention Required
         </h3>
@@ -392,7 +413,10 @@ function AttentionItems({ items }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 
+        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+        title={tooltipText}
+      >
         <Bell size={16} color={colors.primary} />
         Attention Required
         <span style={{ 
@@ -463,7 +487,10 @@ function ActivityChart({ data }) {
   
   return (
     <div style={{ backgroundColor: colors.cardBg, borderRadius: '12px', padding: '20px', border: `1px solid ${colors.border}` }}>
-      <h3 style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px' }}>
+      <h3 
+        style={{ margin: '0 0 16px', fontSize: '14px', fontWeight: 600, color: colors.text, display: 'flex', alignItems: 'center', gap: '8px', cursor: 'help' }}
+        title="Historical view of platform usage. Uploads track file processing, Queries track intelligence engine usage."
+      >
         <BarChart3 size={16} color={colors.primary} />
         Activity History
         <span style={{ marginLeft: 'auto', fontSize: '11px', color: colors.textMuted }}>Last 30 days</span>
