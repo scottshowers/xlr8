@@ -476,7 +476,7 @@ function UploadTab({ colors, darkMode }) {
       )}
 
       <div style={{ marginTop: '1rem', padding: '0.75rem 1rem', background: colors.inputBg, borderRadius: 8, fontSize: '0.85rem', color: colors.textMuted, border: `1px solid ${colors.divider}` }}>
-        💡 <strong>Tip:</strong> Upload compliance documents like Year-End Checklists, SECURE 2.0 guides, or internal policies. XLR8 will automatically extract actionable rules.
+         <strong>Tip:</strong> Upload compliance documents like Year-End Checklists, SECURE 2.0 guides, or internal policies. XLR8 will automatically extract actionable rules.
       </div>
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
