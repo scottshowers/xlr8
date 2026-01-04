@@ -4568,9 +4568,11 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
 #
 # Solution: Store the singleton in sys.modules under a canonical key.
 # This guarantees ONE instance per process regardless of import path.
+# Thread safety via lock ensures only one instance created even with parallel calls.
 # =============================================================================
 
 _SINGLETON_KEY = '_xlr8_structured_data_handler_instance'
+_SINGLETON_LOCK = threading.Lock()
 
 def get_structured_handler() -> StructuredDataHandler:
     """
@@ -4579,27 +4581,34 @@ def get_structured_handler() -> StructuredDataHandler:
     Uses sys.modules to ensure ONE instance per process, regardless of
     whether this module is imported as 'utils.structured_data_handler'
     or 'backend.utils.structured_data_handler'.
-    """
-    if _SINGLETON_KEY not in sys.modules:
-        handler = StructuredDataHandler()
-        sys.modules[_SINGLETON_KEY] = handler
-        logging.getLogger(__name__).warning(
-            f"[HANDLER] Created singleton (id={id(handler)}, conn_id={id(handler.conn)}, db={handler.db_path}, module={_MODULE_LOAD_ID}, pid={os.getpid()})"
-        )
-    else:
-        handler = sys.modules[_SINGLETON_KEY]
-        # Log every access to help debug
-        logging.getLogger(__name__).debug(
-            f"[HANDLER] Reusing singleton (id={id(handler)}, conn_id={id(handler.conn)})"
-        )
     
-    # Verify it's actually a handler instance
-    if not isinstance(handler, StructuredDataHandler):
-        logging.getLogger(__name__).error(f"[HANDLER] SINGLETON IS WRONG TYPE: {type(handler)}")
-        handler = StructuredDataHandler()
-        sys.modules[_SINGLETON_KEY] = handler
+    Thread-safe: uses lock to prevent race conditions.
+    """
+    # Fast path - if already exists, return immediately (no lock needed for reads)
+    if _SINGLETON_KEY in sys.modules:
+        handler = sys.modules[_SINGLETON_KEY]
+        if isinstance(handler, StructuredDataHandler):
+            return handler
+    
+    # Slow path - need to create, use lock
+    with _SINGLETON_LOCK:
+        # Double-check after acquiring lock
+        if _SINGLETON_KEY not in sys.modules:
+            handler = StructuredDataHandler()
+            sys.modules[_SINGLETON_KEY] = handler
+            logging.getLogger(__name__).warning(
+                f"[HANDLER] Created singleton (id={id(handler)}, conn_id={id(handler.conn)}, db={handler.db_path}, module={_MODULE_LOAD_ID}, pid={os.getpid()})"
+            )
+        else:
+            handler = sys.modules[_SINGLETON_KEY]
         
-    return handler
+        # Verify it's actually a handler instance
+        if not isinstance(handler, StructuredDataHandler):
+            logging.getLogger(__name__).error(f"[HANDLER] SINGLETON IS WRONG TYPE: {type(handler)}")
+            handler = StructuredDataHandler()
+            sys.modules[_SINGLETON_KEY] = handler
+            
+        return handler
 
 
 def reset_structured_handler():
