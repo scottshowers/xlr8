@@ -356,11 +356,13 @@ export default function Chat({ functionalAreas = [] }) {
         gap: '0.75rem',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* PersonaSwitcher hidden for now - future feature
           <PersonaSwitcher 
             currentPersona={currentPersona}
             onPersonaChange={setCurrentPersona}
             onCreateNew={() => setShowPersonaCreator(true)}
           />
+          */}
           
           {/* Always using Intelligent Mode - indicator badge */}
           <Tooltip 
