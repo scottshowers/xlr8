@@ -1,17 +1,21 @@
 /**
  * PlaybookBuilderPage - Admin UI for Creating/Editing Playbooks
  * 
+ * Updated: January 4, 2026 - Visual Standards Part 13
+ * 
  * Three creation modes:
  *   A. Template-based: Pick type, fill in blanks
  *   B. Component-based: Mix and match modules
  *   C. Clone and modify: Copy existing, customize
- * 
- * Deploy to: frontend/src/pages/PlaybookBuilderPage.jsx
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import api from '../services/api';
+import { 
+  Wrench, ClipboardList, Search, Building, RefreshCw, FileText, 
+  Puzzle, Copy, CheckCircle, PartyPopper
+} from 'lucide-react';
 
 // Mission Control Colors
 const COLORS = {
@@ -32,33 +36,33 @@ const COLORS = {
   error: '#dc2626',
 };
 
-// Playbook type definitions
+// Playbook type definitions with lucide icons
 const PLAYBOOK_TYPES = [
   {
     id: 'checklist',
     name: 'Checklist',
-    icon: '📋',
+    icon: ClipboardList,
     description: 'Step-by-step workflow with actions and document requirements',
     example: 'Year-End Checklist',
   },
   {
     id: 'analysis',
     name: 'Analysis',
-    icon: '🔍',
+    icon: Search,
     description: 'Analyze uploaded data for insights, patterns, and issues',
     example: 'Data Quality Audit',
   },
   {
     id: 'compliance',
     name: 'Compliance',
-    icon: '🏛️',
+    icon: Building,
     description: 'Check data against standards rules for violations',
     example: 'SECURE 2.0 Check',
   },
   {
     id: 'hybrid',
     name: 'Hybrid',
-    icon: '🔄',
+    icon: RefreshCw,
     description: 'Combination of checklist structure with analysis capabilities',
     example: 'Implementation Validation',
   },
@@ -958,7 +962,18 @@ export default function PlaybookBuilderPage() {
   if (success) {
     return (
       <div style={{ textAlign: 'center', padding: '4rem 2rem' }}>
-        <div style={{ fontSize: '4rem', marginBottom: '1rem' }}>🎉</div>
+        <div style={{ 
+          width: '80px', 
+          height: '80px', 
+          borderRadius: '20px',
+          background: 'rgba(22, 163, 74, 0.1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          margin: '0 auto 1rem',
+        }}>
+          <CheckCircle size={40} color="#16a34a" />
+        </div>
         <h2 style={{ fontFamily: "'Sora', sans-serif", color: COLORS.text, marginBottom: '0.5rem' }}>
           Playbook Created!
         </h2>
@@ -985,11 +1000,31 @@ export default function PlaybookBuilderPage() {
 
   return (
     <div>
-      <div style={{ marginBottom: '2rem' }}>
-        <h1 style={{ fontFamily: "'Sora', sans-serif", fontSize: '1.75rem', fontWeight: '700', color: COLORS.text, margin: 0 }}>
-          🔧 Playbook Builder
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: '20px', 
+          fontWeight: 600, 
+          color: COLORS.text, 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          fontFamily: "'Sora', sans-serif"
+        }}>
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '10px', 
+            backgroundColor: COLORS.primary, 
+            display: 'flex', 
+            alignItems: 'center', 
+            justifyContent: 'center' 
+          }}>
+            <Wrench size={20} color="#ffffff" />
+          </div>
+          Playbook Builder
         </h1>
-        <p style={{ color: COLORS.textLight, marginTop: '0.25rem' }}>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: COLORS.textLight }}>
           Create new playbooks for your team
         </p>
       </div>
