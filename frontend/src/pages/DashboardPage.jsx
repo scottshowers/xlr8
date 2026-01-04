@@ -49,14 +49,13 @@ const colors = {
   success: '#16a34a',
 };
 
-// Truth type colors
+// Truth type colors (Five Truths - Part 14 Visual Standards)
 const truthColors = {
   reality: '#285390',
   configuration: '#7aa866',
   reference: '#5f4282',
   regulatory: '#993c44',
   intent: '#2766b1',
-  compliance: '#d97706',
   unclassified: '#a2a1a0',
 };
 
