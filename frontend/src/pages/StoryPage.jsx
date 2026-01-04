@@ -192,10 +192,10 @@ export default function StoryPage() {
       <Chapter num={2} title="What We Were Fighting" style={{ background: colors.bgAlt }}>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1.5rem', marginTop: '2rem' }}>
           {[
-            { icon: '📊', label: 'Spreadsheet Hell', desc: 'Every project started with blank Excel. Copy. Paste. Pray.' },
-            { icon: '⏰', label: 'Time Drain', desc: 'Weeks spent on manual validation. Same checks, every time.' },
-            { icon: '🔍', label: 'Missed Issues', desc: 'Human eyes miss things. Compliance gaps slip through.' },
-            { icon: '🧠', label: 'Knowledge Loss', desc: 'Senior consultants leave. Expertise walks out the door.' },
+            { icon: '', label: 'Spreadsheet Hell', desc: 'Every project started with blank Excel. Copy. Paste. Pray.' },
+            { icon: '', label: 'Time Drain', desc: 'Weeks spent on manual validation. Same checks, every time.' },
+            { icon: '', label: 'Missed Issues', desc: 'Human eyes miss things. Compliance gaps slip through.' },
+            { icon: '', label: 'Knowledge Loss', desc: 'Senior consultants leave. Expertise walks out the door.' },
           ].map((item, i) => (
             <div key={i} style={{
               background: colors.card,
@@ -261,12 +261,12 @@ export default function StoryPage() {
         
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '1.25rem', marginTop: '2rem' }}>
           {[
-            { icon: '🎯', title: 'Auto-Classification', desc: 'Documents routed to the right Truth layer automatically.', tag: 'ON UPLOAD' },
-            { icon: '🔗', title: 'Relationship Discovery', desc: 'Foreign keys found. Smart JOINs without config.', tag: 'AUTOMATIC' },
-            { icon: '📊', title: 'Data Quality Scoring', desc: 'Every file gets a health score. Issues flagged instantly.', tag: 'REAL-TIME' },
-            { icon: '🧠', title: 'Pattern Learning', desc: 'Common queries cached. Gets faster with use.', tag: 'CONTINUOUS' },
-            { icon: '💬', title: 'Natural Language', desc: 'Ask in plain English. "How many employees in CA?"', tag: 'NO SQL' },
-            { icon: '✅', title: 'Standards Validation', desc: 'Upload compliance rules once. Validate forever.', tag: 'AUTOMATED' },
+            { icon: '', title: 'Auto-Classification', desc: 'Documents routed to the right Truth layer automatically.', tag: 'ON UPLOAD' },
+            { icon: '', title: 'Relationship Discovery', desc: 'Foreign keys found. Smart JOINs without config.', tag: 'AUTOMATIC' },
+            { icon: '', title: 'Data Quality Scoring', desc: 'Every file gets a health score. Issues flagged instantly.', tag: 'REAL-TIME' },
+            { icon: '', title: 'Pattern Learning', desc: 'Common queries cached. Gets faster with use.', tag: 'CONTINUOUS' },
+            { icon: '', title: 'Natural Language', desc: 'Ask in plain English. "How many employees in CA?"', tag: 'NO SQL' },
+            { icon: '', title: 'Standards Validation', desc: 'Upload compliance rules once. Validate forever.', tag: 'AUTOMATED' },
           ].map((item, i) => (
             <div key={i} style={{
               background: colors.card,
@@ -430,7 +430,7 @@ export default function StoryPage() {
         padding: '2rem', textAlign: 'center', color: colors.textLight,
         fontSize: '0.8rem', background: colors.bg, borderTop: `1px solid ${colors.cardBorder}`,
       }}>
-        Built with 💚 by <span style={{ color: colors.primary }}>XLR8</span> · The platform that replaced our spreadsheets
+        Built with  by <span style={{ color: colors.primary }}>XLR8</span> · The platform that replaced our spreadsheets
       </footer>
     </div>
   );
