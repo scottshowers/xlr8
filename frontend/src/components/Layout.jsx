@@ -15,7 +15,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   Rocket, MessageSquare, ChevronDown, ChevronUp,
   Target, FolderOpen, Database, ClipboardList, BarChart3,
-  Lightbulb, Wrench, GraduationCap, Settings
+  Lightbulb, Wrench, GraduationCap, Settings, Map, Building2
 } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
@@ -48,37 +48,39 @@ function SalesButtons() {
   const [hovered, setHovered] = useState(null);
   
   const buttons = [
-    { id: 'journey', path: '/journey', icon: '🗺️', title: 'The Journey' },
-    { id: 'architecture', path: '/architecture', icon: '🏗️', title: 'Architecture' },
+    { id: 'journey', path: '/journey', icon: Map, title: 'The Journey' },
+    { id: 'architecture', path: '/architecture', icon: Building2, title: 'Architecture' },
   ];
   
   return (
     <div style={{ display: 'flex', gap: '0.25rem' }}>
-      {buttons.map(btn => (
-        <SimpleTooltip key={btn.id} text={btn.title}>
-          <Link
-            to={btn.path}
-            onMouseEnter={() => setHovered(btn.id)}
-            onMouseLeave={() => setHovered(null)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 32,
-              height: 32,
-              background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
-              border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
-              borderRadius: 6,
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              textDecoration: 'none',
-              fontSize: '0.9rem',
-            }}
-          >
-            {btn.icon}
-          </Link>
-        </SimpleTooltip>
-      ))}
+      {buttons.map(btn => {
+        const IconComponent = btn.icon;
+        return (
+          <SimpleTooltip key={btn.id} text={btn.title}>
+            <Link
+              to={btn.path}
+              onMouseEnter={() => setHovered(btn.id)}
+              onMouseLeave={() => setHovered(null)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: 32,
+                height: 32,
+                background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
+                border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
+                borderRadius: 6,
+                cursor: 'pointer',
+                transition: 'all 0.15s ease',
+                textDecoration: 'none',
+              }}
+            >
+              <IconComponent size={16} color={hovered === btn.id ? '#83b16d' : '#64748b'} />
+            </Link>
+          </SimpleTooltip>
+        );
+      })}
     </div>
   );
 }
