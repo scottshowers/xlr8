@@ -254,7 +254,7 @@ function SampleDataTable({ title, rows, columns, joinColumn, rowCount, orphanVal
                       fontWeight: col.toLowerCase() === joinColumn?.toLowerCase() ? 500 : 400,
                     }}>
                       {row[col] ?? '—'}
-                      {isOrphan && col.toLowerCase() === joinColumn?.toLowerCase() && ' ⚠️'}
+                      {isOrphan && col.toLowerCase() === joinColumn?.toLowerCase() && ' '}
                     </td>
                   ))}
                 </tr>
