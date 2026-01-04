@@ -365,9 +365,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                     "user_preferences",        # User preferences  
                     "playbook_runs",           # Playbook scan results
                     "finding_suppressions",    # Suppressed findings
-                    "lineage_edges",           # Document lineage
-                    # NOTE: project_relationships, standards_rules, standards_documents 
-                    # handled separately below (different key columns)
+                    # NOTE: lineage_edges, project_relationships, standards_rules, standards_documents 
+                    # handled separately below (different key columns / no id)
                 ]
                 
                 for table in tables_to_wipe:
@@ -392,6 +391,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                     ("project_relationships", "project_name"),  # Uses project_name not project_id
                     ("standards_rules", "rule_id"),             # Uses rule_id
                     ("standards_documents", "id"),              # Standard id
+                    ("lineage_edges", "source_type"),           # Composite key, no id column
                 ]
                 for table, key_col in special_tables:
                     try:
