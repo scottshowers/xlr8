@@ -1415,7 +1415,7 @@ class ProjectIntelligenceService:
             asyncio.set_event_loop(loop)
             try:
                 result = loop.run_until_complete(
-                    analyze_project_relationships(self.project, tables, None)
+                    analyze_project_relationships(self.project, tables, self.handler)
                 )
             finally:
                 loop.close()
