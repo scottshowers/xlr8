@@ -55,17 +55,8 @@ export default function DataCleanup() {
   // ==========================================================================
 
   const loadProjects = async () => {
-    try {
-      const res = await fetch(`${API_BASE}/api/projects`);
-      const data = await res.json();
-      const projectList = data.projects || data || [];
-      setProjects(projectList.map(p => p.name || p.id || p));
-    } catch (e) {
-      console.error('Failed to load projects:', e);
-      // Fallback: extract from tables
-      const uniqueProjects = [...new Set(tables.map(t => t.project).filter(Boolean))];
-      setProjects(uniqueProjects);
-    }
+    // Projects are embedded in table names as prefixes (e.g., "tea1000__table_name")
+    // We'll extract them from table data
   };
 
   const loadTables = async () => {
@@ -76,20 +67,46 @@ export default function DataCleanup() {
       const data = await res.json();
       
       // Response is { success, tables: [...], total }
-      const allTables = (data.tables || []).map(t => ({
-        table_name: t.table_name,
-        display_name: t.display_name || t.table_name,
-        row_count: t.row_count || 0,
-        column_count: t.column_count || t.columns?.length || 0,
-        file_name: t.source_filename || t.file_name || t.source_file,
-        sheet_name: t.sheet_name,
-        project: t.project,
-        created_at: t.created_at,
-        uploaded_by: t.uploaded_by,
-        domain: t.detected_domain || t.domain
-      }));
+      const allTables = (data.tables || []).map(t => {
+        // Extract project from table_name prefix (e.g., "tea1000__..." or "tea1000_...")
+        const tableName = t.table_name || '';
+        let project = null;
+        
+        // Try double underscore first (tea1000__table)
+        if (tableName.includes('__')) {
+          project = tableName.split('__')[0].toUpperCase();
+        } else {
+          // Fall back to first underscore segment if it looks like a project code
+          const firstPart = tableName.split('_')[0];
+          if (firstPart && /^[a-zA-Z]{2,4}\d{3,5}$/i.test(firstPart)) {
+            project = firstPart.toUpperCase();
+          }
+        }
+        
+        return {
+          table_name: t.table_name,
+          display_name: t.display_name || t.table_name,
+          row_count: t.row_count || 0,
+          column_count: t.column_count || t.columns?.length || 0,
+          file_name: t.source_filename || t.file_name || t.source_file,
+          sheet_name: t.sheet_name,
+          project: project,
+          created_at: t.created_at,
+          uploaded_by: t.uploaded_by,
+          domain: t.detected_domain || t.domain
+        };
+      });
       
       setTables(allTables);
+      
+      // Extract unique projects
+      const uniqueProjects = [...new Set(allTables.map(t => t.project).filter(Boolean))];
+      setProjects(uniqueProjects);
+      
+    } catch (e) {
+      console.error('Failed to load tables:', e);
+      setTables([]);
+    }
     } catch (e) {
       console.error('Failed to load tables:', e);
       setTables([]);
@@ -129,18 +146,7 @@ export default function DataCleanup() {
     loadTables();
     loadDocuments();
     loadOrphanPreview();
-    loadProjects();
   }, []);
-
-  // Extract unique projects from tables when they load
-  useEffect(() => {
-    if (tables.length > 0) {
-      const uniqueProjects = [...new Set(tables.map(t => t.project).filter(Boolean))];
-      if (uniqueProjects.length > 0 && projects.length === 0) {
-        setProjects(uniqueProjects);
-      }
-    }
-  }, [tables]);
 
   // ==========================================================================
   // ACTIONS
