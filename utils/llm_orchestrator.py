@@ -131,8 +131,12 @@ def select_local_model(query: str, chunks: List[Dict] = None) -> str:
     """
     Select local model for queries
     
-    Qwen: SQL, data extraction, tables, lists, calculations
-    phi3:medium: General reasoning, analysis, policy interpretation
+    Available models and their use cases:
+    - qwen2.5-coder:14b: SQL, JSON, data extraction, tables, lists, calculations
+    - mistral:7b: General reasoning, analysis, synthesis, natural language
+    - deepseek-r1:14b: Complex reasoning (but outputs <think> tags - use carefully)
+    
+    DO NOT USE phi3 models - they return garbage responses.
     """
     query_lower = query.lower()
     
@@ -151,8 +155,8 @@ def select_local_model(query: str, chunks: List[Dict] = None) -> str:
         logger.info("Selected model: Qwen (data extraction)")
         return 'qwen2.5-coder:14b'
     
-    logger.info("Selected model: phi3:medium (general)")
-    return 'phi3:medium'
+    logger.info("Selected model: mistral:7b (general)")
+    return 'mistral:7b'
 
 
 # =============================================================================
@@ -1032,13 +1036,14 @@ Data Context:
 Analyze the data and provide a clear, direct answer. Focus on the key insight first, then supporting details."""
         
         # ==============================================================
-        # STEP 1: Try phi3:medium (best for reasoning/synthesis)
+        # STEP 1: Try local models for synthesis
+        # mistral:7b is best for natural language synthesis
+        # qwen2.5-coder is for structured/JSON output, NOT synthesis
+        # deepseek-r1 outputs <think> tags that need stripping
         # ==============================================================
         if self.ollama_url:
             models_to_try = [
-                'phi3:medium',
-                'phi3:latest',
-                'qwen2.5-coder:14b',
+                'mistral:7b',
             ]
             
             for model in models_to_try:
@@ -1206,11 +1211,11 @@ Always respond with valid JSON only - no explanations, no markdown, no code bloc
 If you cannot extract the requested data, return an appropriate empty JSON structure."""
         
         # ==============================================================
-        # STEP 1: Try phi3:medium first (good at structured output)
+        # STEP 1: Try qwen2.5-coder (best for structured JSON output)
+        # phi3 models are unreliable for JSON - skip them
         # ==============================================================
         if self.ollama_url:
             models_to_try = [
-                'phi3:medium',
                 'qwen2.5-coder:14b',
             ]
             
