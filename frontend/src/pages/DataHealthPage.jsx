@@ -455,7 +455,7 @@ function RelationshipTable({ relationships, colors, showActions, onConfirm }) {
           </tr>
         </thead>
         <tbody>
-          {relationships.slice(0, 50).map((rel, i) => (
+          {relationships.map((rel, i) => (
             <tr key={i} style={{ borderBottom: '1px solid ' + colors.divider }}>
               <td style={{ padding: '0.75rem' }}>
                 <span style={{ color: colors.textMuted }}>{rel.source_table}.</span>
@@ -488,11 +488,6 @@ function RelationshipTable({ relationships, colors, showActions, onConfirm }) {
           ))}
         </tbody>
       </table>
-      {relationships.length > 50 && (
-        <div style={{ padding: '0.75rem', textAlign: 'center', color: colors.textMuted, fontSize: '0.8rem' }}>
-          +{relationships.length - 50} more
-        </div>
-      )}
     </div>
   );
 }
