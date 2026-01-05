@@ -107,10 +107,6 @@ export default function DataCleanup() {
       console.error('Failed to load tables:', e);
       setTables([]);
     }
-    } catch (e) {
-      console.error('Failed to load tables:', e);
-      setTables([]);
-    }
     setLoading(l => ({ ...l, tables: false }));
   };
 
