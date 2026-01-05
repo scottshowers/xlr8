@@ -1,8 +1,8 @@
 # XLR8 ARCHITECTURE WAYS OF WORKING
 
-**Version:** 1.4  
+**Version:** 2.0  
 **Created:** January 2, 2026  
-**Updated:** January 5, 2026 (Part 13 added - DuckDB Connection Management)  
+**Updated:** January 5, 2026 (Part 15 added - THE CONTEXT GRAPH)  
 **Purpose:** Enforce consistent development patterns across all features
 
 ---
@@ -12,6 +12,10 @@
 This document exists because **we keep leaving things behind**.
 
 Every sprint, we build new capabilities but fail to apply them consistently. We built TableSelector but didn't use it everywhere. We built LLMOrchestrator but 12+ files bypass it. We built health checks that tell us if files exist but not if PDF parsing actually works.
+
+**January 5, 2026 - THE BREAKTHROUGH:** We identified that the entire platform was missing the point. We had 2,451 pairwise relationships when we needed a Context Graph with ~50 hub/spoke connections. The Context Graph IS the intelligence layer. Without it, we're a fancy ETL tool. With it, we deliver consultant-grade analysis.
+
+**Part 15 is not optional. It defines how the platform understands data.**
 
 **This document defines the rules.** Not suggestions. Rules.
 
@@ -1153,3 +1157,358 @@ To verify upload isn't being interrupted:
 If it completes, the connection management is working. If it fails when you navigate elsewhere, there's still a thread collision somewhere.
 
 **This is the law for DuckDB operations. Follow it.**
+
+---
+
+# PART 14: SINGLE SOURCE OF TRUTH - FILE METADATA
+
+**Added:** January 5, 2026 after discovering `_pdf_tables` was a dead table causing PDF metadata to be invisible.
+
+## 14.1 The Problem We Fixed
+
+The codebase had two metadata tables:
+- `_schema_metadata` - Excel/CSV files went here
+- `_pdf_tables` - **NOTHING wrote here**, but code still read from it
+
+Result: PDF uploads succeeded, but APIs returned empty metadata.
+
+## 14.2 The Architecture Now
+
+**`_schema_metadata` is the SINGLE source of truth for ALL file types.**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                    _schema_metadata                      │
+│  (Single source of truth for ALL file type metadata)    │
+├─────────────────────────────────────────────────────────┤
+│  Excel/CSV  │  PDF       │  Fields                      │
+│  ───────────┼────────────┼─────────────────────────────│
+│  store_excel│  store_df  │  file_name, project,         │
+│             │            │  table_name, columns,        │
+│             │            │  row_count, truth_type,      │
+│             │            │  source_type, uploaded_by    │
+└─────────────────────────────────────────────────────────┘
+```
+
+## 14.3 The Rules
+
+### RULE 1: NEVER Query `_pdf_tables`
+
+```python
+# ❌ WRONG - Dead table, returns nothing
+pdf_result = conn.execute("SELECT * FROM _pdf_tables").fetchall()
+
+# ✅ CORRECT - Single source of truth
+result = conn.execute("SELECT * FROM _schema_metadata WHERE is_current = TRUE").fetchall()
+```
+
+### RULE 2: All Files Use Same Storage Path
+
+```python
+# Excel/CSV
+handler.store_excel(file_path, project, filename)  # → _schema_metadata
+
+# PDF
+handler.store_dataframe(df, project, filename, source_type='pdf')  # → _schema_metadata
+```
+
+### RULE 3: Filter by source_type if Needed
+
+```python
+# Get only PDF tables
+pdf_tables = conn.execute("""
+    SELECT * FROM _schema_metadata 
+    WHERE source_type = 'pdf' AND is_current = TRUE
+""").fetchall()
+
+# Get only Excel tables (no source_type means Excel legacy, or explicit)
+excel_tables = conn.execute("""
+    SELECT * FROM _schema_metadata 
+    WHERE (source_type IS NULL OR source_type = 'excel') AND is_current = TRUE
+""").fetchall()
+```
+
+## 14.4 Legacy Cleanup
+
+`deep_clean.py` still references `_pdf_tables` to clean up any legacy data. This is intentional - it removes orphaned entries from the deprecated table.
+
+## 14.5 Files That Were Fixed
+
+| File | What Was Wrong |
+|------|---------------|
+| `platform.py` | Queried `_pdf_tables` for PDF metadata |
+| `data_model.py` | Queried `_pdf_tables` for relationship analysis |
+| `playbooks.py` | Queried `_pdf_tables` for entity extraction |
+| `playbook_framework.py` | Queried `_pdf_tables` as "Source 2" |
+| `unified_chat.py` | Fallback query to `_pdf_tables` |
+| `upload.py` | Cleanup code for `_pdf_tables` |
+| `cleanup.py` | Refresh metrics queried `_pdf_tables` |
+
+**All now use `_schema_metadata` exclusively.**
+
+**When adding new file metadata queries, use `_schema_metadata`. Never `_pdf_tables`.**
+
+---
+
+# PART 15: THE CONTEXT GRAPH - THIS IS THE PLATFORM
+
+**Added:** January 5, 2026  
+**Status:** BREAKTHROUGH - This defines how XLR8 understands data
+
+## 15.1 What This Is
+
+The Context Graph is not a feature. **It IS the platform.**
+
+XLR8's entire value proposition is context-aware analysis. The Context Graph is how we deliver that. Without it, we're just a fancy ETL tool with a chatbot.
+
+**The pitch:** "Upload your HCM data, ask questions, get consultant-grade answers."
+
+**The reality:** We can only deliver consultant-grade answers if we UNDERSTAND the data the way a consultant would:
+- Which table is the source of truth for company codes?
+- Which employees actually exist in payroll?
+- When someone asks about "W2", which 2 companies (of 13) are US-based?
+
+The Context Graph computes this understanding ONCE at upload time, not at query time.
+
+## 15.2 The Architecture
+
+### Hub/Spoke Model
+
+For each semantic type (company_code, job_code, earnings_code, etc.):
+
+```
+HUB = Table with MAX cardinality (the source of truth)
+SPOKES = Tables that reference the hub (the consumers)
+```
+
+**Example:**
+```
+company_code:
+├── HUB: Component_Company (13 values)      ← Source of truth
+├── SPOKE: Employee (6 values, 46% coverage) ← FK to hub
+├── SPOKE: Payroll (6 values, 46% coverage)  ← FK to hub
+└── SPOKE: Benefits (4 values, 31% coverage) ← FK to hub
+```
+
+**Result:** 3 relationships, not 2,451 pairwise matches.
+
+### Storage
+
+The Context Graph extends `_column_mappings` with hub/spoke metadata:
+
+```sql
+_column_mappings:
+├── semantic_type          -- 'company_code', 'job_code', 'earnings_code'
+├── is_hub                  -- TRUE if this is THE hub for its semantic_type
+├── hub_table               -- If spoke, which table is the hub?
+├── hub_column              -- If spoke, which column in hub?
+├── hub_cardinality         -- How many values in the hub? (13)
+├── spoke_cardinality       -- How many values in this spoke? (6)
+├── coverage_pct            -- spoke_cardinality / hub_cardinality (46%)
+└── is_subset               -- Are ALL spoke values in hub? (FK integrity)
+```
+
+### Computation
+
+`handler.compute_context_graph(project)` runs after upload profiling:
+
+1. For each semantic_type in `_column_mappings`:
+2. Find table with MAX distinct_count in `_column_profiles` → mark as HUB
+3. All other tables with same semantic_type → mark as SPOKES
+4. Calculate coverage: `len(spoke_values ∩ hub_values) / hub_cardinality`
+5. Check is_subset: `spoke_values ⊆ hub_values`
+
+### Query
+
+`handler.get_context_graph(project)` returns the graph for query-time use:
+
+```python
+graph = handler.get_context_graph(project)
+# Returns:
+{
+    'hubs': [
+        {'semantic_type': 'company_code', 'table': 'component_company', 'column': 'company_code', 'cardinality': 13},
+        {'semantic_type': 'job_code', 'table': 'job_master', 'column': 'job_code', 'cardinality': 45},
+    ],
+    'relationships': [
+        {'semantic_type': 'company_code', 'spoke_table': 'employee', 'hub_table': 'component_company', 
+         'coverage_pct': 46.0, 'is_valid_fk': True},
+        ...
+    ]
+}
+```
+
+## 15.3 The Rules
+
+### RULE 1: Relationships Come From The Graph
+
+```python
+# ❌ WRONG - O(n²) pairwise matching
+for table_a in tables:
+    for table_b in tables:
+        if table_a.company_code == table_b.company_code:
+            relationships.append(...)
+
+# ❌ WRONG - Column name matching without value validation
+if col_a.name == col_b.name:
+    relationships.append(...)
+
+# ✅ CORRECT - Read from context graph
+graph = handler.get_context_graph(project)
+relationships = graph['relationships']  # Pre-computed hub→spoke
+```
+
+### RULE 2: Query Scoping Uses The Graph
+
+```python
+# ❌ WRONG - Query all tables for "W2"
+tables = get_all_tables()
+for table in tables:
+    if 'tax' in table.lower():
+        process(table)
+
+# ✅ CORRECT - Use context graph to scope
+graph = handler.get_context_graph(project)
+
+# Find companies where country_code = 'US'
+us_companies = query("SELECT company_code FROM companies WHERE country_code = 'US'")
+
+# Get all spokes that have those company codes
+relevant_spokes = [r for r in graph['relationships'] 
+                   if r['semantic_type'] == 'company_code']
+
+# Query only those tables, filtered to US companies
+for spoke in relevant_spokes:
+    query(f"SELECT * FROM {spoke['spoke_table']} WHERE company_code IN {us_companies}")
+```
+
+### RULE 3: Gap Detection Uses Coverage
+
+```python
+# ❌ WRONG - Count everything
+configured = count("SELECT COUNT(*) FROM company")
+used = count("SELECT COUNT(DISTINCT company_code) FROM employee")
+
+# ✅ CORRECT - Read from graph
+graph = handler.get_context_graph(project)
+hub = next(h for h in graph['hubs'] if h['semantic_type'] == 'company_code')
+spoke = next(r for r in graph['relationships'] 
+             if r['semantic_type'] == 'company_code' and r['spoke_table'] == 'employee')
+
+# Gap analysis is pre-computed
+print(f"Configured: {hub['cardinality']}")  # 13
+print(f"In use: {spoke['spoke_cardinality']}")  # 6
+print(f"Coverage: {spoke['coverage_pct']}%")  # 46%
+```
+
+### RULE 4: Semantic Type Inference Uses Filename
+
+```python
+# ❌ WRONG - Ignore filename context
+# Column "code" in "Earnings Codes.pdf" → NONE (no idea what it is)
+
+# ✅ CORRECT - Use filename to infer semantic type
+# Column "code" in "Earnings Codes.pdf" → earnings_code (confident)
+# Column "code" in "Deduction Codes.xlsx" → deduction_code (confident)
+# Column "code" in "Tax Codes.csv" → tax_code (confident)
+```
+
+The LLM prompt for semantic type inference MUST include the filename.
+
+### RULE 5: The Graph is Computed Once
+
+```python
+# ❌ WRONG - Compute relationships at query time
+def answer_question(question):
+    relationships = analyze_project_relationships(project)  # SLOW
+    ...
+
+# ✅ CORRECT - Graph computed at upload, read at query
+def on_upload_complete(project, handler):
+    handler.compute_context_graph(project)  # Computed ONCE
+
+def answer_question(question, handler):
+    graph = handler.get_context_graph(project)  # Fast read
+    ...
+```
+
+## 15.4 Integration Points
+
+The Context Graph must be used by:
+
+| Component | How It Uses The Graph |
+|-----------|----------------------|
+| `relationship_detector.py` | Returns hub→spoke relationships from graph |
+| `table_selector.py` | Uses graph for join path discovery |
+| `intelligence/engine.py` | Scopes analysis to active values only |
+| `sql_generator.py` | Uses graph for automatic joins |
+| `gap_detection` | Reads coverage_pct directly from graph |
+| `data_model.py` | Shows hub/spoke hierarchy in UI |
+| `playbook_framework.py` | Scopes playbook queries to relevant data |
+| `consultative_synthesis.py` | Uses graph for "so what" insights |
+
+## 15.5 Example: "Show me W2 issues"
+
+**Without Context Graph (old way):**
+1. Parse question → detect "W2" keyword
+2. Search all tables for anything tax-related
+3. Return 50 tables, overwhelm user
+4. User gives up
+
+**With Context Graph (correct way):**
+1. Parse question → detect "W2" = US federal tax
+2. Query graph: What companies have country_code = 'US'? → 2 companies
+3. Query graph: What spokes reference those companies? → Employee, Payroll, Tax
+4. Query ONLY those tables, filtered to the 2 US companies
+5. Return focused, actionable answer: "2 US companies, 847 employees, 3 W2 issues found"
+
+**This is the consultant experience. This is what we're selling.**
+
+## 15.6 Files Implementing The Context Graph
+
+| File | Status | Role |
+|------|--------|------|
+| `utils/structured_data_handler.py` | ✅ Done | Schema + compute_context_graph() + get_context_graph() |
+| `backend/utils/relationship_detector.py` | ✅ Done | v6.0 - reads from context graph |
+| `backend/utils/intelligence/table_selector.py` | 🔄 TODO | Needs to use graph for join paths |
+| `backend/utils/intelligence/engine.py` | 🔄 TODO | Needs to scope to active values |
+| `backend/utils/intelligence/sql_generator.py` | 🔄 TODO | Needs to use graph for joins |
+| `backend/routers/data_model.py` | 🔄 TODO | Needs to show hub/spoke in UI |
+| `backend/utils/consultative_synthesis.py` | 🔄 TODO | Needs graph for insights |
+| `backend/utils/playbook_framework.py` | 🔄 TODO | Needs to scope queries |
+
+## 15.7 Why This Matters
+
+**Before:** 2,451 relationships for 64 tables. O(n²) matching. No understanding.
+
+**After:** ~50 relationships. Hub/spoke graph. Pre-computed context.
+
+**The difference:**
+- Query time: seconds → milliseconds
+- Answer quality: data dump → consultant insight
+- User experience: confused → informed
+- Exit readiness: not even close → viable
+
+**This is not optimization. This is the product working correctly for the first time.**
+
+---
+
+## 15.8 Implementation Checklist
+
+- [x] Schema: Add hub/spoke columns to `_column_mappings`
+- [x] Compute: `handler.compute_context_graph(project)`
+- [x] Query: `handler.get_context_graph(project)`
+- [x] Migrate: Add columns to existing databases
+- [x] relationship_detector.py v6: Use graph instead of pairwise
+- [ ] Filename inference: Add filename to semantic type LLM prompt
+- [ ] table_selector.py: Use graph for join paths
+- [ ] intelligence/engine.py: Scope to active values
+- [ ] sql_generator.py: Use graph for automatic joins
+- [ ] data_model.py: Show hub/spoke hierarchy in UI
+- [ ] playbook_framework.py: Scope queries via graph
+- [ ] consultative_synthesis.py: Use graph for insights
+- [ ] End-to-end testing: "W2 issues" returns scoped answer
+
+**Timeline:** 18-24 hours focused work
+
+**This is the law for understanding data relationships. Follow it.**
