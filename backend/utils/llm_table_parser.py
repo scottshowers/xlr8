@@ -303,9 +303,9 @@ def call_llm_cascade(prompt: str, max_tokens: int = 8192) -> Tuple[Optional[str]
     """
     Call LLM for TABLE/JSON extraction.
     
-    Uses qwen2.5-coder:14b ONLY - it's the best model for structured JSON output.
-    No fallback cascade - if qwen fails, other models won't do better.
+    Uses qwen2.5-coder:14b - best model for structured JSON output.
     
+    NOTE: Groq skipped for table parsing - returns incomplete results
     NOTE: Does NOT use deepseek-r1 (reasoning model, outputs <think> tags)
     NOTE: Does NOT use mistral:7b (poor JSON output quality)
     NOTE: Does NOT fall back to Claude API (too expensive for bulk)
@@ -313,14 +313,9 @@ def call_llm_cascade(prompt: str, max_tokens: int = 8192) -> Tuple[Optional[str]
     Returns:
         Tuple of (response_text, llm_used)
     """
-    # Try Groq first if available (fast, cheap)
-    logger.info("[LLM-PARSER] Trying Groq...")
-    response = call_groq(prompt, max_tokens)
-    if response:
-        return response, "groq"
-    
-    # Use qwen2.5-coder:14b - best model for structured JSON output
-    logger.info("[LLM-PARSER] Trying qwen2.5-coder:14b...")
+    # Use qwen2.5-coder:14b directly - best for structured JSON output
+    # Groq skipped: returns incomplete table extractions
+    logger.info("[LLM-PARSER] Using qwen2.5-coder:14b for table extraction...")
     response = call_ollama(prompt, 'qwen2.5-coder:14b', max_tokens)
     if response:
         return response, "ollama-qwen2.5-coder:14b"
