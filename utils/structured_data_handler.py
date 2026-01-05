@@ -487,6 +487,7 @@ class StructuredDataHandler:
             """)
             
             # Column semantic mappings (Claude-inferred + human overrides)
+            # EXTENDED: Now includes context graph (hub/spoke) information
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS _column_mappings (
                     id INTEGER,
@@ -498,6 +499,18 @@ class StructuredDataHandler:
                     confidence FLOAT DEFAULT 0.5,
                     is_override BOOLEAN DEFAULT FALSE,
                     needs_review BOOLEAN DEFAULT FALSE,
+                    
+                    -- CONTEXT GRAPH: Hub/Spoke relationships
+                    -- For each semantic_type, ONE table is the hub (max cardinality)
+                    -- All others are spokes that reference the hub
+                    is_hub BOOLEAN DEFAULT FALSE,        -- Is this THE hub for its semantic_type?
+                    hub_table VARCHAR,                   -- If spoke, which table is the hub?
+                    hub_column VARCHAR,                  -- If spoke, which column in hub?
+                    hub_cardinality INTEGER,             -- How many values in the hub?
+                    spoke_cardinality INTEGER,           -- How many values in this spoke?
+                    coverage_pct FLOAT,                  -- spoke_cardinality / hub_cardinality
+                    is_subset BOOLEAN,                   -- Are ALL spoke values in hub? (FK integrity)
+                    
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -589,6 +602,26 @@ class StructuredDataHandler:
                 self.conn.commit()
             except Exception as mig_e:
                 logger.warning(f"[MIGRATION] Column check/add for _column_profiles: {mig_e}")
+            
+            # MIGRATION: Add context graph columns to _column_mappings
+            try:
+                mapping_cols = self.conn.execute("PRAGMA table_info(_column_mappings)").fetchall()
+                mapping_col_names = [c[1] for c in mapping_cols]
+                
+                if 'is_hub' not in mapping_col_names:
+                    logger.warning("[MIGRATION] Adding context graph columns to _column_mappings")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN is_hub BOOLEAN DEFAULT FALSE")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN hub_table VARCHAR")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN hub_column VARCHAR")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN hub_cardinality INTEGER")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN spoke_cardinality INTEGER")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN coverage_pct FLOAT")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN is_subset BOOLEAN")
+                    logger.warning("[MIGRATION] Context graph columns added to _column_mappings")
+                
+                self.conn.commit()
+            except Exception as mig_e:
+                logger.warning(f"[MIGRATION] Column check/add for _column_mappings: {mig_e}")
             
             # MIGRATION: Add display_name, truth_type, column_count, domain to _schema_metadata
             try:
@@ -1570,13 +1603,22 @@ class StructuredDataHandler:
             semantic_types_text = get_type_names_for_prompt()
             
             # Build prompt for LLM - Uses semantic_vocabulary.py
+            # CONTEXT GRAPH: Include filename so "code" in "Earnings Codes.pdf" becomes "earnings_code"
             prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+SOURCE FILE: {file_name}
 
 COLUMN NAMES:
 {columns}
 
 SAMPLE DATA:
 {sample_str}
+
+IMPORTANT: Use the filename as context. For example:
+- A "code" column in "Earnings Codes.pdf" should be "earnings_code"
+- A "code" column in "Deduction Codes.xlsx" should be "deduction_code"  
+- A "code" column in "Tax Codes.csv" should be "tax_code"
+- A "code" column in "Job Codes" should be "job_code"
 
 For each column, identify if it matches one of these semantic types:
 {semantic_types_text}
@@ -1829,6 +1871,241 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             logger.warning(f"[MAPPINGS] Failed to get review list: {e}")
             return []
     
+    def compute_context_graph(self, project: str) -> Dict:
+        """
+        Compute hub/spoke relationships for the context graph.
+        
+        THE CONTEXT GRAPH is THE core intelligence of the platform.
+        
+        For each semantic_type (company_code, job_code, etc.):
+        1. Find the HUB = table with MAX cardinality (Component Company has 13 company_codes)
+        2. All other tables with same semantic_type are SPOKES
+        3. Calculate coverage: what % of hub values does each spoke have?
+        4. Check subset: are ALL spoke values in hub? (FK integrity)
+        
+        This replaces O(n²) pairwise relationship matching with O(n) graph lookups.
+        
+        Returns:
+            Dict with stats about the computed graph
+        """
+        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project}")
+        
+        try:
+            # Step 1: Get all columns with semantic types, joined with their cardinality
+            # Join _column_mappings with _column_profiles to get distinct_count and distinct_values
+            columns = self.conn.execute("""
+                SELECT 
+                    m.table_name,
+                    m.original_column,
+                    m.semantic_type,
+                    m.confidence,
+                    p.distinct_count,
+                    p.distinct_values
+                FROM _column_mappings m
+                LEFT JOIN _column_profiles p 
+                    ON m.project = p.project 
+                    AND m.table_name = p.table_name 
+                    AND m.original_column = p.column_name
+                WHERE m.project = ?
+                  AND m.semantic_type IS NOT NULL
+                  AND m.semantic_type != 'NONE'
+                  AND m.confidence >= 0.7
+                ORDER BY m.semantic_type, p.distinct_count DESC
+            """, [project]).fetchall()
+            
+            if not columns:
+                logger.warning(f"[CONTEXT-GRAPH] No semantic mappings found for {project}")
+                return {'hubs': 0, 'spokes': 0, 'semantic_types': 0}
+            
+            # Step 2: Group by semantic_type and find hubs
+            from collections import defaultdict
+            by_type = defaultdict(list)
+            
+            for row in columns:
+                table_name, column_name, sem_type, confidence, distinct_count, distinct_values = row
+                by_type[sem_type].append({
+                    'table': table_name,
+                    'column': column_name,
+                    'confidence': confidence,
+                    'cardinality': distinct_count or 0,
+                    'values': self._parse_distinct_values(distinct_values)
+                })
+            
+            hub_count = 0
+            spoke_count = 0
+            
+            # Step 3: For each semantic type, identify hub and update all columns
+            for sem_type, cols in by_type.items():
+                if len(cols) < 2:
+                    # Only one table has this type - no relationships
+                    continue
+                
+                # Sort by cardinality descending - first is the hub
+                cols.sort(key=lambda x: x['cardinality'], reverse=True)
+                hub = cols[0]
+                spokes = cols[1:]
+                
+                hub_values = hub['values']
+                hub_cardinality = hub['cardinality']
+                
+                # Mark the hub
+                self.conn.execute("""
+                    UPDATE _column_mappings 
+                    SET is_hub = TRUE,
+                        hub_table = NULL,
+                        hub_column = NULL,
+                        hub_cardinality = ?,
+                        spoke_cardinality = NULL,
+                        coverage_pct = 100.0,
+                        is_subset = TRUE,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? 
+                      AND table_name = ? 
+                      AND original_column = ?
+                      AND semantic_type = ?
+                """, [hub_cardinality, project, hub['table'], hub['column'], sem_type])
+                hub_count += 1
+                
+                # Mark all spokes
+                for spoke in spokes:
+                    spoke_values = spoke['values']
+                    spoke_cardinality = spoke['cardinality']
+                    
+                    # Calculate coverage and subset
+                    if hub_values and spoke_values:
+                        # How many spoke values exist in hub?
+                        overlap = len(spoke_values & hub_values)
+                        coverage_pct = (overlap / hub_cardinality * 100) if hub_cardinality > 0 else 0
+                        # Are ALL spoke values in hub? (FK integrity check)
+                        is_subset = spoke_values.issubset(hub_values)
+                    else:
+                        coverage_pct = 0
+                        is_subset = False
+                    
+                    self.conn.execute("""
+                        UPDATE _column_mappings 
+                        SET is_hub = FALSE,
+                            hub_table = ?,
+                            hub_column = ?,
+                            hub_cardinality = ?,
+                            spoke_cardinality = ?,
+                            coverage_pct = ?,
+                            is_subset = ?,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE project = ? 
+                          AND table_name = ? 
+                          AND original_column = ?
+                          AND semantic_type = ?
+                    """, [
+                        hub['table'], hub['column'], hub_cardinality,
+                        spoke_cardinality, round(coverage_pct, 2), is_subset,
+                        project, spoke['table'], spoke['column'], sem_type
+                    ])
+                    spoke_count += 1
+                
+                logger.info(f"[CONTEXT-GRAPH] {sem_type}: hub={hub['table']}.{hub['column']} ({hub_cardinality} values), {len(spokes)} spokes")
+            
+            self.conn.execute("CHECKPOINT")
+            
+            result = {
+                'hubs': hub_count,
+                'spokes': spoke_count,
+                'semantic_types': len([t for t in by_type if len(by_type[t]) >= 2]),
+                'total_mappings': len(columns)
+            }
+            
+            logger.warning(f"[CONTEXT-GRAPH] Complete: {hub_count} hubs, {spoke_count} spokes across {result['semantic_types']} semantic types")
+            return result
+            
+        except Exception as e:
+            logger.error(f"[CONTEXT-GRAPH] Failed to compute: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {'hubs': 0, 'spokes': 0, 'semantic_types': 0, 'error': str(e)}
+    
+    def _parse_distinct_values(self, values_json) -> set:
+        """Parse distinct_values JSON into a set for comparison."""
+        if not values_json:
+            return set()
+        
+        try:
+            import json
+            values = json.loads(values_json) if isinstance(values_json, str) else values_json
+            if isinstance(values, list):
+                return {str(v).lower().strip() for v in values if v is not None}
+            return set()
+        except Exception:
+            return set()
+    
+    def get_context_graph(self, project: str) -> Dict:
+        """
+        Get the computed context graph for query-time use.
+        
+        Returns:
+            Dict with:
+            - hubs: List of hub columns (one per semantic_type)
+            - relationships: List of hub→spoke edges with coverage
+        """
+        try:
+            # Get all hubs
+            hubs = self.conn.execute("""
+                SELECT semantic_type, table_name, original_column, hub_cardinality
+                FROM _column_mappings
+                WHERE project = ? AND is_hub = TRUE
+            """, [project]).fetchall()
+            
+            # Get all spokes with their hub references
+            spokes = self.conn.execute("""
+                SELECT 
+                    semantic_type, 
+                    table_name, 
+                    original_column,
+                    hub_table,
+                    hub_column,
+                    hub_cardinality,
+                    spoke_cardinality,
+                    coverage_pct,
+                    is_subset
+                FROM _column_mappings
+                WHERE project = ? 
+                  AND is_hub = FALSE 
+                  AND hub_table IS NOT NULL
+            """, [project]).fetchall()
+            
+            return {
+                'hubs': [
+                    {
+                        'semantic_type': h[0],
+                        'table': h[1],
+                        'column': h[2],
+                        'cardinality': h[3]
+                    }
+                    for h in hubs
+                ],
+                'relationships': [
+                    {
+                        'semantic_type': s[0],
+                        'spoke_table': s[1],
+                        'spoke_column': s[2],
+                        'hub_table': s[3],
+                        'hub_column': s[4],
+                        'hub_cardinality': s[5],
+                        'spoke_cardinality': s[6],
+                        'coverage_pct': s[7],
+                        'is_valid_fk': s[8]  # is_subset = valid foreign key
+                    }
+                    for s in spokes
+                ],
+                'stats': {
+                    'hub_count': len(hubs),
+                    'relationship_count': len(spokes)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"[CONTEXT-GRAPH] Failed to get graph: {e}")
+            return {'hubs': [], 'relationships': [], 'stats': {}}
+
     def create_mapping_job(self, job_id: str, project: str, file_name: str, total_tables: int):
         """Create a mapping job record"""
         try:
@@ -1997,13 +2274,22 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             semantic_types_text = get_type_names_for_prompt()
             
             # Build prompt for LLM - Uses semantic_vocabulary.py
+            # CONTEXT GRAPH: Include filename so "code" in "Earnings Codes.pdf" becomes "earnings_code"
             prompt = f"""Analyze these column names and sample data to identify semantic types.
+
+SOURCE FILE: {file_name}
 
 COLUMN NAMES:
 {columns}
 
 SAMPLE DATA:
 {sample_str}
+
+IMPORTANT: Use the filename as context. For example:
+- A "code" column in "Earnings Codes.pdf" should be "earnings_code"
+- A "code" column in "Deduction Codes.xlsx" should be "deduction_code"  
+- A "code" column in "Tax Codes.csv" should be "tax_code"
+- A "code" column in "Job Codes" should be "job_code"
 
 For each column, identify if it matches one of these semantic types:
 {semantic_types_text}
