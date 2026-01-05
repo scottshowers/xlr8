@@ -295,22 +295,18 @@ def _run_detection(
         
         # Collect all columns
         all_columns = list(columns) if columns else []
-        all_filenames = {filename}
         all_sheet_names = list(sheet_names) if sheet_names else []
         
         # Get additional columns from DuckDB if handler available
         if handler and hasattr(handler, 'conn') and handler.conn:
             try:
                 tables = handler.conn.execute(f"""
-                    SELECT table_name, file_name
+                    SELECT table_name
                     FROM _schema_metadata
                     WHERE project = '{project}'
                 """).fetchall()
                 
-                for table_name, file_name in tables:
-                    if file_name:
-                        all_filenames.add(file_name)
-                    
+                for (table_name,) in tables:
                     try:
                         cols = handler.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
                         for col in cols:
@@ -327,8 +323,7 @@ def _run_detection(
         detection_result = service.detect(
             filename=filename,
             columns=all_columns,
-            sheet_names=all_sheet_names,
-            all_filenames=list(all_filenames)
+            sheet_names=all_sheet_names
         )
         
         return detection_result.to_dict() if detection_result else None
