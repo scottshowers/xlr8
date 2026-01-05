@@ -445,8 +445,10 @@ def parse_pages_with_llm(
     if not pages_text:
         return {'rows': [], 'llm_used': 'none', 'pii_redacted': 0, 'success': False}
     
-    # For small documents, combine and send once
-    if len(pages_text) <= 50:
+    CHUNK_SIZE = 10  # Pages per chunk - keeps LLM context manageable
+    
+    # For small documents (10 pages or less), combine and send once
+    if len(pages_text) <= CHUNK_SIZE:
         combined_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         return parse_table_with_llm(
             text=combined_text,
@@ -455,10 +457,8 @@ def parse_pages_with_llm(
             redact_pii=redact_pii
         )
     
-    # For large documents, process in chunks (same pattern as RegisterExtractor parallel processing)
-    logger.warning(f"[LLM-PARSER] Large document ({len(pages_text)} pages) - processing in chunks")
-    
-    CHUNK_SIZE = 10  # Pages per chunk
+    # For larger documents, process in chunks to avoid overwhelming LLM
+    logger.warning(f"[LLM-PARSER] Document ({len(pages_text)} pages) - processing in {CHUNK_SIZE}-page chunks")
     all_rows = []
     pii_total = 0
     llm_used = 'none'
