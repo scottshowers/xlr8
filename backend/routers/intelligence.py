@@ -69,9 +69,9 @@ def _get_intelligence_service(project: str):
     """Get or create intelligence service for a project."""
     try:
         from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
-        from utils.structured_data_handler import get_structured_handler
+        from utils.structured_data_handler import get_read_handler
         
-        handler = get_structured_handler()
+        handler = get_read_handler()
         service = get_project_intelligence(project, handler)
         return service
         
@@ -251,9 +251,9 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
     """
     try:
         from project_intelligence import ProjectIntelligenceService, AnalysisTier
-        from utils.structured_data_handler import get_structured_handler
+        from utils.structured_data_handler import get_read_handler
         
-        handler = get_structured_handler()
+        handler = get_read_handler()
         service = ProjectIntelligenceService(project, handler)
         
         # Map tier names to enum
