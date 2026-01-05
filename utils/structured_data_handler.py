@@ -4628,14 +4628,17 @@ def get_structured_handler() -> StructuredDataHandler:
 
 class ReadOnlyDuckDBHandler:
     """
-    Lightweight read-only handler for API endpoints.
+    Lightweight handler for API endpoints that only read data.
     
-    Creates a new read-only connection each time - safe for concurrent access.
-    Read-only connections don't conflict with each other or with the write handler.
+    Creates a new connection each time - safe for concurrent access.
+    NOTE: We don't use read_only=True because DuckDB doesn't allow
+    mixing read-only and read-write connections to the same file.
+    DuckDB handles concurrent reads safely via internal locking.
     """
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self.conn = duckdb.connect(db_path, read_only=True)
+        # Don't use read_only=True - it conflicts with write connections
+        self.conn = duckdb.connect(db_path)
     
     def close(self):
         if self.conn:
