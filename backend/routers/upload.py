@@ -890,6 +890,23 @@ def process_file_background(
                 )
                 
                 # =====================================================
+                # TRUTH_TYPE UPDATE - Write classification to _schema_metadata
+                # This enables Dashboard to show proper classification status
+                # =====================================================
+                if truth_type and result.get('tables_created'):
+                    try:
+                        for table_name in result.get('tables_created', []):
+                            handler.conn.execute("""
+                                UPDATE _schema_metadata 
+                                SET truth_type = ?
+                                WHERE table_name = ? AND is_current = TRUE
+                            """, [truth_type, table_name])
+                        handler.conn.execute("CHECKPOINT")
+                        logger.info(f"[BACKGROUND] Updated truth_type={truth_type} for {len(result.get('tables_created', []))} tables")
+                    except Exception as tt_err:
+                        logger.warning(f"[BACKGROUND] Failed to update truth_type: {tt_err}")
+                
+                # =====================================================
                 # COLUMN PROFILING - Populate _column_profiles
                 # This enables Classification Panel to show columns
                 # =====================================================
@@ -1183,6 +1200,20 @@ def process_file_background(
                                     logger.info(f"[BACKGROUND] Profiled PDF columns for: {table_name}")
                                 except Exception as prof_err:
                                     logger.warning(f"[BACKGROUND] PDF column profiling failed for {table_name}: {prof_err}")
+                            
+                            # Update truth_type for PDF tables
+                            if truth_type:
+                                try:
+                                    for table_name in pdf_tables:
+                                        handler.conn.execute("""
+                                            UPDATE _schema_metadata 
+                                            SET truth_type = ?
+                                            WHERE table_name = ? AND is_current = TRUE
+                                        """, [truth_type, table_name])
+                                    handler.conn.execute("CHECKPOINT")
+                                    logger.info(f"[BACKGROUND] Updated PDF truth_type={truth_type} for {len(pdf_tables)} tables")
+                                except Exception as tt_err:
+                                    logger.warning(f"[BACKGROUND] Failed to update PDF truth_type: {tt_err}")
                     except Exception as prof_e:
                         logger.warning(f"[BACKGROUND] PDF profiling error: {prof_e}")
                 
