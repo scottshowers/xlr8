@@ -470,11 +470,11 @@ class IntelligenceHook:
                 from utils.project_intelligence import get_project_intelligence
             
             try:
-                from utils.structured_data_handler import get_read_handler
+                from utils.structured_data_handler import get_structured_handler
             except ImportError:
-                from backend.utils.structured_data_handler import get_read_handler
+                from backend.utils.structured_data_handler import get_structured_handler
             
-            handler = get_read_handler()
+            handler = get_structured_handler()
             service = get_project_intelligence(project_id, handler)
             
             if not service or not service.analyzed_at:
@@ -1478,11 +1478,11 @@ class FindingsExtractor:
             
             # Get structured handler for config gatherer
             try:
-                from utils.structured_data_handler import get_read_handler
+                from utils.structured_data_handler import get_structured_handler
             except ImportError:
-                from backend.utils.structured_data_handler import get_read_handler
+                from backend.utils.structured_data_handler import get_structured_handler
             
-            structured_handler = get_read_handler()
+            structured_handler = get_structured_handler()
             
             # Get schema for config gatherer
             schema = {'tables': []}
