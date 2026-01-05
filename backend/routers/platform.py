@@ -475,14 +475,14 @@ async def get_platform_status(
                 try:
                     if project_filter:
                         schema_results = handler.conn.execute("""
-                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                             FROM _schema_metadata 
                             WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
                             ORDER BY file_name, table_name
                         """, [project_filter]).fetchall()
                     else:
                         schema_results = handler.conn.execute("""
-                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                             FROM _schema_metadata 
                             WHERE is_current = TRUE
                             ORDER BY file_name, table_name
@@ -603,7 +603,8 @@ async def get_platform_status(
                         "table_name": row[2],
                         "display_name": row[3] or row[2],
                         "row_count": int(row[4] or 0),
-                        "column_count": int(row[5] or 0)
+                        "column_count": int(row[5] or 0),
+                        "columns": json.loads(row[7]) if row[7] else []
                     })
                     files_dict[fname]["tables"] += 1
                     files_dict[fname]["rows"] += int(row[4] or 0)
@@ -811,14 +812,14 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
         try:
             if project_filter:
                 schema_results = handler.conn.execute("""
-                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                     FROM _schema_metadata 
                     WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
                     ORDER BY file_name, table_name
                 """, [project_filter]).fetchall()
             else:
                 schema_results = handler.conn.execute("""
-                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at
+                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                     FROM _schema_metadata 
                     WHERE is_current = TRUE
                     ORDER BY file_name, table_name
@@ -908,7 +909,8 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                 "table_name": row[2],
                 "display_name": row[3] or row[2],
                 "row_count": int(row[4] or 0),
-                "column_count": int(row[5] or 0)
+                "column_count": int(row[5] or 0),
+                "columns": json.loads(row[7]) if row[7] else []
             })
             files_dict[fname]["tables"] += 1
             files_dict[fname]["rows"] += int(row[4] or 0)
