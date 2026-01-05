@@ -380,7 +380,7 @@ def parse_table_with_llm(
     # Step 2: Build prompt (generic, domain-agnostic)
     columns_str = ", ".join(columns)
     
-    prompt = f"""Extract tabular data from this text into a JSON array.
+    prompt = f"""Extract ALL tabular data rows from this text into a JSON array.
 
 TABLE STRUCTURE:
 Columns: {columns_str}
@@ -390,12 +390,12 @@ TEXT TO PARSE:
 {text}
 
 INSTRUCTIONS:
-1. Extract ONLY actual data rows from the table
-2. Skip headers, footers, letterhead, company info, contact details, page numbers
-3. Each row must be a JSON object with the exact column names provided above
-4. Use empty string "" for empty cells
-5. Skip anything that doesn't look like table data
-6. Preserve exact values - don't modify or summarize
+1. Extract EVERY data row - do not skip or summarize
+2. Skip only: headers, footers, letterhead, company info, page numbers
+3. Each row = one JSON object with the exact column names above
+4. Use "" for empty cells
+5. Preserve exact values - don't modify
+6. IMPORTANT: Extract ALL rows, not just the first few
 
 Return ONLY a valid JSON array. No markdown, no explanation.
 Format: [{{"column1": "value1", "column2": "value2"}}]"""
@@ -407,6 +407,9 @@ Format: [{{"column1": "value1", "column2": "value2"}}]"""
     if not response:
         logger.error("[LLM-PARSER] All LLMs failed")
         return result
+    
+    # Log response size to detect truncation
+    logger.warning(f"[LLM-PARSER] {llm_used} response: {len(response)} chars")
     
     # Step 4: Parse JSON response
     rows = parse_json_response(response)
@@ -445,9 +448,9 @@ def parse_pages_with_llm(
     if not pages_text:
         return {'rows': [], 'llm_used': 'none', 'pii_redacted': 0, 'success': False}
     
-    CHUNK_SIZE = 10  # Pages per chunk - keeps LLM context manageable
+    CHUNK_SIZE = 5  # Pages per chunk - smaller chunks = better extraction accuracy
     
-    # For small documents (10 pages or less), combine and send once
+    # For small documents (5 pages or less), combine and send once
     if len(pages_text) <= CHUNK_SIZE:
         combined_text = "\n\n--- PAGE BREAK ---\n\n".join(pages_text)
         return parse_table_with_llm(
@@ -466,6 +469,9 @@ def parse_pages_with_llm(
     chunks = [pages_text[i:i + CHUNK_SIZE] for i in range(0, len(pages_text), CHUNK_SIZE)]
     
     for chunk_idx, chunk in enumerate(chunks):
+        start_page = chunk_idx * CHUNK_SIZE + 1
+        end_page = min((chunk_idx + 1) * CHUNK_SIZE, len(pages_text))
+        
         combined_text = "\n\n--- PAGE BREAK ---\n\n".join(chunk)
         
         chunk_result = parse_table_with_llm(
@@ -480,7 +486,7 @@ def parse_pages_with_llm(
             pii_total += chunk_result.get('pii_redacted', 0)
             llm_used = chunk_result.get('llm_used', llm_used)
         
-        logger.info(f"[LLM-PARSER] Processed chunk {chunk_idx + 1}/{len(chunks)}: {len(chunk_result.get('rows', []))} rows")
+        logger.warning(f"[LLM-PARSER] Chunk {chunk_idx + 1}/{len(chunks)} (pages {start_page}-{end_page}): {len(chunk_result.get('rows', []))} rows")
     
     return {
         'rows': all_rows,
