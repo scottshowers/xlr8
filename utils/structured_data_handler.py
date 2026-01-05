@@ -3185,7 +3185,12 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     FROM {table_name}
                 """).fetchone()
             
-            profile['total_count'] = stats[0]
+            # Guard against None result
+            if stats is None:
+                logger.warning(f"[PROFILING-SQL] No stats returned for {table_name}.{col}")
+                return profile
+            
+            profile['total_count'] = stats[0] if stats[0] is not None else 0
             profile['null_count'] = stats[1] or 0
             profile['distinct_count'] = stats[2] or 0
             
@@ -3705,48 +3710,49 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
     def _store_column_profile(self, profile: Dict):
         """Store or update a column profile in the database."""
         try:
-            # Delete existing profile for this column
-            self.conn.execute("""
-                DELETE FROM _column_profiles 
-                WHERE project = ? AND table_name = ? AND column_name = ?
-            """, [profile['project'], profile['table_name'], profile['column_name']])
-            
-            # Insert new profile
-            self.conn.execute("""
-                INSERT INTO _column_profiles (
-                    id, project, table_name, column_name,
-                    inferred_type, original_dtype,
-                    total_count, null_count, distinct_count,
-                    min_value, max_value, mean_value,
-                    distinct_values, value_distribution,
-                    min_date, max_date,
-                    sample_values, is_likely_key, is_categorical,
-                    filter_category, filter_priority
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, [
-                hash(f"{profile['project']}_{profile['table_name']}_{profile['column_name']}") % 2147483647,
-                profile['project'],
-                profile['table_name'],
-                profile['column_name'],
-                profile.get('inferred_type'),
-                profile.get('original_dtype'),
-                profile.get('total_count'),
-                profile.get('null_count'),
-                profile.get('distinct_count'),
-                profile.get('min_value'),
-                profile.get('max_value'),
-                profile.get('mean_value'),
-                json.dumps(profile.get('distinct_values')) if profile.get('distinct_values') else None,
-                json.dumps(profile.get('value_distribution')) if profile.get('value_distribution') else None,
-                profile.get('min_date'),
-                profile.get('max_date'),
-                json.dumps(profile.get('sample_values')) if profile.get('sample_values') else None,
-                profile.get('is_likely_key', False),
-                profile.get('is_categorical', False),
-                profile.get('filter_category'),
-                profile.get('filter_priority', 0)
-            ])
-            self.conn.commit()
+            with self._db_lock:
+                # Delete existing profile for this column
+                self.conn.execute("""
+                    DELETE FROM _column_profiles 
+                    WHERE project = ? AND table_name = ? AND column_name = ?
+                """, [profile['project'], profile['table_name'], profile['column_name']])
+                
+                # Insert new profile
+                self.conn.execute("""
+                    INSERT INTO _column_profiles (
+                        id, project, table_name, column_name,
+                        inferred_type, original_dtype,
+                        total_count, null_count, distinct_count,
+                        min_value, max_value, mean_value,
+                        distinct_values, value_distribution,
+                        min_date, max_date,
+                        sample_values, is_likely_key, is_categorical,
+                        filter_category, filter_priority
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    hash(f"{profile['project']}_{profile['table_name']}_{profile['column_name']}") % 2147483647,
+                    profile['project'],
+                    profile['table_name'],
+                    profile['column_name'],
+                    profile.get('inferred_type'),
+                    profile.get('original_dtype'),
+                    profile.get('total_count'),
+                    profile.get('null_count'),
+                    profile.get('distinct_count'),
+                    profile.get('min_value'),
+                    profile.get('max_value'),
+                    profile.get('mean_value'),
+                    json.dumps(profile.get('distinct_values')) if profile.get('distinct_values') else None,
+                    json.dumps(profile.get('value_distribution')) if profile.get('value_distribution') else None,
+                    profile.get('min_date'),
+                    profile.get('max_date'),
+                    json.dumps(profile.get('sample_values')) if profile.get('sample_values') else None,
+                    profile.get('is_likely_key', False),
+                    profile.get('is_categorical', False),
+                    profile.get('filter_category'),
+                    profile.get('filter_priority', 0)
+                ])
+                self.conn.commit()
             
         except Exception as e:
             logger.warning(f"[PROFILING] Failed to store profile for {profile.get('column_name')}: {e}")
@@ -3776,8 +3782,9 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 query += " AND column_name = ?"
                 params.append(column_name)
             
-            result = self.conn.execute(query, params).fetchall()
-            columns = [desc[0] for desc in self.conn.execute(query, params).description]
+            with self._db_lock:
+                result = self.conn.execute(query, params).fetchall()
+                columns = [desc[0] for desc in self.conn.execute(query, params).description]
             
             profiles = []
             for row in result:
