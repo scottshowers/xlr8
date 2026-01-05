@@ -43,8 +43,8 @@ def check_duckdb_health() -> Dict[str, Any]:
     start = time.time()
     
     try:
-        from utils.structured_data_handler import get_read_handler
-        handler = get_read_handler()
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
         
         # Basic connectivity
         conn_start = time.time()
@@ -486,8 +486,8 @@ def check_data_integrity() -> Dict[str, Any]:
         duckdb_tables = set()
         duckdb_table_rows = {}
         try:
-            from utils.structured_data_handler import get_read_handler
-            handler = get_read_handler()
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
             
             tables = handler.conn.execute("""
                 SELECT table_name FROM information_schema.tables 
@@ -1103,8 +1103,8 @@ async def get_projects_health():
         
         # 1. DuckDB - tables and rows per project
         try:
-            from utils.structured_data_handler import get_read_handler
-            handler = get_read_handler()
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
             
             # Get from schema_metadata
             meta = handler.conn.execute("""
@@ -1258,8 +1258,8 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
         
         # 1. DuckDB files
         try:
-            from utils.structured_data_handler import get_read_handler
-            handler = get_read_handler()
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
             
             query = """
                 SELECT project, file_name, table_name, row_count
