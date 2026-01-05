@@ -181,8 +181,8 @@ def get_semantic_types(project: str) -> Dict[Tuple[str, str], str]:
     semantic_types = {}
     
     try:
-        from utils.structured_data_handler import get_read_handler
-        handler = get_read_handler()
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
         
         if not handler or not hasattr(handler, 'conn'):
             logger.warning("[RELATIONSHIP-V4] No handler available for semantic types")
@@ -219,8 +219,8 @@ def get_column_values(project: str) -> Dict[Tuple[str, str], Set[str]]:
     column_values = {}
     
     try:
-        from utils.structured_data_handler import get_read_handler
-        handler = get_read_handler()
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
         
         if not handler or not hasattr(handler, 'conn'):
             return column_values
@@ -271,8 +271,8 @@ def build_column_index(project: str, semantic_types: Dict, column_values: Dict) 
     tables_columns = defaultdict(list)
     
     try:
-        from utils.structured_data_handler import get_read_handler
-        handler = get_read_handler()
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
         
         if not handler or not hasattr(handler, 'conn'):
             return dict(tables_columns)
