@@ -449,9 +449,13 @@ Look at this image of a PDF page containing a table.
 TASK 1 - COLUMN HEADERS:
 - Identify ALL column headers in the table
 - Focus on actual column headers, not page titles or letterhead
-- If headers span multiple lines, combine them into one name
+- CRITICAL: Each visually separate column is a SEPARATE header
+- If a header cell has text on multiple VERTICAL lines (stacked text), combine into one name
+- But horizontally ADJACENT cells are SEPARATE columns, even if close together
+- Look for visual column separators: vertical lines, spacing, or alignment changes
 - Use snake_case for column names (lowercase, underscores)
 - Include ALL columns in left-to-right order
+- Count the actual data columns below headers to verify column count
 
 TASK 2 - DATA PATTERNS (for validation):
 For each column, describe what VALID data looks like:
