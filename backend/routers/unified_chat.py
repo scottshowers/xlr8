@@ -115,7 +115,7 @@ from backend.utils.learning import get_learning_module
 LEARNING_AVAILABLE = True
 
 # Structured Data Handler - use read handler for queries (no write conflicts)
-from utils.structured_data_handler import get_read_handler
+from utils.structured_data_handler import get_structured_handler
 STRUCTURED_AVAILABLE = True
 
 # RAG Handler
@@ -1709,7 +1709,7 @@ async def unified_chat(request: UnifiedChatRequest):
         
         if STRUCTURED_AVAILABLE:
             try:
-                handler = get_read_handler()
+                handler = get_structured_handler()
                 if handler and handler.conn:
                     schema = await get_project_schema(project, request.scope, handler)
                     
@@ -2936,7 +2936,7 @@ async def export_to_excel(request: ExportRequest):
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
         
-        handler = get_read_handler()
+        handler = get_structured_handler()
         project = request.project
         
         # Get tables for project
@@ -3088,7 +3088,7 @@ async def get_project_data_summary(project: str):
         raise HTTPException(503, "Structured queries not available")
     
     try:
-        handler = get_read_handler()
+        handler = get_structured_handler()
         tables = handler.get_tables(project)
         
         return {
@@ -3115,7 +3115,7 @@ async def get_file_versions(project: str, file_name: str):
         raise HTTPException(503, "Not available")
     
     try:
-        handler = get_read_handler()
+        handler = get_structured_handler()
         return {"versions": handler.get_file_versions(project, file_name)}
     except Exception as e:
         raise HTTPException(500, str(e))
@@ -3135,7 +3135,7 @@ async def compare_versions(project: str, file_name: str, request: CompareRequest
         raise HTTPException(503, "Not available")
     
     try:
-        handler = get_read_handler()
+        handler = get_structured_handler()
         result = handler.compare_versions(
             project=project,
             file_name=file_name,
@@ -3177,7 +3177,7 @@ async def get_diagnostics(project: str = None):
     
     if STRUCTURED_AVAILABLE:
         try:
-            handler = get_read_handler()
+            handler = get_structured_handler()
             
             # Check for _column_profiles table
             try:
@@ -3236,7 +3236,7 @@ async def run_backfill(project: str = None):
         raise HTTPException(503, "Structured queries not available")
     
     try:
-        handler = get_read_handler()
+        handler = get_structured_handler()
         
         if not hasattr(handler, 'backfill_profiles'):
             return {"error": "backfill_profiles method not found - deploy latest structured_data_handler.py"}
