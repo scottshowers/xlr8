@@ -1652,13 +1652,36 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             logger.info(f"[MAPPINGS] Using {result.get('model_used', 'unknown')} for column inference")
             
+            # Get valid semantic types for validation
+            try:
+                from backend.utils.semantic_vocabulary import get_all_type_names
+            except ImportError:
+                try:
+                    from utils.semantic_vocabulary import get_all_type_names
+                except ImportError:
+                    get_all_type_names = None
+            
+            valid_types = get_all_type_names() if get_all_type_names else set()
+            
             # Store mappings
             for item in inferred:
                 col = item.get('column', '')
                 sem_type = item.get('semantic_type', 'NONE')
                 confidence = item.get('confidence', 0.5)
                 
+                # VALIDATE: Only accept types from the vocabulary
+                # Reject anything the LLM made up (e.g., "PAY & COMPENSATION", "Monetary amounts")
                 if sem_type and sem_type != 'NONE':
+                    sem_type_lower = sem_type.lower().strip()
+                    
+                    # Check if it's a valid type
+                    if valid_types and sem_type_lower not in valid_types:
+                        logger.debug(f"[MAPPINGS] Rejected invalid semantic type '{sem_type}' for {col}")
+                        continue  # Skip this mapping
+                    
+                    # Normalize to lowercase
+                    sem_type = sem_type_lower
+                    
                     needs_review = confidence < 0.85
                     
                     mapping = {
