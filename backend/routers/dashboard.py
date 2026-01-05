@@ -172,15 +172,41 @@ def get_data_by_truth_type() -> Dict:
         "regulatory": {"files": 0, "chunks": 0},
         "intent": {"files": 0, "chunks": 0},
         "compliance": {"files": 0, "chunks": 0},
-        "unclassified": {"files": 0}
+        "unclassified": {"files": 0, "tables": 0, "rows": 0}
     }
     
+    # Get TABLES from DuckDB _schema_metadata (ground truth for structured data)
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        if handler and handler.conn:
+            # Count tables and rows by truth_type from DuckDB
+            rows = handler.conn.execute("""
+                SELECT 
+                    COALESCE(LOWER(truth_type), 'unclassified') as truth,
+                    COUNT(*) as table_count,
+                    SUM(row_count) as total_rows,
+                    COUNT(DISTINCT file_name) as file_count
+                FROM _schema_metadata 
+                WHERE is_current = TRUE
+                GROUP BY COALESCE(LOWER(truth_type), 'unclassified')
+            """).fetchall()
+            
+            for truth, table_count, total_rows, file_count in rows:
+                if truth not in result:
+                    truth = "unclassified"
+                result[truth]["tables"] = result[truth].get("tables", 0) + (table_count or 0)
+                result[truth]["rows"] = result[truth].get("rows", 0) + (total_rows or 0)
+                result[truth]["files"] = result[truth].get("files", 0) + (file_count or 0)
+    except Exception as e:
+        logger.warning(f"[DASHBOARD] DuckDB truth type query failed: {e}")
+    
+    # Get CHUNKS from Supabase for unstructured documents
     try:
         supabase = _get_supabase()
         if supabase:
-            # Get from document_registry
             docs = supabase.table("document_registry").select(
-                "truth_type, storage_type, row_count, chunk_count"
+                "truth_type, storage_type, chunk_count"
             ).execute()
             
             for doc in (docs.data or []):
@@ -190,19 +216,13 @@ def get_data_by_truth_type() -> Dict:
                 if truth not in result:
                     truth = "unclassified"
                 
-                result[truth]["files"] = result[truth].get("files", 0) + 1
-                
-                # DuckDB storage = structured (reality, configuration)
-                if "duckdb" in storage.lower():
-                    result[truth]["tables"] = result[truth].get("tables", 0) + 1
-                    result[truth]["rows"] = result[truth].get("rows", 0) + (doc.get("row_count") or 0)
-                
-                # ChromaDB storage = semantic (reference, regulatory, intent)
-                if "chroma" in storage.lower():
+                # Only count ChromaDB chunks (structured data already counted from DuckDB)
+                if "chroma" in storage.lower() and "duckdb" not in storage.lower():
+                    result[truth]["files"] = result[truth].get("files", 0) + 1
                     result[truth]["chunks"] = result[truth].get("chunks", 0) + (doc.get("chunk_count") or 0)
     
     except Exception as e:
-        logger.warning(f"[DASHBOARD] Truth type query failed: {e}")
+        logger.warning(f"[DASHBOARD] Supabase truth type query failed: {e}")
     
     return result
 
