@@ -447,15 +447,22 @@ COLUMN_EXTRACTION_PROMPT = """You are analyzing a PDF table to extract column st
 Look at this image of a PDF page containing a table.
 
 TASK 1 - COLUMN HEADERS:
-- Identify ALL column headers in the table
-- Focus on actual column headers, not page titles or letterhead
-- CRITICAL: Each visually separate column is a SEPARATE header
-- If a header cell has text on multiple VERTICAL lines (stacked text), combine into one name
-- But horizontally ADJACENT cells are SEPARATE columns, even if close together
-- Look for visual column separators: vertical lines, spacing, or alignment changes
+- MOST IMPORTANT: Count the number of distinct DATA COLUMNS in the rows below the header
+- The number of headers MUST match the number of data columns
+- If data rows show 2 distinct values where header shows 1 merged text, split it into 2 columns
+- Example: Header "Code Description" over data like "REG Regular Pay" = TWO columns: "code" and "description"
+- Look at data alignment: values that align vertically are the same column
+- Each visually separate data column needs its own header name
+- If a header spans multiple data columns, create separate header names for each
 - Use snake_case for column names (lowercase, underscores)
 - Include ALL columns in left-to-right order
-- Count the actual data columns below headers to verify column count
+
+CRITICAL VALIDATION:
+- Count data columns in rows 1-3 of actual data
+- If you see "ABC" then "Some Description" as separate values in data, those are 2 columns
+- Headers that look merged but have separate data underneath = SEPARATE COLUMNS
+- STACKED VALUES: If a cell shows a code on line 1 and description on line 2 (like "1XQ" above "COVID Sick"), treat as TWO columns: "code" and "description"
+- Multi-line data in one visual cell area = SPLIT into separate columns by semantic meaning
 
 TASK 2 - DATA PATTERNS (for validation):
 For each column, describe what VALID data looks like:
