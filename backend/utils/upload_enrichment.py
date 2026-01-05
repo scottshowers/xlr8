@@ -349,7 +349,20 @@ def _run_relationship_detection(
 ) -> List[Dict]:
     """Run relationship detection using semantic-first matching."""
     
+    import signal
+    
+    # Timeout handler - 5 minutes max for relationship detection
+    MAX_RELATIONSHIP_DETECTION_SECONDS = 300
+    
+    class TimeoutError(Exception):
+        pass
+    
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Relationship detection timed out")
+    
     try:
+        logger.warning(f"[ENRICHMENT] Starting relationship detection for project={project}")
+        
         # Import relationship detector
         try:
             from backend.utils.relationship_detector import analyze_project_relationships
@@ -361,20 +374,24 @@ def _run_relationship_detection(
                 return []
         
         if not handler or not hasattr(handler, 'conn') or not handler.conn:
+            logger.warning("[ENRICHMENT] No handler/connection for relationship detection")
             return []
         
         # Get all current tables for project
         try:
+            logger.warning(f"[ENRICHMENT] Querying _schema_metadata for {project}...")
             db_tables = handler.conn.execute(f"""
                 SELECT table_name, display_name, columns, row_count
                 FROM _schema_metadata
                 WHERE project = '{project}' AND is_current = TRUE
             """).fetchall()
+            logger.warning(f"[ENRICHMENT] Found {len(db_tables)} tables in _schema_metadata")
         except Exception as e:
-            logger.debug(f"[ENRICHMENT] Could not get tables: {e}")
+            logger.warning(f"[ENRICHMENT] Could not get tables: {e}")
             return []
         
         if not db_tables:
+            logger.warning("[ENRICHMENT] No tables found in _schema_metadata")
             return []
         
         # Format tables for detector
@@ -394,22 +411,44 @@ def _run_relationship_detection(
                 'row_count': row_count or 0
             })
         
-        # Run async detection
+        logger.warning(f"[ENRICHMENT] Prepared {len(table_list)} tables for relationship detection")
+        
+        # Run async detection with timeout
         import asyncio
         
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
+            # Set timeout (only works on Unix)
+            try:
+                old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(MAX_RELATIONSHIP_DETECTION_SECONDS)
+            except (ValueError, AttributeError):
+                # signal.alarm not available (Windows or non-main thread)
+                old_handler = None
+            
+            logger.warning(f"[ENRICHMENT] Running analyze_project_relationships...")
             detect_result = loop.run_until_complete(
                 analyze_project_relationships(project, table_list, None)
             )
+            
+            # Cancel timeout
+            if old_handler is not None:
+                signal.alarm(0)
+                signal.signal(signal.SIGALRM, old_handler)
+                
+        except TimeoutError:
+            logger.error(f"[ENRICHMENT] Relationship detection TIMED OUT after {MAX_RELATIONSHIP_DETECTION_SECONDS}s")
+            return []
         finally:
             loop.close()
         
         if not detect_result:
+            logger.warning("[ENRICHMENT] No detection result returned")
             return []
         
         relationships = detect_result.get('relationships', [])
+        logger.warning(f"[ENRICHMENT] Detection complete: {len(relationships)} relationships found")
         
         # Persist to Supabase
         if relationships:
@@ -418,9 +457,9 @@ def _run_relationship_detection(
         return relationships
         
     except Exception as e:
-        logger.warning(f"[ENRICHMENT] Relationship detection error: {e}")
+        logger.error(f"[ENRICHMENT] Relationship detection error: {e}")
         import traceback
-        logger.debug(traceback.format_exc())
+        logger.error(traceback.format_exc())
         return []
 
 
