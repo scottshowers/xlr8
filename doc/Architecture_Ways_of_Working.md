@@ -1,8 +1,8 @@
 # XLR8 ARCHITECTURE WAYS OF WORKING
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Created:** January 2, 2026  
-**Updated:** January 4, 2026 (Parts 11 & 12 added - Frontend Components, Dead Code)  
+**Updated:** January 5, 2026 (Part 13 added - DuckDB Connection Management)  
 **Purpose:** Enforce consistent development patterns across all features
 
 ---
@@ -1002,3 +1002,154 @@ grep -rn "from.*mymodule\|import.*mymodule" backend/
 | `MissionControl.jsx` | Replaced by DashboardPage, not routed | Jan 4, 2026 |
 
 **When you find orphaned code, delete it. Don't comment it out. Git has history.**
+
+---
+
+# PART 13: DUCKDB CONNECTION MANAGEMENT
+
+**Added:** January 5, 2026 after segfaults from thread collisions during upload.
+
+## 13.1 The Problem
+
+DuckDB connections are NOT thread-safe for concurrent operations. When upload is writing to DuckDB and other code creates new connections or accesses the same connection from different threads, we get:
+- `malloc(): unaligned tcache chunk detected`
+- `Segmentation fault`
+- `Connection Error: Can't open a connection to same database file with a different configuration`
+
+## 13.2 The Architecture
+
+**Single Singleton Handler** - One DuckDB connection for the entire application:
+
+```python
+# utils/structured_data_handler.py
+def get_structured_handler() -> StructuredDataHandler:
+    """Returns the singleton handler with one DuckDB connection."""
+```
+
+**Handler Passing** - Functions in the upload pipeline receive the handler, they don't create new ones:
+
+```python
+# ❌ WRONG - Creates new connection, causes collision
+def detect_relationships(project: str):
+    handler = get_structured_handler()  # Might conflict with upload
+    result = handler.conn.execute("SELECT ...")
+
+# ✅ CORRECT - Uses passed handler
+def detect_relationships(project: str, handler):
+    result = handler.conn.execute("SELECT ...")  # Same connection as upload
+```
+
+## 13.3 The Upload Pipeline
+
+The upload flow maintains ONE handler throughout:
+
+```
+smart_router.py → upload.py:process_file_background
+                      │
+                      ├── handler = get_structured_handler()  ← Created ONCE
+                      │
+                      ├── handler.store_excel()              ← Uses same handler
+                      ├── handler.profile_columns_fast()     ← Uses same handler
+                      │
+                      ├── run_intelligence_analysis(handler) ← Passed down
+                      │       └── ProjectIntelligenceService(handler)
+                      │               └── analyze_project_relationships(handler)
+                      │
+                      └── enrich_structured_upload(handler)  ← Passed down
+                              └── _run_relationship_detection(handler)
+                                      └── analyze_project_relationships(handler)
+```
+
+## 13.4 The Rules
+
+### RULE 1: Upload Pipeline Functions MUST Accept Handler
+
+Any function called during upload processing MUST accept a `handler` parameter:
+
+```python
+# ✅ CORRECT
+def analyze_project_relationships(project: str, tables: List, handler=None) -> Dict:
+    if handler is None:
+        handler = get_structured_handler()  # Fallback for non-upload calls
+    ...
+
+# ✅ CORRECT  
+class ProjectIntelligenceService:
+    def __init__(self, project: str, handler=None):
+        self.handler = handler
+```
+
+### RULE 2: Upload Callers MUST Pass Handler
+
+```python
+# ✅ CORRECT - In upload.py
+handler = get_structured_handler()
+intelligence = ProjectIntelligenceService(project, handler)  # Pass it
+enrichment = enrich_structured_upload(project, handler=handler)  # Pass it
+```
+
+### RULE 3: API Endpoints Use Singleton Directly
+
+Endpoints NOT in the upload path can call `get_structured_handler()` directly:
+
+```python
+# ✅ CORRECT - API endpoint, not upload path
+@router.get("/tables")
+async def get_tables():
+    handler = get_structured_handler()
+    return handler.conn.execute("SHOW TABLES").fetchall()
+```
+
+This is safe because:
+- If upload is running, the singleton IS the upload's handler
+- The `_db_lock` in StructuredDataHandler serializes operations
+
+### RULE 4: No Background Threads During Upload
+
+Background inference was disabled because it created a separate thread hitting DuckDB while upload was writing:
+
+```python
+# In structured_data_handler.py store_excel_file():
+# DISABLED: queue_inference_job() - caused thread collision
+```
+
+If you need background processing, it must happen AFTER upload completes.
+
+## 13.5 Files Following This Pattern
+
+| File | Role | Handler Source |
+|------|------|----------------|
+| `upload.py` | Creates handler | `get_structured_handler()` |
+| `upload_enrichment.py` | Receives handler | Parameter from upload.py |
+| `project_intelligence.py` | Receives handler | Parameter from upload.py |
+| `relationship_detector.py` | Receives handler | Parameter from caller |
+| All API routers | Use singleton | `get_structured_handler()` |
+
+## 13.6 Debugging Connection Issues
+
+If you see these errors:
+
+**`malloc(): unaligned tcache chunk detected` / `Segmentation fault`**
+- Multiple threads hitting DuckDB simultaneously
+- Check for background threads or API calls during upload
+
+**`Connection Error: Can't open a connection to same database file with a different configuration`**
+- Mixed read_only and read-write connections
+- Don't use `duckdb.connect(path, read_only=True)` while write connection exists
+
+**Symptoms of thread collision:**
+- Upload hangs at random points
+- 0 relationships detected despite data existing
+- Logs show queries failing with "NoneType" errors
+
+## 13.7 Testing Upload Isolation
+
+To verify upload isn't being interrupted:
+
+1. Start an upload
+2. DON'T navigate to other pages
+3. Watch logs for `[QUEUE] ====== Job completed ======`
+
+If it completes, the connection management is working. If it fails when you navigate elsewhere, there's still a thread collision somewhere.
+
+**This is the law for DuckDB operations. Follow it.**
