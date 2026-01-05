@@ -29,6 +29,9 @@ import api from '../services/api';
 // NEW: Import ClassificationPanel
 import ClassificationPanel, { ChunkPanel } from '../components/ClassificationPanel';
 
+// Import column splitter for Data view
+import ClickToSplit from '../components/ClickToSplit';
+
 // ============================================================================
 // BRAND COLORS (from Mission Control)
 // ============================================================================
@@ -1026,6 +1029,7 @@ export default function DataExplorer() {
   const [tableDetails, setTableDetails] = useState(null);
   const [sampleData, setSampleData] = useState(null);
   const [detailView, setDetailView] = useState('schema'); // 'schema' | 'data'
+  const [splitColumn, setSplitColumn] = useState(null); // { columnName, sampleValues } when splitting
   const [relationships, setRelationships] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -1702,21 +1706,33 @@ export default function DataExplorer() {
                     {sampleData && sampleData.length > 0 ? (
                       <>
                         <div style={{ fontSize: '0.75rem', color: c.textMuted, marginBottom: '0.5rem' }}>
-                          Showing {sampleData.length} sample rows
+                          Showing {sampleData.length} sample rows • Click column header to split
                         </div>
                         <div style={{ overflowX: 'auto' }}>
                           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: 'max-content' }}>
                             <thead>
                               <tr style={{ borderBottom: `2px solid ${c.border}` }}>
                                 {Object.keys(sampleData[0] || {}).map((col, idx) => (
-                                  <th key={idx} style={{ 
-                                    textAlign: 'left', 
-                                    padding: '0.5rem 0.75rem', 
-                                    fontWeight: 600, 
-                                    color: c.text,
-                                    whiteSpace: 'nowrap',
-                                    background: c.background
-                                  }}>
+                                  <th 
+                                    key={idx} 
+                                    onClick={() => setSplitColumn({
+                                      columnName: col,
+                                      sampleValues: sampleData.map(row => row[col]).filter(v => v)
+                                    })}
+                                    style={{ 
+                                      textAlign: 'left', 
+                                      padding: '0.5rem 0.75rem', 
+                                      fontWeight: 600, 
+                                      color: c.text,
+                                      whiteSpace: 'nowrap',
+                                      background: c.background,
+                                      cursor: 'pointer',
+                                      transition: 'background 0.15s'
+                                    }}
+                                    onMouseEnter={(e) => e.currentTarget.style.background = '#e2e8f0'}
+                                    onMouseLeave={(e) => e.currentTarget.style.background = c.background}
+                                    title={`Click to split "${col}"`}
+                                  >
                                     {col}
                                   </th>
                                 ))}
@@ -2163,6 +2179,24 @@ export default function DataExplorer() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Column Split Modal */}
+      {splitColumn && (
+        <ClickToSplit
+          tableName={selectedTable}
+          columnName={splitColumn.columnName}
+          sampleValues={splitColumn.sampleValues}
+          projectName={projectName}
+          onComplete={(result) => {
+            setSplitColumn(null);
+            // Refresh the table data
+            if (selectedTable) {
+              loadTableDetails(selectedTable);
+            }
+          }}
+          onCancel={() => setSplitColumn(null)}
+        />
       )}
 
       <style>{`
