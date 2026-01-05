@@ -429,7 +429,7 @@ def _run_relationship_detection(
             
             logger.warning(f"[ENRICHMENT] Running analyze_project_relationships...")
             detect_result = loop.run_until_complete(
-                analyze_project_relationships(project, table_list, None)
+                analyze_project_relationships(project, table_list, handler)
             )
             
             # Cancel timeout
