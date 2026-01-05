@@ -238,7 +238,30 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup_event():
-    """Load playbooks from Supabase on startup."""
+    """Startup tasks: cleanup stuck jobs, load playbooks."""
+    
+    # CRITICAL: Clean up any jobs stuck from previous runs/crashes
+    try:
+        from models.processing_job import ProcessingJobModel
+        cancelled = ProcessingJobModel.cancel_stuck(max_age_minutes=15)
+        if cancelled > 0:
+            logger.warning(f"[STARTUP] Cancelled {cancelled} stuck jobs from previous run")
+        else:
+            logger.info("[STARTUP] No stuck jobs to clean up")
+    except ImportError:
+        try:
+            from utils.database.models import ProcessingJobModel
+            cancelled = ProcessingJobModel.cancel_stuck(max_age_minutes=15)
+            if cancelled > 0:
+                logger.warning(f"[STARTUP] Cancelled {cancelled} stuck jobs from previous run")
+            else:
+                logger.info("[STARTUP] No stuck jobs to clean up")
+        except Exception as e:
+            logger.warning(f"[STARTUP] Could not clean stuck jobs: {e}")
+    except Exception as e:
+        logger.warning(f"[STARTUP] Could not clean stuck jobs: {e}")
+    
+    # Load playbooks from Supabase
     try:
         from utils.playbook_loader import load_playbooks_from_supabase
         results = load_playbooks_from_supabase()
