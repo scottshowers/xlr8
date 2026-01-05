@@ -199,18 +199,18 @@ def _load_semantic_types(project: str, handler) -> Dict[Tuple[str, str], str]:
 
 
 def _load_column_values(project: str, handler) -> Dict[Tuple[str, str], Set[str]]:
-    """Load distinct values from _column_profiles.top_values_json."""
+    """Load distinct values from _column_profiles.distinct_values."""
     column_values = {}
     
     try:
         project_prefix = project[:8].lower() if project else ''
         
-        # Use top_values_json which stores actual column VALUES
+        # Use distinct_values which stores actual column VALUES
         result = handler.conn.execute("""
-            SELECT table_name, column_name, top_values_json, distinct_count
+            SELECT table_name, column_name, distinct_values, distinct_count
             FROM _column_profiles
             WHERE LOWER(table_name) LIKE ? || '%'
-              AND top_values_json IS NOT NULL
+              AND distinct_values IS NOT NULL
               AND distinct_count >= 2
               AND distinct_count <= 1000
         """, [project_prefix]).fetchall()
