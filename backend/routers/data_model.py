@@ -1254,3 +1254,117 @@ async def preview_table(project: str, table_name: str, limit: int = 20):
     except Exception as e:
         logger.error(f"Table preview failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data-model/split-column")
+async def split_column(request: Request):
+    """
+    Split a column into two new columns based on a pattern.
+    
+    Supports:
+    - first_word: Split after first word (space)
+    - newline: Split at newline character
+    - delimiter: Split at specific character
+    - position: Split at fixed character position
+    
+    Creates new columns, preserves original (can be deleted separately).
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        try:
+            from backend.utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            raise HTTPException(status_code=500, detail="Cannot load structured handler")
+    
+    try:
+        body = await request.json()
+        project = body.get('project')
+        table_name = body.get('table_name')
+        column_name = body.get('column_name')
+        split_type = body.get('split_type')  # first_word, newline, delimiter, position
+        split_value = body.get('split_value')  # delimiter char or position int
+        new_column_names = body.get('new_column_names', ['left', 'right'])
+        
+        if not all([table_name, column_name, split_type]):
+            raise HTTPException(status_code=400, detail="Missing required fields: table_name, column_name, split_type")
+        
+        if len(new_column_names) != 2:
+            raise HTTPException(status_code=400, detail="new_column_names must have exactly 2 values")
+        
+        left_col = new_column_names[0]
+        right_col = new_column_names[1]
+        
+        handler = get_structured_handler()
+        
+        # Verify table and column exist
+        try:
+            cols = [row[0] for row in handler.conn.execute(f'DESCRIBE "{table_name}"').fetchall()]
+            if column_name not in cols:
+                raise HTTPException(status_code=404, detail=f"Column '{column_name}' not found in table")
+        except Exception as e:
+            raise HTTPException(status_code=404, detail=f"Table not found: {e}")
+        
+        # Build the split expression based on type
+        if split_type == 'first_word':
+            # Split at first space
+            left_expr = f"TRIM(SPLIT_PART(CAST(\"{column_name}\" AS VARCHAR), ' ', 1))"
+            right_expr = f"TRIM(SUBSTR(CAST(\"{column_name}\" AS VARCHAR), LENGTH(SPLIT_PART(CAST(\"{column_name}\" AS VARCHAR), ' ', 1)) + 2))"
+        
+        elif split_type == 'newline':
+            # Split at newline
+            left_expr = f"TRIM(SPLIT_PART(CAST(\"{column_name}\" AS VARCHAR), CHR(10), 1))"
+            right_expr = f"TRIM(SUBSTR(CAST(\"{column_name}\" AS VARCHAR), POSITION(CHR(10) IN CAST(\"{column_name}\" AS VARCHAR)) + 1))"
+        
+        elif split_type == 'delimiter':
+            delim = split_value or ' '
+            # Escape single quotes in delimiter
+            delim_escaped = delim.replace("'", "''")
+            left_expr = f"TRIM(SPLIT_PART(CAST(\"{column_name}\" AS VARCHAR), '{delim_escaped}', 1))"
+            right_expr = f"TRIM(SUBSTR(CAST(\"{column_name}\" AS VARCHAR), POSITION('{delim_escaped}' IN CAST(\"{column_name}\" AS VARCHAR)) + 1))"
+        
+        elif split_type == 'position':
+            pos = int(split_value) if split_value else 0
+            if pos <= 0:
+                raise HTTPException(status_code=400, detail="Position must be > 0")
+            left_expr = f"TRIM(SUBSTR(CAST(\"{column_name}\" AS VARCHAR), 1, {pos}))"
+            right_expr = f"TRIM(SUBSTR(CAST(\"{column_name}\" AS VARCHAR), {pos + 1}))"
+        
+        else:
+            raise HTTPException(status_code=400, detail=f"Unknown split_type: {split_type}")
+        
+        # Add the new columns
+        try:
+            # Add left column
+            handler.conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{left_col}" VARCHAR')
+            handler.conn.execute(f'UPDATE "{table_name}" SET "{left_col}" = {left_expr}')
+            
+            # Add right column
+            handler.conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{right_col}" VARCHAR')
+            handler.conn.execute(f'UPDATE "{table_name}" SET "{right_col}" = {right_expr}')
+            
+            # Get row count
+            row_count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+            
+            logger.info(f"[DATA-MODEL] Split column '{column_name}' into '{left_col}' and '{right_col}' in {table_name} ({row_count} rows)")
+            
+            return {
+                "success": True,
+                "table_name": table_name,
+                "original_column": column_name,
+                "new_columns": [left_col, right_col],
+                "split_type": split_type,
+                "rows_affected": row_count
+            }
+            
+        except Exception as sql_err:
+            logger.error(f"[DATA-MODEL] SQL error splitting column: {sql_err}")
+            raise HTTPException(status_code=500, detail=f"Failed to split column: {sql_err}")
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[DATA-MODEL] Split column failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
