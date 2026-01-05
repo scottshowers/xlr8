@@ -871,6 +871,7 @@ async def _route_to_structured(
         
         # Use sequential job queue to prevent Ollama overload
         if JOB_QUEUE_AVAILABLE and job_queue:
+            logger.warning(f"[SMART-ROUTER] Enqueueing job {job_id} for {filename}")
             job_queue.enqueue(
                 job_id,
                 process_file_background,
@@ -880,6 +881,7 @@ async def _route_to_structured(
                 priority=10
             )
         else:
+            logger.warning(f"[SMART-ROUTER] Using background_tasks for job {job_id} (queue not available)")
             # Fallback to concurrent background tasks
             background_tasks.add_task(
                 process_file_background,
