@@ -32,6 +32,8 @@ export default function DataCleanup() {
   const [confirmDelete, setConfirmDelete] = useState(null);
   const [selectedTables, setSelectedTables] = useState(new Set());
   const [selectedDocs, setSelectedDocs] = useState(new Set());
+  const [projects, setProjects] = useState([]);
+  const [selectedProject, setSelectedProject] = useState('');
 
   const isDark = document.documentElement.classList.contains('dark') || 
                  window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -51,6 +53,20 @@ export default function DataCleanup() {
   // ==========================================================================
   // DATA LOADING
   // ==========================================================================
+
+  const loadProjects = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/projects`);
+      const data = await res.json();
+      const projectList = data.projects || data || [];
+      setProjects(projectList.map(p => p.name || p.id || p));
+    } catch (e) {
+      console.error('Failed to load projects:', e);
+      // Fallback: extract from tables
+      const uniqueProjects = [...new Set(tables.map(t => t.project).filter(Boolean))];
+      setProjects(uniqueProjects);
+    }
+  };
 
   const loadTables = async () => {
     setLoading(l => ({ ...l, tables: true }));
@@ -113,7 +129,18 @@ export default function DataCleanup() {
     loadTables();
     loadDocuments();
     loadOrphanPreview();
+    loadProjects();
   }, []);
+
+  // Extract unique projects from tables when they load
+  useEffect(() => {
+    if (tables.length > 0) {
+      const uniqueProjects = [...new Set(tables.map(t => t.project).filter(Boolean))];
+      if (uniqueProjects.length > 0 && projects.length === 0) {
+        setProjects(uniqueProjects);
+      }
+    }
+  }, [tables]);
 
   // ==========================================================================
   // ACTIONS
@@ -122,6 +149,33 @@ export default function DataCleanup() {
   const showResult = (success, message) => {
     setActionResult({ success, message });
     setTimeout(() => setActionResult(null), 5000);
+  };
+
+  const clearProjectData = async (projectId) => {
+    setLoading(l => ({ ...l, action: true }));
+    try {
+      const res = await fetch(`${API_BASE}/api/status/project/${encodeURIComponent(projectId)}`, {
+        method: 'DELETE'
+      });
+      const data = await res.json();
+      if (data.success) {
+        const deleted = data.deleted || {};
+        showResult(true, 
+          `Cleared ${projectId}: ${deleted.tables || 0} tables, ${deleted.documents || 0} documents, ` +
+          `${deleted.relationships || 0} relationships, ${deleted.jobs || 0} jobs`
+        );
+        loadTables();
+        loadDocuments();
+        loadOrphanPreview();
+        setSelectedProject('');
+      } else {
+        showResult(false, data.error || 'Project cleanup failed');
+      }
+    } catch (e) {
+      showResult(false, e.message);
+    }
+    setLoading(l => ({ ...l, action: false }));
+    setConfirmDelete(null);
   };
 
   const deleteTable = async (tableName) => {
@@ -530,6 +584,74 @@ export default function DataCleanup() {
         </button>
       </div>
 
+      {/* Project Cleanup Section */}
+      <div style={{ 
+        background: c.cardBg, 
+        border: `1px solid ${c.border}`, 
+        borderRadius: 10, 
+        padding: '1rem 1.25rem',
+        marginBottom: '1.5rem'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <Database size={20} color={c.danger} />
+            <h2 style={{ margin: 0, fontSize: '1rem', fontWeight: 600, color: c.text }}>Clear Project Data</h2>
+          </div>
+        </div>
+        
+        <div style={{ display: 'flex', gap: '1rem', alignItems: 'flex-end' }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ fontSize: '0.75rem', color: c.textMuted, display: 'block', marginBottom: '0.5rem' }}>
+              Select Project
+            </label>
+            <select
+              value={selectedProject}
+              onChange={(e) => setSelectedProject(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.5rem 0.75rem',
+                background: c.background,
+                border: `1px solid ${c.border}`,
+                borderRadius: 6,
+                color: c.text,
+                fontSize: '0.9rem'
+              }}
+            >
+              <option value="">-- Select a project --</option>
+              {projects.map(p => (
+                <option key={p} value={p}>{p}</option>
+              ))}
+            </select>
+          </div>
+          
+          <button
+            onClick={() => selectedProject && setConfirmDelete({ type: 'clearProject', project: selectedProject })}
+            disabled={!selectedProject || loading.action}
+            style={{
+              padding: '0.5rem 1.5rem',
+              background: selectedProject ? c.danger : c.border,
+              border: 'none',
+              borderRadius: 6,
+              color: '#fff',
+              cursor: selectedProject ? 'pointer' : 'not-allowed',
+              fontSize: '0.9rem',
+              fontWeight: 500,
+              opacity: selectedProject ? 1 : 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem'
+            }}
+          >
+            <Trash2 size={16} />
+            Clear All Project Data
+          </button>
+        </div>
+        
+        <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.75rem' }}>
+          This will delete all tables, documents, semantic mappings, context graph, relationships, and jobs for the selected project.
+        </div>
+      </div>
+
       {/* Two Column Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
         {/* Tables Section */}
@@ -765,6 +887,16 @@ export default function DataCleanup() {
           title=" FORCE FULL WIPE"
           message="This will delete ALL data from DuckDB and ChromaDB, regardless of registry status. This is IRREVERSIBLE. Are you absolutely sure?"
           onConfirm={() => deepClean(true)}
+          onCancel={() => setConfirmDelete(null)}
+          dangerous={true}
+        />
+      )}
+
+      {confirmDelete?.type === 'clearProject' && (
+        <ConfirmModal
+          title="⚠️ CLEAR PROJECT DATA"
+          message={`This will delete ALL data for project "${confirmDelete.project}" including:\n• All DuckDB tables\n• All ChromaDB documents\n• All semantic mappings & context graph\n• All relationships\n• All jobs\n\nThis is IRREVERSIBLE. Are you sure?`}
+          onConfirm={() => clearProjectData(confirmDelete.project)}
           onCancel={() => setConfirmDelete(null)}
           dangerous={true}
         />
