@@ -1255,7 +1255,7 @@ export default function DataExplorer() {
   };
 
   // Relationship handlers
-  const confirmRelationship = async (rel) => {
+  const confirmRelationship = async (rel, confirmed = true) => {
     const sourceTable = rel.source_table || rel.from_table;
     const sourceCol = rel.source_column || rel.from_column;
     const targetTable = rel.target_table || rel.to_table;
@@ -1267,7 +1267,7 @@ export default function DataExplorer() {
         source_column: sourceCol,
         target_table: targetTable,
         target_column: targetCol,
-        confirmed: true
+        confirmed
       });
       // Reload relationships
       const relRes = await api.get(`/data-model/relationships/${encodeURIComponent(projectName)}`);
