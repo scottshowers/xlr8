@@ -548,7 +548,7 @@ class JobQueue:
         self._worker_thread.start()
         
         self._initialized = True
-        logger.info("[QUEUE] Job queue initialized with sequential processing")
+        logger.warning("[QUEUE] ====== Job queue initialized with sequential processing ======")
     
     def enqueue(self, job_id: str, func: Callable, args: Tuple = (), kwargs: dict = None, priority: int = 10) -> dict:
         """Add a job to the queue. Returns immediately with queue position."""
@@ -567,7 +567,7 @@ class JobQueue:
         position = self._queue.qsize()
         self._job_positions[job_id] = position
         
-        logger.info(f"[QUEUE] Job {job_id} queued at position {position}")
+        logger.warning(f"[QUEUE] Job {job_id} queued at position {position}")
         
         return {
             'queued': True,
@@ -593,7 +593,7 @@ class JobQueue:
     
     def _worker_loop(self):
         """Background worker that processes jobs one at a time"""
-        logger.info("[QUEUE] Worker thread started")
+        logger.warning("[QUEUE] ====== Worker thread started ======")
         
         while self._running:
             try:
@@ -604,15 +604,17 @@ class JobQueue:
                     continue
                 
                 self._current_job = job
-                logger.info(f"[QUEUE] Processing job {job.job_id}")
+                logger.warning(f"[QUEUE] ====== Processing job {job.job_id} ======")
                 
                 try:
                     # Execute the job function
                     job.func(*job.args, **job.kwargs)
                     self._processed_count += 1
-                    logger.info(f"[QUEUE] Job {job.job_id} completed")
+                    logger.warning(f"[QUEUE] ====== Job {job.job_id} completed ======")
                 except Exception as e:
                     logger.error(f"[QUEUE] Job {job.job_id} failed: {e}")
+                    import traceback
+                    logger.error(traceback.format_exc())
                     import traceback
                     logger.error(traceback.format_exc())
                     # CRITICAL FIX: Mark job as failed in database so it doesn't stay stuck
@@ -927,6 +929,7 @@ def process_file_background(
                 # Detection, relationships, metrics - all in one place
                 # =====================================================
                 try:
+                    logger.warning(f"[BACKGROUND] Starting enrichment for {len(result.get('tables_created', []))} tables...")
                     from backend.utils.upload_enrichment import enrich_structured_upload
                     
                     # Get columns and sheet names for detection
