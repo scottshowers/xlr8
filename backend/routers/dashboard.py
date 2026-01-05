@@ -43,10 +43,16 @@ def _get_supabase():
 
 
 def _get_duckdb():
-    """Get DuckDB handler."""
+    """Get read-only DuckDB handler for dashboard operations.
+    
+    Uses get_read_handler() to avoid collisions with upload writes.
+    """
     try:
-        from utils.structured_data_handler import get_structured_handler
-        return get_structured_handler()
+        try:
+            from utils.structured_data_handler import get_read_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_read_handler
+        return get_read_handler()
     except Exception:
         return None
 
