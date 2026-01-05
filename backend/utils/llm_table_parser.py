@@ -443,7 +443,7 @@ def parse_pages_with_llm(
     if not pages_text:
         return {'rows': [], 'llm_used': 'none', 'pii_redacted': 0, 'success': False}
     
-    CHUNK_SIZE = 5  # Pages per chunk - smaller chunks = better extraction accuracy
+    CHUNK_SIZE = 10  # Pages per chunk - larger = faster, smaller = more accurate
     
     # For small documents (5 pages or less), combine and send once
     if len(pages_text) <= CHUNK_SIZE:
