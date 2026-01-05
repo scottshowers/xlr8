@@ -8,7 +8,7 @@ Then add to main.py:
     app.include_router(data_model.router, prefix="/api")
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 import logging
