@@ -510,6 +510,55 @@ async def delete_document(filename: str, project_id: str = Query(None)):
 # BULK PROJECT CLEANUP
 # =============================================================================
 
+@router.delete("/status/system-tables/all")
+async def clear_all_system_tables():
+    """
+    Clear ALL system/metadata tables. NUCLEAR OPTION.
+    
+    Clears:
+    - _column_mappings (semantic types, context graph)
+    - _column_profiles (cardinality data)
+    - _schema_metadata (table registry)
+    - _intelligence_* tables
+    """
+    logger.warning("[CLEANUP] NUCLEAR: Clearing ALL system tables")
+    
+    conn = _get_duckdb(None)
+    if not conn:
+        return {"success": False, "error": "DuckDB not available"}
+    
+    cleared = {}
+    tables_to_clear = [
+        '_column_mappings',
+        '_column_profiles', 
+        '_schema_metadata',
+        '_intelligence_findings',
+        '_intelligence_tasks',
+        '_intelligence_lookups',
+        '_intelligence_relationships',
+        '_intelligence_work_trail'
+    ]
+    
+    for table in tables_to_clear:
+        try:
+            result = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
+            count_before = result[0] if result else 0
+            conn.execute(f"DELETE FROM {table}")
+            cleared[table] = count_before
+            logger.info(f"[CLEANUP] Cleared {count_before} rows from {table}")
+        except Exception as e:
+            cleared[table] = f"error: {str(e)}"
+            logger.debug(f"[CLEANUP] {table}: {e}")
+    
+    try:
+        conn.execute("CHECKPOINT")
+    except Exception:
+        pass
+    
+    logger.warning(f"[CLEANUP] NUCLEAR complete: {cleared}")
+    return {"success": True, "cleared": cleared}
+
+
 @router.delete("/status/project/{project_id}/all")
 async def delete_all_project_data(project_id: str):
     """
