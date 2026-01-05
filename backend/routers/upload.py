@@ -203,32 +203,8 @@ def _cleanup_existing_file(filename: str, project: str = None, project_id: str =
             except Exception as meta_e:
                 pass
             
-            # Also check _pdf_tables
-            try:
-                table_check = conn.execute("""
-                    SELECT COUNT(*) FROM information_schema.tables 
-                    WHERE table_name = '_pdf_tables'
-                """).fetchone()
-                
-                if table_check and table_check[0] > 0:
-                    pdf_result = conn.execute("""
-                        SELECT table_name FROM _pdf_tables 
-                        WHERE LOWER(source_file) = ?
-                    """, [filename_lower]).fetchall()
-                    
-                    for (table_name,) in pdf_result:
-                        try:
-                            conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
-                            result['duckdb_tables_deleted'] += 1
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
-                    
-                    conn.execute("""
-                        DELETE FROM _pdf_tables WHERE LOWER(source_file) = ?
-                    """, [filename_lower])
-                    
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+            # Note: PDF tables are now in _schema_metadata (cleaned above)
+            # No separate _pdf_tables cleanup needed
             
             # Clean support tables
             for support_table in ['file_metadata', '_column_profiles']:
