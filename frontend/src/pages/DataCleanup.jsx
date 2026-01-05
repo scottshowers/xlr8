@@ -156,7 +156,7 @@ export default function DataCleanup() {
   const clearProjectData = async (projectId) => {
     setLoading(l => ({ ...l, action: true }));
     try {
-      const res = await fetch(`${API_BASE}/api/status/project/${encodeURIComponent(projectId)}`, {
+      const res = await fetch(`${API_BASE}/api/status/project/${encodeURIComponent(projectId)}/all`, {
         method: 'DELETE'
       });
       const data = await res.json();
