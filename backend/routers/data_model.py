@@ -305,6 +305,63 @@ async def get_relationships(project_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/data-model/context-graph/{project_name}")
+async def get_context_graph(project_name: str):
+    """
+    Get the context graph showing hub/spoke relationships.
+    
+    THE CONTEXT GRAPH is the intelligence layer:
+    - HUB: Table with max cardinality for a semantic type (source of truth)
+    - SPOKE: Table that references the hub
+    
+    Example: company_code
+    - HUB: component_company (13 unique values)
+    - SPOKE: employee (6 values, 46% coverage)
+    - SPOKE: payroll (6 values, 46% coverage)
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        
+        # Get the context graph
+        graph = handler.get_context_graph(project_name)
+        
+        # Also get summary stats
+        hubs = graph.get('hubs', [])
+        relationships = graph.get('relationships', [])
+        
+        # Group spokes by hub for easier viewing
+        by_semantic_type = {}
+        for hub in hubs:
+            st = hub['semantic_type']
+            by_semantic_type[st] = {
+                'hub': hub,
+                'spokes': [r for r in relationships if r['semantic_type'] == st]
+            }
+        
+        return {
+            "project": project_name,
+            "summary": {
+                "hub_count": len(hubs),
+                "spoke_count": len(relationships),
+                "semantic_types": list(by_semantic_type.keys())
+            },
+            "hubs": hubs,
+            "relationships": relationships,
+            "by_semantic_type": by_semantic_type
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to get context graph: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/data-model/relationships/{project_name}/confirm")
 async def confirm_relationship(project_name: str, confirmation: RelationshipConfirmation):
     """
