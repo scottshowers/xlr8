@@ -2497,6 +2497,10 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             # Start background column inference (90-95%)
             report_progress(90, "Queueing column inference...")
+            # NOTE: Inference queuing disabled to prevent DuckDB thread collision
+            # Background inference was colliding with profile_columns_fast, causing segfaults
+            # Inference can be triggered manually via the UI after upload completes
+            # TODO: Re-enable once proper connection serialization is implemented
             try:
                 import uuid
                 
@@ -2504,13 +2508,14 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 tables_info = results.get('sheets', [])
                 
                 if tables_info:
-                    # Create job record
+                    # Create job record for tracking, but DON'T queue inference
                     self.create_mapping_job(job_id, project, file_name, len(tables_info))
                     results['mapping_job_id'] = job_id
                     
-                    # Queue the job instead of starting a new thread
-                    queue_inference_job(self, job_id, project, file_name, tables_info)
-                    logger.info(f"[MAPPING] Queued inference job {job_id} for {file_name}")
+                    # DISABLED: queue_inference_job(self, job_id, project, file_name, tables_info)
+                    logger.info(f"[MAPPING] Inference disabled during upload - job {job_id} created for {file_name}")
+            except Exception as map_e:
+                logger.warning(f"[MAPPING] Failed to create mapping job: {map_e}")
             except Exception as map_e:
                 logger.warning(f"[MAPPING] Failed to start inference: {map_e}")
             
@@ -4585,6 +4590,9 @@ def get_structured_handler() -> StructuredDataHandler:
     """
     Get or create the singleton handler.
     
+    WARNING: This returns the WRITE handler. Only use for upload operations.
+    For API endpoints that only READ data, use get_read_handler() instead.
+    
     Uses sys.modules to ensure ONE instance per process, regardless of
     whether this module is imported as 'utils.structured_data_handler'
     or 'backend.utils.structured_data_handler'.
@@ -4616,6 +4624,55 @@ def get_structured_handler() -> StructuredDataHandler:
             sys.modules[_SINGLETON_KEY] = handler
             
         return handler
+
+
+class ReadOnlyDuckDBHandler:
+    """
+    Lightweight read-only handler for API endpoints.
+    
+    Creates a new read-only connection each time - safe for concurrent access.
+    Read-only connections don't conflict with each other or with the write handler.
+    """
+    def __init__(self, db_path: str):
+        self.db_path = db_path
+        self.conn = duckdb.connect(db_path, read_only=True)
+    
+    def close(self):
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+
+def get_read_handler() -> ReadOnlyDuckDBHandler:
+    """
+    Get a read-only handler for API endpoints.
+    
+    ALWAYS use this for API endpoints that only READ data.
+    This creates a new read-only connection that won't conflict with
+    upload write operations.
+    
+    Usage:
+        handler = get_read_handler()
+        result = handler.conn.execute("SELECT * FROM ...").fetchall()
+        handler.close()  # Always close when done
+        
+    Or with context manager:
+        with get_read_handler() as handler:
+            result = handler.conn.execute("SELECT * FROM ...").fetchall()
+    
+    Returns:
+        ReadOnlyDuckDBHandler with .conn attribute for SQL execution
+    """
+    db_path = os.environ.get('DUCKDB_PATH', '/data/structured_data.duckdb')
+    if not os.path.exists(db_path):
+        raise FileNotFoundError(f"DuckDB database not found: {db_path}")
+    return ReadOnlyDuckDBHandler(db_path)
 
 
 def reset_structured_handler():
