@@ -88,13 +88,24 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
     """
     Clean up ALL metadata tables after a delete.
     
-    This is the KEY fix - we need to clean _schema_metadata and _pdf_tables
-    which are what the status/metrics endpoints query.
+    CONTEXT GRAPH: Must clean _column_mappings and _column_profiles
+    to ensure hub/spoke relationships are recalculated on re-upload.
+    
+    Note: PDF tables are now in _schema_metadata (via store_dataframe).
+    The _pdf_tables table is deprecated and no longer used.
     """
-    cleaned = {"_schema_metadata": 0, "_pdf_tables": 0, "file_metadata": 0, "column_profiles": 0}
+    cleaned = {
+        "_schema_metadata": 0, 
+        "_column_mappings": 0,
+        "_column_profiles": 0,
+        "_intelligence_findings": 0,
+        "_intelligence_tasks": 0,
+        "_intelligence_lookups": 0,
+        "_intelligence_relationships": 0,
+    }
     
     try:
-        # 1. Clean _schema_metadata (Excel files)
+        # 1. Clean _schema_metadata (ALL file types: Excel, CSV, PDF)
         try:
             if table_name:
                 result = conn.execute(f"DELETE FROM _schema_metadata WHERE table_name = ?", [table_name])
@@ -111,41 +122,32 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
         except Exception as e:
             logger.debug(f"[CLEANUP] _schema_metadata cleanup: {e}")
         
-        # 2. Clean _pdf_tables (PDF files)
-        try:
-            # Check if table exists first
-            table_check = conn.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = '_pdf_tables'
-            """).fetchone()
-            
-            if table_check[0] > 0:
-                if table_name:
-                    result = conn.execute(f"DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
-                    cleaned["_pdf_tables"] = result.rowcount if hasattr(result, 'rowcount') else 1
-                    logger.info(f"[CLEANUP] Deleted from _pdf_tables by table_name: {table_name}")
-                elif filename:
-                    result = conn.execute(f"DELETE FROM _pdf_tables WHERE source_file = ?", [filename])
-                    cleaned["_pdf_tables"] = result.rowcount if hasattr(result, 'rowcount') else 1
-                    logger.info(f"[CLEANUP] Deleted from _pdf_tables by source_file: {filename}")
-                elif project:
-                    result = conn.execute(f"DELETE FROM _pdf_tables WHERE project = ? OR project_id = ?", [project, project])
-                    cleaned["_pdf_tables"] = result.rowcount if hasattr(result, 'rowcount') else 1
-                    logger.info(f"[CLEANUP] Deleted from _pdf_tables by project: {project}")
-        except Exception as e:
-            logger.debug(f"[CLEANUP] _pdf_tables cleanup: {e}")
-        
-        # 3. Also clean legacy metadata tables (file_metadata, column_profiles)
-        for meta_table in ['file_metadata', 'column_profiles']:
+        # 2. Clean CONTEXT GRAPH tables (_column_mappings, _column_profiles)
+        # These MUST be cleaned to ensure hub/spoke is recalculated on re-upload
+        for ctx_table in ['_column_mappings', '_column_profiles']:
             try:
-                if filename:
-                    conn.execute(f"DELETE FROM {meta_table} WHERE filename = ?", [filename])
-                elif table_name:
-                    conn.execute(f"DELETE FROM {meta_table} WHERE table_name = ?", [table_name])
-                cleaned[meta_table] = 1
+                if table_name:
+                    conn.execute(f"DELETE FROM {ctx_table} WHERE table_name = ?", [table_name])
+                elif filename:
+                    conn.execute(f"DELETE FROM {ctx_table} WHERE file_name = ?", [filename])
+                elif project:
+                    conn.execute(f"DELETE FROM {ctx_table} WHERE project = ?", [project])
+                cleaned[ctx_table] = 1
+                logger.info(f"[CLEANUP] Cleaned {ctx_table}")
             except Exception as e:
-                logger.debug(f"[CLEANUP] {meta_table} cleanup: {e}")
+                logger.debug(f"[CLEANUP] {ctx_table} cleanup: {e}")
         
+        # 3. Clean intelligence tables
+        for intel_table in ['_intelligence_findings', '_intelligence_tasks', '_intelligence_lookups', '_intelligence_relationships']:
+            try:
+                if project:
+                    conn.execute(f"DELETE FROM {intel_table} WHERE project_name = ?", [project])
+                    cleaned[intel_table] = 1
+                    logger.info(f"[CLEANUP] Cleaned {intel_table}")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] {intel_table} cleanup: {e}")
+        
+        conn.execute("CHECKPOINT")
         logger.info(f"[CLEANUP] Metadata cleanup complete: {cleaned}")
         return cleaned
         
@@ -573,14 +575,22 @@ async def delete_all_project_data(project_id: str):
             except Exception as e:
                 logger.debug(f"Suppressed: {e}")
     
-    # 3. Jobs
+    # 3. Jobs and Relationships in Supabase
     supabase = _get_supabase()
     if supabase:
         try:
             result = supabase.table("jobs").delete().eq("project_id", project_id).execute()
             deleted["jobs"] = len(result.data) if result.data else 0
         except Exception as e:
-            logger.debug(f"Suppressed: {e}")
+            logger.debug(f"Suppressed jobs cleanup: {e}")
+        
+        # Clean project_relationships (context graph relationships)
+        try:
+            result = supabase.table("project_relationships").delete().eq("project_name", project_id).execute()
+            deleted["relationships"] = len(result.data) if result.data else 0
+            logger.info(f"[CLEANUP] Deleted {deleted['relationships']} relationships from Supabase")
+        except Exception as e:
+            logger.debug(f"Suppressed relationships cleanup: {e}")
     
     logger.info(f"[CLEANUP] Deleted for {project_id}: {deleted}")
     return {"success": True, "deleted": deleted, "project_id": project_id}
@@ -595,8 +605,10 @@ async def refresh_metrics(project: str = Query(None)):
     """
     Force refresh of metrics by cleaning orphaned metadata entries.
     
-    This cleans up _schema_metadata and _pdf_tables entries that reference
+    This cleans up _schema_metadata entries that reference
     tables that no longer exist in DuckDB.
+    
+    Note: _pdf_tables is deprecated - PDFs now use _schema_metadata.
     """
     logger.info(f"[CLEANUP] Refreshing metrics for project: {project or 'all'}")
     
@@ -609,9 +621,9 @@ async def refresh_metrics(project: str = Query(None)):
         tables = conn.execute("SHOW TABLES").fetchall()
         actual_tables = set(t[0] for t in tables)
         
-        orphaned = {"_schema_metadata": 0, "_pdf_tables": 0}
+        orphaned = {"_schema_metadata": 0}
         
-        # Clean orphaned _schema_metadata entries
+        # Clean orphaned _schema_metadata entries (ALL file types: Excel, CSV, PDF)
         try:
             meta_result = conn.execute("SELECT table_name FROM _schema_metadata").fetchall()
             for (table_name,) in meta_result:
@@ -622,22 +634,7 @@ async def refresh_metrics(project: str = Query(None)):
         except Exception as e:
             logger.debug(f"[CLEANUP] _schema_metadata refresh: {e}")
         
-        # Clean orphaned _pdf_tables entries
-        try:
-            table_check = conn.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = '_pdf_tables'
-            """).fetchone()
-            
-            if table_check[0] > 0:
-                pdf_result = conn.execute("SELECT table_name FROM _pdf_tables").fetchall()
-                for (table_name,) in pdf_result:
-                    if table_name not in actual_tables:
-                        conn.execute("DELETE FROM _pdf_tables WHERE table_name = ?", [table_name])
-                        orphaned["_pdf_tables"] += 1
-                        logger.info(f"[CLEANUP] Removed orphaned _pdf_tables: {table_name}")
-        except Exception as e:
-            logger.debug(f"[CLEANUP] _pdf_tables refresh: {e}")
+        # Note: _pdf_tables is deprecated - PDFs now use _schema_metadata
         
         logger.info(f"[CLEANUP] Metrics refresh complete - removed orphans: {orphaned}")
         return {
@@ -713,35 +710,7 @@ async def list_structured_files():
         except Exception as e:
             logger.debug(f"[STATUS] Schema query: {e}")
         
-        # Also check _pdf_tables
-        try:
-            pdf_rows = conn.execute("""
-                SELECT source_file, project, table_name, row_count, created_at
-                FROM _pdf_tables
-                ORDER BY source_file
-            """).fetchall()
-            
-            for row in pdf_rows:
-                fname = row[0]
-                if not fname:
-                    continue
-                if fname not in files_dict:
-                    files_dict[fname] = {
-                        "filename": fname,
-                        "project": row[1],
-                        "tables": 0,
-                        "row_count": 0,
-                        "sheets": []
-                    }
-                files_dict[fname]["sheets"].append({
-                    "table_name": row[2],
-                    "display_name": row[2],
-                    "row_count": int(row[3] or 0)
-                })
-                files_dict[fname]["tables"] += 1
-                files_dict[fname]["row_count"] += int(row[3] or 0)
-        except Exception as e:
-            logger.debug(f"[STATUS] PDF tables query: {e}")
+        # Note: PDF tables are now in _schema_metadata (queried above)
         
         return {
             "files": list(files_dict.values()),
