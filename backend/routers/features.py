@@ -140,9 +140,9 @@ async def list_comparable_tables(project_id: Optional[str] = None):
     Returns table names with row counts and column info.
     """
     try:
-        from utils.structured_data_handler import get_structured_handler
+        from utils.structured_data_handler import get_read_handler
         
-        handler = get_structured_handler()
+        handler = get_read_handler()
         
         # Get tables from schema metadata
         tables = handler.query("""
