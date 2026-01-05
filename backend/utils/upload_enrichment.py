@@ -625,7 +625,9 @@ def _persist_relationships(project: str, relationships: List[Dict]) -> None:
                 'target_column': rel.get('target_column', ''),
                 'confidence': rel.get('confidence', 0.5),
                 'relationship_type': rel.get('relationship_type', 'one-to-many'),
-                'needs_review': rel.get('confidence', 0.5) < 0.8,
+                'semantic_type': rel.get('semantic_type'),  # From context graph
+                'method': rel.get('match_type'),  # e.g., 'context_graph:company_code'
+                'needs_review': rel.get('needs_review', rel.get('confidence', 0.5) < 0.8),
                 'confirmed': False
             })
         
