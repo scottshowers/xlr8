@@ -1392,64 +1392,19 @@ class ProjectIntelligenceService:
         """
         Detect relationships between tables using semantic analysis.
         
+        NOTE: SKIPPED - relationship detection now handled by upload_enrichment.py
+        to avoid duplicate work. The enrichment step runs after intelligence
+        analysis and persists relationships to Supabase.
+        
         Uses relationship_detector.py which:
         1. Detects semantic type of each key column (employee_id, company_code, etc.)
         2. Only compares columns of the SAME type
         3. Strips prefixes before comparing (home_company_code ↔ company_code)
         4. Uses global mappings for known equivalents
         """
-        if not RELATIONSHIP_DETECTOR_AVAILABLE or not analyze_project_relationships:
-            logger.info("[INTELLIGENCE] Relationship detector not available, skipping")
-            return
-        
-        if not tables:
-            return
-        
-        logger.info(f"[INTELLIGENCE] Detecting relationships across {len(tables)} tables")
-        
-        try:
-            import asyncio
-            
-            # Run the async function
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
-            try:
-                result = loop.run_until_complete(
-                    analyze_project_relationships(self.project, tables, self.handler)
-                )
-            finally:
-                loop.close()
-            
-            if not result:
-                logger.warning("[INTELLIGENCE] Relationship detection returned no results")
-                return
-            
-            # Convert results to Relationship objects
-            for rel_dict in result.get('relationships', []):
-                try:
-                    rel = Relationship(
-                        from_table=rel_dict.get('source_table', ''),
-                        from_column=rel_dict.get('source_column', ''),
-                        to_table=rel_dict.get('target_table', ''),
-                        to_column=rel_dict.get('target_column', ''),
-                        confidence=rel_dict.get('confidence', 0.5),
-                        relationship_type=rel_dict.get('relationship_type', 'one-to-many')
-                    )
-                    self.relationships.append(rel)
-                except Exception as e:
-                    logger.debug(f"[INTELLIGENCE] Failed to create relationship: {e}")
-            
-            logger.info(f"[INTELLIGENCE] Detected {len(self.relationships)} relationships")
-            
-            # Store semantic types as findings for visibility
-            semantic_types = result.get('semantic_types', [])
-            if semantic_types:
-                logger.info(f"[INTELLIGENCE] Identified {len(semantic_types)} typed key columns")
-                
-        except Exception as e:
-            logger.warning(f"[INTELLIGENCE] Relationship detection failed: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+        # SKIP - handled by upload_enrichment.py to avoid duplicate detection
+        logger.info("[INTELLIGENCE] Skipping relationship detection (handled by enrichment)")
+        return
     
     def _persist_relationships(self) -> None:
         """Persist detected relationships to Supabase."""
