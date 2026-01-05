@@ -1610,8 +1610,8 @@ class ProjectIntelligenceService:
         logger.info("[INTELLIGENCE] Running gap detection...")
         
         try:
-            # Initialize gap detection engine
-            gap_engine = GapDetectionEngine(self.project, self.project_id)
+            # Initialize gap detection engine with handler
+            gap_engine = GapDetectionEngine(structured_handler=self.handler)
             
             # Get table classifications to find Config vs Reality pairs
             config_tables = []
