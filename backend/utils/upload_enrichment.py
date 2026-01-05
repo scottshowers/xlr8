@@ -464,7 +464,10 @@ def _run_relationship_detection(
 
 
 def _persist_relationships(project: str, relationships: List[Dict]) -> None:
-    """Persist detected relationships to Supabase."""
+    """Persist detected relationships to Supabase with batching."""
+    
+    if not relationships:
+        return
     
     try:
         try:
@@ -473,32 +476,50 @@ def _persist_relationships(project: str, relationships: List[Dict]) -> None:
             try:
                 from backend.utils.database.supabase_client import get_supabase
             except ImportError:
+                logger.warning("[ENRICHMENT] Supabase client not available - skipping relationship persist")
                 return
         
         supabase = get_supabase()
         if not supabase:
+            logger.warning("[ENRICHMENT] No Supabase connection - skipping relationship persist")
             return
         
+        # Build batch records
+        records = []
         for rel in relationships:
-            try:
-                supabase.table('project_relationships').upsert({
-                    'project_name': project,
-                    'source_table': rel.get('source_table', ''),
-                    'source_column': rel.get('source_column', ''),
-                    'target_table': rel.get('target_table', ''),
-                    'target_column': rel.get('target_column', ''),
-                    'confidence': rel.get('confidence', 0.5),
-                    'relationship_type': rel.get('relationship_type', 'one-to-many'),
-                    'needs_review': rel.get('confidence', 0.5) < 0.8,
-                    'confirmed': False
-                }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
-            except Exception as e:
-                logger.debug(f"[ENRICHMENT] Failed to persist relationship: {e}")
+            records.append({
+                'project_name': project,
+                'source_table': rel.get('source_table', ''),
+                'source_column': rel.get('source_column', ''),
+                'target_table': rel.get('target_table', ''),
+                'target_column': rel.get('target_column', ''),
+                'confidence': rel.get('confidence', 0.5),
+                'relationship_type': rel.get('relationship_type', 'one-to-many'),
+                'needs_review': rel.get('confidence', 0.5) < 0.8,
+                'confirmed': False
+            })
         
-        logger.info(f"[ENRICHMENT] Persisted {len(relationships)} relationships")
+        # Batch upsert in chunks of 50 (Supabase limit friendly)
+        BATCH_SIZE = 50
+        persisted = 0
+        
+        for i in range(0, len(records), BATCH_SIZE):
+            batch = records[i:i + BATCH_SIZE]
+            try:
+                supabase.table('project_relationships').upsert(
+                    batch,
+                    on_conflict='project_name,source_table,source_column,target_table,target_column'
+                ).execute()
+                persisted += len(batch)
+            except Exception as batch_err:
+                logger.warning(f"[ENRICHMENT] Batch {i//BATCH_SIZE + 1} failed: {batch_err}")
+                # Continue with remaining batches
+        
+        logger.warning(f"[ENRICHMENT] Persisted {persisted}/{len(relationships)} relationships to Supabase")
         
     except Exception as e:
-        logger.warning(f"[ENRICHMENT] Relationship persistence error: {e}")
+        # Don't let persistence failure kill the job
+        logger.warning(f"[ENRICHMENT] Relationship persistence failed (non-fatal): {e}")
 
 
 # =============================================================================
