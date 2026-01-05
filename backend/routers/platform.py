@@ -291,17 +291,8 @@ async def get_platform_status(
         except Exception:
             pass
         
-        # Also check _pdf_tables
-        try:
-            pdf_meta = handler.conn.execute("""
-                SELECT COUNT(DISTINCT source_file), COUNT(*), COALESCE(SUM(row_count), 0)
-                FROM _pdf_tables
-            """).fetchone()
-            response["stats"]["files"] += pdf_meta[0] or 0
-            response["stats"]["tables"] += pdf_meta[1] or 0
-            response["stats"]["rows"] += int(pdf_meta[2] or 0)
-        except Exception:
-            pass
+        # Note: PDF files are now in _schema_metadata (via store_dataframe), 
+        # no separate _pdf_tables query needed
         
         # Get column count
         try:
@@ -468,8 +459,8 @@ async def get_platform_status(
             handler = get_structured_handler()
             
             # STEP 1: Run DuckDB queries SEQUENTIALLY (connection not thread-safe)
+            # Note: PDFs are now in _schema_metadata (via store_dataframe), no separate _pdf_tables query
             schema_results = []
-            pdf_results = []
             
             if include_files:
                 try:
@@ -489,23 +480,6 @@ async def get_platform_status(
                         """).fetchall()
                 except Exception as e:
                     logger.debug(f"[PLATFORM] Schema metadata query: {e}")
-                
-                try:
-                    if project_filter:
-                        pdf_results = handler.conn.execute("""
-                            SELECT source_file, project, table_name, row_count, created_at
-                            FROM _pdf_tables
-                            WHERE LOWER(project) = LOWER(?)
-                            ORDER BY source_file, table_name
-                        """, [project_filter]).fetchall()
-                    else:
-                        pdf_results = handler.conn.execute("""
-                            SELECT source_file, project, table_name, row_count, created_at
-                            FROM _pdf_tables
-                            ORDER BY source_file, table_name
-                        """).fetchall()
-                except Exception as e:
-                    logger.debug(f"[PLATFORM] PDF tables query: {e}")
             
             # STEP 2: Run Supabase queries IN PARALLEL (network-bound)
             def get_document_registry():
@@ -599,51 +573,28 @@ async def get_platform_status(
                             "sheets": []
                         }
                     
+                    # Handle columns - could be JSON string or already parsed
+                    cols = row[7]
+                    if isinstance(cols, str):
+                        try:
+                            cols = json.loads(cols)
+                        except (json.JSONDecodeError, TypeError):
+                            cols = []
+                    elif cols is None:
+                        cols = []
+                    
                     files_dict[fname]["sheets"].append({
                         "table_name": row[2],
                         "display_name": row[3] or row[2],
                         "row_count": int(row[4] or 0),
                         "column_count": int(row[5] or 0),
-                        "columns": json.loads(row[7]) if row[7] else []
+                        "columns": cols
                     })
                     files_dict[fname]["tables"] += 1
                     files_dict[fname]["rows"] += int(row[4] or 0)
                     files_dict[fname]["row_count"] += int(row[4] or 0)
                 
-                # Add PDF tables
-                for row in pdf_results:
-                    fname = row[0]
-                    if not fname:
-                        continue
-                    
-                    provenance = registry_lookup.get(fname.lower(), {})
-                    chunks_info = registry_chunks.get(fname.lower(), {})
-                    
-                    if fname not in files_dict:
-                        files_dict[fname] = {
-                            "filename": fname,
-                            "project": row[1],
-                            "tables": 0,
-                            "rows": 0,
-                            "row_count": 0,
-                            "chunks": chunks_info.get('chunk_count', 0),
-                            "loaded_at": str(row[4]) if row[4] else None,
-                            "uploaded_by": provenance.get('uploaded_by', ''),
-                            "uploaded_at": provenance.get('uploaded_at', ''),
-                            "type": "hybrid" if chunks_info.get('chunk_count', 0) > 0 else "structured",
-                            "sheets": [],
-                            "truth_type": provenance.get('truth_type', '')
-                        }
-                    
-                    files_dict[fname]["sheets"].append({
-                        "table_name": row[2],
-                        "display_name": row[2],
-                        "row_count": int(row[3] or 0),
-                        "column_count": 0
-                    })
-                    files_dict[fname]["tables"] += 1
-                    files_dict[fname]["rows"] += int(row[3] or 0)
-                    files_dict[fname]["row_count"] += int(row[3] or 0)
+                # Note: PDF tables are now in _schema_metadata (processed above)
                 
                 # Add unstructured-only docs from registry
                 for entry in registry_data:
@@ -828,24 +779,8 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             logger.debug(f"[FILES] Schema query: {e}")
             schema_results = []
         
-        # Query PDF tables
-        try:
-            if project_filter:
-                pdf_results = handler.conn.execute("""
-                    SELECT source_file, project, table_name, row_count, created_at
-                    FROM _pdf_tables
-                    WHERE LOWER(project) = LOWER(?)
-                    ORDER BY source_file, table_name
-                """, [project_filter]).fetchall()
-            else:
-                pdf_results = handler.conn.execute("""
-                    SELECT source_file, project, table_name, row_count, created_at
-                    FROM _pdf_tables
-                    ORDER BY source_file, table_name
-                """).fetchall()
-        except Exception as e:
-            logger.debug(f"[FILES] PDF query: {e}")
-            pdf_results = []
+        # Note: PDF tables are now in _schema_metadata (via store_dataframe)
+        # No separate _pdf_tables query needed
         
         # Get document registry for provenance (single Supabase call)
         registry_lookup = {}
@@ -905,50 +840,28 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                     "sheets": []
                 }
             
+            # Handle columns - could be JSON string or already parsed
+            cols = row[7]
+            if isinstance(cols, str):
+                try:
+                    cols = json.loads(cols)
+                except (json.JSONDecodeError, TypeError):
+                    cols = []
+            elif cols is None:
+                cols = []
+            
             files_dict[fname]["sheets"].append({
                 "table_name": row[2],
                 "display_name": row[3] or row[2],
                 "row_count": int(row[4] or 0),
                 "column_count": int(row[5] or 0),
-                "columns": json.loads(row[7]) if row[7] else []
+                "columns": cols
             })
             files_dict[fname]["tables"] += 1
             files_dict[fname]["rows"] += int(row[4] or 0)
             files_dict[fname]["row_count"] += int(row[4] or 0)
         
-        # Add PDF tables
-        for row in pdf_results:
-            fname = row[0]
-            if not fname:
-                continue
-            
-            provenance = registry_lookup.get(fname.lower(), {})
-            
-            if fname not in files_dict:
-                files_dict[fname] = {
-                    "filename": fname,
-                    "project": row[1],
-                    "tables": 0,
-                    "rows": 0,
-                    "row_count": 0,
-                    "chunks": provenance.get('chunk_count', 0),
-                    "loaded_at": str(row[4]) if row[4] else None,
-                    "uploaded_by": provenance.get('uploaded_by', ''),
-                    "uploaded_at": provenance.get('uploaded_at', ''),
-                    "truth_type": provenance.get('truth_type', ''),
-                    "type": "hybrid" if provenance.get('chunk_count', 0) > 0 else "structured",
-                    "sheets": []
-                }
-            
-            files_dict[fname]["sheets"].append({
-                "table_name": row[2],
-                "display_name": row[2],
-                "row_count": int(row[3] or 0),
-                "column_count": 0
-            })
-            files_dict[fname]["tables"] += 1
-            files_dict[fname]["rows"] += int(row[3] or 0)
-            files_dict[fname]["row_count"] += int(row[3] or 0)
+        # Note: PDF tables are now in _schema_metadata (processed above)
         
         # Add ChromaDB-only documents (files in registry but not in DuckDB)
         for fname_lower, provenance in registry_lookup.items():
