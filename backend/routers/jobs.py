@@ -285,7 +285,10 @@ async def clear_job_history(
     Does NOT delete active (queued/processing) jobs.
     """
     try:
-        from utils.supabase_client import get_supabase
+        try:
+            from utils.database.supabase_client import get_supabase
+        except ImportError:
+            from backend.utils.database.supabase_client import get_supabase
         supabase = get_supabase()
         if not supabase:
             raise HTTPException(status_code=503, detail="Database not available")
