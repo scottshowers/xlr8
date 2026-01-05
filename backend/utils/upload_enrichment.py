@@ -47,6 +47,13 @@ class EnrichmentResult:
     domains: List[Dict] = field(default_factory=list)
     functional_areas: List[Dict] = field(default_factory=list)
     
+    # Semantic type inference results (structured only)
+    semantic_types_inferred: int = 0
+    
+    # Context graph results (structured only)
+    context_graph_hubs: int = 0
+    context_graph_spokes: int = 0
+    
     # Relationship results (structured only)
     relationships: List[Dict] = field(default_factory=list)
     relationships_count: int = 0
@@ -73,6 +80,9 @@ class EnrichmentResult:
             'systems': self.systems,
             'domains': self.domains,
             'functional_areas': self.functional_areas,
+            'semantic_types_inferred': self.semantic_types_inferred,
+            'context_graph_hubs': self.context_graph_hubs,
+            'context_graph_spokes': self.context_graph_spokes,
             'relationships': self.relationships,
             'relationships_count': self.relationships_count,
             'char_count': self.char_count,
@@ -174,7 +184,49 @@ def enrich_upload(
         result.errors.append(f"Detection: {str(e)}")
     
     # =========================================================================
-    # STEP 2: RELATIONSHIPS - Table relationships (structured only)
+    # STEP 2: SEMANTIC TYPE INFERENCE - Infer column meanings (structured only)
+    # This MUST run before context graph and relationships
+    # =========================================================================
+    if upload_type in ('structured', 'hybrid') and handler and tables_created:
+        update_progress(86, "Inferring column semantic types...")
+        
+        try:
+            semantic_result = _run_semantic_type_inference(
+                project=project,
+                filename=filename,
+                handler=handler,
+                tables=tables_created
+            )
+            
+            if semantic_result:
+                result.semantic_types_inferred = semantic_result.get('total_mappings', 0)
+                logger.warning(f"[ENRICHMENT] Inferred {result.semantic_types_inferred} semantic types")
+                
+        except Exception as e:
+            logger.warning(f"[ENRICHMENT] Semantic type inference failed: {e}")
+            result.errors.append(f"Semantic types: {str(e)}")
+    
+    # =========================================================================
+    # STEP 3: CONTEXT GRAPH - Compute hub/spoke relationships (structured only)
+    # This MUST run after semantic types, before relationship detection
+    # =========================================================================
+    if upload_type in ('structured', 'hybrid') and handler:
+        update_progress(87, "Computing context graph...")
+        
+        try:
+            graph_result = handler.compute_context_graph(project)
+            
+            if graph_result:
+                result.context_graph_hubs = graph_result.get('hubs', 0)
+                result.context_graph_spokes = graph_result.get('spokes', 0)
+                logger.warning(f"[ENRICHMENT] Context graph: {result.context_graph_hubs} hubs, {result.context_graph_spokes} spokes")
+                
+        except Exception as e:
+            logger.warning(f"[ENRICHMENT] Context graph computation failed: {e}")
+            result.errors.append(f"Context graph: {str(e)}")
+    
+    # =========================================================================
+    # STEP 4: RELATIONSHIPS - Table relationships from context graph (structured only)
     # =========================================================================
     if upload_type in ('structured', 'hybrid') and handler:
         update_progress(88, "Detecting relationships...")
@@ -196,7 +248,7 @@ def enrich_upload(
             result.errors.append(f"Relationships: {str(e)}")
     
     # =========================================================================
-    # STEP 3: DOCUMENT METRICS
+    # STEP 5: DOCUMENT METRICS
     # =========================================================================
     update_progress(90, "Computing document metrics...")
     
@@ -218,7 +270,7 @@ def enrich_upload(
         result.errors.append(f"Metrics: {str(e)}")
     
     # =========================================================================
-    # STEP 4: CHROMADB METADATA ENRICHMENT (queries by filename, no doc_ids needed)
+    # STEP 6: CHROMADB METADATA ENRICHMENT (queries by filename, no doc_ids needed)
     # =========================================================================
     if upload_type in ('semantic', 'hybrid', 'standards'):
         update_progress(92, "Enriching ChromaDB metadata...")
@@ -238,7 +290,7 @@ def enrich_upload(
             result.errors.append(f"ChromaDB: {str(e)}")
     
     # =========================================================================
-    # STEP 5: PERSIST TO SUPABASE
+    # STEP 7: PERSIST TO SUPABASE
     # =========================================================================
     update_progress(95, "Storing enrichment data...")
     
@@ -334,7 +386,90 @@ def _run_detection(
 
 
 # =============================================================================
-# STEP 2: RELATIONSHIP DETECTION
+# STEP 2: SEMANTIC TYPE INFERENCE
+# =============================================================================
+
+def _run_semantic_type_inference(
+    project: str,
+    filename: str,
+    handler,
+    tables: Optional[List[str]] = None
+) -> Optional[Dict]:
+    """
+    Infer semantic types for all columns in uploaded tables.
+    
+    This MUST run before context graph computation because the graph
+    is built from semantic types.
+    
+    Args:
+        project: Project name
+        filename: Source filename
+        handler: DuckDB handler
+        tables: List of table names to process
+        
+    Returns:
+        Dict with inference stats
+    """
+    if not handler or not tables:
+        return None
+    
+    try:
+        total_mappings = 0
+        tables_processed = 0
+        
+        for table_name in tables:
+            try:
+                # Get column names
+                cols_result = handler.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                columns = [c[1] for c in cols_result if c[1] and not c[1].startswith('_')]
+                
+                if not columns:
+                    continue
+                
+                # Get sample data (first 5 rows)
+                try:
+                    sample_result = handler.conn.execute(f"SELECT * FROM \"{table_name}\" LIMIT 5").fetchall()
+                    # Convert to list of dicts
+                    sample_data = []
+                    for row in sample_result:
+                        row_dict = {columns[i]: row[i] for i in range(min(len(columns), len(row)))}
+                        sample_data.append(row_dict)
+                except Exception:
+                    sample_data = []
+                
+                # Run inference
+                mappings = handler.infer_column_mappings(
+                    project=project,
+                    file_name=filename,
+                    table_name=table_name,
+                    columns=columns,
+                    sample_data=sample_data
+                )
+                
+                if mappings:
+                    total_mappings += len(mappings)
+                    tables_processed += 1
+                    
+            except Exception as table_err:
+                logger.warning(f"[ENRICHMENT] Semantic inference failed for {table_name}: {table_err}")
+                continue
+        
+        logger.info(f"[ENRICHMENT] Semantic type inference complete: {total_mappings} mappings from {tables_processed} tables")
+        
+        return {
+            'total_mappings': total_mappings,
+            'tables_processed': tables_processed
+        }
+        
+    except Exception as e:
+        logger.warning(f"[ENRICHMENT] Semantic type inference error: {e}")
+        import traceback
+        logger.debug(traceback.format_exc())
+        return None
+
+
+# =============================================================================
+# STEP 4: RELATIONSHIP DETECTION (reads from context graph)
 # =============================================================================
 
 def _run_relationship_detection(
@@ -518,7 +653,7 @@ def _persist_relationships(project: str, relationships: List[Dict]) -> None:
 
 
 # =============================================================================
-# STEP 3: DOCUMENT METRICS
+# STEP 5: DOCUMENT METRICS
 # =============================================================================
 
 def _compute_document_metrics(
@@ -563,7 +698,7 @@ def _compute_document_metrics(
 
 
 # =============================================================================
-# STEP 4: CHROMADB ENRICHMENT (BY FILENAME)
+# STEP 6: CHROMADB ENRICHMENT (BY FILENAME)
 # =============================================================================
 
 def _enrich_chromadb_by_filename(
@@ -695,7 +830,7 @@ def _enrich_chromadb_by_filename(
 
 
 # =============================================================================
-# STEP 5: PERSIST TO SUPABASE
+# STEP 7: PERSIST TO SUPABASE
 # =============================================================================
 
 def _persist_enrichment(
