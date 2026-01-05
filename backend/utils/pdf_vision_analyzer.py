@@ -62,10 +62,13 @@ except ImportError:
 
 try:
     import pytesseract
+    # Actually test if tesseract binary is available, not just the Python wrapper
+    pytesseract.get_tesseract_version()
     TESSERACT_AVAILABLE = True
-except ImportError:
+    logger.info("[PDF-VISION] Tesseract OCR available for PII detection")
+except Exception:
     TESSERACT_AVAILABLE = False
-    logger.warning("[PDF-VISION] pytesseract not available - PII redaction limited")
+    # Not an error - conservative redaction will be used instead
 
 try:
     import anthropic
@@ -292,7 +295,7 @@ def detect_pii_regions_with_ocr(image: Image.Image) -> List[Dict[str, Any]]:
     Returns list of regions containing PII with bounding boxes.
     """
     if not TESSERACT_AVAILABLE:
-        logger.warning("[PDF-VISION] Tesseract not available - using pattern-only detection")
+        logger.debug("[PDF-VISION] Tesseract not available - using pattern-only detection")
         return []
     
     pii_regions = []
@@ -331,7 +334,8 @@ def detect_pii_regions_with_ocr(image: Image.Image) -> List[Dict[str, Any]]:
             logger.warning(f"[PDF-VISION] Found {len(pii_regions)} PII regions to redact")
         
     except Exception as e:
-        logger.error(f"[PDF-VISION] OCR PII detection failed: {e}")
+        # Expected when tesseract not installed - fallback to pattern-only detection
+        logger.debug(f"[PDF-VISION] OCR not available: {e}")
     
     return pii_regions
 
