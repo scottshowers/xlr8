@@ -243,6 +243,17 @@ async def get_relationships(project_name: str):
             
             if result.data:
                 for row in result.data:
+                    # Read boolean fields directly (saved by upload_enrichment)
+                    # Fall back to status string field for backward compatibility
+                    needs_review = row.get('needs_review')
+                    confirmed = row.get('confirmed')
+                    
+                    # If boolean fields are None, check status string
+                    if needs_review is None:
+                        needs_review = row.get('status') == 'needs_review'
+                    if confirmed is None:
+                        confirmed = row.get('status') == 'confirmed'
+                    
                     relationships.append({
                         'source_table': row.get('source_table', ''),
                         'source_column': row.get('source_column', ''),
@@ -251,8 +262,8 @@ async def get_relationships(project_name: str):
                         'confidence': row.get('confidence', 0.9),
                         'semantic_type': row.get('semantic_type', 'unknown'),
                         'method': row.get('method', 'saved'),
-                        'needs_review': row.get('status') == 'needs_review',
-                        'confirmed': row.get('status') == 'confirmed',
+                        'needs_review': bool(needs_review),
+                        'confirmed': bool(confirmed),
                         'id': row.get('id'),
                     })
                 
@@ -328,6 +339,8 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
                     'target_table': confirmation.target_table,
                     'target_column': confirmation.target_column,
                     'status': 'confirmed',
+                    'confirmed': True,
+                    'needs_review': False,
                     'method': 'manual'
                 }).execute()
                 
@@ -553,47 +566,13 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                     'filename': filename
                 })
             
-            logger.info(f"Found {len(tables)} Excel tables for {project_name}")
+            logger.info(f"Found {len(tables)} tables for {project_name}")
             
         except Exception as e:
             logger.warning(f"Metadata query failed: {e}")
         
-        # Query _pdf_tables for PDF files
-        try:
-            table_check = handler.conn.execute("""
-                SELECT COUNT(*) FROM information_schema.tables 
-                WHERE table_name = '_pdf_tables'
-            """).fetchone()
-            
-            if table_check[0] > 0:
-                pdf_result = handler.conn.execute("""
-                    SELECT table_name, source_file, project, row_count, columns
-                    FROM _pdf_tables
-                """).fetchall()
-                
-                for row in pdf_result:
-                    table_name, source_file, proj, row_count, columns_json = row
-                    
-                    if not proj or proj.lower() != project_name.lower():
-                        continue
-                    
-                    try:
-                        columns = json.loads(columns_json) if columns_json else []
-                    except Exception:
-                        columns = []
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'columns': columns,
-                        'row_count': row_count or 0,
-                        'sheet_name': 'PDF Data',
-                        'filename': source_file
-                    })
-                
-                logger.info(f"Found {len([t for t in tables if t.get('sheet_name') == 'PDF Data'])} PDF tables for {project_name}")
-                
-        except Exception as e:
-            logger.debug(f"PDF tables query: {e}")
+        # Note: PDF tables are now in _schema_metadata (via store_dataframe)
+        # No separate _pdf_tables query needed
         
         # FALLBACK: If metadata returned nothing, query DuckDB directly
         if not tables:
