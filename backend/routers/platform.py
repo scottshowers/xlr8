@@ -530,10 +530,11 @@ async def get_platform_status(
                 supabase = get_supabase()
                 if not supabase:
                     return []
+                # Fetch all relationships - no limit, same as data_model.py
                 if project_filter:
-                    result = supabase.table("project_relationships").select("*").eq("project_name", project_filter).limit(100).execute()
+                    result = supabase.table("project_relationships").select("*").eq("project_name", project_filter).execute()
                 else:
-                    result = supabase.table("project_relationships").select("*").limit(100).execute()
+                    result = supabase.table("project_relationships").select("*").execute()
                 return result.data or []
             
             # Run Supabase queries in parallel
