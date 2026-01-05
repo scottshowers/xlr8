@@ -63,7 +63,7 @@ KEY_PATTERNS = [
 # MAIN FUNCTION
 # =============================================================================
 
-async def analyze_project_relationships(project: str, tables: List[Dict], llm_client=None) -> Dict:
+async def analyze_project_relationships(project: str, tables: List[Dict], handler=None) -> Dict:
     """
     Detect relationships between tables using SEMANTIC-FIRST matching.
     
@@ -79,23 +79,32 @@ async def analyze_project_relationships(project: str, tables: List[Dict], llm_cl
     Args:
         project: Project name
         tables: List of table dicts (for API compatibility)
-        llm_client: Not used in v4
+        handler: DuckDB handler (optional - if None, creates one)
         
     Returns:
         Dict with 'relationships' list and stats
     """
     logger.warning(f"[RELATIONSHIP-V4] Starting SEMANTIC-FIRST detection for {project}")
     
+    # Get handler if not provided
+    if handler is None:
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+    
     # Load semantic types from _column_mappings
-    semantic_types = get_semantic_types(project)
+    semantic_types = get_semantic_types(project, handler)
     logger.warning(f"[RELATIONSHIP-V4] Loaded {len(semantic_types)} semantic type mappings")
     
     # Load column values from _column_profiles
-    column_values = get_column_values(project)
+    column_values = get_column_values(project, handler)
     logger.warning(f"[RELATIONSHIP-V4] Loaded {len(column_values)} column value profiles")
     
     # Build column index by table
-    tables_columns = build_column_index(project, semantic_types, column_values)
+    tables_columns = build_column_index(project, semantic_types, column_values, handler)
     logger.warning(f"[RELATIONSHIP-V4] Built index for {len(tables_columns)} tables")
     
     if not tables_columns:
@@ -171,9 +180,13 @@ async def analyze_project_relationships(project: str, tables: List[Dict], llm_cl
 # DATA LOADING
 # =============================================================================
 
-def get_semantic_types(project: str) -> Dict[Tuple[str, str], str]:
+def get_semantic_types(project: str, handler=None) -> Dict[Tuple[str, str], str]:
     """
     Load semantic types from _column_mappings table.
+    
+    Args:
+        project: Project name
+        handler: DuckDB handler (uses passed handler to avoid connection conflicts)
     
     Returns:
         Dict of (table_name, column_name) -> semantic_type
@@ -181,9 +194,6 @@ def get_semantic_types(project: str) -> Dict[Tuple[str, str], str]:
     semantic_types = {}
     
     try:
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
-        
         if not handler or not hasattr(handler, 'conn'):
             logger.warning("[RELATIONSHIP-V4] No handler available for semantic types")
             return semantic_types
@@ -209,9 +219,13 @@ def get_semantic_types(project: str) -> Dict[Tuple[str, str], str]:
     return semantic_types
 
 
-def get_column_values(project: str) -> Dict[Tuple[str, str], Set[str]]:
+def get_column_values(project: str, handler=None) -> Dict[Tuple[str, str], Set[str]]:
     """
     Load distinct values from _column_profiles table.
+    
+    Args:
+        project: Project name
+        handler: DuckDB handler (uses passed handler to avoid connection conflicts)
     
     Returns:
         Dict of (table_name, column_name) -> set of values
@@ -219,9 +233,6 @@ def get_column_values(project: str) -> Dict[Tuple[str, str], Set[str]]:
     column_values = {}
     
     try:
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
-        
         if not handler or not hasattr(handler, 'conn'):
             return column_values
         
@@ -261,9 +272,15 @@ def get_column_values(project: str) -> Dict[Tuple[str, str], Set[str]]:
     return column_values
 
 
-def build_column_index(project: str, semantic_types: Dict, column_values: Dict) -> Dict[str, List[Dict]]:
+def build_column_index(project: str, semantic_types: Dict, column_values: Dict, handler=None) -> Dict[str, List[Dict]]:
     """
     Build an index of columns by table, enriched with semantic info.
+    
+    Args:
+        project: Project name
+        semantic_types: Dict of semantic type mappings
+        column_values: Dict of column values
+        handler: DuckDB handler (uses passed handler to avoid connection conflicts)
     
     Returns:
         Dict of table_name -> list of column dicts
@@ -271,9 +288,6 @@ def build_column_index(project: str, semantic_types: Dict, column_values: Dict) 
     tables_columns = defaultdict(list)
     
     try:
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
-        
         if not handler or not hasattr(handler, 'conn'):
             return dict(tables_columns)
         
