@@ -1024,6 +1024,8 @@ export default function DataExplorer() {
   const [tables, setTables] = useState([]);
   const [selectedTable, setSelectedTable] = useState(null);
   const [tableDetails, setTableDetails] = useState(null);
+  const [sampleData, setSampleData] = useState(null);
+  const [detailView, setDetailView] = useState('schema'); // 'schema' | 'data'
   const [relationships, setRelationships] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadingDetails, setLoadingDetails] = useState(false);
@@ -1199,6 +1201,7 @@ export default function DataExplorer() {
 
   const loadTableDetails = async (tableName) => {
     setLoadingDetails(true);
+    setSampleData(null);
     
     // Get the table from our list - this is the source of truth for row count
     const tableFromList = tables.find(t => t.table_name === tableName);
@@ -1221,6 +1224,16 @@ export default function DataExplorer() {
           row_count: knownRowCount
         }
       }));
+      
+      // Fetch sample data from table-preview endpoint
+      try {
+        const previewRes = await api.get(`/data-model/table-preview/${encodeURIComponent(projectName)}/${encodeURIComponent(tableName)}`);
+        if (previewRes.data?.sample_data) {
+          setSampleData(previewRes.data.sample_data);
+        }
+      } catch (previewErr) {
+        console.warn('Could not load sample data:', previewErr);
+      }
     } catch (err) {
       // Build details from tables list
       setTableDetails({
@@ -1584,65 +1597,166 @@ export default function DataExplorer() {
                       {tableDetails.row_count?.toLocaleString() || 0} rows • {tableDetails.columns?.length || 0} columns
                     </div>
                   </div>
-                  <button
-                    onClick={() => setActiveTab('classification')}
-                    style={{
-                      padding: '0.25rem 0.6rem',
-                      background: `${c.royalPurple}15`,
-                      border: `1px solid ${c.royalPurple}40`,
-                      borderRadius: 6,
-                      fontSize: '0.75rem',
-                      color: c.royalPurple,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.35rem'
-                    }}
-                  >
-                    <Eye size={14} /> Classification
-                  </button>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    {/* Schema/Data Toggle */}
+                    <div style={{ display: 'flex', background: c.background, borderRadius: 6, padding: 2 }}>
+                      <button
+                        onClick={() => setDetailView('schema')}
+                        style={{
+                          padding: '0.25rem 0.6rem',
+                          background: detailView === 'schema' ? c.cardBg : 'transparent',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: '0.75rem',
+                          fontWeight: detailView === 'schema' ? 600 : 400,
+                          color: detailView === 'schema' ? c.accent : c.textMuted,
+                          cursor: 'pointer',
+                          boxShadow: detailView === 'schema' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        Schema
+                      </button>
+                      <button
+                        onClick={() => setDetailView('data')}
+                        style={{
+                          padding: '0.25rem 0.6rem',
+                          background: detailView === 'data' ? c.cardBg : 'transparent',
+                          border: 'none',
+                          borderRadius: 4,
+                          fontSize: '0.75rem',
+                          fontWeight: detailView === 'data' ? 600 : 400,
+                          color: detailView === 'data' ? c.accent : c.textMuted,
+                          cursor: 'pointer',
+                          boxShadow: detailView === 'data' ? '0 1px 2px rgba(0,0,0,0.1)' : 'none'
+                        }}
+                      >
+                        Data
+                      </button>
+                    </div>
+                    <button
+                      onClick={() => setActiveTab('classification')}
+                      style={{
+                        padding: '0.25rem 0.6rem',
+                        background: `${c.royalPurple}15`,
+                        border: `1px solid ${c.royalPurple}40`,
+                        borderRadius: 6,
+                        fontSize: '0.75rem',
+                        color: c.royalPurple,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '0.35rem'
+                      }}
+                    >
+                      <Eye size={14} /> Classification
+                    </button>
+                  </div>
                 </div>
                 
-                {/* Columns Grid */}
-                <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
-                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                    <thead>
-                      <tr style={{ borderBottom: `2px solid ${c.border}` }}>
-                        <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Column</th>
-                        <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Type</th>
-                        <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Fill Rate</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(tableDetails.columns || []).map((col, idx) => {
-                        const colName = typeof col === 'string' ? col : col.name;
-                        const colType = typeof col === 'string' ? 'VARCHAR' : col.type || 'VARCHAR';
-                        const fillRate = typeof col === 'string' ? 100 : col.fill_rate || 100;
-                        
-                        return (
-                          <tr key={idx} style={{ borderBottom: `1px solid ${c.border}` }}>
-                            <td style={{ padding: '0.5rem 0.75rem', color: c.text }}>
-                              <code style={{ fontSize: '0.8rem', background: c.background, padding: '0.15rem 0.35rem', borderRadius: 3 }}>
-                                {colName}
-                              </code>
-                            </td>
-                            <td style={{ padding: '0.5rem 0.75rem', color: c.textMuted, fontSize: '0.8rem' }}>{colType}</td>
-                            <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
-                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
-                                <div style={{ width: '60px', height: '6px', background: c.background, borderRadius: 3, overflow: 'hidden' }}>
-                                  <div style={{ width: `${fillRate}%`, height: '100%', background: getFillRateColor(fillRate), borderRadius: 3 }} />
+                {/* Schema View */}
+                {detailView === 'schema' && (
+                  <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: `2px solid ${c.border}` }}>
+                          <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Column</th>
+                          <th style={{ textAlign: 'left', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Type</th>
+                          <th style={{ textAlign: 'right', padding: '0.5rem 0.75rem', fontWeight: 600, color: c.text }}>Fill Rate</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(tableDetails.columns || []).map((col, idx) => {
+                          const colName = typeof col === 'string' ? col : col.name;
+                          const colType = typeof col === 'string' ? 'VARCHAR' : col.type || 'VARCHAR';
+                          const fillRate = typeof col === 'string' ? 100 : col.fill_rate || 100;
+                          
+                          return (
+                            <tr key={idx} style={{ borderBottom: `1px solid ${c.border}` }}>
+                              <td style={{ padding: '0.5rem 0.75rem', color: c.text }}>
+                                <code style={{ fontSize: '0.8rem', background: c.background, padding: '0.15rem 0.35rem', borderRadius: 3 }}>
+                                  {colName}
+                                </code>
+                              </td>
+                              <td style={{ padding: '0.5rem 0.75rem', color: c.textMuted, fontSize: '0.8rem' }}>{colType}</td>
+                              <td style={{ padding: '0.5rem 0.75rem', textAlign: 'right' }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: '0.5rem' }}>
+                                  <div style={{ width: '60px', height: '6px', background: c.background, borderRadius: 3, overflow: 'hidden' }}>
+                                    <div style={{ width: `${fillRate}%`, height: '100%', background: getFillRateColor(fillRate), borderRadius: 3 }} />
+                                  </div>
+                                  <span style={{ fontSize: '0.75rem', color: getFillRateColor(fillRate), fontWeight: 500, minWidth: '35px' }}>
+                                    {fillRate}%
+                                  </span>
                                 </div>
-                                <span style={{ fontSize: '0.75rem', color: getFillRateColor(fillRate), fontWeight: 500, minWidth: '35px' }}>
-                                  {fillRate}%
-                                </span>
-                              </div>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+
+                {/* Data View - Sample Rows */}
+                {detailView === 'data' && (
+                  <div style={{ maxHeight: '55vh', overflowY: 'auto' }}>
+                    {sampleData && sampleData.length > 0 ? (
+                      <>
+                        <div style={{ fontSize: '0.75rem', color: c.textMuted, marginBottom: '0.5rem' }}>
+                          Showing {sampleData.length} sample rows
+                        </div>
+                        <div style={{ overflowX: 'auto' }}>
+                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.8rem', minWidth: 'max-content' }}>
+                            <thead>
+                              <tr style={{ borderBottom: `2px solid ${c.border}` }}>
+                                {Object.keys(sampleData[0] || {}).map((col, idx) => (
+                                  <th key={idx} style={{ 
+                                    textAlign: 'left', 
+                                    padding: '0.5rem 0.75rem', 
+                                    fontWeight: 600, 
+                                    color: c.text,
+                                    whiteSpace: 'nowrap',
+                                    background: c.background
+                                  }}>
+                                    {col}
+                                  </th>
+                                ))}
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sampleData.map((row, ridx) => (
+                                <tr key={ridx} style={{ borderBottom: `1px solid ${c.border}` }}>
+                                  {Object.values(row).map((val, cidx) => (
+                                    <td key={cidx} style={{ 
+                                      padding: '0.5rem 0.75rem', 
+                                      color: c.text,
+                                      maxWidth: '200px',
+                                      overflow: 'hidden',
+                                      textOverflow: 'ellipsis',
+                                      whiteSpace: 'nowrap'
+                                    }} title={String(val || '')}>
+                                      {val === null || val === undefined ? (
+                                        <span style={{ color: c.textMuted, fontStyle: 'italic' }}>null</span>
+                                      ) : String(val).length > 50 ? (
+                                        String(val).substring(0, 47) + '...'
+                                      ) : (
+                                        String(val)
+                                      )}
+                                    </td>
+                                  ))}
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '200px', color: c.textMuted }}>
+                        <Database size={40} style={{ marginBottom: '0.75rem', opacity: 0.5 }} />
+                        <p>No sample data available</p>
+                      </div>
+                    )}
+                  </div>
+                )}
               </>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '200px', color: c.textMuted }}>
