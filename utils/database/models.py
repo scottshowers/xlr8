@@ -1227,7 +1227,9 @@ def auto_classify_file(filename: str, file_extension: str, project_name: str,
     reference_keywords = ['checklist', 'standard', 'guide', 'reference', 'compliance', 'template', 
                           'best_practice', 'best-practice', 'year-end', 'yearend', 'year_end']
     # Config keywords only apply to structured files - PDFs with these words are documentation
-    config_keywords = ['mapping', 'lookup', 'config', 'crosswalk', 'translation', 'xref']
+    # Added 'configuration' and 'validation' explicitly for clarity
+    config_keywords = ['mapping', 'lookup', 'config', 'configuration', 'crosswalk', 'translation', 
+                       'xref', 'validation', 'setup']
     # "codes" is special - structured file with codes = config, PDF with codes = intent (documenting codes)
     codes_keywords = ['codes', 'code_list', 'earnings_codes', 'deduction_codes']
     
