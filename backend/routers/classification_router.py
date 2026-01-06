@@ -112,6 +112,8 @@ async def get_all_table_classifications(
             "row_count": c.row_count,
             "column_count": c.column_count,
             "truth_type": c.truth_type,
+            "entity_type": c.entity_type,
+            "category": c.category,
             "detected_domain": c.detected_domain,
             "domain_confidence": c.domain_confidence,
             "categorical_columns": len(categorical_cols),
