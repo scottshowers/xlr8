@@ -406,6 +406,13 @@ class IntelligenceEngineV2:
             'q_lower': q_lower
         }
         
+        # v3.0: Detect entity scoping from Context Graph
+        # If question mentions specific values (e.g., "company ABC"), scope queries
+        entity_scope = self._detect_entity_scope(question, q_lower)
+        if entity_scope:
+            analysis['entity_scope'] = entity_scope
+            logger.warning(f"[ENGINE-V2] Entity scope detected: {entity_scope}")
+        
         # =====================================================================
         # GATHER ALL FIVE TRUTHS - NO SKIPPING
         # =====================================================================
@@ -464,6 +471,14 @@ class IntelligenceEngineV2:
         if regulatory:
             compliance_check = self._check_compliance(reality, configuration, regulatory)
         
+        # v3.0: Get Context Graph for synthesis
+        context_graph = None
+        if self.table_selector and hasattr(self.table_selector, '_get_context_graph'):
+            try:
+                context_graph = self.table_selector._get_context_graph()
+            except Exception as e:
+                logger.debug(f"[ENGINE-V2] Could not get context graph: {e}")
+        
         # Synthesize answer
         answer = self.synthesizer.synthesize(
             question=question,
@@ -477,7 +492,8 @@ class IntelligenceEngineV2:
             conflicts=conflicts,
             insights=insights,
             compliance_check=compliance_check,
-            context=context
+            context=context,
+            context_graph=context_graph  # v3.0
         )
         
         # Track SQL
@@ -556,6 +572,74 @@ class IntelligenceEngineV2:
     def _is_config_domain(self, q_lower: str) -> bool:
         """Check if question is about config (not employee data)."""
         return any(cd in q_lower for cd in self.CONFIG_DOMAINS)
+    
+    def _detect_entity_scope(self, question: str, q_lower: str) -> Optional[Dict]:
+        """
+        Detect if question references specific entity values for scoping.
+        
+        Uses Context Graph to find hub values mentioned in the question.
+        Returns scoping info that gatherers can use to filter queries.
+        
+        Example: "Show employees in company ABC" → scope to company_code='ABC'
+        
+        Returns:
+            Dict with {semantic_type, value, hub_table, hub_column} or None
+        """
+        if not self.structured_handler or not self.table_selector:
+            return None
+        
+        try:
+            # Get Context Graph
+            graph = self.table_selector._get_context_graph()
+            if not graph or not graph.get('hubs'):
+                return None
+            
+            # For each hub, check if any of its values appear in the question
+            for hub in graph.get('hubs', []):
+                hub_table = hub.get('table', '')
+                hub_column = hub.get('column', '')
+                semantic_type = hub.get('semantic_type', '')
+                
+                if not hub_table or not hub_column:
+                    continue
+                
+                # Get distinct values from this hub
+                try:
+                    values = self.structured_handler.conn.execute(f"""
+                        SELECT DISTINCT "{hub_column}" 
+                        FROM "{hub_table}" 
+                        WHERE "{hub_column}" IS NOT NULL
+                        LIMIT 100
+                    """).fetchall()
+                    
+                    for (val,) in values:
+                        if not val:
+                            continue
+                        val_str = str(val).lower()
+                        val_upper = str(val).upper()
+                        
+                        # Check if value appears in question (case-insensitive)
+                        # Must be a "word" - not substring of another word
+                        import re
+                        if len(val_str) >= 2:  # Skip single chars
+                            # Match as word boundary
+                            pattern = rf'\b{re.escape(val_str)}\b'
+                            if re.search(pattern, q_lower):
+                                logger.warning(f"[ENGINE-V2] Found entity scope: {semantic_type}={val}")
+                                return {
+                                    'semantic_type': semantic_type,
+                                    'value': str(val),  # Original case
+                                    'hub_table': hub_table,
+                                    'hub_column': hub_column
+                                }
+                except Exception as e:
+                    logger.debug(f"[ENGINE-V2] Could not check hub {hub_table}: {e}")
+                    continue
+                    
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Entity scope detection failed: {e}")
+        
+        return None
     
     # =========================================================================
     # CLARIFICATION HANDLING
