@@ -2252,23 +2252,58 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     if not col_names:
                         continue
                     
-                    # Look for "code" or "id" column (the key column)
+                    # Look for key column with expanding patterns
                     key_column = None
                     has_description = False
                     
+                    # Get singular form of entity_type for matching
+                    entity_singular = None
+                    if entity_type:
+                        et = entity_type.lower()
+                        if et.endswith('ies'):
+                            entity_singular = et[:-3] + 'y'
+                        elif et.endswith('ses'):
+                            entity_singular = et[:-2]
+                        elif et.endswith('s') and not et.endswith('ss'):
+                            entity_singular = et[:-1]
+                        else:
+                            entity_singular = et
+                    
                     for col in col_names:
-                        # Key column patterns
+                        # Primary patterns: explicit code/id columns
                         if col == 'code' or col.endswith('_code') or col.endswith('_id'):
-                            if not key_column:  # Take first match
+                            if not key_column:
                                 key_column = col
                         # Description column patterns
                         if 'description' in col or 'name' in col or 'label' in col or col == 'desc':
                             has_description = True
                     
-                    # If no explicit key, check for columns that LOOK like keys
+                    # Secondary: Check for entity_type in column name
+                    # e.g., entity_type="unions" → look for column containing "union"
+                    if not key_column and entity_singular:
+                        for col in col_names:
+                            if entity_singular in col or col == entity_singular:
+                                key_column = col
+                                break
+                    
+                    # Tertiary: Common key column names
                     if not key_column:
                         for col in col_names:
-                            if col in ['id', 'type', 'status']:
+                            if col in ['id', 'type', 'status', 'number', 'num']:
+                                key_column = col
+                                break
+                    
+                    # Quaternary: Columns containing common key indicators
+                    if not key_column:
+                        for col in col_names:
+                            if '_number' in col or '_num' in col or '_no' in col:
+                                key_column = col
+                                break
+                    
+                    # Last resort: First column that's not a description
+                    if not key_column and col_names:
+                        for col in col_names:
+                            if not any(x in col for x in ['description', 'name', 'label', 'desc', 'date', 'time', 'created', 'updated']):
                                 key_column = col
                                 break
                     
@@ -2302,10 +2337,16 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     # =================================================
                     score = 0
                     
-                    # +2: Has code/id column
+                    # +2: Has code/id column with explicit suffix
                     if key_column == 'code' or key_column.endswith('_code'):
                         score += 2
                     elif key_column.endswith('_id') or key_column == 'id':
+                        score += 1
+                    # +2: Key column contains entity_type (e.g., "union" in unions table)
+                    elif entity_singular and entity_singular in key_column:
+                        score += 2
+                    # +1: Key column has number/num pattern
+                    elif '_number' in key_column or '_num' in key_column:
                         score += 1
                     
                     # +2: Has description/name column
