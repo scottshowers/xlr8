@@ -1,0 +1,897 @@
+[
+  {
+    "semantic_type": "master_company_code",
+    "display_name": "Master Company",
+    "hub_type": "master_company",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "component_company_code",
+    "display_name": "Component Company",
+    "hub_type": "component_company",
+    "is_hub": true,
+    "column_patterns": [
+      "Source Company Code",
+      "CoCode",
+      "SrcCoCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "tax_info_code",
+    "display_name": "Tax Info",
+    "hub_type": "tax_info",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "location_code",
+    "display_name": "Location Codes",
+    "hub_type": "location",
+    "is_hub": true,
+    "column_patterns": [
+      "LocationCode",
+      "Location",
+      "EducationLocation",
+      "BirthLocation",
+      "LocationDesc"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "establishments_code",
+    "display_name": "Establishments",
+    "hub_type": "establishments",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "organization_levels_code",
+    "display_name": "Organization Levels",
+    "hub_type": "organization_levels",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "suborg_levels_code",
+    "display_name": "Sub-Org Levels",
+    "hub_type": "suborg_levels",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "projects_code",
+    "display_name": "Projects",
+    "hub_type": "projects",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ppaca_code",
+    "display_name": "PPACA",
+    "hub_type": "ppaca",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ppaca_measuregroup_code",
+    "display_name": "PPACA MeasureGroup",
+    "hub_type": "ppaca_measuregroup",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "timeclockimport_code",
+    "display_name": "TimeClockImport",
+    "hub_type": "timeclockimport",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ppaca_dedbene_code",
+    "display_name": "PPACA DedBene",
+    "hub_type": "ppaca_dedbene",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "banks_code",
+    "display_name": "Banks",
+    "hub_type": "banks",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "holidays_code",
+    "display_name": "Holidays",
+    "hub_type": "holidays",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "pay_groups_code",
+    "display_name": "Pay Groups",
+    "hub_type": "pay_groups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "payroll_models_code",
+    "display_name": "Payroll Models",
+    "hub_type": "payroll_models",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "tax_groups_code",
+    "display_name": "Tax Groups",
+    "hub_type": "tax_groups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "work_pattern_code",
+    "display_name": "Work Pattern",
+    "hub_type": "work_pattern",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "distributioncenter_code",
+    "display_name": "DistributionCenter",
+    "hub_type": "distributioncenter",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earning_code",
+    "display_name": "Earning Codes",
+    "hub_type": "earning",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earnings_tax_categories_code",
+    "display_name": "Earnings Tax Categories",
+    "hub_type": "earnings_tax_categories",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earn_group_code",
+    "display_name": "Earn Group",
+    "hub_type": "earn_group",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earn_group_earns_code",
+    "display_name": "Earn Group Earns",
+    "hub_type": "earn_group_earns",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "shifts_code",
+    "display_name": "Shifts",
+    "hub_type": "shifts",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "shifts_groups_code",
+    "display_name": "Shifts Groups",
+    "hub_type": "shifts_groups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ded_code",
+    "display_name": "Ded Codes",
+    "hub_type": "ded",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "deductiontaxcategories_code",
+    "display_name": "DeductionTaxCategories",
+    "hub_type": "deductiontaxcategories",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "optionratecodes_code",
+    "display_name": "OptionRateCodes",
+    "hub_type": "optionratecodes",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "option_rates_code",
+    "display_name": "Option Rates",
+    "hub_type": "option_rates",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "agegradedrates_code",
+    "display_name": "AgeGradedRates",
+    "hub_type": "agegradedrates",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ded_groups_code",
+    "display_name": "Ded Groups",
+    "hub_type": "ded_groups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ded_group_deds_code",
+    "display_name": "Ded Group Deds",
+    "hub_type": "ded_group_deds",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "gl_base_accts_code",
+    "display_name": "GL Base Accts",
+    "hub_type": "gl_base_accts",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "gl_rules_code",
+    "display_name": "GL Rules",
+    "hub_type": "gl_rules",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "salary_grades_code",
+    "display_name": "Salary Grades",
+    "hub_type": "salary_grades",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "slrydifferentialgroups_code",
+    "display_name": "SlryDifferentialGroups",
+    "hub_type": "slrydifferentialgroups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "wc_code",
+    "display_name": "WC Codes",
+    "hub_type": "wc",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "wc_risk_rates_code",
+    "display_name": "WC Risk Rates",
+    "hub_type": "wc_risk_rates",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "jobfamilies_code",
+    "display_name": "JobFamilies",
+    "hub_type": "jobfamilies",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "job_code",
+    "display_name": "Job Code",
+    "hub_type": "job",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "job_groups_code",
+    "display_name": "Job Groups",
+    "hub_type": "job_groups",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "job_group_jobs_code",
+    "display_name": "Job Group Jobs",
+    "hub_type": "job_group_jobs",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "pto_benefits_code",
+    "display_name": "PTO Benefits",
+    "hub_type": "pto_benefits",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "labor_union_code",
+    "display_name": "Labor Union",
+    "hub_type": "labor_union",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "eduleveldegs_code",
+    "display_name": "EduLevelDegs",
+    "hub_type": "eduleveldegs",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "edu_majors_code",
+    "display_name": "Edu Majors",
+    "hub_type": "edu_majors",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "licensetype_code",
+    "display_name": "LicenseType",
+    "hub_type": "licensetype",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "liccerts_code",
+    "display_name": "Lic&Certs",
+    "hub_type": "liccerts",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "provadminvendpayee_code",
+    "display_name": "ProvAdminVendPayee",
+    "hub_type": "provadminvendpayee",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_web_user_defined_fields_code",
+    "display_name": "NCU WEB User Defined Fields",
+    "hub_type": "ncu_web_user_defined_fields",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_employee_type_code",
+    "display_name": "NCU BRIT Employee Type Codes",
+    "hub_type": "ncu_brit_employee_type",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_job_change_reasons_code",
+    "display_name": "NCU BRIT Job Change Reasons",
+    "hub_type": "ncu_brit_job_change_reasons",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_leave_of_absence_type_code",
+    "display_name": "NCU BRIT Leave Of Absence Type",
+    "hub_type": "ncu_brit_leave_of_absence_type",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_loa_reasons_code",
+    "display_name": "NCU BRIT LOA Reasons",
+    "hub_type": "ncu_brit_loa_reasons",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_termination_types_code",
+    "display_name": "NCU BRIT Termination Types",
+    "hub_type": "ncu_brit_termination_types",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_termination_reasons_code",
+    "display_name": "NCU BRIT Termination Reasons",
+    "hub_type": "ncu_brit_termination_reasons",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_benefit_change_reasons_code",
+    "display_name": "NCU BRIT Benefit Change Reasons",
+    "hub_type": "ncu_brit_benefit_change_reasons",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_decline_reason_code",
+    "display_name": "NCU BRIT Decline Reason",
+    "hub_type": "ncu_brit_decline_reason",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_web_relationships_code",
+    "display_name": "NCU WEB Relationships",
+    "hub_type": "ncu_web_relationships",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_web_expressions_code",
+    "display_name": "NCU WEB Expressions",
+    "hub_type": "ncu_web_expressions",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_web_variable_pay_plan_code",
+    "display_name": "NCU WEB Variable Pay Plan",
+    "hub_type": "ncu_web_variable_pay_plan",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_web_variable_pay_group_code",
+    "display_name": "NCU WEB Variable Pay Group",
+    "hub_type": "ncu_web_variable_pay_group",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_award_types_code",
+    "display_name": "NCU BRIT Award Types",
+    "hub_type": "ncu_brit_award_types",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_awards_and_recognition_code",
+    "display_name": "NCU BRIT Awards and Recognition",
+    "hub_type": "ncu_brit_awards_and_recognition",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_body_parts_code",
+    "display_name": "NCU BRIT Body Parts",
+    "hub_type": "ncu_brit_body_parts",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_cobra_status_code",
+    "display_name": "NCU BRIT COBRA Status",
+    "hub_type": "ncu_brit_cobra_status",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_company_property_code",
+    "display_name": "NCU BRIT Company Property",
+    "hub_type": "ncu_brit_company_property",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_hire_source_code",
+    "display_name": "NCU BRIT Hire Source",
+    "hub_type": "ncu_brit_hire_source",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_school_code",
+    "display_name": "NCU BRIT School Codes",
+    "hub_type": "ncu_brit_school",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_skill_code",
+    "display_name": "NCU BRIT Skill Codes",
+    "hub_type": "ncu_brit_skill",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_skillproficiencylevels_code",
+    "display_name": "NCU BRIT SkillProficiencyLevels",
+    "hub_type": "ncu_brit_skillproficiencylevels",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_tests_code",
+    "display_name": "NCU BRIT Tests",
+    "hub_type": "ncu_brit_tests",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "ncu_brit_pay_scales_code",
+    "display_name": "NCU BRIT Pay Scales",
+    "hub_type": "ncu_brit_pay_scales",
+    "is_hub": true,
+    "column_patterns": [],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "country_code",
+    "display_name": "Country",
+    "hub_type": "country",
+    "is_hub": true,
+    "column_patterns": [
+      "ContactAddressCountry",
+      "ContactHomePhoneCountryCode",
+      "ContactOtherPhoneCountryCode",
+      "ContactWorkPhoneCountryCode",
+      "Country",
+      "HomePhoneCountry",
+      "BusinessPhoneCountry",
+      "CountryCode",
+      "CountryPrefix",
+      "BirthCountry"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "phone_type_code",
+    "display_name": "Phone Type",
+    "hub_type": "phone_type",
+    "is_hub": true,
+    "column_patterns": [
+      "ContactOtherPhoneType",
+      "PhoneType"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "deduction_code_code",
+    "display_name": "Deduction Code",
+    "hub_type": "deduction_code",
+    "is_hub": true,
+    "column_patterns": [
+      "DedCode",
+      "DeductionCode",
+      "SrcDedCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earning_code_code",
+    "display_name": "Earning Code",
+    "hub_type": "earning_code",
+    "is_hub": true,
+    "column_patterns": [
+      "EarnCode",
+      "SrcEarnCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "job_change_reason_code",
+    "display_name": "Job Change Reason",
+    "hub_type": "job_change_reason",
+    "is_hub": true,
+    "column_patterns": [
+      "TermReason",
+      "Reason"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "leave_reason_code",
+    "display_name": "Leave Reason",
+    "hub_type": "leave_reason",
+    "is_hub": true,
+    "column_patterns": [
+      "LeaveReason"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "earning_group_code",
+    "display_name": "Earning Group",
+    "hub_type": "earning_group",
+    "is_hub": true,
+    "column_patterns": [
+      "EarnGroupCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "employee_type_code",
+    "display_name": "Employee Type",
+    "hub_type": "employee_type",
+    "is_hub": true,
+    "column_patterns": [
+      "EmpType",
+      "EmployeeType"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "job_code_code",
+    "display_name": "Job Code",
+    "hub_type": "job_code",
+    "is_hub": true,
+    "column_patterns": [
+      "JobCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "pay_group_code",
+    "display_name": "Pay Group",
+    "hub_type": "pay_group",
+    "is_hub": true,
+    "column_patterns": [
+      "PayGroup"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "shift_code",
+    "display_name": "Shift",
+    "hub_type": "shift",
+    "is_hub": true,
+    "column_patterns": [
+      "ShiftCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "benefit_option_code",
+    "display_name": "Benefit Option",
+    "hub_type": "benefit_option",
+    "is_hub": true,
+    "column_patterns": [
+      "BenOption"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "tax_code",
+    "display_name": "Tax",
+    "hub_type": "tax",
+    "is_hub": true,
+    "column_patterns": [
+      "TaxCode",
+      "SrcTaxCode",
+      "Tax Code"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "award_code",
+    "display_name": "Award",
+    "hub_type": "award",
+    "is_hub": true,
+    "column_patterns": [
+      "AwardCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "provider_code",
+    "display_name": "Provider",
+    "hub_type": "provider",
+    "is_hub": true,
+    "column_patterns": [
+      "AwardProvider",
+      "LicenseProvider",
+      "Provider"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "school_code",
+    "display_name": "School",
+    "hub_type": "school",
+    "is_hub": true,
+    "column_patterns": [
+      "School"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "license_code",
+    "display_name": "License",
+    "hub_type": "license",
+    "is_hub": true,
+    "column_patterns": [
+      "LicenseID"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "property_code",
+    "display_name": "Property",
+    "hub_type": "property",
+    "is_hub": true,
+    "column_patterns": [
+      "PropertyID"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "skill_code",
+    "display_name": "Skill",
+    "hub_type": "skill",
+    "is_hub": true,
+    "column_patterns": [
+      "SkillID"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "test_code",
+    "display_name": "Test",
+    "hub_type": "test",
+    "is_hub": true,
+    "column_patterns": [
+      "TestCode"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "course_code",
+    "display_name": "Course",
+    "hub_type": "course",
+    "is_hub": true,
+    "column_patterns": [
+      "CourseID"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "military_era_code",
+    "display_name": "Military Era",
+    "hub_type": "military_era",
+    "is_hub": true,
+    "column_patterns": [
+      "VeteranOf"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "military_branch_code",
+    "display_name": "Military Branch",
+    "hub_type": "military_branch",
+    "is_hub": true,
+    "column_patterns": [
+      "Branch"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "nationality_code",
+    "display_name": "Nationality",
+    "hub_type": "nationality",
+    "is_hub": true,
+    "column_patterns": [
+      "Nationality1",
+      "Nationality2",
+      "Nationality3"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "employee_status_code",
+    "display_name": "Employee Status",
+    "hub_type": "employee_status",
+    "is_hub": true,
+    "column_patterns": [
+      "EmployeeStatus"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "salary_grade_code",
+    "display_name": "Salary Grade",
+    "hub_type": "salary_grade",
+    "is_hub": true,
+    "column_patterns": [
+      "SalaryGrade"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "rating_code",
+    "display_name": "Rating",
+    "hub_type": "rating",
+    "is_hub": true,
+    "column_patterns": [
+      "Rating"
+    ],
+    "source": "UKG_BRIT_v2"
+  },
+  {
+    "semantic_type": "review_type_code",
+    "display_name": "Review Type",
+    "hub_type": "review_type",
+    "is_hub": true,
+    "column_patterns": [
+      "ReviewType"
+    ],
+    "source": "UKG_BRIT_v2"
+  }
+]
