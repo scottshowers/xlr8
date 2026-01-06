@@ -19,7 +19,7 @@ import {
   Database, FileSpreadsheet, FileText, Link2, ChevronDown, ChevronRight, ChevronUp,
   ArrowLeft, RefreshCw, CheckCircle, AlertTriangle, XCircle, Key, Loader2,
   Shield, Play, Folder, BookOpen, Code, Trash2, Edit3, Sparkles, Eye, Edit2,
-  Search, ClipboardList, BarChart3, Tags
+  Search, ClipboardList, BarChart3, Tags, Network
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -28,6 +28,9 @@ import api from '../services/api';
 
 // NEW: Import ClassificationPanel
 import ClassificationPanel, { ChunkPanel } from '../components/ClassificationPanel';
+
+// NEW: Import ContextGraph
+import ContextGraph from '../components/ContextGraph';
 
 // Import column splitter for Data view
 import ClickToSplit from '../components/ClickToSplit';
@@ -1330,6 +1333,7 @@ export default function DataExplorer() {
   // UPDATED: Added classification tab with tooltips
   const tabs = [
     { id: 'tables', label: 'Tables & Fields', icon: FileSpreadsheet, tooltip: 'Browse all tables and their columns. View fill rates and data types.' },
+    { id: 'context-graph', label: 'Context Graph', icon: Network, tooltip: 'View hub/spoke relationships that power intelligent joins and queries.' },
     { id: 'classification', label: 'Classification', icon: Eye, tooltip: 'See how columns are classified (PII, categorical, numeric) and their data quality.' },
     { id: 'relationships', label: 'Data Model', icon: Link2, tooltip: 'View, verify, and test relationships. Confirm join columns between tables.' },
     { id: 'compliance', label: 'Compliance', icon: Shield, tooltip: 'Run compliance checks against loaded rules. View gaps and recommendations.' },
@@ -1781,6 +1785,19 @@ export default function DataExplorer() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Context Graph Tab */}
+      {activeTab === 'context-graph' && (
+        <div style={{ 
+          background: c.cardBg, 
+          border: `1px solid ${c.border}`, 
+          borderRadius: 10, 
+          padding: '1.5rem',
+          maxWidth: '1200px'
+        }}>
+          <ContextGraph project={currentProject?.name || currentProject} />
         </div>
       )}
 
