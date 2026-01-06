@@ -230,9 +230,11 @@ class SQLGenerator:
         """
         Generate SQL for a question.
         
+        v3.0: Uses entity_scope from context to add scoping filters.
+        
         Args:
             question: User's question
-            context: Analysis context (domains, tables, etc.)
+            context: Analysis context (domains, tables, entity_scope, etc.)
             
         Returns:
             Dict with sql, table, query_type, all_columns
@@ -255,6 +257,9 @@ class SQLGenerator:
         
         q_lower = question.lower()
         
+        # v3.0: Extract entity scope from context
+        entity_scope = context.get('entity_scope') if context else None
+        
         # Select relevant tables
         if self.table_selector:
             relevant_tables = self.table_selector.select(tables, question)
@@ -265,10 +270,86 @@ class SQLGenerator:
         if self._is_simple_query(question) and relevant_tables:
             result = self._generate_simple(question, relevant_tables[0], orchestrator)
             if result:
+                # v3.0: Apply entity scope filter
+                if entity_scope:
+                    result = self._apply_entity_scope(result, entity_scope)
                 return result
         
         # Complex query path
-        return self._generate_complex(question, relevant_tables, orchestrator, q_lower)
+        result = self._generate_complex(question, relevant_tables, orchestrator, q_lower)
+        
+        # v3.0: Apply entity scope filter
+        if result and entity_scope:
+            result = self._apply_entity_scope(result, entity_scope)
+        
+        return result
+    
+    def _apply_entity_scope(self, result: Dict, entity_scope: Dict) -> Dict:
+        """
+        Apply entity scoping filter to generated SQL.
+        
+        Uses Context Graph to find the scoping column in the target table
+        and adds a WHERE clause.
+        
+        Args:
+            result: SQL generation result with 'sql' key
+            entity_scope: Dict with semantic_type, value, hub_table, hub_column
+        """
+        sql = result.get('sql', '')
+        if not sql:
+            return result
+        
+        semantic_type = entity_scope.get('semantic_type')
+        scope_value = entity_scope.get('value')
+        hub_column = entity_scope.get('hub_column')
+        
+        if not semantic_type or not scope_value:
+            return result
+        
+        # Find the scoping column in the target table(s)
+        # Look for columns with matching semantic_type in _column_mappings
+        target_table = result.get('table', '')
+        
+        try:
+            if self.handler and target_table:
+                # Find column in target table that matches this semantic type
+                scope_col = self.handler.conn.execute("""
+                    SELECT column_name FROM _column_mappings
+                    WHERE LOWER(table_name) = LOWER(?)
+                    AND semantic_type = ?
+                    LIMIT 1
+                """, [target_table, semantic_type]).fetchone()
+                
+                if scope_col:
+                    col_name = scope_col[0]
+                    # Add WHERE clause
+                    scope_filter = f'"{col_name}" = \'{scope_value}\''
+                    sql = self._inject_where_clause(sql, scope_filter)
+                    result['sql'] = sql
+                    result['entity_scope_applied'] = {
+                        'column': col_name,
+                        'value': scope_value,
+                        'semantic_type': semantic_type
+                    }
+                    logger.warning(f"[SQL-GEN] Applied entity scope: {col_name}='{scope_value}'")
+                else:
+                    # Fallback: try hub_column directly if table has it
+                    if hub_column:
+                        columns = result.get('all_columns', set())
+                        if hub_column in columns or hub_column.lower() in {c.lower() for c in columns}:
+                            scope_filter = f'"{hub_column}" = \'{scope_value}\''
+                            sql = self._inject_where_clause(sql, scope_filter)
+                            result['sql'] = sql
+                            result['entity_scope_applied'] = {
+                                'column': hub_column,
+                                'value': scope_value,
+                                'semantic_type': semantic_type
+                            }
+                            logger.warning(f"[SQL-GEN] Applied entity scope (fallback): {hub_column}='{scope_value}'")
+        except Exception as e:
+            logger.debug(f"[SQL-GEN] Entity scope application failed: {e}")
+        
+        return result
     
     def _get_orchestrator(self):
         """Get or create LLMOrchestrator."""
