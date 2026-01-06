@@ -2186,12 +2186,12 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Compute hub/spoke relationships for the context graph.
         
-        DATA-DRIVEN APPROACH (v2.0):
+        DATA-DRIVEN APPROACH (v3.0):
         ============================
-        OLD: Vocabulary → Semantic Type → Hub Candidate → Check Data
-        NEW: Data Patterns → Hub Candidate → Value Matching → Vocabulary Labels
-        
-        The data determines what's a hub. Vocabulary just provides labels.
+        Changes from v2.0:
+        - MIN_HUB_CARDINALITY: 3 → 1 (small config tables are valid hubs)
+        - Smarter key column selection: prefer column matching entity_type
+        - Better scoring: boost when key column matches entity name
         
         Algorithm:
         1. Identify hub candidates from DATA PATTERNS (not vocabulary)
@@ -2201,12 +2201,12 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         Returns:
             Dict with stats about the computed graph
         """
-        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-DRIVEN v2.0)")
+        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-DRIVEN v3.0)")
         
         # Configurable thresholds
         HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
         MIN_COVERAGE_PCT = 20             # Minimum overlap for relationship  
-        MIN_HUB_CARDINALITY = 3           # Skip hubs with fewer values
+        MIN_HUB_CARDINALITY = 1           # v3.0: Allow single-row config tables
         MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
         
         try:
@@ -2238,7 +2238,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # =================================================================
             # STEP 2: Score each table as potential hub candidate
             # =================================================================
-            hub_candidates = []  # List of (table_name, key_column, score, entity_type, category, truth_type)
+            hub_candidates = []
             
             for table_name, file_name, entity_type, category, row_count, truth_type in tables:
                 try:
@@ -2252,60 +2252,111 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     if not col_names:
                         continue
                     
-                    # Look for key column with expanding patterns
+                    # =================================================
+                    # v3.0: SMARTER KEY COLUMN SELECTION
+                    # Priority order:
+                    # 1. Column that matches entity_type + "_code" (e.g., bank_code for banks)
+                    # 2. Column that contains entity singular (e.g., bank in bank_code)
+                    # 3. Generic code/id columns
+                    # 4. Fallback patterns
+                    # =================================================
+                    
                     key_column = None
+                    key_column_score_boost = 0
                     has_description = False
                     
                     # Get singular form of entity_type for matching
                     entity_singular = None
+                    entity_singular_clean = None
                     if entity_type:
-                        et = entity_type.lower()
+                        et = entity_type.lower().strip()
+                        # Handle common pluralization patterns
                         if et.endswith('ies'):
-                            entity_singular = et[:-3] + 'y'
+                            entity_singular = et[:-3] + 'y'  # companies → company
                         elif et.endswith('ses'):
-                            entity_singular = et[:-2]
+                            entity_singular = et[:-2]  # statuses → status
                         elif et.endswith('s') and not et.endswith('ss'):
-                            entity_singular = et[:-1]
+                            entity_singular = et[:-1]  # banks → bank
                         else:
                             entity_singular = et
+                        
+                        # Also handle underscored versions
+                        entity_singular_clean = entity_singular.replace('_', '')
                     
-                    for col in col_names:
-                        # Primary patterns: explicit code/id columns
-                        if col == 'code' or col.endswith('_code') or col.endswith('_id'):
-                            if not key_column:
+                    # PRIORITY 1: Exact match - entity_singular + "_code"
+                    # e.g., for entity_type="banks", look for "bank_code"
+                    if entity_singular:
+                        target_col = f"{entity_singular}_code"
+                        target_col_clean = f"{entity_singular_clean}_code" if entity_singular_clean else None
+                        
+                        for col in col_names:
+                            col_clean = col.replace('_', '')
+                            if col == target_col or (target_col_clean and col_clean == target_col_clean):
                                 key_column = col
-                        # Description column patterns
-                        if 'description' in col or 'name' in col or 'label' in col or col == 'desc':
-                            has_description = True
+                                key_column_score_boost = 3  # Strong match
+                                break
                     
-                    # Secondary: Check for entity_type in column name
-                    # e.g., entity_type="unions" → look for column containing "union"
+                    # PRIORITY 2: Column contains entity singular + code suffix
+                    # e.g., for entity_type="tax_groups", match "tax_group_code"
                     if not key_column and entity_singular:
                         for col in col_names:
-                            if entity_singular in col or col == entity_singular:
+                            if entity_singular in col and col.endswith('_code'):
                                 key_column = col
+                                key_column_score_boost = 2
                                 break
                     
-                    # Tertiary: Common key column names
+                    # PRIORITY 3: Column contains entity singular (without _code suffix)
+                    if not key_column and entity_singular:
+                        for col in col_names:
+                            if col.endswith('_code') and entity_singular_clean and entity_singular_clean in col.replace('_', ''):
+                                key_column = col
+                                key_column_score_boost = 2
+                                break
+                    
+                    # PRIORITY 4: Generic *_code columns (but NOT country_code, state_code as primary)
+                    # These are often foreign keys, not the primary key
+                    secondary_codes = {'country_code', 'state_code', 'state_province_code', 'stateprovince_code'}
                     if not key_column:
                         for col in col_names:
-                            if col in ['id', 'type', 'status', 'number', 'num']:
+                            if col.endswith('_code') and col not in secondary_codes:
                                 key_column = col
+                                key_column_score_boost = 1
                                 break
                     
-                    # Quaternary: Columns containing common key indicators
+                    # PRIORITY 5: Plain "code" column
+                    if not key_column:
+                        if 'code' in col_names:
+                            key_column = 'code'
+                            key_column_score_boost = 1
+                    
+                    # PRIORITY 6: *_id columns
+                    if not key_column:
+                        for col in col_names:
+                            if col.endswith('_id') or col == 'id':
+                                key_column = col
+                                key_column_score_boost = 1
+                                break
+                    
+                    # PRIORITY 7: Columns with common key indicators
                     if not key_column:
                         for col in col_names:
                             if '_number' in col or '_num' in col or '_no' in col:
                                 key_column = col
                                 break
                     
-                    # Last resort: First column that's not a description
+                    # PRIORITY 8: First non-description column
                     if not key_column and col_names:
+                        desc_patterns = ['description', 'name', 'label', 'desc', 'date', 'time', 'created', 'updated']
                         for col in col_names:
-                            if not any(x in col for x in ['description', 'name', 'label', 'desc', 'date', 'time', 'created', 'updated']):
+                            if not any(p in col for p in desc_patterns):
                                 key_column = col
                                 break
+                    
+                    # Check for description column
+                    for col in col_names:
+                        if 'description' in col or 'name' in col or 'label' in col or col == 'desc':
+                            has_description = True
+                            break
                     
                     if not key_column:
                         continue  # Can't be a hub without a key column
@@ -2337,16 +2388,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     # =================================================
                     score = 0
                     
-                    # +2: Has code/id column with explicit suffix
+                    # v3.0: Add key column score boost (0-3 based on match quality)
+                    score += key_column_score_boost
+                    
+                    # +2: Has explicit code column pattern
                     if key_column == 'code' or key_column.endswith('_code'):
                         score += 2
                     elif key_column.endswith('_id') or key_column == 'id':
-                        score += 1
-                    # +2: Key column contains entity_type (e.g., "union" in unions table)
-                    elif entity_singular and entity_singular in key_column:
-                        score += 2
-                    # +1: Key column has number/num pattern
-                    elif '_number' in key_column or '_num' in key_column:
                         score += 1
                     
                     # +2: Has description/name column
@@ -2387,7 +2435,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'truth_type': truth_type,
                             'file_name': file_name
                         })
-                        logger.debug(f"[CONTEXT-GRAPH] Hub candidate: {table_name}.{key_column} (score={score}, card={cardinality})")
+                        logger.debug(f"[CONTEXT-GRAPH] Hub candidate: {table_name}.{key_column} (score={score}, card={cardinality}, entity={entity_type})")
                     
                 except Exception as table_err:
                     logger.debug(f"[CONTEXT-GRAPH] Error analyzing {table_name}: {table_err}")
@@ -2435,9 +2483,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             
             final_hubs = []
             for sem_type, candidates in hubs_by_type.items():
-                # Sort: prefer configuration, then highest cardinality
+                # Sort: prefer configuration, then highest score, then highest cardinality
                 candidates.sort(key=lambda x: (
                     x['truth_type'] == 'configuration',  # True sorts after False
+                    x['score'],
                     x['cardinality']
                 ), reverse=True)
                 
@@ -2489,7 +2538,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         }
             
             # For each hub, find matching spokes
-            relationships = []  # (hub, spoke_table, spoke_column, coverage_pct, is_subset)
+            relationships = []
             
             for hub in final_hubs:
                 hub_values = hub['values']
