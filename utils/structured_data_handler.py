@@ -1602,7 +1602,7 @@ class StructuredDataHandler:
             
             semantic_types_text = get_type_names_for_prompt()
             
-            # Build prompt for LLM - Uses semantic_vocabulary.py
+            # Build STRICT prompt for LLM - conservative matching
             # CONTEXT GRAPH: Include filename so "code" in "Earnings Codes.pdf" becomes "earnings_code"
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
@@ -1614,22 +1614,44 @@ COLUMN NAMES:
 SAMPLE DATA:
 {sample_str}
 
-IMPORTANT: Use the filename as context. For example:
-- A "code" column in "Earnings Codes.pdf" should be "earnings_code"
-- A "code" column in "Deduction Codes.xlsx" should be "deduction_code"  
-- A "code" column in "Tax Codes.csv" should be "tax_code"
-- A "code" column in "Job Codes" should be "job_code"
+CRITICAL RULES - BE CONSERVATIVE:
 
-For each column, identify if it matches one of these semantic types:
+1. ONLY tag a column if you are HIGHLY CONFIDENT it actually IS that semantic type.
+   - "company_code" column with values like "001", "002" → company_code ✓
+   - "code" column in ambiguous context → NONE (not enough info)
+
+2. DO NOT tag these as semantic types:
+   - Boolean/flag columns (is_exempt, is_active, inactive, futa_exempt) → NONE
+   - Currency codes like "USD", "CAD" → NONE (not amounts)
+   - Generic "code" columns without clear context → NONE
+   - "contact" or "name" fields that aren't specifically employee names → NONE
+   - ID numbers that aren't SSNs (tax IDs, FEIN, business numbers) → NONE
+   - Dates that aren't effective dates (created_at, modified_at) → NONE
+   - Generic counters or limits (fte_work_hours with 2 values) → NONE
+   - Columns where cardinality is very low (<5) in reference tables → NONE
+
+3. Use filename context ONLY for "code" columns:
+   - "code" in "Earnings Codes.pdf" → earning_code
+   - "code" in "Deduction Codes.xlsx" → deduction_code
+   - "code" in "Job Codes" → job_code
+
+4. Column name must CLOSELY MATCH the semantic type:
+   - "company_code" → company_code ✓
+   - "employer_type_code" → NONE (not the same as employee_type_code)
+   - "gl_account_number" → NONE (not company_code)
+
+5. Match ONLY these exact semantic types:
 {semantic_types_text}
 
-Respond with JSON array only, no explanation:
+6. When in doubt, use NONE. Wrong matches are worse than no matches.
+
+Respond with JSON array only:
 [
-  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  {{"column": "column_name", "semantic_type": "exact_type_or_NONE", "confidence": 0.0-1.0}},
   ...
 ]
 
-Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+Use confidence 0.95+ ONLY for exact column name matches like "company_code"→company_code."""
 
             # Use LLMOrchestrator - LOCAL FIRST (Mistral), Claude fallback
             try:
@@ -1663,11 +1685,18 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             valid_types = get_all_type_names() if get_all_type_names else set()
             
-            # Store mappings
+            # Store mappings - ONLY high confidence ones
+            MIN_CONFIDENCE_THRESHOLD = 0.80  # Skip mappings below this
+            
             for item in inferred:
                 col = item.get('column', '')
                 sem_type = item.get('semantic_type', 'NONE')
                 confidence = item.get('confidence', 0.5)
+                
+                # SKIP low confidence mappings entirely
+                if confidence < MIN_CONFIDENCE_THRESHOLD:
+                    logger.debug(f"[MAPPINGS] Skipped low-confidence ({confidence:.2f}) mapping: {col} → {sem_type}")
+                    continue
                 
                 # VALIDATE: Only accept types from the vocabulary
                 # Reject anything the LLM made up (e.g., "PAY & COMPENSATION", "Monetary amounts")
@@ -1682,7 +1711,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                     # Normalize to lowercase
                     sem_type = sem_type_lower
                     
-                    needs_review = confidence < 0.85
+                    needs_review = confidence < 0.90  # Tightened from 0.85
                     
                     mapping = {
                         'project': project,
@@ -1916,6 +1945,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
         try:
             # Step 1: Get all columns with semantic types, joined with their cardinality
             # Join _column_mappings with _column_profiles to get distinct_count and distinct_values
+            # ONLY use HIGH CONFIDENCE mappings for hub/spoke relationships
             columns = self.conn.execute("""
                 SELECT 
                     m.table_name,
@@ -1932,7 +1962,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 WHERE m.project = ?
                   AND m.semantic_type IS NOT NULL
                   AND m.semantic_type != 'NONE'
-                  AND m.confidence >= 0.7
+                  AND m.confidence >= 0.85
                 ORDER BY m.semantic_type, p.distinct_count DESC
             """, [project]).fetchall()
             
@@ -1958,6 +1988,8 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             spoke_count = 0
             
             # Step 3: For each semantic type, identify hub and update all columns
+            MIN_HUB_CARDINALITY = 5  # Hub must have at least this many unique values to be useful
+            
             for sem_type, cols in by_type.items():
                 if len(cols) < 2:
                     # Only one table has this type - no relationships
@@ -1966,6 +1998,12 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
                 # Sort by cardinality descending - first is the hub
                 cols.sort(key=lambda x: x['cardinality'], reverse=True)
                 hub = cols[0]
+                
+                # Skip if hub cardinality is too low - not useful for joins
+                if hub['cardinality'] < MIN_HUB_CARDINALITY:
+                    logger.debug(f"[CONTEXT-GRAPH] Skipping {sem_type}: hub cardinality {hub['cardinality']} < {MIN_HUB_CARDINALITY}")
+                    continue
+                
                 spokes = cols[1:]
                 
                 hub_values = hub['values']
@@ -2297,7 +2335,7 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             semantic_types_text = get_type_names_for_prompt()
             
-            # Build prompt for LLM - Uses semantic_vocabulary.py
+            # Build STRICT prompt for LLM - conservative matching (threaded version)
             # CONTEXT GRAPH: Include filename so "code" in "Earnings Codes.pdf" becomes "earnings_code"
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
@@ -2309,22 +2347,44 @@ COLUMN NAMES:
 SAMPLE DATA:
 {sample_str}
 
-IMPORTANT: Use the filename as context. For example:
-- A "code" column in "Earnings Codes.pdf" should be "earnings_code"
-- A "code" column in "Deduction Codes.xlsx" should be "deduction_code"  
-- A "code" column in "Tax Codes.csv" should be "tax_code"
-- A "code" column in "Job Codes" should be "job_code"
+CRITICAL RULES - BE CONSERVATIVE:
 
-For each column, identify if it matches one of these semantic types:
+1. ONLY tag a column if you are HIGHLY CONFIDENT it actually IS that semantic type.
+   - "company_code" column with values like "001", "002" → company_code ✓
+   - "code" column in ambiguous context → NONE (not enough info)
+
+2. DO NOT tag these as semantic types:
+   - Boolean/flag columns (is_exempt, is_active, inactive, futa_exempt) → NONE
+   - Currency codes like "USD", "CAD" → NONE (not amounts)
+   - Generic "code" columns without clear context → NONE
+   - "contact" or "name" fields that aren't specifically employee names → NONE
+   - ID numbers that aren't SSNs (tax IDs, FEIN, business numbers) → NONE
+   - Dates that aren't effective dates (created_at, modified_at) → NONE
+   - Generic counters or limits (fte_work_hours with 2 values) → NONE
+   - Columns where cardinality is very low (<5) in reference tables → NONE
+
+3. Use filename context ONLY for "code" columns:
+   - "code" in "Earnings Codes.pdf" → earning_code
+   - "code" in "Deduction Codes.xlsx" → deduction_code
+   - "code" in "Job Codes" → job_code
+
+4. Column name must CLOSELY MATCH the semantic type:
+   - "company_code" → company_code ✓
+   - "employer_type_code" → NONE (not the same as employee_type_code)
+   - "gl_account_number" → NONE (not company_code)
+
+5. Match ONLY these exact semantic types:
 {semantic_types_text}
 
-Respond with JSON array only, no explanation:
+6. When in doubt, use NONE. Wrong matches are worse than no matches.
+
+Respond with JSON array only:
 [
-  {{"column": "column_name", "semantic_type": "type_or_NONE", "confidence": 0.0-1.0}},
+  {{"column": "column_name", "semantic_type": "exact_type_or_NONE", "confidence": 0.0-1.0}},
   ...
 ]
 
-Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely matches, below 0.7 for uncertain."""
+Use confidence 0.95+ ONLY for exact column name matches like "company_code"→company_code."""
 
             # Use LLMOrchestrator - LOCAL FIRST (Mistral), Claude fallback
             try:
@@ -2347,14 +2407,42 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             
             logger.info(f"[MAPPINGS] Using {result.get('model_used', 'unknown')} for column inference (threaded)")
             
-            # Store mappings using thread connection
+            # Get valid semantic types for validation
+            try:
+                from backend.utils.semantic_vocabulary import get_all_type_names
+            except ImportError:
+                try:
+                    from utils.semantic_vocabulary import get_all_type_names
+                except ImportError:
+                    get_all_type_names = None
+            
+            valid_types = get_all_type_names() if get_all_type_names else set()
+            
+            # Store mappings - ONLY high confidence ones
+            MIN_CONFIDENCE_THRESHOLD = 0.80  # Skip mappings below this
+            
             for item in inferred:
                 col = item.get('column', '')
                 sem_type = item.get('semantic_type', 'NONE')
                 confidence = item.get('confidence', 0.5)
                 
+                # SKIP low confidence mappings entirely
+                if confidence < MIN_CONFIDENCE_THRESHOLD:
+                    logger.debug(f"[MAPPINGS] Skipped low-confidence ({confidence:.2f}) mapping: {col} → {sem_type}")
+                    continue
+                
                 if sem_type and sem_type != 'NONE':
-                    needs_review = confidence < 0.85
+                    sem_type_lower = sem_type.lower().strip()
+                    
+                    # Check if it's a valid type
+                    if valid_types and sem_type_lower not in valid_types:
+                        logger.debug(f"[MAPPINGS] Rejected invalid semantic type '{sem_type}' for {col}")
+                        continue
+                    
+                    # Normalize to lowercase
+                    sem_type = sem_type_lower
+                    
+                    needs_review = confidence < 0.90  # Tightened from 0.85
                     
                     mapping = {
                         'project': project,
