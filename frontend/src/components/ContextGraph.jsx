@@ -225,6 +225,8 @@ export default function ContextGraph({ project }) {
   const grouped = getGroupedData();
   const summary = data.summary || {};
   const validFKCount = data.relationships?.filter(r => r.is_valid_fk).length || 0;
+  const hasRealityData = summary.has_reality_data || false;
+  const hubsAwaitingReality = summary.hubs_awaiting_reality || data.hubs?.length || 0;
 
   return (
     <div>
@@ -248,7 +250,7 @@ export default function ContextGraph({ project }) {
               Context Graph
             </h3>
             <p style={{ margin: 0, fontSize: '0.85rem', color: c.textMuted }}>
-              {summary.hub_count} hubs • {summary.spoke_count} relationships • {summary.semantic_types?.length} semantic types
+              {summary.hub_count || 0} hub{(summary.hub_count || 0) !== 1 ? 's' : ''} • {summary.spoke_count || 0} relationship{(summary.spoke_count || 0) !== 1 ? 's' : ''} • {(summary.semantic_types || []).length} semantic type{(summary.semantic_types || []).length !== 1 ? 's' : ''}
             </p>
           </div>
         </div>
@@ -298,6 +300,26 @@ export default function ContextGraph({ project }) {
           </button>
         </div>
       </div>
+
+      {/* Status Banner - No Reality Data */}
+      {!hasRealityData && (
+        <div style={{
+          padding: '0.75rem 1rem',
+          background: `${c.warning}15`,
+          border: `1px solid ${c.warning}40`,
+          borderRadius: 6,
+          marginBottom: '1rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.75rem'
+        }}>
+          <AlertCircle size={18} style={{ color: c.warning }} />
+          <div style={{ fontSize: '0.85rem' }}>
+            <strong style={{ color: c.text }}>Configuration Only</strong>
+            <span style={{ color: c.textMuted }}> — {hubsAwaitingReality} hub{hubsAwaitingReality !== 1 ? 's' : ''} ready. Upload employee/payroll data (Reality) to see coverage and gaps.</span>
+          </div>
+        </div>
+      )}
 
       {/* Legend */}
       <div style={{ 
@@ -481,9 +503,10 @@ export default function ContextGraph({ project }) {
                     padding: '1rem', 
                     textAlign: 'center', 
                     color: c.textMuted,
-                    fontSize: '0.85rem'
+                    fontSize: '0.85rem',
+                    background: `${c.warning}08`
                   }}>
-                    No spoke relationships found
+                    <span style={{ color: c.warning }}>⏳</span> Awaiting Reality data — upload employee/payroll files to see coverage
                   </div>
                 )}
               </div>
@@ -495,7 +518,7 @@ export default function ContextGraph({ project }) {
       {/* Summary Stats */}
       <div style={{ 
         display: 'grid', 
-        gridTemplateColumns: 'repeat(3, 1fr)',
+        gridTemplateColumns: hasRealityData ? 'repeat(3, 1fr)' : 'repeat(2, 1fr)',
         gap: '1rem',
         marginTop: '1.5rem',
         padding: '1rem 0',
@@ -503,22 +526,35 @@ export default function ContextGraph({ project }) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.royalPurple }}>
-            {summary.hub_count}
+            {summary.hub_count || 0}
           </div>
-          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Hub Tables</div>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.electricBlue }}>
-            {summary.spoke_count}
+          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+            {hasRealityData ? 'Hub Tables' : 'Hub Candidates'}
           </div>
-          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Relationships</div>
         </div>
-        <div style={{ textAlign: 'center' }}>
-          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.success }}>
-            {validFKCount}
+        {hasRealityData ? (
+          <>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.electricBlue }}>
+                {summary.spoke_count || 0}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Reality Connections</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.success }}>
+                {validFKCount}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Valid FKs</div>
+            </div>
+          </>
+        ) : (
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.warning }}>
+              {hubsAwaitingReality}
+            </div>
+            <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Awaiting Reality</div>
           </div>
-          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Valid FKs</div>
-        </div>
+        )}
       </div>
 
       {/* Info Box */}
@@ -535,10 +571,11 @@ export default function ContextGraph({ project }) {
       }}>
         <Info size={16} style={{ color: c.accent, flexShrink: 0, marginTop: 2 }} />
         <div>
-          <strong style={{ color: c.text }}>How it works:</strong> Each semantic type (like company_code) 
-          has one <strong>hub</strong> table with the most complete set of values. Other tables with the same 
-          semantic type become <strong>spokes</strong> that reference the hub. This enables automatic joins 
-          and gap detection.
+          <strong style={{ color: c.text }}>How it works:</strong> <strong>Configuration</strong> tables 
+          (code lookups, mappings) become <strong>hubs</strong> — the source of truth for each semantic type. 
+          When you upload <strong>Reality</strong> data (employee records, payroll), those tables become 
+          <strong>spokes</strong> that reference the hubs. This enables gap detection: 
+          "13 codes configured, 6 in use by employees."
         </div>
       </div>
     </div>
