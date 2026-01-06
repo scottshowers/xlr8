@@ -621,6 +621,11 @@ class StructuredDataHandler:
                     self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN is_subset BOOLEAN")
                     logger.warning("[MIGRATION] Context graph columns added to _column_mappings")
                 
+                # DATA-DRIVEN: is_discovered for auto-detected types not in vocabulary
+                if 'is_discovered' not in mapping_col_names:
+                    logger.warning("[MIGRATION] Adding is_discovered column to _column_mappings")
+                    self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN is_discovered BOOLEAN DEFAULT FALSE")
+                
                 self.conn.commit()
             except Exception as mig_e:
                 logger.warning(f"[MIGRATION] Column check/add for _column_mappings: {mig_e}")
@@ -2181,264 +2186,372 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Compute hub/spoke relationships for the context graph.
         
-        THE CONTEXT GRAPH is THE core intelligence of the platform.
+        DATA-DRIVEN APPROACH (v2.0):
+        ============================
+        OLD: Vocabulary → Semantic Type → Hub Candidate → Check Data
+        NEW: Data Patterns → Hub Candidate → Value Matching → Vocabulary Labels
         
-        NEW MODEL (Config=Hub, Reality=Spoke):
-        - Configuration tables (truth_type='configuration') = HUBS (sources of truth)
-        - Reality tables (truth_type='reality') = SPOKES (reference the hubs)
+        The data determines what's a hub. Vocabulary just provides labels.
         
-        This means:
-        - Config tables don't compete on cardinality - they ARE the source
-        - Reality tables reference Config tables for validation
-        - "13 configured, 6 in use" comes from Reality→Config coverage
-        
-        With only Config data: Shows hub candidates ready for validation
-        With Reality data: Shows actual coverage and gaps
+        Algorithm:
+        1. Identify hub candidates from DATA PATTERNS (not vocabulary)
+        2. Find spokes by VALUE MATCHING across all columns
+        3. Apply vocabulary labels (auto-add if not found)
         
         Returns:
             Dict with stats about the computed graph
         """
-        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project}")
+        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-DRIVEN v2.0)")
+        
+        # Configurable thresholds
+        HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
+        MIN_COVERAGE_PCT = 20             # Minimum overlap for relationship  
+        MIN_HUB_CARDINALITY = 3           # Skip hubs with fewer values
+        MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
         
         try:
-            # Step 1: Get all columns with semantic types, joined with truth_type
-            # ONLY include "_code" semantic types - these are explicit lookups
-            # Generic types (amount, rate, date) are too loose for hub/spoke
-            columns = self.conn.execute("""
+            from collections import defaultdict
+            
+            # =================================================================
+            # STEP 1: Get all tables and their metadata for this project
+            # =================================================================
+            tables = self.conn.execute("""
                 SELECT 
-                    m.table_name,
-                    m.original_column,
-                    m.semantic_type,
-                    m.confidence,
-                    p.distinct_count,
-                    p.distinct_values,
+                    s.table_name,
+                    s.file_name,
+                    s.entity_type,
+                    s.category,
+                    s.row_count,
                     COALESCE(s.truth_type, 'unknown') as truth_type
-                FROM _column_mappings m
-                LEFT JOIN _column_profiles p 
-                    ON m.project = p.project 
-                    AND m.table_name = p.table_name 
-                    AND m.original_column = p.column_name
-                LEFT JOIN _schema_metadata s
-                    ON m.project = s.project
-                    AND m.table_name = s.table_name
-                WHERE m.project = ?
-                  AND m.semantic_type IS NOT NULL
-                  AND m.semantic_type != 'NONE'
-                  AND m.semantic_type LIKE '%_code'
-                  AND m.confidence >= 0.85
-                ORDER BY m.semantic_type, p.distinct_count DESC
+                FROM _schema_metadata s
+                WHERE s.project = ? 
+                  AND s.is_current = TRUE
+                  AND s.table_name NOT LIKE '\\_%' ESCAPE '\\'
             """, [project]).fetchall()
             
-            if not columns:
-                logger.warning(f"[CONTEXT-GRAPH] No semantic mappings found for {project}")
+            if not tables:
+                logger.warning(f"[CONTEXT-GRAPH] No tables found for {project}")
                 return {'hubs': 0, 'spokes': 0, 'semantic_types': 0}
             
-            # Step 2: Validate semantic type matches - column name should relate to the type
-            # This filters out bad LLM inferences like gl_segment → company_code
-            # BUT: Trust high-confidence mappings from entity_type context
-            def column_matches_type(column_name: str, semantic_type: str, confidence: float) -> bool:
-                """
-                Check if column name reasonably matches the semantic type.
-                
-                DYNAMIC: For high-confidence mappings (>=0.90), trust them even if 
-                column name is generic like "code". These come from entity_type context
-                where we KNOW the table is e.g. "termination_reasons" so "code" → 
-                "termination_reason_code" is correct.
-                """
-                # High confidence = trust it (entity_type inference)
-                if confidence >= 0.90:
-                    return True
-                
-                col = column_name.lower()
-                sem = semantic_type.lower().replace('_code', '').replace('_', '')
-                
-                # Direct match patterns for LOWER confidence mappings
-                # company_code: column should have "company", "comp", "co_code"
-                # earning_code: column should have "earn", "earning"
-                # job_code: column should have "job", "position"
-                # etc.
-                
-                type_patterns = {
-                    'company': ['company', 'comp_', 'co_code', '_co_'],
-                    'earning': ['earn', 'earnings'],
-                    'deduction': ['deduct', 'ded_', 'benefit'],
-                    'job': ['job', 'position'],
-                    'location': ['location', 'loc_', 'state', 'county', 'city'],
-                    'paygroup': ['pay_group', 'paygroup', 'paygrp'],
-                    'tax': ['tax', 'futa', 'suta', 'fica', 'sui'],
-                    'orglevel': ['org_level', 'org_', 'level'],
-                    'employeetype': ['employee_type', 'emp_type', 'ee_type'],
-                    'employmentstatus': ['status', 'employment'],
-                }
-                
-                patterns = type_patterns.get(sem, [sem])
-                return any(p in col for p in patterns)
+            logger.info(f"[CONTEXT-GRAPH] Found {len(tables)} tables to analyze")
             
-            # Step 3: Filter to only valid matches
-            valid_columns = []
-            for row in columns:
-                table_name, column_name, sem_type, confidence, distinct_count, distinct_values, truth_type = row
-                if column_matches_type(column_name, sem_type, confidence):
-                    valid_columns.append(row)
-                else:
-                    logger.debug(f"[CONTEXT-GRAPH] Skipping bad match: {column_name} → {sem_type} (confidence={confidence})")
+            # =================================================================
+            # STEP 2: Score each table as potential hub candidate
+            # =================================================================
+            hub_candidates = []  # List of (table_name, key_column, score, entity_type, category, truth_type)
             
-            columns = valid_columns
+            for table_name, file_name, entity_type, category, row_count, truth_type in tables:
+                try:
+                    # Get column info for this table
+                    columns = self.conn.execute(f"""
+                        PRAGMA table_info('{table_name}')
+                    """).fetchall()
+                    
+                    col_names = [c[1].lower() for c in columns if c[1] and not c[1].startswith('_')]
+                    
+                    if not col_names:
+                        continue
+                    
+                    # Look for "code" or "id" column (the key column)
+                    key_column = None
+                    has_description = False
+                    
+                    for col in col_names:
+                        # Key column patterns
+                        if col == 'code' or col.endswith('_code') or col.endswith('_id'):
+                            if not key_column:  # Take first match
+                                key_column = col
+                        # Description column patterns
+                        if 'description' in col or 'name' in col or 'label' in col or col == 'desc':
+                            has_description = True
+                    
+                    # If no explicit key, check for columns that LOOK like keys
+                    if not key_column:
+                        for col in col_names:
+                            if col in ['id', 'type', 'status']:
+                                key_column = col
+                                break
+                    
+                    if not key_column:
+                        continue  # Can't be a hub without a key column
+                    
+                    # Get cardinality of the key column
+                    try:
+                        card_result = self.conn.execute(f"""
+                            SELECT COUNT(DISTINCT "{key_column}") 
+                            FROM "{table_name}"
+                            WHERE "{key_column}" IS NOT NULL 
+                              AND TRIM(CAST("{key_column}" AS VARCHAR)) != ''
+                        """).fetchone()
+                        cardinality = card_result[0] if card_result else 0
+                    except Exception:
+                        cardinality = 0
+                    
+                    if cardinality < MIN_HUB_CARDINALITY or cardinality > MAX_HUB_CARDINALITY:
+                        continue
+                    
+                    # Calculate uniqueness ratio
+                    row_count = row_count or 0
+                    if row_count > 0:
+                        uniqueness = cardinality / row_count
+                    else:
+                        uniqueness = 0
+                    
+                    # =================================================
+                    # Score the table as a hub candidate
+                    # =================================================
+                    score = 0
+                    
+                    # +2: Has code/id column
+                    if key_column == 'code' or key_column.endswith('_code'):
+                        score += 2
+                    elif key_column.endswith('_id') or key_column == 'id':
+                        score += 1
+                    
+                    # +2: Has description/name column
+                    if has_description:
+                        score += 2
+                    
+                    # +2: High uniqueness (> 80%)
+                    if uniqueness > 0.8:
+                        score += 2
+                    elif uniqueness > 0.5:
+                        score += 1
+                    
+                    # +1: Reasonable size (< 2000 rows)
+                    if row_count < 2000:
+                        score += 1
+                    
+                    # +1: Entity type suggests reference table
+                    if entity_type:
+                        et_lower = entity_type.lower()
+                        if et_lower.endswith('_codes') or et_lower.endswith('_types') or \
+                           et_lower.endswith('_reasons') or et_lower.endswith('_groups') or \
+                           et_lower.endswith('s'):  # Plural suggests lookup
+                            score += 1
+                    
+                    # +1: truth_type = configuration
+                    if truth_type == 'configuration':
+                        score += 1
+                    
+                    # Check threshold
+                    if score >= HUB_PATTERN_SCORE_THRESHOLD:
+                        hub_candidates.append({
+                            'table_name': table_name,
+                            'key_column': key_column,
+                            'score': score,
+                            'cardinality': cardinality,
+                            'entity_type': entity_type,
+                            'category': category,
+                            'truth_type': truth_type,
+                            'file_name': file_name
+                        })
+                        logger.debug(f"[CONTEXT-GRAPH] Hub candidate: {table_name}.{key_column} (score={score}, card={cardinality})")
+                    
+                except Exception as table_err:
+                    logger.debug(f"[CONTEXT-GRAPH] Error analyzing {table_name}: {table_err}")
+                    continue
             
-            if not columns:
-                logger.warning(f"[CONTEXT-GRAPH] No valid semantic mappings after filtering for {project}")
+            logger.info(f"[CONTEXT-GRAPH] Found {len(hub_candidates)} hub candidates")
+            
+            if not hub_candidates:
                 return {'hubs': 0, 'spokes': 0, 'semantic_types': 0}
             
-            # Step 4: Separate into Config (hubs) and Reality (spokes) by semantic_type
-            from collections import defaultdict
-            config_by_type = defaultdict(list)  # Potential hubs
-            reality_by_type = defaultdict(list)  # Potential spokes
+            # =================================================================
+            # STEP 3: Get actual values for each hub candidate
+            # =================================================================
+            for hub in hub_candidates:
+                try:
+                    values_result = self.conn.execute(f"""
+                        SELECT DISTINCT LOWER(TRIM(CAST("{hub['key_column']}" AS VARCHAR))) as val
+                        FROM "{hub['table_name']}"
+                        WHERE "{hub['key_column']}" IS NOT NULL 
+                          AND TRIM(CAST("{hub['key_column']}" AS VARCHAR)) != ''
+                        LIMIT 5000
+                    """).fetchall()
+                    hub['values'] = {r[0] for r in values_result if r[0]}
+                except Exception:
+                    hub['values'] = set()
             
-            for row in columns:
-                table_name, column_name, sem_type, confidence, distinct_count, distinct_values, truth_type = row
-                
-                entry = {
-                    'table': table_name,
-                    'column': column_name,
-                    'confidence': confidence,
-                    'cardinality': distinct_count or 0,
-                    'values': self._parse_distinct_values(distinct_values),
-                    'truth_type': truth_type
-                }
-                
-                # Route based on truth_type
-                if truth_type == 'configuration':
-                    config_by_type[sem_type].append(entry)
-                elif truth_type == 'reality':
-                    reality_by_type[sem_type].append(entry)
-                else:
-                    # Unknown - use cardinality heuristic: high cardinality config tables
-                    # are likely code lookups, low cardinality might be reality
-                    # For now, treat as config candidate
-                    config_by_type[sem_type].append(entry)
+            # =================================================================
+            # STEP 4: Determine semantic type for each hub
+            # =================================================================
+            for hub in hub_candidates:
+                semantic_type = self._derive_semantic_type(
+                    hub['entity_type'], 
+                    hub['key_column'],
+                    hub['category']
+                )
+                hub['semantic_type'] = semantic_type
+                hub['is_discovered'] = not self._is_known_semantic_type(semantic_type)
             
+            # =================================================================
+            # STEP 5: Deduplicate hubs (same semantic_type → pick best)
+            # =================================================================
+            hubs_by_type = defaultdict(list)
+            for hub in hub_candidates:
+                hubs_by_type[hub['semantic_type']].append(hub)
+            
+            final_hubs = []
+            for sem_type, candidates in hubs_by_type.items():
+                # Sort: prefer configuration, then highest cardinality
+                candidates.sort(key=lambda x: (
+                    x['truth_type'] == 'configuration',  # True sorts after False
+                    x['cardinality']
+                ), reverse=True)
+                
+                final_hubs.append(candidates[0])
+                # Mark others as secondary
+                for secondary in candidates[1:]:
+                    secondary['is_secondary'] = True
+            
+            logger.info(f"[CONTEXT-GRAPH] {len(final_hubs)} unique hubs after deduplication")
+            
+            # =================================================================
+            # STEP 6: Find spokes by value matching
+            # =================================================================
+            # Get all columns from all tables (from _column_profiles for efficiency)
+            all_columns = self.conn.execute("""
+                SELECT 
+                    p.table_name,
+                    p.column_name,
+                    p.distinct_count,
+                    p.distinct_values,
+                    COALESCE(s.truth_type, 'unknown') as truth_type,
+                    s.entity_type,
+                    s.category,
+                    s.file_name
+                FROM _column_profiles p
+                LEFT JOIN _schema_metadata s 
+                    ON p.project = s.project AND p.table_name = s.table_name
+                WHERE p.project = ?
+                  AND p.distinct_count > 0
+                  AND p.distinct_count < 5000
+            """, [project]).fetchall()
+            
+            # Build lookup of column values (only for columns with cached values)
+            column_values_cache = {}
+            for table_name, col_name, distinct_count, distinct_values, truth_type, entity_type, category, file_name in all_columns:
+                if distinct_values:
+                    values = self._parse_distinct_values(distinct_values)
+                    if values:
+                        column_values_cache[(table_name, col_name)] = {
+                            'values': values,
+                            'cardinality': distinct_count or len(values),
+                            'truth_type': truth_type,
+                            'entity_type': entity_type,
+                            'category': category,
+                            'file_name': file_name
+                        }
+            
+            # For each hub, find matching spokes
+            relationships = []  # (hub, spoke_table, spoke_column, coverage_pct, is_subset)
+            
+            for hub in final_hubs:
+                hub_values = hub['values']
+                hub_cardinality = len(hub_values)
+                
+                if not hub_values:
+                    continue
+                
+                # Check every column for value overlap
+                for (table_name, col_name), col_info in column_values_cache.items():
+                    # Skip the hub itself
+                    if table_name == hub['table_name'] and col_name == hub['key_column']:
+                        continue
+                    
+                    spoke_values = col_info['values']
+                    if not spoke_values:
+                        continue
+                    
+                    # Calculate overlap
+                    overlap = len(spoke_values & hub_values)
+                    if overlap == 0:
+                        continue
+                    
+                    coverage_pct = (overlap / hub_cardinality * 100) if hub_cardinality > 0 else 0
+                    is_subset = spoke_values.issubset(hub_values)
+                    
+                    # Check thresholds
+                    if coverage_pct >= MIN_COVERAGE_PCT or is_subset:
+                        relationships.append({
+                            'hub': hub,
+                            'spoke_table': table_name,
+                            'spoke_column': col_name,
+                            'spoke_cardinality': col_info['cardinality'],
+                            'coverage_pct': round(coverage_pct, 2),
+                            'is_subset': is_subset,
+                            'truth_type': col_info['truth_type'],
+                            'entity_type': col_info['entity_type'],
+                            'file_name': col_info['file_name']
+                        })
+            
+            logger.info(f"[CONTEXT-GRAPH] Found {len(relationships)} spoke relationships")
+            
+            # =================================================================
+            # STEP 7: Update _column_mappings with hub/spoke data
+            # =================================================================
             hub_count = 0
             spoke_count = 0
-            hub_candidates = 0
             
-            MIN_HUB_CARDINALITY = 3  # Lowered - some config tables are small
-            
-            # Step 5: For each semantic type in Config, mark as hub
-            # If multiple config tables have same type, highest cardinality wins
-            for sem_type, configs in config_by_type.items():
-                if not configs:
-                    continue
-                
-                # Sort by cardinality - highest is the hub
-                configs.sort(key=lambda x: x['cardinality'], reverse=True)
-                hub = configs[0]
-                
-                # Skip if hub cardinality is too low
-                if hub['cardinality'] < MIN_HUB_CARDINALITY:
-                    logger.debug(f"[CONTEXT-GRAPH] Skipping {sem_type}: hub cardinality {hub['cardinality']} < {MIN_HUB_CARDINALITY}")
-                    continue
-                
-                hub_values = hub['values']
-                hub_cardinality = hub['cardinality']
-                
-                # Mark the hub
-                self.conn.execute("""
-                    UPDATE _column_mappings 
-                    SET is_hub = TRUE,
-                        hub_table = NULL,
-                        hub_column = NULL,
-                        hub_cardinality = ?,
-                        spoke_cardinality = NULL,
-                        coverage_pct = 100.0,
-                        is_subset = TRUE,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE project = ? 
-                      AND table_name = ? 
-                      AND original_column = ?
-                      AND semantic_type = ?
-                """, [hub_cardinality, project, hub['table'], hub['column'], sem_type])
+            # First, mark all hubs
+            for hub in final_hubs:
+                # Ensure mapping exists (upsert)
+                self._upsert_column_mapping(
+                    project=project,
+                    file_name=hub['file_name'],
+                    table_name=hub['table_name'],
+                    column_name=hub['key_column'],
+                    semantic_type=hub['semantic_type'],
+                    confidence=0.95,
+                    is_hub=True,
+                    hub_cardinality=hub['cardinality'],
+                    is_discovered=hub.get('is_discovered', False)
+                )
                 hub_count += 1
-                
-                # Check for Reality spokes with this semantic type
-                reality_spokes = reality_by_type.get(sem_type, [])
-                
-                if reality_spokes:
-                    # Mark Reality tables as spokes
-                    for spoke in reality_spokes:
-                        spoke_values = spoke['values']
-                        spoke_cardinality = spoke['cardinality']
-                        
-                        # Calculate coverage and subset
-                        if hub_values and spoke_values:
-                            overlap = len(spoke_values & hub_values)
-                            coverage_pct = (overlap / hub_cardinality * 100) if hub_cardinality > 0 else 0
-                            is_subset = spoke_values.issubset(hub_values)
-                        else:
-                            coverage_pct = 0
-                            is_subset = False
-                        
-                        self.conn.execute("""
-                            UPDATE _column_mappings 
-                            SET is_hub = FALSE,
-                                hub_table = ?,
-                                hub_column = ?,
-                                hub_cardinality = ?,
-                                spoke_cardinality = ?,
-                                coverage_pct = ?,
-                                is_subset = ?,
-                                updated_at = CURRENT_TIMESTAMP
-                            WHERE project = ? 
-                              AND table_name = ? 
-                              AND original_column = ?
-                              AND semantic_type = ?
-                        """, [
-                            hub['table'], hub['column'], hub_cardinality,
-                            spoke_cardinality, round(coverage_pct, 2), is_subset,
-                            project, spoke['table'], spoke['column'], sem_type
-                        ])
-                        spoke_count += 1
-                    
-                    logger.info(f"[CONTEXT-GRAPH] {sem_type}: hub={hub['table']}.{hub['column']} ({hub_cardinality} values), {len(reality_spokes)} reality spokes")
-                else:
-                    # No Reality data yet - just a hub candidate
-                    hub_candidates += 1
-                    logger.info(f"[CONTEXT-GRAPH] {sem_type}: hub candidate={hub['table']}.{hub['column']} ({hub_cardinality} values), awaiting Reality data")
-                
-                # Also mark other Config tables as secondary hubs (not spokes)
-                # They might be alternate code tables
-                for secondary in configs[1:]:
-                    self.conn.execute("""
-                        UPDATE _column_mappings 
-                        SET is_hub = FALSE,
-                            hub_table = ?,
-                            hub_column = ?,
-                            hub_cardinality = ?,
-                            spoke_cardinality = ?,
-                            coverage_pct = NULL,
-                            is_subset = NULL,
-                            updated_at = CURRENT_TIMESTAMP
-                        WHERE project = ? 
-                          AND table_name = ? 
-                          AND original_column = ?
-                          AND semantic_type = ?
-                    """, [
-                        hub['table'], hub['column'], hub_cardinality,
-                        secondary['cardinality'],
-                        project, secondary['table'], secondary['column'], sem_type
-                    ])
+            
+            # Then, mark all spokes
+            for rel in relationships:
+                hub = rel['hub']
+                self._upsert_column_mapping(
+                    project=project,
+                    file_name=rel['file_name'],
+                    table_name=rel['spoke_table'],
+                    column_name=rel['spoke_column'],
+                    semantic_type=hub['semantic_type'],
+                    confidence=0.85,
+                    is_hub=False,
+                    hub_table=hub['table_name'],
+                    hub_column=hub['key_column'],
+                    hub_cardinality=hub['cardinality'],
+                    spoke_cardinality=rel['spoke_cardinality'],
+                    coverage_pct=rel['coverage_pct'],
+                    is_subset=rel['is_subset'],
+                    is_discovered=hub.get('is_discovered', False)
+                )
+                spoke_count += 1
             
             self.conn.execute("CHECKPOINT")
             
+            # =================================================================
+            # STEP 8: Auto-add discovered types to vocabulary
+            # =================================================================
+            discovered_types = [h['semantic_type'] for h in final_hubs if h.get('is_discovered')]
+            if discovered_types:
+                logger.warning(f"[CONTEXT-GRAPH] Discovered {len(discovered_types)} new semantic types: {discovered_types}")
+                # Note: These are tracked via is_discovered flag
+                # UI can show them for user to name/confirm
+            
             result = {
                 'hubs': hub_count,
-                'hub_candidates': hub_candidates,  # Hubs awaiting Reality data
                 'spokes': spoke_count,
-                'semantic_types': len(config_by_type),
-                'total_mappings': len(columns),
-                'has_reality_data': len(reality_by_type) > 0
+                'semantic_types': len(final_hubs),
+                'discovered_types': len(discovered_types),
+                'total_candidates': len(hub_candidates),
+                'total_relationships': len(relationships)
             }
             
-            logger.warning(f"[CONTEXT-GRAPH] Complete: {hub_count} hubs ({hub_candidates} awaiting Reality), {spoke_count} spokes across {result['semantic_types']} semantic types")
+            logger.warning(f"[CONTEXT-GRAPH] Complete: {hub_count} hubs ({len(discovered_types)} discovered), {spoke_count} spokes across {len(final_hubs)} semantic types")
             return result
             
         except Exception as e:
@@ -2446,6 +2559,124 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             import traceback
             logger.error(traceback.format_exc())
             return {'hubs': 0, 'spokes': 0, 'semantic_types': 0, 'error': str(e)}
+    
+    def _derive_semantic_type(self, entity_type: str, column_name: str, category: str = None) -> str:
+        """
+        Derive semantic type from entity_type and column name.
+        
+        Pattern: entity_type (singularized) + column suffix = semantic_type
+        
+        Examples:
+        - entity_type="termination_reasons" + col="code" → "termination_reason_code"
+        - entity_type="pay_groups" + col="pay_group_code" → "pay_group_code"
+        - entity_type="earnings" + col="earnings_code" → "earning_code"
+        """
+        col = column_name.lower()
+        
+        # If column already looks like a semantic type, use it
+        if col.endswith('_code') and len(col) > 5:
+            return col
+        
+        if entity_type:
+            # Singularize entity_type
+            et = entity_type.lower().strip()
+            if et.endswith('ies'):
+                singular = et[:-3] + 'y'  # companies → company
+            elif et.endswith('ses'):
+                singular = et[:-2]  # statuses → status
+            elif et.endswith('s') and not et.endswith('ss'):
+                singular = et[:-1]  # earnings → earning
+            else:
+                singular = et
+            
+            # Build semantic type
+            if col == 'code' or col == 'id' or col == 'type':
+                return f"{singular}_code"
+            elif col.endswith('_code') or col.endswith('_id'):
+                return col
+            else:
+                return f"{singular}_{col}"
+        
+        # Fallback: just use column name
+        if col.endswith('_code'):
+            return col
+        return f"{col}_code"
+    
+    def _is_known_semantic_type(self, semantic_type: str) -> bool:
+        """Check if semantic type exists in vocabulary."""
+        try:
+            try:
+                from backend.utils.semantic_vocabulary import get_all_types
+            except ImportError:
+                from utils.semantic_vocabulary import get_all_types
+            
+            known_types = {t.name for t in get_all_types()}
+            return semantic_type in known_types
+        except Exception:
+            return False
+    
+    def _upsert_column_mapping(
+        self,
+        project: str,
+        file_name: str,
+        table_name: str,
+        column_name: str,
+        semantic_type: str,
+        confidence: float = 0.85,
+        is_hub: bool = False,
+        hub_table: str = None,
+        hub_column: str = None,
+        hub_cardinality: int = None,
+        spoke_cardinality: int = None,
+        coverage_pct: float = None,
+        is_subset: bool = None,
+        is_discovered: bool = False
+    ):
+        """Upsert a column mapping with hub/spoke info."""
+        try:
+            # Check if exists
+            existing = self.safe_fetchone("""
+                SELECT id FROM _column_mappings 
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [project, table_name, column_name])
+            
+            if existing:
+                # Update
+                self.conn.execute("""
+                    UPDATE _column_mappings SET
+                        semantic_type = ?,
+                        confidence = ?,
+                        is_hub = ?,
+                        hub_table = ?,
+                        hub_column = ?,
+                        hub_cardinality = ?,
+                        spoke_cardinality = ?,
+                        coverage_pct = ?,
+                        is_subset = ?,
+                        is_discovered = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE project = ? AND table_name = ? AND original_column = ?
+                """, [
+                    semantic_type, confidence, is_hub,
+                    hub_table, hub_column, hub_cardinality,
+                    spoke_cardinality, coverage_pct, is_subset, is_discovered,
+                    project, table_name, column_name
+                ])
+            else:
+                # Insert
+                self.conn.execute("""
+                    INSERT INTO _column_mappings 
+                    (project, file_name, table_name, original_column, semantic_type, confidence,
+                     is_hub, hub_table, hub_column, hub_cardinality, spoke_cardinality, 
+                     coverage_pct, is_subset, is_discovered)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    project, file_name or '', table_name, column_name, semantic_type, confidence,
+                    is_hub, hub_table, hub_column, hub_cardinality, spoke_cardinality,
+                    coverage_pct, is_subset, is_discovered
+                ])
+        except Exception as e:
+            logger.debug(f"[CONTEXT-GRAPH] Mapping upsert error: {e}")
     
     def _parse_distinct_values(self, values_json) -> set:
         """Parse distinct_values JSON into a set for comparison."""
@@ -2473,7 +2704,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         with self._db_lock:
             try:
-                # Get all hubs with truth_type and entity_type
+                # Get all hubs with truth_type, entity_type, and is_discovered
                 hubs = self.conn.execute("""
                     SELECT 
                         m.semantic_type, 
@@ -2482,7 +2713,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         m.hub_cardinality,
                         COALESCE(s.truth_type, 'unknown') as truth_type,
                         s.entity_type,
-                        s.category
+                        s.category,
+                        COALESCE(m.is_discovered, FALSE) as is_discovered
                     FROM _column_mappings m
                     LEFT JOIN _schema_metadata s 
                         ON m.project = s.project AND m.table_name = s.table_name
@@ -2503,7 +2735,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         m.is_subset,
                         COALESCE(s.truth_type, 'unknown') as truth_type,
                         s.entity_type,
-                        s.category
+                        s.category,
+                        COALESCE(m.is_discovered, FALSE) as is_discovered
                     FROM _column_mappings m
                     LEFT JOIN _schema_metadata s 
                         ON m.project = s.project AND m.table_name = s.table_name
@@ -2525,10 +2758,14 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         'truth_type': h[4],
                         'entity_type': h[5],
                         'category': h[6],
+                        'is_discovered': h[7],
                         'has_reality_spokes': any(s[0] == h[0] for s in reality_spokes)
                     }
                     for h in hubs
                 ]
+                
+                # Count discovered hubs
+                discovered_hubs = [h for h in hub_list if h.get('is_discovered')]
                 
                 return {
                     'hubs': hub_list,
@@ -2545,7 +2782,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'is_valid_fk': s[8],  # is_subset = valid foreign key
                             'truth_type': s[9],
                             'entity_type': s[10],
-                            'category': s[11]
+                            'category': s[11],
+                            'is_discovered': s[12]
                         }
                         for s in spokes
                     ],
@@ -2556,7 +2794,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         'reality_spoke_count': len(reality_spokes),
                         'semantic_types': list(set(h[0] for h in hubs)),
                         'has_reality_data': len(reality_spokes) > 0,
-                        'hubs_awaiting_reality': len([h for h in hub_list if not h['has_reality_spokes']])
+                        'hubs_awaiting_reality': len([h for h in hub_list if not h['has_reality_spokes']]),
+                        'discovered_hubs': len(discovered_hubs)
                     }
                 }
                 
