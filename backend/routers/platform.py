@@ -36,6 +36,23 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["platform"])
 
+
+def _get_read_handler():
+    """Get a read-only DuckDB handler for platform endpoints.
+    
+    Creates a NEW connection each time - safe for concurrent access during uploads.
+    ALWAYS close when done: handler.close()
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_read_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_read_handler
+        return get_read_handler()
+    except Exception:
+        return None
+
+
 # Simple time-based cache for platform status
 _platform_cache = {
     'data': None,
@@ -180,10 +197,10 @@ async def get_platform_status(
     # =========================================================================
     services = {}
     
-    # DuckDB
+    # DuckDB - use read handler for thread safety
+    handler = None
     try:
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
+        handler = _get_read_handler()
         duck_start = time.time()
         handler.conn.execute("SELECT 1").fetchone()
         duck_latency = int((time.time() - duck_start) * 1000)
@@ -195,6 +212,9 @@ async def get_platform_status(
     except Exception as e:
         services["duckdb"] = {"status": "error", "error": str(e), "latency_ms": 0}
         response["health"]["overall"] = "degraded"
+    finally:
+        if handler:
+            handler.close()
     
     # ChromaDB
     try:
@@ -273,12 +293,13 @@ async def get_platform_status(
     # =========================================================================
     
     # Get file/table stats from DuckDB metadata
+    stats_handler = None
     try:
-        handler = get_structured_handler()
+        stats_handler = _get_read_handler()
         
         # Try _schema_metadata first
         try:
-            meta = handler.conn.execute("""
+            meta = stats_handler.conn.execute("""
                 SELECT 
                     COUNT(DISTINCT file_name) as files,
                     COUNT(DISTINCT table_name) as tables,
@@ -297,7 +318,7 @@ async def get_platform_status(
         
         # Get column count
         try:
-            col_count = handler.conn.execute("""
+            col_count = stats_handler.conn.execute("""
                 SELECT COUNT(*) FROM _column_profiles
             """).fetchone()
             response["stats"]["columns"] = col_count[0] or 0
@@ -306,6 +327,9 @@ async def get_platform_status(
             
     except Exception as e:
         logger.warning(f"DuckDB stats failed: {e}")
+    finally:
+        if stats_handler:
+            stats_handler.close()
     
     # =========================================================================
     # PARALLEL SUPABASE QUERIES: Stats, Jobs, Metrics
@@ -456,24 +480,25 @@ async def get_platform_status(
     # Supabase queries run in parallel (network-bound)
     # =========================================================================
     if include_files or include_relationships:
+        files_handler = None
         try:
-            handler = get_structured_handler()
+            files_handler = _get_read_handler()
             
             # STEP 1: Run DuckDB queries SEQUENTIALLY (connection not thread-safe)
             # Note: PDFs are now in _schema_metadata (via store_dataframe), no separate _pdf_tables query
             schema_results = []
             
-            if include_files:
+            if include_files and files_handler:
                 try:
                     if project_filter:
-                        schema_results = handler.conn.execute("""
+                        schema_results = files_handler.conn.execute("""
                             SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                             FROM _schema_metadata 
                             WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
                             ORDER BY file_name, table_name
                         """, [project_filter]).fetchall()
                     else:
-                        schema_results = handler.conn.execute("""
+                        schema_results = files_handler.conn.execute("""
                             SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                             FROM _schema_metadata 
                             WHERE is_current = TRUE
@@ -647,18 +672,22 @@ async def get_platform_status(
                 
         except Exception as e:
             logger.warning(f"Files/relationships fetch failed: {e}")
+        finally:
+            if files_handler:
+                files_handler.close()
     else:
         logger.debug("[PLATFORM] Skipping files and relationships (not requested)")
     
     # =========================================================================
     # CLASSIFICATION: Summary stats
     # =========================================================================
+    class_handler = None
     try:
-        handler = get_structured_handler()
+        class_handler = _get_read_handler()
         
         # Get classification stats from _column_profiles
         try:
-            class_stats = handler.conn.execute("""
+            class_stats = class_handler.conn.execute("""
                 SELECT 
                     COUNT(*) FILTER (WHERE filter_category IS NOT NULL AND filter_category != '') as classified,
                     COUNT(*) FILTER (WHERE filter_category IS NULL OR filter_category = '') as unclassified
@@ -671,6 +700,9 @@ async def get_platform_status(
             
     except Exception as e:
         logger.warning(f"Classification stats failed: {e}")
+    finally:
+        if class_handler:
+            class_handler.close()
     
     # =========================================================================
     # PIPELINE: Processing pipeline stats (for Mission Control)
@@ -752,33 +784,40 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
     """
     start_time = time.time()
     project_filter = project
+    files_handler = None
     
     try:
-        from utils.structured_data_handler import get_structured_handler
         from utils.database.supabase_client import get_supabase
         
         files_dict = {}
         
-        handler = get_structured_handler()
+        files_handler = _get_read_handler()
         # Query DuckDB for schema metadata (fast, local)
         try:
-            if project_filter:
-                schema_results = handler.conn.execute("""
+            if project_filter and files_handler:
+                schema_results = files_handler.conn.execute("""
                     SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                     FROM _schema_metadata 
                     WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
                     ORDER BY file_name, table_name
                 """, [project_filter]).fetchall()
-            else:
-                schema_results = handler.conn.execute("""
+            elif files_handler:
+                schema_results = files_handler.conn.execute("""
                     SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns
                     FROM _schema_metadata 
                     WHERE is_current = TRUE
                     ORDER BY file_name, table_name
                 """).fetchall()
+            else:
+                schema_results = []
         except Exception as e:
             logger.debug(f"[FILES] Schema query: {e}")
             schema_results = []
+        
+        # Close handler early - we're done with DuckDB
+        if files_handler:
+            files_handler.close()
+            files_handler = None
         
         # Note: PDF tables are now in _schema_metadata (via store_dataframe)
         # No separate _pdf_tables query needed
