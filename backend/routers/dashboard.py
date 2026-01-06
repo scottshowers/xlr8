@@ -43,7 +43,28 @@ def _get_supabase():
 
 
 def _get_duckdb():
-    """Get DuckDB handler for dashboard operations."""
+    """Get DuckDB read handler for dashboard operations.
+    
+    Uses get_read_handler() which creates a NEW connection each time.
+    This prevents threading conflicts with upload operations.
+    
+    IMPORTANT: Always close the handler when done, or use with context manager.
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_read_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_read_handler
+        return get_read_handler()
+    except Exception:
+        return None
+
+
+def _get_duckdb_write():
+    """Get DuckDB write handler for operations that modify data.
+    
+    Only use this for pipeline health checks that actually write.
+    """
     try:
         try:
             from utils.structured_data_handler import get_structured_handler
@@ -71,7 +92,7 @@ def test_pipeline_upload() -> Dict:
     """Test upload pipeline with a real operation."""
     start = time.time()
     try:
-        handler = _get_duckdb()
+        handler = _get_duckdb_write()  # Needs write access
         if not handler:
             return {"healthy": False, "error": "DuckDB unavailable", "latency_ms": 0}
         
@@ -90,6 +111,7 @@ def test_pipeline_upload() -> Dict:
 def test_pipeline_process() -> Dict:
     """Test processing pipeline - schema metadata operations."""
     start = time.time()
+    handler = None
     try:
         handler = _get_duckdb()
         if not handler:
@@ -109,11 +131,15 @@ def test_pipeline_process() -> Dict:
         return {"healthy": True, "latency_ms": latency, "tables_tracked": tables_tracked}
     except Exception as e:
         return {"healthy": False, "error": str(e), "latency_ms": int((time.time() - start) * 1000)}
+    finally:
+        if handler:
+            handler.close()
 
 
 def test_pipeline_query() -> Dict:
     """Test query pipeline - intelligence engine readiness."""
     start = time.time()
+    handler = None
     try:
         handler = _get_duckdb()
         if not handler:
@@ -134,6 +160,9 @@ def test_pipeline_query() -> Dict:
         return {"healthy": True, "latency_ms": latency, "columns_profiled": columns, "tables_profiled": tables}
     except Exception as e:
         return {"healthy": False, "error": str(e), "latency_ms": int((time.time() - start) * 1000)}
+    finally:
+        if handler:
+            handler.close()
 
 
 def test_pipeline_semantic() -> Dict:
@@ -176,9 +205,9 @@ def get_data_by_truth_type() -> Dict:
     }
     
     # Get TABLES from DuckDB _schema_metadata (ground truth for structured data)
+    handler = None
     try:
-        from utils.structured_data_handler import get_structured_handler
-        handler = get_structured_handler()
+        handler = _get_duckdb()  # Uses read handler - separate connection
         if handler and handler.conn:
             # Count tables and rows by truth_type from DuckDB
             rows = handler.conn.execute("""
@@ -200,6 +229,9 @@ def get_data_by_truth_type() -> Dict:
                 result[truth]["files"] = result[truth].get("files", 0) + (file_count or 0)
     except Exception as e:
         logger.warning(f"[DASHBOARD] DuckDB truth type query failed: {e}")
+    finally:
+        if handler:
+            handler.close()
     
     # Get CHUNKS from Supabase for unstructured documents
     try:
@@ -305,6 +337,7 @@ def get_relationship_summary() -> Dict:
         "by_type": {}
     }
     
+    handler = None
     try:
         handler = _get_duckdb()
         supabase = _get_supabase()
@@ -356,6 +389,9 @@ def get_relationship_summary() -> Dict:
     
     except Exception as e:
         logger.warning(f"[DASHBOARD] Relationship query failed: {e}")
+    finally:
+        if handler:
+            handler.close()
     
     return result
 
@@ -367,6 +403,7 @@ def get_relationship_summary() -> Dict:
 def get_attention_items() -> List[Dict]:
     """Get items that need attention."""
     items = []
+    handler = None
     
     try:
         supabase = _get_supabase()
@@ -445,6 +482,9 @@ def get_attention_items() -> List[Dict]:
     
     except Exception as e:
         logger.warning(f"[DASHBOARD] Attention items query failed: {e}")
+    finally:
+        if handler:
+            handler.close()
     
     return items
 
