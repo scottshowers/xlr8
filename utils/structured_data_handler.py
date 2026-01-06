@@ -2069,65 +2069,66 @@ Include ALL columns. Use confidence 0.9+ for obvious matches, 0.7-0.9 for likely
             - hubs: List of hub columns (one per semantic_type)
             - relationships: List of hub→spoke edges with coverage
         """
-        try:
-            # Get all hubs
-            hubs = self.conn.execute("""
-                SELECT semantic_type, table_name, original_column, hub_cardinality
-                FROM _column_mappings
-                WHERE project = ? AND is_hub = TRUE
-            """, [project]).fetchall()
-            
-            # Get all spokes with their hub references
-            spokes = self.conn.execute("""
-                SELECT 
-                    semantic_type, 
-                    table_name, 
-                    original_column,
-                    hub_table,
-                    hub_column,
-                    hub_cardinality,
-                    spoke_cardinality,
-                    coverage_pct,
-                    is_subset
-                FROM _column_mappings
-                WHERE project = ? 
-                  AND is_hub = FALSE 
-                  AND hub_table IS NOT NULL
-            """, [project]).fetchall()
-            
-            return {
-                'hubs': [
-                    {
-                        'semantic_type': h[0],
-                        'table': h[1],
-                        'column': h[2],
-                        'cardinality': h[3]
+        with self._db_lock:
+            try:
+                # Get all hubs
+                hubs = self.conn.execute("""
+                    SELECT semantic_type, table_name, original_column, hub_cardinality
+                    FROM _column_mappings
+                    WHERE project = ? AND is_hub = TRUE
+                """, [project]).fetchall()
+                
+                # Get all spokes with their hub references
+                spokes = self.conn.execute("""
+                    SELECT 
+                        semantic_type, 
+                        table_name, 
+                        original_column,
+                        hub_table,
+                        hub_column,
+                        hub_cardinality,
+                        spoke_cardinality,
+                        coverage_pct,
+                        is_subset
+                    FROM _column_mappings
+                    WHERE project = ? 
+                      AND is_hub = FALSE 
+                      AND hub_table IS NOT NULL
+                """, [project]).fetchall()
+                
+                return {
+                    'hubs': [
+                        {
+                            'semantic_type': h[0],
+                            'table': h[1],
+                            'column': h[2],
+                            'cardinality': h[3]
+                        }
+                        for h in hubs
+                    ],
+                    'relationships': [
+                        {
+                            'semantic_type': s[0],
+                            'spoke_table': s[1],
+                            'spoke_column': s[2],
+                            'hub_table': s[3],
+                            'hub_column': s[4],
+                            'hub_cardinality': s[5],
+                            'spoke_cardinality': s[6],
+                            'coverage_pct': s[7],
+                            'is_valid_fk': s[8]  # is_subset = valid foreign key
+                        }
+                        for s in spokes
+                    ],
+                    'stats': {
+                        'hub_count': len(hubs),
+                        'relationship_count': len(spokes)
                     }
-                    for h in hubs
-                ],
-                'relationships': [
-                    {
-                        'semantic_type': s[0],
-                        'spoke_table': s[1],
-                        'spoke_column': s[2],
-                        'hub_table': s[3],
-                        'hub_column': s[4],
-                        'hub_cardinality': s[5],
-                        'spoke_cardinality': s[6],
-                        'coverage_pct': s[7],
-                        'is_valid_fk': s[8]  # is_subset = valid foreign key
-                    }
-                    for s in spokes
-                ],
-                'stats': {
-                    'hub_count': len(hubs),
-                    'relationship_count': len(spokes)
                 }
-            }
-            
-        except Exception as e:
-            logger.error(f"[CONTEXT-GRAPH] Failed to get graph: {e}")
-            return {'hubs': [], 'relationships': [], 'stats': {}}
+                
+            except Exception as e:
+                logger.error(f"[CONTEXT-GRAPH] Failed to get graph: {e}")
+                return {'hubs': [], 'relationships': [], 'stats': {}}
 
     def create_mapping_job(self, job_id: str, project: str, file_name: str, total_tables: int):
         """Create a mapping job record"""
