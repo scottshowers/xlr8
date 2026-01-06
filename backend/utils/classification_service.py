@@ -87,6 +87,8 @@ class TableClassification:
     source_filename: str
     project_id: Optional[str]
     truth_type: Optional[str]
+    entity_type: Optional[str] = None  # What this table IS (e.g., 'termination_reasons')
+    category: Optional[str] = None  # Logical grouping (e.g., 'change_reasons')
     
     # Metrics
     row_count: int
@@ -222,9 +224,9 @@ class ClassificationService:
         try:
             conn = self.structured_handler.conn
             
-            # Get table metadata - include display_name
+            # Get table metadata - include display_name, entity_type, category
             metadata = conn.execute("""
-                SELECT table_name, display_name, project, file_name, row_count, column_count, created_at, truth_type
+                SELECT table_name, display_name, project, file_name, row_count, column_count, created_at, truth_type, entity_type, category
                 FROM _schema_metadata
                 WHERE table_name = ?
             """, [table_name]).fetchone()
@@ -233,7 +235,7 @@ class ClassificationService:
                 logger.warning(f"[CLASSIFICATION] Table {table_name} not found in metadata")
                 return None
             
-            table_name_db, display_name, project, filename, row_count, col_count, created_at, truth_type = metadata
+            table_name_db, display_name, project, filename, row_count, col_count, created_at, truth_type, entity_type, category = metadata
             
             # Get column profiles
             columns = self._get_column_classifications(conn, table_name)
@@ -260,6 +262,8 @@ class ClassificationService:
                 source_filename=filename or table_name,
                 project_id=project,
                 truth_type=truth_type,
+                entity_type=entity_type,
+                category=category,
                 row_count=row_count or 0,
                 column_count=col_count or len(columns),
                 created_at=str(created_at) if created_at else None,
