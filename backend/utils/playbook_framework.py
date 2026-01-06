@@ -418,6 +418,7 @@ class IntelligenceHook:
     Hook into the Project Intelligence Service.
     
     Provides pre-computed findings, tasks, and lookups.
+    v3.0: Also provides Context Graph gap detection.
     """
     
     @staticmethod
@@ -434,6 +435,73 @@ class IntelligenceHook:
                 return False
     
     @staticmethod
+    def get_context_graph_gaps(project_id: str) -> List[Dict]:
+        """
+        Get data gaps from Context Graph coverage analysis.
+        
+        v3.0: Uses coverage_pct from hub/spoke relationships to identify
+        tables with incomplete data coverage.
+        
+        Returns:
+            List of gap findings, e.g.:
+            [{'semantic_type': 'company_code', 'spoke_table': 'payroll', 
+              'coverage_pct': 46.2, 'description': 'Only 6 of 13 companies in payroll'}]
+        """
+        gaps = []
+        
+        try:
+            try:
+                from utils.structured_data_handler import get_structured_handler
+            except ImportError:
+                from backend.utils.structured_data_handler import get_structured_handler
+            
+            handler = get_structured_handler()
+            if not handler or not hasattr(handler, 'get_context_graph'):
+                return gaps
+            
+            # Get context graph for project
+            # Extract project name from project_id if needed
+            graph = handler.get_context_graph(project_id)
+            
+            if not graph or not graph.get('relationships'):
+                return gaps
+            
+            # Analyze coverage gaps
+            for rel in graph.get('relationships', []):
+                coverage = rel.get('coverage_pct', 0) or 0
+                spoke_table = rel.get('spoke_table', '')
+                semantic_type = rel.get('semantic_type', '')
+                hub_table = rel.get('hub_table', '')
+                matched_count = rel.get('matched_count', 0) or 0
+                hub_count = rel.get('hub_count', 0) or 0
+                
+                # Flag tables with low coverage (<70%)
+                if coverage < 70 and hub_count > 0:
+                    gaps.append({
+                        'semantic_type': semantic_type,
+                        'spoke_table': spoke_table,
+                        'hub_table': hub_table,
+                        'coverage_pct': round(coverage, 1),
+                        'matched_count': matched_count,
+                        'hub_count': hub_count,
+                        'description': f"Only {matched_count} of {hub_count} {semantic_type.replace('_', ' ')}s appear in {spoke_table} ({coverage:.0f}% coverage)",
+                        'severity': 'critical' if coverage < 30 else ('warning' if coverage < 50 else 'info'),
+                        'source': 'context_graph'
+                    })
+            
+            # Sort by severity (critical first) then coverage (lowest first)
+            severity_order = {'critical': 0, 'warning': 1, 'info': 2}
+            gaps.sort(key=lambda g: (severity_order.get(g['severity'], 3), g['coverage_pct']))
+            
+            if gaps:
+                logger.info(f"[INTELLIGENCE] Context Graph found {len(gaps)} coverage gaps")
+                
+        except Exception as e:
+            logger.debug(f"[INTELLIGENCE] Context Graph gap detection failed: {e}")
+        
+        return gaps
+    
+    @staticmethod
     def get_context(
         project_id: str, 
         action_id: str, 
@@ -442,13 +510,16 @@ class IntelligenceHook:
         """
         Get intelligence context for an action.
         
+        v3.0: Also includes Context Graph gap findings.
+        
         Returns:
             {
                 'available': bool,
                 'findings': List[Dict],
                 'tasks': List[Dict],
                 'lookups': List[Dict],
-                'summary': Dict
+                'summary': Dict,
+                'coverage_gaps': List[Dict]  # v3.0
             }
         """
         result = {
@@ -456,7 +527,8 @@ class IntelligenceHook:
             'findings': [],
             'tasks': [],
             'lookups': [],
-            'summary': {}
+            'summary': {},
+            'coverage_gaps': []  # v3.0
         }
         
         if not IntelligenceHook.is_available():
@@ -479,6 +551,10 @@ class IntelligenceHook:
             
             if not service or not service.analyzed_at:
                 logger.debug(f"[INTELLIGENCE] Project {project_id[:8]} not analyzed yet")
+                # Still try to get Context Graph gaps even without full analysis
+                result['coverage_gaps'] = IntelligenceHook.get_context_graph_gaps(project_id)
+                if result['coverage_gaps']:
+                    result['available'] = True
                 return result
             
             result['available'] = True
@@ -530,7 +606,10 @@ class IntelligenceHook:
                     'entry_count': lookup_dict.get('entry_count', 0)
                 })
             
-            logger.info(f"[INTELLIGENCE] Action {action_id}: {len(result['findings'])} findings, {len(result['tasks'])} tasks")
+            # v3.0: Get Context Graph coverage gaps
+            result['coverage_gaps'] = IntelligenceHook.get_context_graph_gaps(project_id)
+            
+            logger.info(f"[INTELLIGENCE] Action {action_id}: {len(result['findings'])} findings, {len(result['tasks'])} tasks, {len(result['coverage_gaps'])} coverage gaps")
             return result
             
         except Exception as e:
