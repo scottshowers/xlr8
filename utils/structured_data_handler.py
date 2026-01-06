@@ -736,13 +736,21 @@ class StructuredDataHandler:
         
         Args:
             file_name: Original filename (e.g., "Change Reasons.xlsx")
-            sheet_name: Sheet/tab name (e.g., "Change Reasons")
+            sheet_name: Sheet/tab name (e.g., "Change Reasons" or "Change Reasons - Termination Reasons")
             sub_table_title: Title of sub-table within sheet if detected (e.g., "Termination Reasons")
             
         Returns:
             Dict with 'entity_type' and 'category' keys (values may be None)
         """
         result = {'entity_type': None, 'category': None}
+        
+        # CONTEXT GRAPH FIX: Parse combined sheet_name when it contains " - "
+        # This happens when sub-tables are detected and stored as "Sheet - SubTable"
+        if sheet_name and ' - ' in sheet_name and not sub_table_title:
+            parts = sheet_name.split(' - ', 1)
+            sheet_name = parts[0].strip()
+            sub_table_title = parts[1].strip()
+            logger.info(f"[ENTITY-META] Parsed combined name: sheet='{sheet_name}', sub='{sub_table_title}'")
         
         def normalize_to_entity_type(name: str) -> str:
             """Convert a name to entity_type format: lowercase, underscores, singular-ish"""
@@ -1717,7 +1725,7 @@ class StructuredDataHandler:
             semantic_types_text = get_type_names_for_prompt()
             
             # Build STRICT prompt for LLM - conservative matching
-            # CONTEXT GRAPH: Include entity_type so "code" in "termination_reasons" becomes "termination_reason_code"
+            # CONTEXT GRAPH: Include entity_type so LLM can resolve generic columns dynamically
             entity_context = ""
             if entity_type:
                 entity_context = f"""
@@ -1725,19 +1733,18 @@ ENTITY TYPE: {entity_type}
 {f"CATEGORY: {category}" if category else ""}
 
 CRITICAL - USE ENTITY TYPE TO RESOLVE AMBIGUOUS COLUMNS:
-When a column has a generic name like "code", "description", "name", "type", use the ENTITY TYPE to determine its semantic type:
-- "code" in entity_type="termination_reasons" → termination_reason_code
-- "code" in entity_type="earnings" or "earning_codes" → earning_code  
-- "code" in entity_type="deductions" or "deduction_codes" → deduction_code
-- "code" in entity_type="job_codes" or "jobs" → job_code
-- "code" in entity_type="company" or "companies" → company_code
-- "code" in entity_type="departments" → department_code
-- "code" in entity_type="locations" → location_code
-- "code" in entity_type="benefit_change_reasons" → benefit_change_reason_code
-- "code" in entity_type="job_change_reasons" → job_change_reason_code
-- "code" in entity_type="loa_reasons" → loa_reason_code
+When a column has a generic name like "code", "type", "id", "name", "description", 
+combine the ENTITY TYPE with the column name to find the semantic type.
 
-The entity_type tells you WHAT this table IS. Use it with HIGH CONFIDENCE.
+THE PATTERN: entity_type (singularized) + column_name = semantic_type
+Examples of this pattern:
+- entity_type="termination_reasons" + col="code" → Look for "termination_reason_code" in allowed types
+- entity_type="employee_types" + col="code" → Look for "employee_type_code" in allowed types
+- entity_type="pay_groups" + col="code" → Look for "pay_group_code" in allowed types
+- entity_type="earnings" + col="code" → Look for "earning_code" in allowed types
+
+The entity_type tells you WHAT this table contains. Search the allowed semantic types below
+for one that matches the pattern: [entity singular]_[column]. If found, use it with HIGH CONFIDENCE.
 """
             
             prompt = f"""Analyze these column names and sample data to identify semantic types.
@@ -1877,7 +1884,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Pattern-based fallback when LLM is unavailable.
         
-        CONTEXT GRAPH: Also uses entity_type to resolve generic "code" columns.
+        CONTEXT GRAPH: Uses entity_type to dynamically resolve generic columns
+        by searching the semantic vocabulary.
         """
         mappings = []
         
@@ -1894,23 +1902,75 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             except Exception:
                 pass
         
-        # Entity type to semantic type mapping for generic "code" columns
-        entity_to_semantic = {
-            'termination_reasons': 'termination_reason_code',
-            'benefit_change_reasons': 'benefit_change_reason_code',
-            'job_change_reasons': 'job_change_reason_code',
-            'loa_reasons': 'loa_reason_code',
-            'earnings': 'earning_code',
-            'earning_codes': 'earning_code',
-            'deductions': 'deduction_code',
-            'deduction_codes': 'deduction_code',
-            'jobs': 'job_code',
-            'job_codes': 'job_code',
-            'companies': 'company_code',
-            'company': 'company_code',
-            'departments': 'department_code',
-            'locations': 'location_code',
-        }
+        # DYNAMIC: Search vocabulary for semantic type matching entity_type + column
+        def find_semantic_type_for_entity(entity_type: str, col_name: str) -> Optional[str]:
+            """
+            Dynamically find semantic type that matches entity_type + column.
+            
+            For example:
+            - entity_type="termination_reasons", col="code" → termination_reason_code
+            - entity_type="employee_types", col="code" → employee_type_code
+            - entity_type="pay_groups", col="code" → pay_group_code
+            
+            This is NOT hardcoded - it searches the vocabulary.
+            """
+            if not entity_type:
+                return None
+            
+            col_lower = col_name.lower()
+            
+            # Generic columns that benefit from entity_type context
+            generic_cols = {'code', 'type', 'id', 'number', 'num'}
+            if col_lower not in generic_cols:
+                return None
+            
+            try:
+                try:
+                    from backend.utils.semantic_vocabulary import get_all_types
+                except ImportError:
+                    from utils.semantic_vocabulary import get_all_types
+                
+                all_types = get_all_types()
+                
+                # Normalize entity_type for matching
+                # "termination_reasons" → "termination_reason" (singularize)
+                # "employee_types" → "employee_type"
+                entity_normalized = entity_type.lower().replace('_', '')
+                if entity_normalized.endswith('s') and not entity_normalized.endswith('ss'):
+                    entity_singular = entity_normalized[:-1]
+                else:
+                    entity_singular = entity_normalized
+                
+                # Also try without trailing 's' on each word
+                # "termination_reasons" → "terminationreason"
+                entity_words = entity_type.lower().split('_')
+                entity_words_singular = [w[:-1] if w.endswith('s') and not w.endswith('ss') else w for w in entity_words]
+                entity_pattern = ''.join(entity_words_singular)
+                
+                # Search for matching semantic type
+                for sem_type in all_types:
+                    type_name = sem_type.name.lower().replace('_', '')
+                    
+                    # Match patterns:
+                    # - "terminationreasoncode" contains "terminationreason"
+                    # - "employeetypecode" contains "employeetype"
+                    if entity_singular in type_name or entity_pattern in type_name:
+                        # Prefer types ending in the column type (code, type, etc.)
+                        if col_lower in type_name or type_name.endswith(col_lower):
+                            logger.info(f"[DYNAMIC-MATCH] entity='{entity_type}' + col='{col_name}' → {sem_type.name}")
+                            return sem_type.name
+                
+                # Second pass: looser match
+                for sem_type in all_types:
+                    type_name = sem_type.name.lower().replace('_', '')
+                    if entity_singular in type_name or entity_pattern in type_name:
+                        logger.info(f"[DYNAMIC-MATCH] entity='{entity_type}' + col='{col_name}' → {sem_type.name} (loose)")
+                        return sem_type.name
+                        
+            except Exception as e:
+                logger.debug(f"[FALLBACK] Vocabulary search failed: {e}")
+            
+            return None
         
         patterns = {
             'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
@@ -1930,24 +1990,24 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             col_lower = col.lower()
             matched = False
             
-            # CONTEXT GRAPH: Check for generic "code" column with entity_type context
-            if col_lower == 'code' and entity_type and entity_type in entity_to_semantic:
-                sem_type = entity_to_semantic[entity_type]
-                mapping = {
-                    'project': project,
-                    'file_name': file_name,
-                    'table_name': table_name,
-                    'original_column': col,
-                    'semantic_type': sem_type,
-                    'confidence': 0.90,  # High confidence when entity_type matches
-                    'is_override': False,
-                    'needs_review': False
-                }
-                mappings.append(mapping)
-                if project and file_name and table_name:
-                    self._store_column_mapping(mapping)
-                logger.info(f"[FALLBACK] entity_type='{entity_type}' + col='code' → {sem_type}")
-                continue
+            # CONTEXT GRAPH: Try dynamic entity_type + column matching first
+            if entity_type:
+                sem_type = find_semantic_type_for_entity(entity_type, col)
+                if sem_type:
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': 0.90,  # High confidence when entity_type matches
+                        'is_override': False,
+                        'needs_review': False
+                    }
+                    mappings.append(mapping)
+                    if project and file_name and table_name:
+                        self._store_column_mapping(mapping)
+                    continue
             
             # Standard pattern matching
             for sem_type, pattern_list in patterns.items():
@@ -2792,8 +2852,63 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
     
     def _fallback_column_inference_threaded(self, thread_conn, columns: List[str], 
                                              project: str, file_name: str, table_name: str) -> List[Dict]:
-        """Thread-safe pattern-based fallback"""
+        """Thread-safe pattern-based fallback with dynamic entity_type resolution."""
         mappings = []
+        
+        # CONTEXT GRAPH: Fetch entity_type for this table
+        entity_type = None
+        try:
+            meta = thread_conn.execute("""
+                SELECT entity_type FROM _schema_metadata 
+                WHERE table_name = ? AND is_current = TRUE
+            """, [table_name]).fetchone()
+            if meta:
+                entity_type = meta[0]
+        except Exception:
+            pass
+        
+        # DYNAMIC: Search vocabulary for semantic type matching entity_type + column
+        def find_semantic_type_for_entity(entity_type: str, col_name: str) -> Optional[str]:
+            """Dynamically find semantic type that matches entity_type + column."""
+            if not entity_type:
+                return None
+            
+            col_lower = col_name.lower()
+            generic_cols = {'code', 'type', 'id', 'number', 'num'}
+            if col_lower not in generic_cols:
+                return None
+            
+            try:
+                try:
+                    from backend.utils.semantic_vocabulary import get_all_types
+                except ImportError:
+                    from utils.semantic_vocabulary import get_all_types
+                
+                all_types = get_all_types()
+                entity_normalized = entity_type.lower().replace('_', '')
+                if entity_normalized.endswith('s') and not entity_normalized.endswith('ss'):
+                    entity_singular = entity_normalized[:-1]
+                else:
+                    entity_singular = entity_normalized
+                
+                entity_words = entity_type.lower().split('_')
+                entity_words_singular = [w[:-1] if w.endswith('s') and not w.endswith('ss') else w for w in entity_words]
+                entity_pattern = ''.join(entity_words_singular)
+                
+                for sem_type in all_types:
+                    type_name = sem_type.name.lower().replace('_', '')
+                    if entity_singular in type_name or entity_pattern in type_name:
+                        if col_lower in type_name or type_name.endswith(col_lower):
+                            return sem_type.name
+                
+                for sem_type in all_types:
+                    type_name = sem_type.name.lower().replace('_', '')
+                    if entity_singular in type_name or entity_pattern in type_name:
+                        return sem_type.name
+                        
+            except Exception:
+                pass
+            return None
         
         patterns = {
             'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
@@ -2811,6 +2926,26 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         
         for col in columns:
             col_lower = col.lower()
+            
+            # CONTEXT GRAPH: Try dynamic entity_type + column matching first
+            if entity_type:
+                sem_type = find_semantic_type_for_entity(entity_type, col)
+                if sem_type:
+                    mapping = {
+                        'project': project,
+                        'file_name': file_name,
+                        'table_name': table_name,
+                        'original_column': col,
+                        'semantic_type': sem_type,
+                        'confidence': 0.90,
+                        'is_override': False,
+                        'needs_review': False
+                    }
+                    mappings.append(mapping)
+                    self._store_column_mapping_threaded(thread_conn, mapping)
+                    continue
+            
+            # Standard pattern matching
             for sem_type, pattern_list in patterns.items():
                 for pattern in pattern_list:
                     if re.search(pattern, col_lower):
