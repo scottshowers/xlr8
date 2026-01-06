@@ -82,10 +82,13 @@ class Synthesizer:
         conflicts: List[Conflict],
         insights: List[Insight],
         compliance_check: Optional[Dict] = None,
-        context: Dict = None
+        context: Dict = None,
+        context_graph: Dict = None  # v3.0: Context Graph for relationship context
     ) -> SynthesizedAnswer:
         """
         Synthesize a consultative answer from all Five Truths.
+        
+        v3.0: Now accepts context_graph for relationship awareness.
         
         Args:
             question: The user's question
@@ -100,6 +103,7 @@ class Synthesizer:
             insights: Proactive insights discovered
             compliance_check: Results of compliance checking
             context: Additional context
+            context_graph: Hub/spoke relationships and coverage info
             
         Returns:
             SynthesizedAnswer with full provenance
@@ -110,6 +114,7 @@ class Synthesizer:
         self._last_configuration = configuration
         self._last_reference = reference
         self._last_regulatory = regulatory
+        self._context_graph = context_graph  # v3.0
         
         reasoning = []
         
@@ -334,7 +339,8 @@ class Synthesizer:
                     regulatory=self._last_regulatory,
                     conflicts=conflicts,
                     insights=insights,
-                    structured_data=structured_data
+                    structured_data=structured_data,
+                    context_graph=getattr(self, '_context_graph', None)  # v3.0
                 )
                 
                 logger.warning(f"[SYNTHESIZE] LLM synthesis SUCCESS: method={answer.synthesis_method}")
