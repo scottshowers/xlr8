@@ -60,21 +60,6 @@ def _get_duckdb():
         return None
 
 
-def _get_duckdb_write():
-    """Get DuckDB write handler for operations that modify data.
-    
-    Only use this for pipeline health checks that actually write.
-    """
-    try:
-        try:
-            from utils.structured_data_handler import get_structured_handler
-        except ImportError:
-            from backend.utils.structured_data_handler import get_structured_handler
-        return get_structured_handler()
-    except Exception:
-        return None
-
-
 def _get_chromadb():
     """Get ChromaDB client."""
     try:
@@ -89,23 +74,28 @@ def _get_chromadb():
 # =============================================================================
 
 def test_pipeline_upload() -> Dict:
-    """Test upload pipeline with a real operation."""
+    """Test upload pipeline health (read-only check).
+    
+    NOTE: Changed to read-only to avoid conflicts with active uploads.
+    The actual write capability is proven by successful uploads.
+    """
     start = time.time()
+    handler = None
     try:
-        handler = _get_duckdb_write()  # Needs write access
+        handler = _get_duckdb()  # Read handler - safe for concurrent access
         if not handler:
             return {"healthy": False, "error": "DuckDB unavailable", "latency_ms": 0}
         
-        # Test: Can we create and query a table?
-        test_table = "_dashboard_test_upload"
-        handler.conn.execute(f"CREATE OR REPLACE TABLE {test_table} AS SELECT 1 as test_col")
-        result = handler.conn.execute(f"SELECT * FROM {test_table}").fetchone()
-        handler.conn.execute(f"DROP TABLE IF EXISTS {test_table}")
+        # Test: Can we query DuckDB? (read-only, no write conflicts)
+        result = handler.conn.execute("SELECT 1 as health_check").fetchone()
         
         latency = int((time.time() - start) * 1000)
         return {"healthy": result is not None, "latency_ms": latency}
     except Exception as e:
         return {"healthy": False, "error": str(e), "latency_ms": int((time.time() - start) * 1000)}
+    finally:
+        if handler:
+            handler.close()
 
 
 def test_pipeline_process() -> Dict:
