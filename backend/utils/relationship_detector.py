@@ -96,6 +96,7 @@ async def analyze_project_relationships(project: str, tables: List[Dict], handle
             'is_valid_fk': rel.get('is_valid_fk', False),
             'needs_review': needs_review,
             'confirmed': False,
+            'source_file': rel.get('file_name'),  # For UI grouping
         })
     
     # Sort by confidence
