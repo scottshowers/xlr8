@@ -1,0 +1,1074 @@
+[
+  {
+    "file": "Data_Conversion-Configurable_Fields.xls",
+    "sheet": "Employee",
+    "entity": "Employee",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "ContactAddressCountry",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "ContactHomePhoneCountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "ContactOtherPhoneCountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "ContactOtherPhoneType",
+    "references_hub": "phone_type",
+    "pattern_matched": "PhoneType"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Contacts",
+    "entity": "Contacts",
+    "column": "ContactWorkPhoneCountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Dependents",
+    "entity": "Dependents",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Dependents",
+    "entity": "Dependents",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Beneficiaries",
+    "entity": "Beneficiaries",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Contacts_Dependents_and_Beneficiaries.xlsx",
+    "sheet": "Beneficiaries",
+    "entity": "Beneficiaries",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_Earning_Flat_Amounts_and_User_Defined_Fields.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_Earning_Flat_Amounts_and_User_Defined_Fields.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "EarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_Earning_Flat_Amounts_and_User_Defined_Fields.xlsx",
+    "sheet": "MF5 - UD Fields",
+    "entity": "UD Fields",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "Country",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "HomePhoneCountry",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "BusinessPhoneCountry",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "TermReason",
+    "references_hub": "job_change_reason",
+    "pattern_matched": "Reason"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "LeaveReason",
+    "references_hub": "leave_reason",
+    "pattern_matched": "LeaveReason"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "EarnGroupCode",
+    "references_hub": "earning_group",
+    "pattern_matched": "EarnGroupCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "EmpType",
+    "references_hub": "employee_type",
+    "pattern_matched": "EmpType"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "LocationCode",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "PayGroup",
+    "references_hub": "pay_group",
+    "pattern_matched": "PayGroup"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF1 - Employee Data",
+    "entity": "Employee Data",
+    "column": "ShiftCode",
+    "references_hub": "shift",
+    "pattern_matched": "ShiftCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF2 - Deduction Data",
+    "entity": "Deduction Data",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF2 - Deduction Data",
+    "entity": "Deduction Data",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF2 - Deduction Data",
+    "entity": "Deduction Data",
+    "column": "DeductionCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DeductionCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF2 - Deduction Data",
+    "entity": "Deduction Data",
+    "column": "SrcDedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF2 - Deduction Data",
+    "entity": "Deduction Data",
+    "column": "BenOption",
+    "references_hub": "benefit_option",
+    "pattern_matched": "BenOption"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF3 - Direct Deposit",
+    "entity": "Direct Deposit",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF3 - Direct Deposit",
+    "entity": "Direct Deposit",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "EarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "MF4 - Earnings Data",
+    "entity": "Earnings Data",
+    "column": "SrcEarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB1 - Balances-Earnings",
+    "entity": "OB1 - Balances-Earnings",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB1 - Balances-Earnings",
+    "entity": "OB1 - Balances-Earnings",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB1 - Balances-Earnings",
+    "entity": "OB1 - Balances-Earnings",
+    "column": "EarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB1 - Balances-Earnings",
+    "entity": "OB1 - Balances-Earnings",
+    "column": "SrcEarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB2 - Balances-Deductions",
+    "entity": "OB2 - Balances-Deductions",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB2 - Balances-Deductions",
+    "entity": "OB2 - Balances-Deductions",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB2 - Balances-Deductions",
+    "entity": "OB2 - Balances-Deductions",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB2 - Balances-Deductions",
+    "entity": "OB2 - Balances-Deductions",
+    "column": "SrcDedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB3 - Balances-Taxes",
+    "entity": "OB3 - Balances-Taxes",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB3 - Balances-Taxes",
+    "entity": "OB3 - Balances-Taxes",
+    "column": "SrcCoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB3 - Balances-Taxes",
+    "entity": "OB3 - Balances-Taxes",
+    "column": "TaxCode",
+    "references_hub": "tax",
+    "pattern_matched": "TaxCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_People_Data_and_Payroll_Balances__US_.xlsx",
+    "sheet": "OB3 - Balances-Taxes",
+    "entity": "OB3 - Balances-Taxes",
+    "column": "SrcTaxCode",
+    "references_hub": "tax",
+    "pattern_matched": "TaxCode"
+  },
+  {
+    "file": "Data_Conversion_-_OE_Benefit_Import.xls",
+    "sheet": "OE_Ben_Import",
+    "entity": "OE_Ben_Import",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_OE_Benefit_Import.xls",
+    "sheet": "OE_Ben_Import",
+    "entity": "OE_Ben_Import",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_OE_Benefit_Import.xls",
+    "sheet": "OE_Ben_Import",
+    "entity": "OE_Ben_Import",
+    "column": "BenOption",
+    "references_hub": "benefit_option",
+    "pattern_matched": "BenOption"
+  },
+  {
+    "file": "Data_Conversion_-_OE_Benefit_Import.xls",
+    "sheet": "OE_Ben_Import",
+    "entity": "OE_Ben_Import",
+    "column": "Reason",
+    "references_hub": "job_change_reason",
+    "pattern_matched": "Reason"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Allocations",
+    "entity": "Allocations",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Allocations",
+    "entity": "Allocations",
+    "column": "Location",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Allocations",
+    "entity": "Allocations",
+    "column": "PayGroup",
+    "references_hub": "pay_group",
+    "pattern_matched": "PayGroup"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Allocations",
+    "entity": "Allocations",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Awards",
+    "entity": "Awards",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Awards",
+    "entity": "Awards",
+    "column": "AwardCode",
+    "references_hub": "award",
+    "pattern_matched": "AwardCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Awards",
+    "entity": "Awards",
+    "column": "AwardProvider",
+    "references_hub": "provider",
+    "pattern_matched": "Provider"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Education",
+    "entity": "Education",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Education",
+    "entity": "Education",
+    "column": "School",
+    "references_hub": "school",
+    "pattern_matched": "School"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Education",
+    "entity": "Education",
+    "column": "EducationLocation",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Licenses",
+    "entity": "Licenses",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Licenses",
+    "entity": "Licenses",
+    "column": "LicenseID",
+    "references_hub": "license",
+    "pattern_matched": "LicenseID"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Licenses",
+    "entity": "Licenses",
+    "column": "LicenseProvider",
+    "references_hub": "provider",
+    "pattern_matched": "Provider"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Property",
+    "entity": "Property",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Property",
+    "entity": "Property",
+    "column": "PropertyID",
+    "references_hub": "property",
+    "pattern_matched": "PropertyID"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Skills",
+    "entity": "Skills",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Skills",
+    "entity": "Skills",
+    "column": "SkillID",
+    "references_hub": "skill",
+    "pattern_matched": "SkillID"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Tests",
+    "entity": "Tests",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Tests",
+    "entity": "Tests",
+    "column": "TestCode",
+    "references_hub": "test",
+    "pattern_matched": "TestCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Multiple Jobs",
+    "entity": "Multiple Jobs",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Multiple Jobs",
+    "entity": "Multiple Jobs",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Additional Phone",
+    "entity": "Additional Phone",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Additional Phone",
+    "entity": "Additional Phone",
+    "column": "PhoneType",
+    "references_hub": "phone_type",
+    "pattern_matched": "PhoneType"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Additional Phone",
+    "entity": "Additional Phone",
+    "column": "CountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Additional Phone",
+    "entity": "Additional Phone",
+    "column": "CountryPrefix",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Training",
+    "entity": "Training",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Training",
+    "entity": "Training",
+    "column": "CourseID",
+    "references_hub": "course",
+    "pattern_matched": "CourseID"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Training",
+    "entity": "Training",
+    "column": "Provider",
+    "references_hub": "provider",
+    "pattern_matched": "Provider"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Training",
+    "entity": "Training",
+    "column": "Reason",
+    "references_hub": "job_change_reason",
+    "pattern_matched": "Reason"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Military Info",
+    "entity": "Military Info",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Military Info",
+    "entity": "Military Info",
+    "column": "VeteranOf",
+    "references_hub": "military_era",
+    "pattern_matched": "VeteranOf"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Military Info",
+    "entity": "Military Info",
+    "column": "Branch",
+    "references_hub": "military_branch",
+    "pattern_matched": "Branch"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "I9 and Visa Info",
+    "entity": "I9 and Visa Info",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "BirthCountry",
+    "references_hub": "country",
+    "pattern_matched": "BirthCountry"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "BirthLocation",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "Nationality1",
+    "references_hub": "nationality",
+    "pattern_matched": "Nationality"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "Nationality2",
+    "references_hub": "nationality",
+    "pattern_matched": "Nationality"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Birth Country and Nationality",
+    "entity": "Birth Country and Nationality",
+    "column": "Nationality3",
+    "references_hub": "nationality",
+    "pattern_matched": "Nationality"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Previous Employment",
+    "entity": "Previous Employment",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Previous Employment",
+    "entity": "Previous Employment",
+    "column": "Location",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_HR_Conversion.xls",
+    "sheet": "Previous Employment",
+    "entity": "Previous Employment",
+    "column": "Reason",
+    "references_hub": "job_change_reason",
+    "pattern_matched": "Reason"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "Reason",
+    "references_hub": "job_change_reason",
+    "pattern_matched": "Reason"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "EmployeeType",
+    "references_hub": "employee_type",
+    "pattern_matched": "EmployeeType"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "EmployeeStatus",
+    "references_hub": "employee_status",
+    "pattern_matched": "EmployeeStatus"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "Location",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "PayGroup",
+    "references_hub": "pay_group",
+    "pattern_matched": "PayGroup"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Job History",
+    "entity": "Job History",
+    "column": "SalaryGrade",
+    "references_hub": "salary_grade",
+    "pattern_matched": "SalaryGrade"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Review History",
+    "entity": "Review History",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Review History",
+    "entity": "Review History",
+    "column": "Rating",
+    "references_hub": "rating",
+    "pattern_matched": "Rating"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Review History",
+    "entity": "Review History",
+    "column": "ReviewType",
+    "references_hub": "review_type",
+    "pattern_matched": "ReviewType"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Review History",
+    "entity": "Review History",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Status History",
+    "entity": "Status History",
+    "column": "Source Company Code",
+    "references_hub": "component_company",
+    "pattern_matched": "Company Code"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Status History",
+    "entity": "Status History",
+    "column": "EmployeeStatus",
+    "references_hub": "employee_status",
+    "pattern_matched": "EmployeeStatus"
+  },
+  {
+    "file": "Data_Conversion_-_Optional_History_Conversion.xls",
+    "sheet": "Status History",
+    "entity": "Status History",
+    "column": "LeaveReason",
+    "references_hub": "leave_reason",
+    "pattern_matched": "LeaveReason"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "PayrollCountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "CountryCode",
+    "references_hub": "country",
+    "pattern_matched": "Country"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "LocationDesc",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Header",
+    "entity": "Header",
+    "column": "PayGroup",
+    "references_hub": "pay_group",
+    "pattern_matched": "PayGroup"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Earnings",
+    "entity": "Earnings",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Earnings",
+    "entity": "Earnings",
+    "column": "EarnCode",
+    "references_hub": "earning_code",
+    "pattern_matched": "EarnCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Earnings",
+    "entity": "Earnings",
+    "column": "JobCode",
+    "references_hub": "job_code",
+    "pattern_matched": "JobCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Earnings",
+    "entity": "Earnings",
+    "column": "LocationDesc",
+    "references_hub": "location",
+    "pattern_matched": "Location"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Deductions",
+    "entity": "Deductions",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Deductions",
+    "entity": "Deductions",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Taxes",
+    "entity": "Taxes",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Taxes",
+    "entity": "Taxes",
+    "column": "TaxCode",
+    "references_hub": "tax",
+    "pattern_matched": "TaxCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Third_Party_Pay.xlsx",
+    "sheet": "TPP - Direct Deposits",
+    "entity": "Direct Deposits",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Garnishments",
+    "entity": "Garnishments",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Garnishments",
+    "entity": "Garnishments",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Excluded Earnings",
+    "entity": "Excluded Earnings",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Excluded Earnings",
+    "entity": "Excluded Earnings",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Included Deductions",
+    "entity": "Included Deductions",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_UKG_Pro_Employee_Garnishment.xlsx",
+    "sheet": "Included Deductions",
+    "entity": "Included Deductions",
+    "column": "DedCode",
+    "references_hub": "deduction_code",
+    "pattern_matched": "DedCode"
+  },
+  {
+    "file": "Data_Conversion_-_EmpPriorYearWages.xlsx",
+    "sheet": "EmpPriorYearWages",
+    "entity": "EmpPriorYearWages",
+    "column": "CoCode",
+    "references_hub": "component_company",
+    "pattern_matched": "CoCode"
+  },
+  {
+    "file": "Data_Conversion_-_EmpPriorYearWages.xlsx",
+    "sheet": "EmpPriorYearWages",
+    "entity": "EmpPriorYearWages",
+    "column": "Tax Code",
+    "references_hub": "tax",
+    "pattern_matched": "Tax Code"
+  }
+]
