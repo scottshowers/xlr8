@@ -2657,16 +2657,19 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Derive semantic type from entity_type and column name.
         
+        v3.1: Fixed doubling issue (last_check_no_last_check_no → last_check_no_code)
+        
         Pattern: entity_type (singularized) + column suffix = semantic_type
         
         Examples:
         - entity_type="termination_reasons" + col="code" → "termination_reason_code"
         - entity_type="pay_groups" + col="pay_group_code" → "pay_group_code"
         - entity_type="earnings" + col="earnings_code" → "earning_code"
+        - entity_type="last_check_no" + col="last_check_no" → "last_check_no_code" (FIXED)
         """
-        col = column_name.lower()
+        col = column_name.lower().strip()
         
-        # If column already looks like a semantic type, use it
+        # If column already looks like a semantic type with _code suffix, use it
         if col.endswith('_code') and len(col) > 5:
             return col
         
@@ -2682,10 +2685,22 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             else:
                 singular = et
             
+            # Clean up underscores for comparison
+            singular_clean = singular.replace('_', '')
+            col_clean = col.replace('_', '')
+            
             # Build semantic type
             if col == 'code' or col == 'id' or col == 'type':
                 return f"{singular}_code"
             elif col.endswith('_code') or col.endswith('_id'):
+                return col
+            # v3.1 FIX: If column matches or contains entity name, don't double up
+            elif col == singular or col_clean == singular_clean:
+                return f"{singular}_code"
+            elif singular in col or singular_clean in col_clean:
+                # Column already includes entity - just add _code if needed
+                if not col.endswith('_code'):
+                    return f"{col}_code"
                 return col
             else:
                 return f"{singular}_{col}"
@@ -2696,18 +2711,136 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         return f"{col}_code"
     
     def _is_known_semantic_type(self, semantic_type: str) -> bool:
-        """Check if semantic type exists in vocabulary."""
+        """
+        Check if semantic type exists in vocabulary or vendor schema.
+        
+        v3.1: Also checks loaded vendor schemas (e.g., UKG Pro)
+        """
         try:
+            # Check core vocabulary
             try:
                 from backend.utils.semantic_vocabulary import get_all_types
             except ImportError:
                 from utils.semantic_vocabulary import get_all_types
             
             known_types = {t.name for t in get_all_types()}
-            return semantic_type in known_types
+            if semantic_type in known_types:
+                return True
+            
+            # Check vendor schemas
+            vendor_types = self._get_vendor_semantic_types()
+            return semantic_type in vendor_types
+            
         except Exception:
             return False
     
+    def _get_vendor_semantic_types(self) -> set:
+        """
+        Load semantic types from vendor schema files.
+        Cached after first load.
+        
+        Looks in: config/vendors/{vendor}/vocabulary_seed.json
+        """
+        # Use cached version if available
+        if hasattr(self, '_vendor_types_cache') and self._vendor_types_cache:
+            return self._vendor_types_cache
+        
+        vendor_types = set()
+        
+        try:
+            import json
+            import os
+            
+            # Find config directory (try multiple paths)
+            base_paths = [
+                '/app/config/vendors',           # Railway production
+                'config/vendors',                # Local relative
+                os.path.join(os.path.dirname(__file__), '..', 'config', 'vendors'),  # Relative to this file
+            ]
+            
+            for base_path in base_paths:
+                if not os.path.exists(base_path):
+                    continue
+                    
+                # Scan vendor directories
+                for vendor in os.listdir(base_path):
+                    vocab_path = os.path.join(base_path, vendor, 'vocabulary_seed.json')
+                    if os.path.exists(vocab_path):
+                        try:
+                            with open(vocab_path, 'r') as f:
+                                vocab_data = json.load(f)
+                            
+                            for entry in vocab_data:
+                                if 'semantic_type' in entry:
+                                    vendor_types.add(entry['semantic_type'])
+                                if 'hub_type' in entry:
+                                    # Also add variations
+                                    vendor_types.add(f"{entry['hub_type']}_code")
+                                    vendor_types.add(entry['hub_type'])
+                            
+                            logger.debug(f"[VENDOR-SCHEMA] Loaded {len(vocab_data)} types from {vendor}")
+                        except Exception as e:
+                            logger.debug(f"[VENDOR-SCHEMA] Error loading {vocab_path}: {e}")
+                
+                # Found and processed a valid path, stop looking
+                if vendor_types:
+                    break
+            
+            # Cache for future calls
+            self._vendor_types_cache = vendor_types
+            
+        except Exception as e:
+            logger.debug(f"[VENDOR-SCHEMA] Error loading vendor types: {e}")
+            self._vendor_types_cache = set()
+        
+        return self._vendor_types_cache
+    
+    def _get_vendor_hub_patterns(self, vendor: str = None) -> dict:
+        """
+        Load hub patterns from vendor schema for enhanced detection.
+        
+        Returns dict: {hub_type: {key_column, column_patterns, entity_names}}
+        """
+        if hasattr(self, '_vendor_hub_cache') and self._vendor_hub_cache:
+            return self._vendor_hub_cache
+        
+        hub_patterns = {}
+        
+        try:
+            import json
+            import os
+            
+            base_paths = [
+                '/app/config/vendors',
+                'config/vendors',
+                os.path.join(os.path.dirname(__file__), '..', 'config', 'vendors'),
+            ]
+            
+            for base_path in base_paths:
+                schema_path = os.path.join(base_path, 'ukg_pro', 'schema_reference.json')
+                if os.path.exists(schema_path):
+                    with open(schema_path, 'r') as f:
+                        schema = json.load(f)
+                    
+                    for hub_type, hub_info in schema.get('hubs', {}).items():
+                        hub_patterns[hub_type] = {
+                            'semantic_type': hub_info.get('semantic_type', f'{hub_type}_code'),
+                            'key_column': hub_info.get('key_column'),
+                            'column_patterns': hub_info.get('column_patterns', []),
+                            'entity_names': hub_info.get('expected_in_data', []),
+                            'is_required': hub_info.get('is_required', False),
+                        }
+                    
+                    logger.info(f"[VENDOR-SCHEMA] Loaded {len(hub_patterns)} hub patterns from UKG Pro schema")
+                    break
+            
+            self._vendor_hub_cache = hub_patterns
+            
+        except Exception as e:
+            logger.debug(f"[VENDOR-SCHEMA] Error loading hub patterns: {e}")
+            self._vendor_hub_cache = {}
+        
+        return self._vendor_hub_cache
     def _upsert_column_mapping(
         self,
         project: str,
