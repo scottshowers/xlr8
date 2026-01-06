@@ -191,7 +191,8 @@ def get_data_by_truth_type() -> Dict:
         "regulatory": {"files": 0, "chunks": 0},
         "intent": {"files": 0, "chunks": 0},
         "compliance": {"files": 0, "chunks": 0},
-        "unclassified": {"files": 0, "tables": 0, "rows": 0}
+        "unclassified": {"files": 0, "tables": 0, "rows": 0},
+        "entity_types": {}  # entity_type breakdown
     }
     
     # Get TABLES from DuckDB _schema_metadata (ground truth for structured data)
@@ -217,6 +218,28 @@ def get_data_by_truth_type() -> Dict:
                 result[truth]["tables"] = result[truth].get("tables", 0) + (table_count or 0)
                 result[truth]["rows"] = result[truth].get("rows", 0) + (total_rows or 0)
                 result[truth]["files"] = result[truth].get("files", 0) + (file_count or 0)
+            
+            # Get entity_type breakdown
+            try:
+                entity_rows = handler.conn.execute("""
+                    SELECT 
+                        COALESCE(entity_type, 'untyped') as entity_type,
+                        COUNT(*) as table_count,
+                        SUM(row_count) as total_rows
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    GROUP BY COALESCE(entity_type, 'untyped')
+                    ORDER BY table_count DESC
+                """).fetchall()
+                
+                for entity_type, table_count, total_rows in entity_rows:
+                    result["entity_types"][entity_type] = {
+                        "tables": table_count or 0,
+                        "rows": total_rows or 0
+                    }
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] entity_type breakdown failed: {e}")
+                
     except Exception as e:
         logger.warning(f"[DASHBOARD] DuckDB truth type query failed: {e}")
     finally:
@@ -317,14 +340,20 @@ def get_lineage_summary() -> Dict:
 # =============================================================================
 
 def get_relationship_summary() -> Dict:
-    """Get table relationship coverage."""
+    """Get table relationship coverage including Context Graph."""
     result = {
         "total_relationships": 0,
         "tables_with_relationships": 0,
         "tables_total": 0,
         "tables_orphaned": 0,
         "coverage_percent": 0,
-        "by_type": {}
+        "by_type": {},
+        "context_graph": {
+            "hub_count": 0,
+            "spoke_count": 0,
+            "semantic_types": [],
+            "has_reality_data": False
+        }
     }
     
     handler = None
@@ -349,6 +378,43 @@ def get_relationship_summary() -> Dict:
                     result["tables_total"] = tables[0] if tables else 0
                 except Exception:
                     pass
+            
+            # Get Context Graph summary
+            try:
+                if hasattr(handler, 'get_context_graph'):
+                    # Get for all projects (no project filter)
+                    hubs = handler.conn.execute("""
+                        SELECT COUNT(*), COUNT(DISTINCT semantic_type)
+                        FROM _column_mappings WHERE is_hub = TRUE
+                    """).fetchone()
+                    
+                    spokes = handler.conn.execute("""
+                        SELECT COUNT(*) FROM _column_mappings 
+                        WHERE is_hub = FALSE AND hub_table IS NOT NULL
+                    """).fetchone()
+                    
+                    # Get semantic types with hubs
+                    sem_types = handler.conn.execute("""
+                        SELECT DISTINCT semantic_type FROM _column_mappings WHERE is_hub = TRUE
+                    """).fetchall()
+                    
+                    # Check if any Reality spokes exist
+                    reality_spokes = handler.conn.execute("""
+                        SELECT COUNT(*) FROM _column_mappings m
+                        JOIN _schema_metadata s ON m.table_name = s.table_name AND m.project = s.project
+                        WHERE m.is_hub = FALSE AND m.hub_table IS NOT NULL 
+                        AND s.truth_type = 'reality'
+                    """).fetchone()
+                    
+                    result["context_graph"] = {
+                        "hub_count": hubs[0] if hubs else 0,
+                        "semantic_type_count": hubs[1] if hubs else 0,
+                        "spoke_count": spokes[0] if spokes else 0,
+                        "semantic_types": [st[0] for st in sem_types] if sem_types else [],
+                        "has_reality_data": (reality_spokes[0] if reality_spokes else 0) > 0
+                    }
+            except Exception as e:
+                logger.debug(f"[DASHBOARD] Context graph summary failed: {e}")
         
         # Get relationships from Supabase
         if supabase:
