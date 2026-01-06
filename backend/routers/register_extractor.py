@@ -478,13 +478,13 @@ def store_to_duckdb(
         handler.safe_execute(f"CREATE TABLE {table_name} AS SELECT * FROM temp_payroll")
         handler.conn.unregister('temp_payroll')
         
-        # Store metadata
+        # Store metadata with entity_type for Context Graph
         try:
             columns_info = [{'name': col, 'type': 'VARCHAR'} for col in df.columns]
             handler.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, columns, row_count, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, 'payroll', ?, ?, ?, 1, TRUE)
+                (id, project, file_name, sheet_name, table_name, entity_type, category, columns, row_count, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, 'payroll', ?, 'payroll_register', 'payroll', ?, ?, 1, TRUE)
             """, [
                 project_name,
                 source_file,
