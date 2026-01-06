@@ -1,5 +1,5 @@
 """
-XLR8 Intelligence Engine v2 - Main Orchestrator
+XLR8 Intelligence Engine v3 - Main Orchestrator
 ================================================
 
 The brain of XLR8. Thin orchestrator that coordinates:
@@ -8,6 +8,12 @@ The brain of XLR8. Thin orchestrator that coordinates:
 - Truth gathering (Reality, Intent, Configuration, Reference, Regulatory)
 - Conflict detection
 - Response synthesis
+
+v3.0 CHANGES:
+- Context Graph integration for intelligent table selection
+- Semantic type detection in queries
+- Graph-aware JOIN suggestions via TableSelector
+- Passes Context Graph to components for scoped queries
 
 CRITICAL: ALL questions gather ALL Five Truths.
 Validation questions especially need all truths to triangulate:
@@ -43,7 +49,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "6.4.0"  # ADDED: Compliance engine integration, conflict detection
+__version__ = "7.0.0"  # v3.0: Context Graph integration
 
 # Try to load ConsultativeSynthesizer
 SYNTHESIS_AVAILABLE = False
@@ -296,8 +302,22 @@ class IntelligenceEngineV2:
         # Truth Enricher (LLM Lookups) - extracts structured data from raw truths
         self.truth_enricher = TruthEnricher(project_id=self.project_id)
         
+        # v3.0: Log Context Graph availability
+        context_graph_available = False
+        if structured_handler and hasattr(structured_handler, 'get_context_graph'):
+            try:
+                graph = structured_handler.get_context_graph(self.project)
+                hub_count = len(graph.get('hubs', []))
+                rel_count = len(graph.get('relationships', []))
+                if hub_count > 0 or rel_count > 0:
+                    context_graph_available = True
+                    logger.warning(f"[ENGINE-V2] Context Graph: {hub_count} hubs, {rel_count} relationships")
+            except Exception as e:
+                logger.debug(f"[ENGINE-V2] Context Graph not available: {e}")
+        
         logger.info(f"[ENGINE-V2] Context loaded: {len(self.schema.get('tables', []))} tables, "
-                   f"{len(self.filter_candidates)} filter categories")
+                   f"{len(self.filter_candidates)} filter categories, "
+                   f"context_graph={'yes' if context_graph_available else 'no'}")
     
     def _init_pattern_cache(self):
         """Initialize SQL pattern cache for learning.
