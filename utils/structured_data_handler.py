@@ -2235,12 +2235,24 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             
             # Step 2: Validate semantic type matches - column name should relate to the type
             # This filters out bad LLM inferences like gl_segment → company_code
-            def column_matches_type(column_name: str, semantic_type: str) -> bool:
-                """Check if column name reasonably matches the semantic type."""
+            # BUT: Trust high-confidence mappings from entity_type context
+            def column_matches_type(column_name: str, semantic_type: str, confidence: float) -> bool:
+                """
+                Check if column name reasonably matches the semantic type.
+                
+                DYNAMIC: For high-confidence mappings (>=0.90), trust them even if 
+                column name is generic like "code". These come from entity_type context
+                where we KNOW the table is e.g. "termination_reasons" so "code" → 
+                "termination_reason_code" is correct.
+                """
+                # High confidence = trust it (entity_type inference)
+                if confidence >= 0.90:
+                    return True
+                
                 col = column_name.lower()
                 sem = semantic_type.lower().replace('_code', '').replace('_', '')
                 
-                # Direct match patterns
+                # Direct match patterns for LOWER confidence mappings
                 # company_code: column should have "company", "comp", "co_code"
                 # earning_code: column should have "earn", "earning"
                 # job_code: column should have "job", "position"
@@ -2266,10 +2278,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             valid_columns = []
             for row in columns:
                 table_name, column_name, sem_type, confidence, distinct_count, distinct_values, truth_type = row
-                if column_matches_type(column_name, sem_type):
+                if column_matches_type(column_name, sem_type, confidence):
                     valid_columns.append(row)
                 else:
-                    logger.debug(f"[CONTEXT-GRAPH] Skipping bad match: {column_name} → {sem_type}")
+                    logger.debug(f"[CONTEXT-GRAPH] Skipping bad match: {column_name} → {sem_type} (confidence={confidence})")
             
             columns = valid_columns
             
