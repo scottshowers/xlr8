@@ -1797,7 +1797,7 @@ export default function DataExplorer() {
           padding: '1.5rem',
           maxWidth: '1200px'
         }}>
-          <ContextGraph project={currentProject?.name || currentProject} />
+          <ContextGraph project={activeProject?.name || activeProject} />
         </div>
       )}
 
