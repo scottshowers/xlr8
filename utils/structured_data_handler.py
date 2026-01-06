@@ -2739,7 +2739,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         Load semantic types from vendor schema files.
         Cached after first load.
         
-        Looks in: config/vendors/{vendor}/vocabulary_seed.json
+        v3.2: Updated paths - files now in config/ directly
         """
         # Use cached version if available
         if hasattr(self, '_vendor_types_cache') and self._vendor_types_cache:
@@ -2753,38 +2753,32 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             
             # Find config directory (try multiple paths)
             base_paths = [
-                '/app/config/vendors',           # Railway production
-                'config/vendors',                # Local relative
-                os.path.join(os.path.dirname(__file__), '..', 'config', 'vendors'),  # Relative to this file
+                '/app/config',                   # Railway production
+                'config',                        # Local relative
+                os.path.join(os.path.dirname(__file__), '..', 'config'),  # Relative to this file
             ]
             
             for base_path in base_paths:
-                if not os.path.exists(base_path):
-                    continue
-                    
-                # Scan vendor directories
-                for vendor in os.listdir(base_path):
-                    vocab_path = os.path.join(base_path, vendor, 'vocabulary_seed.json')
-                    if os.path.exists(vocab_path):
-                        try:
-                            with open(vocab_path, 'r') as f:
-                                vocab_data = json.load(f)
-                            
-                            for entry in vocab_data:
-                                if 'semantic_type' in entry:
-                                    vendor_types.add(entry['semantic_type'])
-                                if 'hub_type' in entry:
-                                    # Also add variations
-                                    vendor_types.add(f"{entry['hub_type']}_code")
-                                    vendor_types.add(entry['hub_type'])
-                            
-                            logger.debug(f"[VENDOR-SCHEMA] Loaded {len(vocab_data)} types from {vendor}")
-                        except Exception as e:
-                            logger.debug(f"[VENDOR-SCHEMA] Error loading {vocab_path}: {e}")
-                
-                # Found and processed a valid path, stop looking
-                if vendor_types:
-                    break
+                vocab_path = os.path.join(base_path, 'ukg_vocabulary_seed.json')
+                if os.path.exists(vocab_path):
+                    try:
+                        with open(vocab_path, 'r') as f:
+                            vocab_data = json.load(f)
+                        
+                        for entry in vocab_data:
+                            if 'semantic_type' in entry:
+                                vendor_types.add(entry['semantic_type'])
+                            # Also add variations if present
+                            for var in entry.get('variations', []):
+                                vendor_types.add(var)
+                            if 'hub_type' in entry:
+                                vendor_types.add(f"{entry['hub_type']}_code")
+                                vendor_types.add(entry['hub_type'])
+                        
+                        logger.info(f"[VENDOR-SCHEMA] Loaded {len(vocab_data)} types from {vocab_path}")
+                        break
+                    except Exception as e:
+                        logger.debug(f"[VENDOR-SCHEMA] Error loading {vocab_path}: {e}")
             
             # Cache for future calls
             self._vendor_types_cache = vendor_types
@@ -2799,6 +2793,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Load hub patterns from vendor schema for enhanced detection.
         
+        v3.2: Updated paths - files now in config/ directly
+        
         Returns dict: {hub_type: {key_column, column_patterns, entity_names}}
         """
         if hasattr(self, '_vendor_hub_cache') and self._vendor_hub_cache:
@@ -2811,13 +2807,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             import os
             
             base_paths = [
-                '/app/config/vendors',
-                'config/vendors',
-                os.path.join(os.path.dirname(__file__), '..', 'config', 'vendors'),
+                '/app/config',
+                'config',
+                os.path.join(os.path.dirname(__file__), '..', 'config'),
             ]
             
             for base_path in base_paths:
-                schema_path = os.path.join(base_path, 'ukg_pro', 'schema_reference.json')
+                schema_path = os.path.join(base_path, 'ukg_schema_reference.json')
                 if os.path.exists(schema_path):
                     with open(schema_path, 'r') as f:
                         schema = json.load(f)
@@ -2831,7 +2827,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'is_required': hub_info.get('is_required', False),
                         }
                     
-                    logger.info(f"[VENDOR-SCHEMA] Loaded {len(hub_patterns)} hub patterns from UKG Pro schema")
+                    logger.info(f"[VENDOR-SCHEMA] Loaded {len(hub_patterns)} hub patterns from {schema_path}")
                     break
             
             self._vendor_hub_cache = hub_patterns
