@@ -2452,6 +2452,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # STEP 6: Find spokes by value matching
             # =================================================================
             # Get all columns from all tables (from _column_profiles for efficiency)
+            # REQUIRE schema metadata to avoid orphaned data showing as "Unknown Source"
             all_columns = self.conn.execute("""
                 SELECT 
                     p.table_name,
@@ -2463,11 +2464,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     s.category,
                     s.file_name
                 FROM _column_profiles p
-                LEFT JOIN _schema_metadata s 
+                INNER JOIN _schema_metadata s 
                     ON p.project = s.project AND p.table_name = s.table_name
                 WHERE p.project = ?
                   AND p.distinct_count > 0
                   AND p.distinct_count < 5000
+                  AND s.file_name IS NOT NULL
+                  AND s.is_current = TRUE
             """, [project]).fetchall()
             
             # Build lookup of column values (only for columns with cached values)
@@ -2777,7 +2780,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         COALESCE(s.truth_type, 'unknown') as truth_type,
                         s.entity_type,
                         s.category,
-                        COALESCE(m.is_discovered, FALSE) as is_discovered
+                        COALESCE(m.is_discovered, FALSE) as is_discovered,
+                        s.file_name
                     FROM _column_mappings m
                     LEFT JOIN _schema_metadata s 
                         ON m.project = s.project AND m.table_name = s.table_name
@@ -2824,7 +2828,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'truth_type': s[9],
                             'entity_type': s[10],
                             'category': s[11],
-                            'is_discovered': s[12]
+                            'is_discovered': s[12],
+                            'file_name': s[13]
                         }
                         for s in spokes
                     ],
