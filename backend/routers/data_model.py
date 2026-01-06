@@ -18,6 +18,34 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["data-model"])
 
 
+def _get_read_handler():
+    """Get a read-only DuckDB handler for API endpoints.
+    
+    Creates a NEW connection each time - safe for concurrent access.
+    ALWAYS close when done: handler.close()
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_read_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_read_handler
+        return get_read_handler()
+    except Exception:
+        return None
+
+
+def _get_write_handler():
+    """Get the write handler for operations that modify data."""
+    try:
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        return get_structured_handler()
+    except Exception:
+        return None
+
+
 class RelationshipConfirmation(BaseModel):
     """Request to confirm or reject a relationship."""
     source_table: str
