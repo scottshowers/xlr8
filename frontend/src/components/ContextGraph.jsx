@@ -1,24 +1,59 @@
 /**
- * Context Graph Visualization
+ * ContextGraph.jsx - Hub/Spoke Relationship Visualization
+ * ========================================================
  * 
- * Displays the hub/spoke relationships that power intelligent queries.
- * Shows semantic types, their hub tables, and related spoke tables.
+ * Deploy to: frontend/src/components/ContextGraph.jsx
+ * 
+ * PURPOSE:
+ * Shows the semantic hub/spoke relationships that power intelligent queries.
+ * Each semantic type (company_code, job_code, etc.) has ONE hub (source of truth)
+ * and multiple spokes (tables that reference the hub).
+ * 
+ * This is the intelligence layer that enables:
+ * - Automatic join path discovery
+ * - Gap detection ("13 configured, 6 have data")
+ * - Query scoping
  */
 
 import React, { useState, useEffect } from 'react';
 import { 
   Network, Database, Link2, ChevronDown, ChevronRight, 
-  CheckCircle2, AlertCircle, Loader2, RefreshCw 
+  CheckCircle2, AlertCircle, Loader2, RefreshCw, Info
 } from 'lucide-react';
+import api from '../services/api';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+// ============================================================================
+// BRAND COLORS (matches rest of platform)
+// ============================================================================
+const brandColors = {
+  primary: '#83b16d',
+  accent: '#285390',
+  electricBlue: '#2766b1',
+  skyBlue: '#93abd9',
+  iceFlow: '#c9d3d4',
+  silver: '#a2a1a0',
+  white: '#f6f5fa',
+  scarletSage: '#993c44',
+  royalPurple: '#5f4282',
+  background: '#f0f2f5',
+  cardBg: '#ffffff',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  border: '#e2e8f0',
+  warning: '#d97706',
+  success: '#22c55e',
+};
 
+// ============================================================================
+// MAIN COMPONENT
+// ============================================================================
 export default function ContextGraph({ project }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [expandedTypes, setExpandedTypes] = useState(new Set());
-  const [viewMode, setViewMode] = useState('grouped'); // 'grouped' or 'list'
+  
+  const c = brandColors;
 
   useEffect(() => {
     if (project) {
@@ -30,15 +65,13 @@ export default function ContextGraph({ project }) {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/data-model/context-graph/${project}`);
-      if (!res.ok) throw new Error('Failed to fetch context graph');
-      const json = await res.json();
-      setData(json);
+      const res = await api.get(`/data-model/context-graph/${project}`);
+      setData(res.data);
       // Auto-expand first 3 semantic types
-      const firstThree = (json.summary?.semantic_types || []).slice(0, 3);
+      const firstThree = (res.data?.summary?.semantic_types || []).slice(0, 3);
       setExpandedTypes(new Set(firstThree));
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Failed to load context graph');
     } finally {
       setLoading(false);
     }
@@ -88,172 +121,330 @@ export default function ContextGraph({ project }) {
     return grouped;
   };
 
+  // Shorten table name for display
+  const shortTableName = (fullName) => {
+    if (!fullName) return '';
+    const parts = fullName.split('_');
+    // Take last 2-3 meaningful parts
+    return parts.slice(-3).join('_');
+  };
+
+  // Loading state
   if (loading) {
     return (
-      <div className="flex items-center justify-center p-8 text-gray-400">
-        <Loader2 className="w-6 h-6 animate-spin mr-2" />
-        Loading context graph...
+      <div style={{ 
+        display: 'flex', 
+        flexDirection: 'column',
+        alignItems: 'center', 
+        justifyContent: 'center', 
+        padding: '3rem',
+        color: c.textMuted 
+      }}>
+        <Loader2 size={32} style={{ animation: 'spin 1s linear infinite', marginBottom: '1rem' }} />
+        <p>Loading context graph...</p>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
     );
   }
 
+  // Error state
   if (error) {
     return (
-      <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-lg text-red-400">
-        <AlertCircle className="w-5 h-5 inline mr-2" />
-        {error}
+      <div style={{ 
+        padding: '2rem', 
+        background: `${c.scarletSage}15`, 
+        border: `1px solid ${c.scarletSage}40`,
+        borderRadius: 8,
+        textAlign: 'center',
+        color: c.scarletSage
+      }}>
+        <AlertCircle size={32} style={{ marginBottom: '1rem' }} />
+        <p style={{ marginBottom: '1rem' }}>{error}</p>
+        <button 
+          onClick={fetchContextGraph}
+          style={{
+            padding: '0.5rem 1rem',
+            background: c.accent,
+            color: 'white',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer'
+          }}
+        >
+          Retry
+        </button>
       </div>
     );
   }
 
+  // Empty state
   if (!data || !data.hubs?.length) {
     return (
-      <div className="p-6 bg-gray-800/50 rounded-lg border border-gray-700 text-center">
-        <Network className="w-12 h-12 mx-auto mb-3 text-gray-500" />
-        <p className="text-gray-400">No context graph data yet.</p>
-        <p className="text-sm text-gray-500 mt-1">Upload data files to build relationships.</p>
+      <div style={{ 
+        padding: '3rem', 
+        textAlign: 'center',
+        color: c.textMuted 
+      }}>
+        <Network size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+        <h3 style={{ margin: '0 0 0.5rem', color: c.text, fontWeight: 600 }}>No Context Graph Data</h3>
+        <p style={{ margin: 0, fontSize: '0.9rem' }}>
+          Upload data files to build semantic relationships.
+        </p>
+        <p style={{ margin: '0.5rem 0 0', fontSize: '0.8rem', color: c.textMuted }}>
+          The context graph is computed automatically during upload.
+        </p>
       </div>
     );
   }
 
   const grouped = getGroupedData();
   const summary = data.summary || {};
+  const validFKCount = data.relationships?.filter(r => r.is_valid_fk).length || 0;
 
   return (
-    <div className="space-y-4">
+    <div>
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="p-2 bg-purple-500/20 rounded-lg">
-            <Network className="w-5 h-5 text-purple-400" />
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        justifyContent: 'space-between',
+        marginBottom: '1.5rem'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div style={{ 
+            padding: '0.6rem',
+            background: `${c.royalPurple}20`,
+            borderRadius: 8
+          }}>
+            <Network size={22} style={{ color: c.royalPurple }} />
           </div>
           <div>
-            <h3 className="font-semibold text-white">Context Graph</h3>
-            <p className="text-sm text-gray-400">
-              {summary.hub_count} hubs • {summary.spoke_count} relationships • {summary.semantic_types?.length} types
+            <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 600, color: c.text }}>
+              Context Graph
+            </h3>
+            <p style={{ margin: 0, fontSize: '0.85rem', color: c.textMuted }}>
+              {summary.hub_count} hubs • {summary.spoke_count} relationships • {summary.semantic_types?.length} semantic types
             </p>
           </div>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <button
             onClick={expandAll}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white transition"
+            style={{
+              padding: '0.4rem 0.75rem',
+              fontSize: '0.75rem',
+              background: 'transparent',
+              border: `1px solid ${c.border}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+              color: c.textMuted
+            }}
           >
             Expand All
           </button>
           <button
             onClick={collapseAll}
-            className="px-2 py-1 text-xs text-gray-400 hover:text-white transition"
+            style={{
+              padding: '0.4rem 0.75rem',
+              fontSize: '0.75rem',
+              background: 'transparent',
+              border: `1px solid ${c.border}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+              color: c.textMuted
+            }}
           >
             Collapse All
           </button>
           <button
             onClick={fetchContextGraph}
-            className="p-1.5 text-gray-400 hover:text-white transition rounded hover:bg-gray-700"
             title="Refresh"
+            style={{
+              padding: '0.4rem',
+              background: 'transparent',
+              border: `1px solid ${c.border}`,
+              borderRadius: 4,
+              cursor: 'pointer',
+              color: c.textMuted
+            }}
           >
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw size={16} />
           </button>
         </div>
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-4 text-xs text-gray-400 px-2">
-        <span className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-purple-500"></div>
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: '1.5rem',
+        padding: '0.75rem 1rem',
+        background: c.background,
+        borderRadius: 6,
+        marginBottom: '1rem',
+        fontSize: '0.8rem',
+        color: c.textMuted
+      }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: c.royalPurple }}></div>
           Hub (source of truth)
         </span>
-        <span className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-gray-600"></div>
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <div style={{ width: 12, height: 12, borderRadius: 3, background: c.silver }}></div>
           Spoke (references hub)
         </span>
-        <span className="flex items-center gap-1">
-          <CheckCircle2 className="w-3 h-3 text-green-400" />
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <CheckCircle2 size={14} style={{ color: c.success }} />
           Valid FK
         </span>
-        <span className="flex items-center gap-1">
-          <AlertCircle className="w-3 h-3 text-yellow-400" />
+        <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+          <AlertCircle size={14} style={{ color: c.warning }} />
           Partial match
         </span>
       </div>
 
-      {/* Grouped View */}
-      <div className="space-y-2">
+      {/* Semantic Type Groups */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
         {Object.entries(grouped).map(([semanticType, { hub, spokes }]) => (
           <div 
             key={semanticType}
-            className="bg-gray-800/50 rounded-lg border border-gray-700 overflow-hidden"
+            style={{
+              background: c.cardBg,
+              border: `1px solid ${c.border}`,
+              borderRadius: 8,
+              overflow: 'hidden'
+            }}
           >
             {/* Semantic Type Header */}
             <button
               onClick={() => toggleType(semanticType)}
-              className="w-full px-4 py-3 flex items-center justify-between hover:bg-gray-700/50 transition"
+              style={{
+                width: '100%',
+                padding: '0.75rem 1rem',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                background: 'transparent',
+                border: 'none',
+                cursor: 'pointer',
+                textAlign: 'left'
+              }}
             >
-              <div className="flex items-center gap-3">
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                 {expandedTypes.has(semanticType) ? (
-                  <ChevronDown className="w-4 h-4 text-gray-400" />
+                  <ChevronDown size={16} style={{ color: c.textMuted }} />
                 ) : (
-                  <ChevronRight className="w-4 h-4 text-gray-400" />
+                  <ChevronRight size={16} style={{ color: c.textMuted }} />
                 )}
-                <span className="font-mono text-sm text-purple-400 font-medium">
+                <span style={{ 
+                  fontFamily: 'monospace',
+                  fontSize: '0.9rem',
+                  fontWeight: 600,
+                  color: c.royalPurple
+                }}>
                   {semanticType}
                 </span>
-                <span className="text-xs text-gray-500">
+                <span style={{ 
+                  fontSize: '0.75rem',
+                  color: c.textMuted,
+                  background: c.background,
+                  padding: '0.15rem 0.5rem',
+                  borderRadius: 4
+                }}>
                   {spokes.length} relationship{spokes.length !== 1 ? 's' : ''}
                 </span>
               </div>
-              <div className="text-xs text-gray-500">
-                Hub: {hub.cardinality.toLocaleString()} unique values
+              <div style={{ fontSize: '0.8rem', color: c.textMuted }}>
+                Hub: {hub.cardinality?.toLocaleString()} unique values
               </div>
             </button>
 
             {/* Expanded Content */}
             {expandedTypes.has(semanticType) && (
-              <div className="border-t border-gray-700 bg-gray-900/30">
+              <div style={{ borderTop: `1px solid ${c.border}` }}>
                 {/* Hub Info */}
-                <div className="px-4 py-3 flex items-center gap-3 bg-purple-500/10 border-b border-gray-700">
-                  <Database className="w-4 h-4 text-purple-400" />
-                  <div className="flex-1">
-                    <div className="text-sm text-white font-mono">
-                      {hub.table.split('_').slice(-2).join('_')}
+                <div style={{ 
+                  padding: '0.75rem 1rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  background: `${c.royalPurple}10`,
+                  borderBottom: `1px solid ${c.border}`
+                }}>
+                  <Database size={16} style={{ color: c.royalPurple }} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ 
+                      fontSize: '0.85rem', 
+                      fontWeight: 500, 
+                      color: c.text,
+                      fontFamily: 'monospace'
+                    }}>
+                      {shortTableName(hub.table)}
                     </div>
-                    <div className="text-xs text-gray-400">
-                      Column: <span className="text-purple-300">{hub.column}</span>
+                    <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                      Column: <span style={{ color: c.royalPurple }}>{hub.column}</span>
                     </div>
                   </div>
-                  <div className="px-2 py-0.5 bg-purple-500/20 rounded text-xs text-purple-300">
+                  <span style={{
+                    padding: '0.2rem 0.5rem',
+                    background: `${c.royalPurple}20`,
+                    color: c.royalPurple,
+                    borderRadius: 4,
+                    fontSize: '0.7rem',
+                    fontWeight: 600
+                  }}>
                     HUB
-                  </div>
+                  </span>
                 </div>
 
                 {/* Spokes */}
                 {spokes.length > 0 ? (
-                  <div className="divide-y divide-gray-700/50">
+                  <div>
                     {spokes.map((spoke, idx) => (
                       <div 
                         key={idx}
-                        className="px-4 py-2 flex items-center gap-3 hover:bg-gray-800/50"
+                        style={{
+                          padding: '0.6rem 1rem',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.75rem',
+                          borderBottom: idx < spokes.length - 1 ? `1px solid ${c.border}` : 'none',
+                          background: 'transparent'
+                        }}
                       >
-                        <Link2 className="w-4 h-4 text-gray-500 ml-4" />
-                        <div className="flex-1">
-                          <div className="text-sm text-gray-300 font-mono">
-                            {spoke.spoke_table.split('_').slice(-2).join('_')}
+                        <Link2 size={14} style={{ color: c.silver, marginLeft: '1.5rem' }} />
+                        <div style={{ flex: 1 }}>
+                          <div style={{ 
+                            fontSize: '0.85rem', 
+                            color: c.text,
+                            fontFamily: 'monospace'
+                          }}>
+                            {shortTableName(spoke.spoke_table)}
                           </div>
-                          <div className="text-xs text-gray-500">
+                          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
                             {spoke.spoke_column} → {spoke.hub_column}
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                           {spoke.is_valid_fk ? (
-                            <CheckCircle2 className="w-4 h-4 text-green-400" title="Valid foreign key" />
+                            <CheckCircle2 size={16} style={{ color: c.success }} title="Valid foreign key" />
                           ) : (
-                            <AlertCircle className="w-4 h-4 text-yellow-400" title="Partial match" />
+                            <AlertCircle size={16} style={{ color: c.warning }} title="Partial match" />
                           )}
-                          <span className="text-xs text-gray-500">
-                            {spoke.coverage_pct ? `${(spoke.coverage_pct * 100).toFixed(0)}%` : '-'}
+                          <span style={{ 
+                            fontSize: '0.75rem', 
+                            color: c.textMuted,
+                            minWidth: 45,
+                            textAlign: 'right'
+                          }}>
+                            {spoke.coverage_pct ? `${Math.round(spoke.coverage_pct)}%` : '-'}
                           </span>
-                          <span className="text-xs text-gray-600">
+                          <span style={{ 
+                            fontSize: '0.7rem', 
+                            color: c.silver,
+                            fontFamily: 'monospace'
+                          }}>
                             {spoke.spoke_cardinality}/{spoke.hub_cardinality}
                           </span>
                         </div>
@@ -261,7 +452,12 @@ export default function ContextGraph({ project }) {
                     ))}
                   </div>
                 ) : (
-                  <div className="px-4 py-3 text-sm text-gray-500 text-center">
+                  <div style={{ 
+                    padding: '1rem', 
+                    textAlign: 'center', 
+                    color: c.textMuted,
+                    fontSize: '0.85rem'
+                  }}>
                     No spoke relationships found
                   </div>
                 )}
@@ -272,20 +468,52 @@ export default function ContextGraph({ project }) {
       </div>
 
       {/* Summary Stats */}
-      <div className="grid grid-cols-3 gap-4 pt-4 border-t border-gray-700">
-        <div className="text-center">
-          <div className="text-2xl font-bold text-purple-400">{summary.hub_count}</div>
-          <div className="text-xs text-gray-500">Hub Tables</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-blue-400">{summary.spoke_count}</div>
-          <div className="text-xs text-gray-500">Relationships</div>
-        </div>
-        <div className="text-center">
-          <div className="text-2xl font-bold text-green-400">
-            {data.relationships?.filter(r => r.is_valid_fk).length || 0}
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(3, 1fr)',
+        gap: '1rem',
+        marginTop: '1.5rem',
+        padding: '1rem 0',
+        borderTop: `1px solid ${c.border}`
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.royalPurple }}>
+            {summary.hub_count}
           </div>
-          <div className="text-xs text-gray-500">Valid FKs</div>
+          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Hub Tables</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.electricBlue }}>
+            {summary.spoke_count}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Relationships</div>
+        </div>
+        <div style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: '1.75rem', fontWeight: 700, color: c.success }}>
+            {validFKCount}
+          </div>
+          <div style={{ fontSize: '0.75rem', color: c.textMuted }}>Valid FKs</div>
+        </div>
+      </div>
+
+      {/* Info Box */}
+      <div style={{
+        marginTop: '1rem',
+        padding: '0.75rem 1rem',
+        background: `${c.accent}10`,
+        borderRadius: 6,
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: '0.75rem',
+        fontSize: '0.8rem',
+        color: c.textMuted
+      }}>
+        <Info size={16} style={{ color: c.accent, flexShrink: 0, marginTop: 2 }} />
+        <div>
+          <strong style={{ color: c.text }}>How it works:</strong> Each semantic type (like company_code) 
+          has one <strong>hub</strong> table with the most complete set of values. Other tables with the same 
+          semantic type become <strong>spokes</strong> that reference the hub. This enables automatic joins 
+          and gap detection.
         </div>
       </div>
     </div>
