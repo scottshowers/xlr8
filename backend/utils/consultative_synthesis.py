@@ -147,10 +147,13 @@ class ConsultativeSynthesizer:
         compliance: List[Any] = None,
         conflicts: List[Any] = None,
         insights: List[Any] = None,
-        structured_data: Dict = None
+        structured_data: Dict = None,
+        context_graph: Dict = None  # v3.0: Context Graph for relationship context
     ) -> ConsultativeAnswer:
         """
         Main entry point - synthesize all truths into a consultative answer.
+        
+        v3.0: Now accepts context_graph for relationship awareness.
         
         Args:
             question: The user's question
@@ -163,6 +166,7 @@ class ConsultativeSynthesizer:
             conflicts: Pre-detected conflicts between sources
             insights: Pre-generated insights
             structured_data: Raw query results (rows, columns, sql)
+            context_graph: Hub/spoke relationships and coverage info
             
         Returns:
             ConsultativeAnswer with synthesized response
@@ -178,6 +182,12 @@ class ConsultativeSynthesizer:
             regulatory=regulatory,
             structured_data=structured_data
         )
+        
+        # v3.0: Add Context Graph context to summaries if available
+        if context_graph:
+            graph_summary = self._summarize_context_graph(context_graph)
+            if graph_summary:
+                summaries.append(graph_summary)
         
         # Step 2: Triangulate - find alignments, conflicts, gaps
         triangulation = self._triangulate(summaries, conflicts or [])
@@ -249,6 +259,56 @@ class ConsultativeSynthesizer:
         summaries.append(reg_summary)
         
         return summaries
+    
+    def _summarize_context_graph(self, context_graph: Dict) -> Optional[TruthSummary]:
+        """
+        Summarize Context Graph relationships for LLM context.
+        
+        v3.0: Provides hub/spoke relationship context so LLM understands
+        how data connects and where gaps exist.
+        """
+        if not context_graph:
+            return None
+        
+        hubs = context_graph.get('hubs', [])
+        relationships = context_graph.get('relationships', [])
+        
+        if not hubs and not relationships:
+            return None
+        
+        key_facts = []
+        
+        # Summarize hubs (master data)
+        if hubs:
+            key_facts.append(f"Data model has {len(hubs)} master data hubs:")
+            for hub in hubs[:5]:
+                sem_type = hub.get('semantic_type', 'unknown')
+                table = hub.get('table', 'unknown')
+                key_facts.append(f"  - {sem_type}: {table}")
+        
+        # Summarize coverage gaps
+        low_coverage = [r for r in relationships if (r.get('coverage_pct') or 0) < 70]
+        if low_coverage:
+            key_facts.append(f"\nData coverage gaps ({len(low_coverage)} tables with <70% coverage):")
+            for rel in low_coverage[:5]:
+                spoke = rel.get('spoke_table', 'unknown')
+                sem_type = rel.get('semantic_type', 'unknown')
+                coverage = rel.get('coverage_pct', 0)
+                matched = rel.get('matched_count', 0)
+                total = rel.get('hub_count', 0)
+                key_facts.append(f"  - {spoke}: only {matched}/{total} {sem_type}s ({coverage:.0f}%)")
+        
+        if not key_facts:
+            return None
+        
+        return TruthSummary(
+            source_type='data_model',
+            has_data=True,
+            summary=f"Context Graph: {len(hubs)} hubs, {len(relationships)} relationships",
+            key_facts=key_facts,
+            confidence=0.95,
+            sources=['context_graph']
+        )
     
     def _summarize_reality(self, reality: List[Any], structured_data: Dict = None) -> TruthSummary:
         """Summarize data/query results."""
