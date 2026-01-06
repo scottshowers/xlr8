@@ -2401,14 +2401,16 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         with self._db_lock:
             try:
-                # Get all hubs with truth_type
+                # Get all hubs with truth_type and entity_type
                 hubs = self.conn.execute("""
                     SELECT 
                         m.semantic_type, 
                         m.table_name, 
                         m.original_column, 
                         m.hub_cardinality,
-                        COALESCE(s.truth_type, 'unknown') as truth_type
+                        COALESCE(s.truth_type, 'unknown') as truth_type,
+                        s.entity_type,
+                        s.category
                     FROM _column_mappings m
                     LEFT JOIN _schema_metadata s 
                         ON m.project = s.project AND m.table_name = s.table_name
@@ -2427,7 +2429,9 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         m.spoke_cardinality,
                         m.coverage_pct,
                         m.is_subset,
-                        COALESCE(s.truth_type, 'unknown') as truth_type
+                        COALESCE(s.truth_type, 'unknown') as truth_type,
+                        s.entity_type,
+                        s.category
                     FROM _column_mappings m
                     LEFT JOIN _schema_metadata s 
                         ON m.project = s.project AND m.table_name = s.table_name
@@ -2447,6 +2451,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         'column': h[2],
                         'cardinality': h[3],
                         'truth_type': h[4],
+                        'entity_type': h[5],
+                        'category': h[6],
                         'has_reality_spokes': any(s[0] == h[0] for s in reality_spokes)
                     }
                     for h in hubs
@@ -2465,7 +2471,9 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'spoke_cardinality': s[6],
                             'coverage_pct': s[7],
                             'is_valid_fk': s[8],  # is_subset = valid foreign key
-                            'truth_type': s[9]
+                            'truth_type': s[9],
+                            'entity_type': s[10],
+                            'category': s[11]
                         }
                         for s in spokes
                     ],
