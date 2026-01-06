@@ -310,6 +310,43 @@ _register(SemanticType(
 
 
 # -----------------------------------------------------------------------------
+# CHANGE REASON CODES - For configuration/reference tables
+# -----------------------------------------------------------------------------
+
+_register(SemanticType(
+    name="termination_reason_code",
+    category="change_reasons",
+    aliases=["term_reason_code", "separation_reason", "term_code", "termination_code"],
+    patterns=[r"term.*reason", r"separation.*reason", r"termination.*code"],
+    description="Termination/separation reason code"
+))
+
+_register(SemanticType(
+    name="benefit_change_reason_code",
+    category="change_reasons",
+    aliases=["benefit_reason_code", "ben_change_reason", "benefit_event_code"],
+    patterns=[r"benefit.*reason", r"ben.*change.*reason"],
+    description="Benefit change reason code (life events, etc.)"
+))
+
+_register(SemanticType(
+    name="job_change_reason_code",
+    category="change_reasons",
+    aliases=["position_change_reason", "job_reason_code", "transfer_reason"],
+    patterns=[r"job.*change.*reason", r"position.*change", r"transfer.*reason"],
+    description="Job/position change reason code"
+))
+
+_register(SemanticType(
+    name="loa_reason_code",
+    category="change_reasons",
+    aliases=["leave_reason_code", "absence_reason", "loa_code", "leave_type"],
+    patterns=[r"loa.*reason", r"leave.*reason", r"absence.*reason"],
+    description="Leave of absence reason code"
+))
+
+
+# -----------------------------------------------------------------------------
 # DERIVED/CALCULATED FIELDS (not stored, calculated from source)
 # -----------------------------------------------------------------------------
 
@@ -402,10 +439,11 @@ def get_type_names_for_prompt() -> str:
         "pay": "PAY & COMPENSATION",
         "date": "DATES",
         "status": "STATUS FIELDS",
+        "change_reasons": "CHANGE REASON CODES",
         "derived": "DERIVED/CALCULATED FIELDS"
     }
     
-    for cat_key in ["employee", "org", "pay", "date", "status", "derived"]:
+    for cat_key in ["employee", "org", "pay", "date", "status", "change_reasons", "derived"]:
         if cat_key in categories:
             lines.append(f"\n{category_names.get(cat_key, cat_key.upper())}:")
             for st in categories[cat_key]:
