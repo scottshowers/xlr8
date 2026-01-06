@@ -1,8 +1,14 @@
 """
-XLR8 Intelligence Engine - SQL Generator v2.0
+XLR8 Intelligence Engine - SQL Generator v3.0
 ==============================================
 
 Generates SQL queries from natural language questions.
+
+v3.0 CHANGES:
+- CONTEXT GRAPH JOINS: Uses Context Graph hub/spoke relationships
+  to automatically suggest and build JOIN clauses
+- Gets join columns from semantic type mappings
+- Prefers high-coverage spokes for better query performance
 
 v2.0 CHANGES:
 - SMART FILTER DETECTION: Detects question keywords that match column VALUES
@@ -11,6 +17,7 @@ v2.0 CHANGES:
 - Filter hints in LLM prompt guide better query generation
 
 Key features:
+- Context Graph-aware join generation (v3.0)
 - Question-aware value filtering (the key to useful queries)
 - Simple vs complex query detection
 - CREATE TABLE schema format for better LLM accuracy
@@ -142,46 +149,78 @@ class SQLGenerator:
         """
         Build relationship hints for the LLM prompt.
         
-        Tells the LLM how tables can be joined based on detected relationships.
+        v3.0: Also uses Context Graph for join hints.
+        
+        Tells the LLM how tables can be joined based on:
+        1. Context Graph hub/spoke relationships (highest priority)
+        2. Detected relationships from Supabase
         
         Handles both:
         - Object format (from project_intelligence): rel.from_table, rel.to_table
         - Dict format (from Supabase): rel['source_table'], rel['target_table']
         """
-        if not self.relationships:
-            return ""
-        
         table_names = {t.get('table_name', '').lower() for t in tables}
-        
         hints = []
-        for rel in self.relationships:
-            # Handle both object and dict formats
-            if hasattr(rel, 'from_table'):
-                # Object format
-                from_table = rel.from_table
-                from_col = rel.from_column
-                to_table = rel.to_table
-                to_col = rel.to_column
-                confidence = getattr(rel, 'confidence', 0.9)
-            elif isinstance(rel, dict):
-                # Dict format from Supabase
-                from_table = rel.get('source_table', '')
-                from_col = rel.get('source_column', '')
-                to_table = rel.get('target_table', '')
-                to_col = rel.get('target_column', '')
-                confidence = rel.get('confidence', 0.9)
-            else:
-                continue
-            
-            from_lower = from_table.lower() if from_table else ''
-            to_lower = to_table.lower() if to_table else ''
-            
-            # Check if relationship involves selected tables
-            if from_lower in table_names and to_lower in table_names:
-                hint = f"  - {from_table}.{from_col} → {to_table}.{to_col}"
-                if confidence < 0.8:
-                    hint += " (low confidence)"
-                hints.append(hint)
+        seen_joins = set()  # Avoid duplicates
+        
+        # =================================================================
+        # v3.0: Context Graph joins (highest priority)
+        # =================================================================
+        if self.table_selector and hasattr(self.table_selector, 'get_join_path'):
+            table_list = list(table_names)
+            for i, t1 in enumerate(table_list):
+                for t2 in table_list[i+1:]:
+                    join_path = self.table_selector.get_join_path(t1, t2)
+                    if join_path:
+                        sem_type = join_path.get('semantic_type', '')
+                        from_col = join_path.get('from_column', '')
+                        to_col = join_path.get('to_column', '')
+                        join_key = tuple(sorted([f"{t1}.{from_col}", f"{t2}.{to_col}"]))
+                        
+                        if join_key not in seen_joins:
+                            seen_joins.add(join_key)
+                            if join_path.get('join_type') == 'via_hub':
+                                hint = f"  - {t1}.{from_col} → {t2}.{to_col} (via {join_path.get('via_hub')}, semantic: {sem_type})"
+                            else:
+                                hint = f"  - {t1}.{from_col} → {t2}.{to_col} (semantic: {sem_type})"
+                            hints.append(hint)
+                            logger.info(f"[SQL-GEN] Context Graph join: {hint}")
+        
+        # =================================================================
+        # Legacy relationships from Supabase
+        # =================================================================
+        if self.relationships:
+            for rel in self.relationships:
+                # Handle both object and dict formats
+                if hasattr(rel, 'from_table'):
+                    # Object format
+                    from_table = rel.from_table
+                    from_col = rel.from_column
+                    to_table = rel.to_table
+                    to_col = rel.to_column
+                    confidence = getattr(rel, 'confidence', 0.9)
+                elif isinstance(rel, dict):
+                    # Dict format from Supabase
+                    from_table = rel.get('source_table', '')
+                    from_col = rel.get('source_column', '')
+                    to_table = rel.get('target_table', '')
+                    to_col = rel.get('target_column', '')
+                    confidence = rel.get('confidence', 0.9)
+                else:
+                    continue
+                
+                from_lower = from_table.lower() if from_table else ''
+                to_lower = to_table.lower() if to_table else ''
+                
+                # Check if relationship involves selected tables
+                if from_lower in table_names and to_lower in table_names:
+                    join_key = tuple(sorted([f"{from_lower}.{from_col}", f"{to_lower}.{to_col}"]))
+                    if join_key not in seen_joins:
+                        seen_joins.add(join_key)
+                        hint = f"  - {from_table}.{from_col} → {to_table}.{to_col}"
+                        if confidence < 0.8:
+                            hint += " (low confidence)"
+                        hints.append(hint)
         
         if hints:
             return "\n\nRELATIONSHIPS (use for JOINs):\n" + "\n".join(hints)
