@@ -472,12 +472,14 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         except Exception as e:
             logger.debug(f"[BI] Could not load file metadata from registry: {e}")
         
-        # STEP 1: Build lookup of display_names and file_names from _schema_metadata (source of truth)
+        # STEP 1: Build lookup of display_names, file_names, entity_type from _schema_metadata (source of truth)
         display_name_lookup = {}
         file_name_lookup = {}  # table_name -> file_name
+        entity_type_lookup = {}  # table_name -> entity_type
+        category_lookup = {}  # table_name -> category
         try:
             meta_results = handler.conn.execute("""
-                SELECT table_name, display_name, file_name, sheet_name
+                SELECT table_name, display_name, file_name, sheet_name, entity_type, category
                 FROM _schema_metadata
                 WHERE is_current = TRUE
             """).fetchall()
@@ -487,6 +489,10 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                         display_name_lookup[row[0]] = row[1]
                     if row[2]:  # file_name
                         file_name_lookup[row[0]] = row[2]
+                    if row[4]:  # entity_type
+                        entity_type_lookup[row[0]] = row[4]
+                    if row[5]:  # category
+                        category_lookup[row[0]] = row[5]
         except Exception as e:
             logger.debug(f"[BI] Could not load display names from metadata: {e}")
         
@@ -553,6 +559,10 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                 truth_type = file_meta.get('truth_type', 'reality')
                 domain = file_meta.get('domain', '')
                 
+                # Get entity_type and category from schema metadata
+                entity_type = entity_type_lookup.get(table_name)
+                category = category_lookup.get(table_name)
+                
                 tables.append({
                     'table_name': table_name,
                     'display_name': display_name,
@@ -562,6 +572,8 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
                     'row_count': row_count,
                     'truth_type': truth_type,
                     'domain': domain,
+                    'entity_type': entity_type,
+                    'category': category,
                     'file': file_name
                 })
                 
