@@ -87,12 +87,14 @@ class TableClassification:
     source_filename: str
     project_id: Optional[str]
     truth_type: Optional[str]
-    entity_type: Optional[str] = None  # What this table IS (e.g., 'termination_reasons')
-    category: Optional[str] = None  # Logical grouping (e.g., 'change_reasons')
     
-    # Metrics
+    # Metrics (required fields without defaults)
     row_count: int
     column_count: int
+    
+    # Optional fields with defaults
+    entity_type: Optional[str] = None  # What this table IS (e.g., 'termination_reasons')
+    category: Optional[str] = None  # Logical grouping (e.g., 'change_reasons')
     created_at: Optional[str] = None
     
     # Classification details
