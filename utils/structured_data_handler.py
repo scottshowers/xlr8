@@ -441,6 +441,8 @@ class StructuredDataHandler:
                     sheet_name VARCHAR NOT NULL,
                     table_name VARCHAR NOT NULL,
                     display_name VARCHAR,
+                    entity_type VARCHAR,
+                    category VARCHAR,
                     columns JSON NOT NULL,
                     column_count INTEGER,
                     row_count INTEGER,
@@ -623,7 +625,7 @@ class StructuredDataHandler:
             except Exception as mig_e:
                 logger.warning(f"[MIGRATION] Column check/add for _column_mappings: {mig_e}")
             
-            # MIGRATION: Add display_name, truth_type, column_count, domain to _schema_metadata
+            # MIGRATION: Add display_name, truth_type, column_count, domain, entity_type, category to _schema_metadata
             try:
                 schema_cols = self.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()
                 schema_col_names = [c[1] for c in schema_cols]
@@ -647,6 +649,15 @@ class StructuredDataHandler:
                 if 'domain' not in schema_col_names:
                     logger.warning("[MIGRATION] Adding domain column to _schema_metadata")
                     self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN domain VARCHAR")
+                
+                # CONTEXT GRAPH: entity_type and category for semantic typing
+                if 'entity_type' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding entity_type column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN entity_type VARCHAR")
+                
+                if 'category' not in schema_col_names:
+                    logger.warning("[MIGRATION] Adding category column to _schema_metadata")
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN category VARCHAR")
                 
                 # Backfill display_name for existing records (use file_name without extension)
                 self.conn.execute("""
@@ -704,6 +715,87 @@ class StructuredDataHandler:
         if sanitized and sanitized[0].isdigit():
             sanitized = 'col_' + sanitized
         return sanitized or 'unnamed'
+    
+    def _derive_entity_metadata(
+        self, 
+        file_name: str, 
+        sheet_name: str, 
+        sub_table_title: str = None
+    ) -> Dict[str, Optional[str]]:
+        """
+        Derive entity_type and category from file/sheet/sub-table context.
+        
+        This enables semantic inference to correctly type generic columns.
+        For example, a "code" column in a "Termination Reasons" sub-table
+        becomes "termination_reason_code" instead of unknown.
+        
+        Priority:
+        1. Sub-table title → entity_type (e.g., "Termination Reasons" → "termination_reasons")
+        2. Sheet name → entity_type if no sub-table, or category if sub-table exists
+        3. File name → entity_type for simple single-table files
+        
+        Args:
+            file_name: Original filename (e.g., "Change Reasons.xlsx")
+            sheet_name: Sheet/tab name (e.g., "Change Reasons")
+            sub_table_title: Title of sub-table within sheet if detected (e.g., "Termination Reasons")
+            
+        Returns:
+            Dict with 'entity_type' and 'category' keys (values may be None)
+        """
+        result = {'entity_type': None, 'category': None}
+        
+        def normalize_to_entity_type(name: str) -> str:
+            """Convert a name to entity_type format: lowercase, underscores, singular-ish"""
+            if not name:
+                return None
+            # Remove file extensions
+            name = re.sub(r'\.[^.]+$', '', name)
+            # Remove common prefixes that don't add meaning (only as whole words/prefixes)
+            # Match: "Component_Company" -> "Company", "Component Company" -> "Company"
+            # Don't match: "Configuration" (should stay as is)
+            name = re.sub(r'^(component|config|setup|master)[_\s]+', '', name, flags=re.IGNORECASE)
+            # Convert to lowercase with underscores
+            name = re.sub(r'[^\w\s]', '', name)
+            name = re.sub(r'\s+', '_', name.strip())
+            name = name.lower()
+            # Remove trailing 's' for simple plurals (but not 'ss' like 'address')
+            if name.endswith('s') and not name.endswith('ss'):
+                # Keep it plural for now - more natural for table names
+                pass
+            return name if name else None
+        
+        # Clean inputs
+        file_clean = file_name.strip() if file_name else ''
+        sheet_clean = sheet_name.strip() if sheet_name else ''
+        sub_clean = sub_table_title.strip() if sub_table_title else ''
+        
+        # Priority 1: Sub-table title is most specific
+        if sub_clean:
+            result['entity_type'] = normalize_to_entity_type(sub_clean)
+            # Sheet becomes category when sub-table exists
+            if sheet_clean and sheet_clean.lower() != sub_clean.lower():
+                result['category'] = normalize_to_entity_type(sheet_clean)
+            logger.info(f"[ENTITY-META] Sub-table '{sub_clean}' → entity_type='{result['entity_type']}', category='{result['category']}'")
+            return result
+        
+        # Priority 2: Sheet name
+        if sheet_clean and sheet_clean.lower() not in ['sheet1', 'data', 'sheet 1']:
+            result['entity_type'] = normalize_to_entity_type(sheet_clean)
+            # File name can be category if different
+            file_normalized = normalize_to_entity_type(file_clean)
+            if file_normalized and file_normalized != result['entity_type']:
+                result['category'] = file_normalized
+            logger.info(f"[ENTITY-META] Sheet '{sheet_clean}' → entity_type='{result['entity_type']}', category='{result['category']}'")
+            return result
+        
+        # Priority 3: File name (for CSVs or simple single-sheet files)
+        if file_clean:
+            result['entity_type'] = normalize_to_entity_type(file_clean)
+            logger.info(f"[ENTITY-META] File '{file_clean}' → entity_type='{result['entity_type']}'")
+            return result
+        
+        logger.warning(f"[ENTITY-META] Could not derive entity_type from file='{file_name}', sheet='{sheet_name}', sub='{sub_table_title}'")
+        return result
     
     def _remove_junk_columns(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, List[Dict]]:
         """
@@ -1010,6 +1102,9 @@ class StructuredDataHandler:
             table_name = self._generate_table_name(project, file_name, sheet_name)
             display_name = self._generate_display_name(file_name, sheet_name)
             
+            # Derive entity_type and category from context
+            entity_meta = self._derive_entity_metadata(file_name, sheet_name)
+            
             # Create table (thread-safe)
             self.safe_create_table_from_df(table_name, df)
             
@@ -1024,14 +1119,16 @@ class StructuredDataHandler:
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project,
                 file_name,
                 sheet_name,
                 table_name,
                 display_name,
+                entity_meta.get('entity_type'),
+                entity_meta.get('category'),
                 json.dumps(columns_info),
                 len(df.columns),
                 len(df),
@@ -3262,6 +3359,9 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             table_name = self._generate_table_name(project, file_name, 'data')
             display_name = self._generate_display_name(file_name, 'data')
             
+            # Derive entity_type and category from context (CSVs use file_name)
+            entity_meta = self._derive_entity_metadata(file_name, 'data')
+            
             # Create table (thread-safe)
             self.safe_create_table_from_df(table_name, df)
             
@@ -3278,10 +3378,11 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project, file_name, 'data', table_name, display_name,
+                entity_meta.get('entity_type'), entity_meta.get('category'),
                 json.dumps(columns_info), len(df.columns), len(df), json.dumps(likely_keys),
                 None,  # truth_type - set by smart_router if provided
                 uploaded_by
@@ -3395,6 +3496,9 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             table_name = self._generate_table_name(project, file_name, sheet_name)
             display_name = self._generate_display_name(file_name, sheet_name)
             
+            # Derive entity_type and category from context
+            entity_meta = self._derive_entity_metadata(file_name, sheet_name)
+            
             # Clean up any existing data for this file
             try:
                 logger.warning(f"[STORE_DF] CLEANUP: Looking for existing data for {project}/{file_name}")
@@ -3437,14 +3541,16 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             with self._db_lock:
                 self.conn.execute("""
                     INSERT INTO _schema_metadata 
-                    (id, project, file_name, sheet_name, table_name, display_name, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
-                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                 """, [
                     project,
                     file_name,
                     sheet_name,
                     table_name,
                     display_name,
+                    entity_meta.get('entity_type'),
+                    entity_meta.get('category'),
                     json.dumps(columns_info),
                     len(df.columns),
                     len(df),
