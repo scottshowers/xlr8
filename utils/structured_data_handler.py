@@ -1673,6 +1673,8 @@ class StructuredDataHandler:
         Use LLM to infer semantic meaning of columns.
         LOCAL FIRST: Uses Mistral via LLMOrchestrator, Claude only as fallback.
         
+        CONTEXT GRAPH: Uses entity_type to resolve ambiguous column names like "code".
+        
         Args:
             project: Project name
             file_name: Source file name
@@ -1691,6 +1693,21 @@ class StructuredDataHandler:
             for i, row in enumerate(sample_data[:5]):
                 sample_str += f"Row {i+1}: {row}\n"
             
+            # CONTEXT GRAPH: Fetch entity_type for this table
+            entity_type = None
+            category = None
+            try:
+                meta = self.safe_fetchone("""
+                    SELECT entity_type, category FROM _schema_metadata 
+                    WHERE table_name = ? AND is_current = TRUE
+                """, [table_name])
+                if meta:
+                    entity_type = meta[0]
+                    category = meta[1]
+                    logger.info(f"[MAPPINGS] Using entity_type='{entity_type}', category='{category}' for inference")
+            except Exception as meta_e:
+                logger.debug(f"[MAPPINGS] Could not fetch entity_type: {meta_e}")
+            
             # Get semantic types from vocabulary (ONE SOURCE OF TRUTH)
             try:
                 from backend.utils.semantic_vocabulary import get_type_names_for_prompt
@@ -1700,11 +1717,33 @@ class StructuredDataHandler:
             semantic_types_text = get_type_names_for_prompt()
             
             # Build STRICT prompt for LLM - conservative matching
-            # CONTEXT GRAPH: Include filename so "code" in "Earnings Codes.pdf" becomes "earnings_code"
+            # CONTEXT GRAPH: Include entity_type so "code" in "termination_reasons" becomes "termination_reason_code"
+            entity_context = ""
+            if entity_type:
+                entity_context = f"""
+ENTITY TYPE: {entity_type}
+{f"CATEGORY: {category}" if category else ""}
+
+CRITICAL - USE ENTITY TYPE TO RESOLVE AMBIGUOUS COLUMNS:
+When a column has a generic name like "code", "description", "name", "type", use the ENTITY TYPE to determine its semantic type:
+- "code" in entity_type="termination_reasons" → termination_reason_code
+- "code" in entity_type="earnings" or "earning_codes" → earning_code  
+- "code" in entity_type="deductions" or "deduction_codes" → deduction_code
+- "code" in entity_type="job_codes" or "jobs" → job_code
+- "code" in entity_type="company" or "companies" → company_code
+- "code" in entity_type="departments" → department_code
+- "code" in entity_type="locations" → location_code
+- "code" in entity_type="benefit_change_reasons" → benefit_change_reason_code
+- "code" in entity_type="job_change_reasons" → job_change_reason_code
+- "code" in entity_type="loa_reasons" → loa_reason_code
+
+The entity_type tells you WHAT this table IS. Use it with HIGH CONFIDENCE.
+"""
+            
             prompt = f"""Analyze these column names and sample data to identify semantic types.
 
 SOURCE FILE: {file_name}
-
+{entity_context}
 COLUMN NAMES:
 {columns}
 
@@ -1716,18 +1755,19 @@ CRITICAL RULES - BE CONSERVATIVE:
 1. ONLY tag a column if you are HIGHLY CONFIDENT it actually IS that semantic type.
    - "company_code" column with values like "001", "002" → company_code ✓
    - "code" column in ambiguous context → NONE (not enough info)
+   - BUT: "code" column WITH entity_type context → USE THE ENTITY TYPE (see above)
 
 2. DO NOT tag these as semantic types:
    - Boolean/flag columns (is_exempt, is_active, inactive, futa_exempt) → NONE
    - Currency codes like "USD", "CAD" → NONE (not amounts)
-   - Generic "code" columns without clear context → NONE
+   - Generic "code" columns WITHOUT entity_type context → NONE
    - "contact" or "name" fields that aren't specifically employee names → NONE
    - ID numbers that aren't SSNs (tax IDs, FEIN, business numbers) → NONE
    - Dates that aren't effective dates (created_at, modified_at) → NONE
    - Generic counters or limits (fte_work_hours with 2 values) → NONE
    - Columns where cardinality is very low (<5) in reference tables → NONE
 
-3. Use filename context ONLY for "code" columns:
+3. Use filename context ONLY if entity_type is not available:
    - "code" in "Earnings Codes.pdf" → earning_code
    - "code" in "Deduction Codes.xlsx" → deduction_code
    - "code" in "Job Codes" → job_code
@@ -1748,7 +1788,7 @@ Respond with JSON array only:
   ...
 ]
 
-Use confidence 0.95+ ONLY for exact column name matches like "company_code"→company_code."""
+Use confidence 0.95+ for exact column name matches AND for "code" columns with clear entity_type context."""
 
             # Use LLMOrchestrator - LOCAL FIRST (Mistral), Claude fallback
             try:
@@ -1834,8 +1874,43 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
     
     def _fallback_column_inference(self, columns: List[str], project: str = None, 
                                     file_name: str = None, table_name: str = None) -> List[Dict]:
-        """Pattern-based fallback when Claude is unavailable"""
+        """
+        Pattern-based fallback when LLM is unavailable.
+        
+        CONTEXT GRAPH: Also uses entity_type to resolve generic "code" columns.
+        """
         mappings = []
+        
+        # CONTEXT GRAPH: Fetch entity_type for this table
+        entity_type = None
+        if table_name:
+            try:
+                meta = self.safe_fetchone("""
+                    SELECT entity_type FROM _schema_metadata 
+                    WHERE table_name = ? AND is_current = TRUE
+                """, [table_name])
+                if meta:
+                    entity_type = meta[0]
+            except Exception:
+                pass
+        
+        # Entity type to semantic type mapping for generic "code" columns
+        entity_to_semantic = {
+            'termination_reasons': 'termination_reason_code',
+            'benefit_change_reasons': 'benefit_change_reason_code',
+            'job_change_reasons': 'job_change_reason_code',
+            'loa_reasons': 'loa_reason_code',
+            'earnings': 'earning_code',
+            'earning_codes': 'earning_code',
+            'deductions': 'deduction_code',
+            'deduction_codes': 'deduction_code',
+            'jobs': 'job_code',
+            'job_codes': 'job_code',
+            'companies': 'company_code',
+            'company': 'company_code',
+            'departments': 'department_code',
+            'locations': 'location_code',
+        }
         
         patterns = {
             'employee_number': [r'employee.*num', r'emp.*num', r'ee.*num', r'emp.*id', r'employee.*id', r'^emp_no$', r'^ee_id$'],
@@ -1853,6 +1928,28 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         
         for col in columns:
             col_lower = col.lower()
+            matched = False
+            
+            # CONTEXT GRAPH: Check for generic "code" column with entity_type context
+            if col_lower == 'code' and entity_type and entity_type in entity_to_semantic:
+                sem_type = entity_to_semantic[entity_type]
+                mapping = {
+                    'project': project,
+                    'file_name': file_name,
+                    'table_name': table_name,
+                    'original_column': col,
+                    'semantic_type': sem_type,
+                    'confidence': 0.90,  # High confidence when entity_type matches
+                    'is_override': False,
+                    'needs_review': False
+                }
+                mappings.append(mapping)
+                if project and file_name and table_name:
+                    self._store_column_mapping(mapping)
+                logger.info(f"[FALLBACK] entity_type='{entity_type}' + col='code' → {sem_type}")
+                continue
+            
+            # Standard pattern matching
             for sem_type, pattern_list in patterns.items():
                 for pattern in pattern_list:
                     if re.search(pattern, col_lower):
@@ -1870,10 +1967,10 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                         
                         if project and file_name and table_name:
                             self._store_column_mapping(mapping)
+                        matched = True
                         break
-                else:
-                    continue
-                break
+                if matched:
+                    break
         
         return mappings
     
