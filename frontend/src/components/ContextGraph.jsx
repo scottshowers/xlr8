@@ -55,22 +55,30 @@ export default function ContextGraph({ project }) {
   
   const c = brandColors;
 
+  // Debug
+  console.log('[ContextGraph] Rendering with project:', project);
+
   useEffect(() => {
     if (project) {
       fetchContextGraph();
+    } else {
+      setLoading(false);
     }
   }, [project]);
 
   const fetchContextGraph = async () => {
+    console.log('[ContextGraph] Fetching for project:', project);
     setLoading(true);
     setError(null);
     try {
       const res = await api.get(`/data-model/context-graph/${project}`);
+      console.log('[ContextGraph] Response:', res.data);
       setData(res.data);
       // Auto-expand first 3 semantic types
       const firstThree = (res.data?.summary?.semantic_types || []).slice(0, 3);
       setExpandedTypes(new Set(firstThree));
     } catch (err) {
+      console.error('[ContextGraph] Error:', err);
       setError(err.message || 'Failed to load context graph');
     } finally {
       setLoading(false);
@@ -128,6 +136,23 @@ export default function ContextGraph({ project }) {
     // Take last 2-3 meaningful parts
     return parts.slice(-3).join('_');
   };
+
+  // No project selected
+  if (!project) {
+    return (
+      <div style={{ 
+        padding: '3rem', 
+        textAlign: 'center',
+        color: c.textMuted 
+      }}>
+        <Network size={48} style={{ marginBottom: '1rem', opacity: 0.5 }} />
+        <h3 style={{ margin: '0 0 0.5rem', color: c.text, fontWeight: 600 }}>No Project Selected</h3>
+        <p style={{ margin: 0, fontSize: '0.9rem' }}>
+          Select a project to view its context graph.
+        </p>
+      </div>
+    );
+  }
 
   // Loading state
   if (loading) {
