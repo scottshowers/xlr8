@@ -1,9 +1,16 @@
 """
-XLR8 Intelligence Engine - Table Selector v2.1
+XLR8 Intelligence Engine - Table Selector v3.0
 ===============================================
 
 Handles table scoring and selection for SQL generation.
 Given a question and available tables, selects the most relevant ones.
+
+v3.0 CHANGES (Context Graph Integration):
+- Uses Context Graph hub/spoke relationships for intelligent selection
+- Boosts HUB tables when question relates to their semantic type
+- Boosts SPOKE tables that connect to relevant hubs
+- Uses entity_type for understanding what tables ARE
+- Suggests join paths through the graph
 
 v2.1 CHANGES:
 - Added fallback domain matching when no classifications exist
@@ -17,7 +24,8 @@ v2.0 CHANGES:
 - Removes VALUE MATCH cap - replaced by proper domain scoring
 
 Key features:
-- Metadata-driven domain matching (highest priority)
+- Context Graph hub/spoke awareness (highest priority)
+- Metadata-driven domain matching
 - Fallback name-based domain matching (when no metadata)
 - Direct name matching
 - Column value matching (finds tables with matching data)
@@ -29,8 +37,7 @@ Deploy to: backend/utils/intelligence/table_selector.py
 import re
 import json
 import logging
-from typing import Dict, List, Optional, Set, Any
-from enum import Enum
+from typing import Dict, List, Optional, Set, Any, Tuple
 
 from .types import LOOKUP_INDICATORS
 
@@ -104,6 +111,30 @@ DOMAIN_KEYWORDS = {
 
 
 # =============================================================================
+# SEMANTIC TYPE KEYWORDS (for Context Graph matching)
+# =============================================================================
+
+# Maps question keywords to semantic types in the Context Graph
+# When these words appear in a question, we boost tables that are 
+# hubs/spokes for these semantic types
+SEMANTIC_TYPE_KEYWORDS = {
+    'company_code': ['company', 'companies', 'organization', 'legal entity'],
+    'employee_number': ['employee', 'employees', 'worker', 'staff', 'person'],
+    'job_code': ['job', 'jobs', 'position', 'title', 'role'],
+    'department_code': ['department', 'dept', 'cost center', 'org unit'],
+    'location_code': ['location', 'site', 'work location', 'office'],
+    'earning_code': ['earning', 'earnings', 'pay code', 'compensation'],
+    'deduction_code': ['deduction', 'deductions', 'benefit code', 'benefits'],
+    'employment_status_code': ['status', 'employment status', 'active', 'terminated'],
+    'termination_reason_code': ['termination', 'separation', 'term reason', 'why left'],
+    'benefit_change_reason_code': ['benefit change', 'life event', 'qualifying event'],
+    'job_change_reason_code': ['job change', 'transfer reason', 'promotion'],
+    'loa_reason_code': ['leave', 'loa', 'absence', 'time off reason'],
+    'tax_code': ['tax', 'taxes', 'withholding', 'w2', 'w-2', 'fica', 'sui', 'futa'],
+}
+
+
+# =============================================================================
 # TABLE SELECTOR CLASS
 # =============================================================================
 
@@ -111,10 +142,12 @@ class TableSelector:
     """
     Selects relevant tables for a given question.
     
+    v3.0: Uses Context Graph for intelligent hub/spoke-aware selection.
     v2.0: Uses table classification metadata for domain-aware selection.
     
     Uses a scoring system that considers:
-    - Domain matching via classifications (highest priority)
+    - Context Graph hub/spoke relationships (highest priority)
+    - Domain matching via classifications
     - Table type (CONFIG tables boost for setup questions)
     - Direct name matches
     - Column value matches
@@ -138,6 +171,236 @@ class TableSelector:
         # Cache for table classifications
         self._classifications: Dict[str, TableClassification] = {}
         self._classifications_loaded = False
+        
+        # Cache for context graph
+        self._context_graph: Dict = None
+        self._context_graph_loaded = False
+    
+    # =========================================================================
+    # CONTEXT GRAPH METHODS (v3.0)
+    # =========================================================================
+    
+    def _load_context_graph(self) -> None:
+        """Load context graph from structured handler."""
+        if self._context_graph_loaded:
+            return
+        
+        if not self.project or not self.structured_handler:
+            self._context_graph_loaded = True
+            return
+        
+        try:
+            if hasattr(self.structured_handler, 'get_context_graph'):
+                self._context_graph = self.structured_handler.get_context_graph(self.project)
+                hub_count = len(self._context_graph.get('hubs', []))
+                rel_count = len(self._context_graph.get('relationships', []))
+                logger.warning(f"[TABLE-SEL] Loaded context graph: {hub_count} hubs, {rel_count} relationships")
+            else:
+                logger.debug("[TABLE-SEL] Handler does not have get_context_graph method")
+        except Exception as e:
+            logger.warning(f"[TABLE-SEL] Failed to load context graph: {e}")
+        
+        self._context_graph_loaded = True
+    
+    def _get_context_graph(self) -> Dict:
+        """Get cached context graph."""
+        self._load_context_graph()
+        return self._context_graph or {'hubs': [], 'relationships': []}
+    
+    def _detect_semantic_types(self, q_lower: str) -> List[str]:
+        """
+        Detect which semantic types are relevant to a question.
+        
+        Returns:
+            List of semantic type names (e.g., ['company_code', 'employee_number'])
+        """
+        relevant_types = []
+        for sem_type, keywords in SEMANTIC_TYPE_KEYWORDS.items():
+            if any(kw in q_lower for kw in keywords):
+                relevant_types.append(sem_type)
+        return relevant_types
+    
+    def _score_context_graph(self, table_name: str, relevant_semantic_types: List[str]) -> int:
+        """
+        Score table based on Context Graph hub/spoke relationships.
+        
+        Returns bonus if:
+        - Table is a HUB for a relevant semantic type (+120)
+        - Table is a SPOKE connected to a relevant hub (+80)
+        - Additional bonus for high coverage spokes (+20)
+        """
+        if not relevant_semantic_types:
+            return 0
+        
+        graph = self._get_context_graph()
+        if not graph.get('hubs') and not graph.get('relationships'):
+            return 0
+        
+        score = 0
+        table_lower = table_name.lower()
+        
+        # Check if this table is a HUB for any relevant semantic type
+        for hub in graph.get('hubs', []):
+            hub_table = hub.get('table', '').lower()
+            hub_semantic_type = hub.get('semantic_type', '')
+            
+            if hub_table == table_lower and hub_semantic_type in relevant_semantic_types:
+                score += 120  # Strong boost for being THE hub
+                logger.warning(f"[TABLE-SEL] CONTEXT GRAPH HUB: {table_name[-40:]} is hub for {hub_semantic_type} (+120)")
+                
+                # Extra boost if hub has Reality spokes (data is being used)
+                if hub.get('has_reality_spokes'):
+                    score += 20
+        
+        # Check if this table is a SPOKE for any relevant semantic type
+        for rel in graph.get('relationships', []):
+            spoke_table = rel.get('spoke_table', '').lower()
+            rel_semantic_type = rel.get('semantic_type', '')
+            
+            if spoke_table == table_lower and rel_semantic_type in relevant_semantic_types:
+                score += 80  # Good boost for being a spoke
+                
+                # Extra boost for high coverage (>50%)
+                coverage = rel.get('coverage_pct', 0) or 0
+                if coverage > 50:
+                    score += 20
+                
+                # Extra boost for Reality tables (actual data, not just config)
+                if rel.get('truth_type') == 'reality':
+                    score += 30
+                
+                logger.warning(f"[TABLE-SEL] CONTEXT GRAPH SPOKE: {table_name[-40:]} references {rel_semantic_type} "
+                             f"(coverage={coverage:.0f}%, truth={rel.get('truth_type')}) (+{80 + (20 if coverage > 50 else 0) + (30 if rel.get('truth_type') == 'reality' else 0)})")
+        
+        return score
+    
+    def get_join_path(self, from_table: str, to_table: str) -> Optional[Dict]:
+        """
+        Find a join path between two tables using the Context Graph.
+        
+        Returns:
+            Dict with join info if path found, None otherwise
+            {
+                'semantic_type': 'company_code',
+                'from_column': 'company_code',
+                'to_column': 'company_code',
+                'via_hub': 'component_company'  # if indirect join
+            }
+        """
+        graph = self._get_context_graph()
+        from_lower = from_table.lower()
+        to_lower = to_table.lower()
+        
+        # Build lookup of table → semantic types it participates in
+        table_semantic_types = {}
+        
+        for hub in graph.get('hubs', []):
+            hub_table = hub.get('table', '').lower()
+            sem_type = hub.get('semantic_type', '')
+            col = hub.get('column', '')
+            if hub_table not in table_semantic_types:
+                table_semantic_types[hub_table] = []
+            table_semantic_types[hub_table].append({'semantic_type': sem_type, 'column': col, 'is_hub': True})
+        
+        for rel in graph.get('relationships', []):
+            spoke_table = rel.get('spoke_table', '').lower()
+            sem_type = rel.get('semantic_type', '')
+            col = rel.get('spoke_column', '')
+            if spoke_table not in table_semantic_types:
+                table_semantic_types[spoke_table] = []
+            table_semantic_types[spoke_table].append({
+                'semantic_type': sem_type, 
+                'column': col, 
+                'is_hub': False,
+                'hub_table': rel.get('hub_table'),
+                'hub_column': rel.get('hub_column')
+            })
+        
+        # Find common semantic types between the two tables
+        from_types = {t['semantic_type']: t for t in table_semantic_types.get(from_lower, [])}
+        to_types = {t['semantic_type']: t for t in table_semantic_types.get(to_lower, [])}
+        
+        common_types = set(from_types.keys()) & set(to_types.keys())
+        
+        if common_types:
+            # Direct join possible
+            sem_type = list(common_types)[0]  # Pick first common type
+            return {
+                'semantic_type': sem_type,
+                'from_column': from_types[sem_type]['column'],
+                'to_column': to_types[sem_type]['column'],
+                'join_type': 'direct'
+            }
+        
+        # Check for indirect join via hub
+        for from_type_info in table_semantic_types.get(from_lower, []):
+            for to_type_info in table_semantic_types.get(to_lower, []):
+                # If both reference the same hub
+                from_hub = from_type_info.get('hub_table')
+                to_hub = to_type_info.get('hub_table')
+                
+                if from_hub and to_hub and from_hub == to_hub:
+                    return {
+                        'semantic_type': from_type_info['semantic_type'],
+                        'from_column': from_type_info['column'],
+                        'to_column': to_type_info['column'],
+                        'via_hub': from_hub,
+                        'hub_column': from_type_info.get('hub_column'),
+                        'join_type': 'via_hub'
+                    }
+        
+        return None
+    
+    def get_related_tables(self, table_name: str) -> List[Dict]:
+        """
+        Get tables related to the given table through the Context Graph.
+        
+        Returns:
+            List of related tables with relationship info
+        """
+        graph = self._get_context_graph()
+        table_lower = table_name.lower()
+        related = []
+        
+        # Find semantic types this table participates in
+        my_semantic_types = set()
+        
+        for hub in graph.get('hubs', []):
+            if hub.get('table', '').lower() == table_lower:
+                my_semantic_types.add(hub.get('semantic_type'))
+        
+        for rel in graph.get('relationships', []):
+            if rel.get('spoke_table', '').lower() == table_lower:
+                my_semantic_types.add(rel.get('semantic_type'))
+        
+        # Find other tables with same semantic types
+        for sem_type in my_semantic_types:
+            # Find hub for this type
+            for hub in graph.get('hubs', []):
+                if hub.get('semantic_type') == sem_type:
+                    hub_table = hub.get('table', '').lower()
+                    if hub_table != table_lower:
+                        related.append({
+                            'table': hub.get('table'),
+                            'relationship': 'hub',
+                            'semantic_type': sem_type,
+                            'column': hub.get('column')
+                        })
+            
+            # Find spokes for this type
+            for rel in graph.get('relationships', []):
+                if rel.get('semantic_type') == sem_type:
+                    spoke_table = rel.get('spoke_table', '').lower()
+                    if spoke_table != table_lower:
+                        related.append({
+                            'table': rel.get('spoke_table'),
+                            'relationship': 'spoke',
+                            'semantic_type': sem_type,
+                            'column': rel.get('spoke_column'),
+                            'coverage_pct': rel.get('coverage_pct')
+                        })
+        
+        return related
     
     def _load_classifications(self) -> None:
         """Load table classifications from database."""
@@ -229,6 +492,8 @@ class TableSelector:
         """
         Select the most relevant tables for a question.
         
+        v3.0: Now uses Context Graph for intelligent hub/spoke-aware selection.
+        
         Args:
             tables: List of table metadata dicts with table_name, columns, row_count
             question: The user's question
@@ -248,6 +513,11 @@ class TableSelector:
         if question_domain:
             logger.warning(f"[TABLE-SEL] Detected question domain: {question_domain}")
         
+        # v3.0: Detect relevant semantic types for Context Graph matching
+        relevant_semantic_types = self._detect_semantic_types(q_lower)
+        if relevant_semantic_types:
+            logger.warning(f"[TABLE-SEL] Detected semantic types: {relevant_semantic_types}")
+        
         # Check if this is a config/setup question
         is_config_question = any(term in q_lower for term in [
             'configured', 'setup', 'set up', 'valid', 'correct', 
@@ -262,7 +532,7 @@ class TableSelector:
         for table in tables:
             score = self._score_table(
                 table, q_lower, words, filter_candidate_tables,
-                question_domain, is_config_question
+                question_domain, is_config_question, relevant_semantic_types
             )
             scored_tables.append((score, table))
         
@@ -305,10 +575,12 @@ class TableSelector:
     def _score_table(self, table: Dict, q_lower: str, words: List[str], 
                      filter_candidate_tables: Set[str],
                      question_domain: Optional[str],
-                     is_config_question: bool) -> int:
+                     is_config_question: bool,
+                     relevant_semantic_types: List[str] = None) -> int:
         """
         Score a table's relevance to the question.
         
+        v3.0: Adds Context Graph hub/spoke scoring (highest priority).
         v2.1: Adds fallback domain matching when no classifications exist.
         
         Returns an integer score where higher = more relevant.
@@ -320,7 +592,14 @@ class TableSelector:
         score = 0
         
         # =====================================================================
-        # 1. METADATA-BASED DOMAIN MATCHING (highest priority - v2.0)
+        # 0. CONTEXT GRAPH SCORING (highest priority - v3.0)
+        # =====================================================================
+        if relevant_semantic_types:
+            context_score = self._score_context_graph(table_name, relevant_semantic_types)
+            score += context_score
+        
+        # =====================================================================
+        # 1. METADATA-BASED DOMAIN MATCHING (v2.0)
         # =====================================================================
         metadata_score = self._score_metadata_match(table_name, question_domain, is_config_question)
         score += metadata_score
