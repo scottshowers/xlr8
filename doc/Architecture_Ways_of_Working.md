@@ -1,1514 +1,689 @@
-# XLR8 ARCHITECTURE WAYS OF WORKING
+# XLR8 ARCHITECTURE & EXECUTION GUIDE
 
-**Version:** 2.0  
+**Version:** 4.0  
 **Created:** January 2, 2026  
-**Updated:** January 5, 2026 (Part 15 added - THE CONTEXT GRAPH)  
-**Purpose:** Enforce consistent development patterns across all features
+**Updated:** January 6, 2026  
+**Purpose:** Single source of truth for what we're building and how
 
 ---
 
-# EXECUTIVE SUMMARY
+# SECTION A: CURRENT STATUS & ROADMAP
 
-This document exists because **we keep leaving things behind**.
-
-Every sprint, we build new capabilities but fail to apply them consistently. We built TableSelector but didn't use it everywhere. We built LLMOrchestrator but 12+ files bypass it. We built health checks that tell us if files exist but not if PDF parsing actually works.
-
-**January 5, 2026 - THE BREAKTHROUGH:** We identified that the entire platform was missing the point. We had 2,451 pairwise relationships when we needed a Context Graph with ~50 hub/spoke connections. The Context Graph IS the intelligence layer. Without it, we're a fancy ETL tool. With it, we deliver consultant-grade analysis.
-
-**Part 15 is not optional. It defines how the platform understands data.**
-
-**This document defines the rules.** Not suggestions. Rules.
+This section answers: "Where are we? What's next?"
 
 ---
 
-# PART 1: THE NON-NEGOTIABLE PATTERNS
+## A.1 Executive Summary
 
-These patterns exist. They work. Use them everywhere.
+**XLR8 is a SaaS implementation analysis platform** that delivers consultant-grade insights from customer data. The core value proposition: "Upload your HCM data, ask questions, get answers a $500/hr consultant would give."
 
-## 1.1 TableSelector - Intelligent Table Matching
+**The breakthrough (January 5-6, 2026):** We discovered the platform was missing its intelligence layer. We had 2,451 pairwise relationships when we needed a Context Graph with ~50 hub/spoke connections. We also discovered that generic columns (like "code") can't be semantically typed without knowing what the table IS (`entity_type`).
 
-**What it is:** Domain-aware table selection using scoring (domain match, name match, value match, penalties).
+**The pivot (January 6, 2026 - Phase 4 testing):** Hub detection was vocabulary-gated - only columns matching known semantic types could become hubs. This is backwards. **Data patterns should identify hubs, vocabulary should label them.** New approach: detect lookup table patterns from data, find relationships by value matching, then apply vocabulary labels.
 
-**Where it lives:** `backend/utils/intelligence/table_selector.py`
+**Current state:**
+- Context Graph schema: ✅ Done
+- Hub/spoke computation: 🔄 Needs rewrite (data-driven)
+- Entity type foundation: ✅ Phase 1-3 Done
+- Component integration: 🔄 Phase 4 In Progress (blocked on hub rewrite)
+- Holistic extension: ⬜ Phase 8+
 
-**Current adoption:** 7 files use it. Others still do string matching.
+**Total foundation work: ~50 hours (revised). Then we build value.**
 
-### THE RULE
+---
 
-**NEVER match tables using string operations (startswith, endswith, in, find) for user-facing queries.**
+## A.2 The Roadmap At A Glance
 
-```python
-# ❌ WRONG - Dumb string matching
-for table in tables:
-    if "tax" in table_name.lower():
-        selected_tables.append(table)
-
-# ❌ WRONG - Filename substring matching
-if report_name.lower() in file_name.lower():
-    matched = True
-
-# ✅ CORRECT - Use TableSelector
-from backend.utils.intelligence.table_selector import TableSelector
-
-selector = TableSelector(
-    structured_handler=handler,
-    project=project_name
-)
-selected = selector.select(tables, question, max_tables=5)
 ```
-
-### WHEN STRING MATCHING IS ACCEPTABLE
-
-- System table identification (`table.startswith('_')`) - internal, not user-facing
-- Project scoping (`table.startswith(project_prefix)`) - security boundary
-- Health check diagnostics - internal tooling only
-
-### FILES THAT NEED FIXING
-
-The following files contain table/file matching that should use TableSelector:
-
-| File | Issue | Priority |
-|------|-------|----------|
-| `backend/routers/health.py:556` | Filename to table matching with `.lower().replace()` | Low (diagnostic) |
-| `backend/routers/health.py:581` | Table name fuzzy matching | Low (diagnostic) |
-| `backend/routers/cleanup.py:291` | matched_tables iteration | Medium |
-| `backend/routers/bi_router.py:451` | Value matching with `.lower() in .lower()` | Medium |
-| `backend/utils/playbook_framework.py` | `get_matched_tables()` filename substring | Medium |
-
----
-
-## 1.2 LLMOrchestrator - Centralized LLM Routing
-
-**What it is:** Single entry point for all LLM calls. Handles local models first, Claude fallback, metrics tracking, PII sanitization.
-
-**Where it lives:** `utils/llm_orchestrator.py`
-
-**Current adoption:** 15 files use it. 12+ files bypass it with direct Claude/Groq calls.
-
-### THE RULE
-
-**ALL LLM calls MUST go through LLMOrchestrator. No exceptions.**
-
-```python
-# ❌ WRONG - Direct Anthropic client
-import anthropic
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-response = client.messages.create(
-    model="claude-sonnet-4-20250514",
-    messages=[{"role": "user", "content": prompt}]
-)
-
-# ❌ WRONG - Direct Groq call
-import requests
-response = requests.post("https://api.groq.com/...", json=payload)
-
-# ✅ CORRECT - Use LLMOrchestrator
-from utils.llm_orchestrator import LLMOrchestrator
-
-orchestrator = LLMOrchestrator()
-result = orchestrator.synthesize(query, context)  # Tries local first, Claude fallback
-```
-
-### AVAILABLE ORCHESTRATOR METHODS
-
-| Method | Purpose | Local First? |
-|--------|---------|--------------|
-| `synthesize(query, context)` | General synthesis | Yes (Mistral → Claude) |
-| `generate_sql(prompt, schema_columns)` | SQL generation | Yes (Qwen only, no Claude) |
-| `generate_json(prompt)` | Structured output | Yes (phi3 → Qwen → Claude) |
-| `check_status()` | Health check | N/A |
-
-### FILES WITH DIRECT LLM CALLS - STATUS
-
-| File | Status | Notes |
-|------|--------|-------|
-| `backend/utils/pdf_vision_analyzer.py` | ⚠️ Exception | Uses Vision API (images) - orchestrator doesn't support multimodal |
-| `backend/utils/intelligence/intent_parser.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/utils/intelligence/truth_enricher.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/utils/hybrid_analyzer.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/utils/llm_table_parser.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/utils/consultative_synthesis.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/utils/playbook_framework.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/routers/advisor_router.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/routers/playbooks.py` | ✅ FIXED | Uses orchestrator._call_claude() |
-| `backend/routers/register_extractor.py` | ⚠️ Exception | Uses Streaming API for progress updates |
-
-### DOCUMENTED EXCEPTIONS
-
-**Vision API (pdf_vision_analyzer.py):** 
-Uses Claude's vision capabilities for PDF image extraction. Direct access required because orchestrator doesn't support multimodal (image) inputs.
-
-**Streaming API (register_extractor.py):**
-Uses Claude's streaming API for large PDF extraction with real-time progress updates. Direct access required because orchestrator doesn't support streaming responses.
-
----
-
-## 1.3 RegistrationService - File Provenance
-
-**What it is:** Single service for registering all uploaded files. Creates registry entries, lineage tracking, file hashing.
-
-**Where it lives:** `backend/utils/registration_service.py`
-
-**Current adoption:** Used in upload.py, smart_router.py, register_extractor.py. Good.
-
-### THE RULE
-
-**ALL file uploads MUST go through RegistrationService.**
-
-```python
-# ❌ WRONG - Direct registry insert
-DocumentRegistryModel.register(filename=filename, ...)
-
-# ✅ CORRECT - Use RegistrationService
-from backend.utils.registration_service import RegistrationService, RegistrationSource
-
-result = RegistrationService.register_structured(
-    filename=filename,
-    project_id=project_id,
-    tables_created=tables,
-    row_count=total_rows,
-    file_content=content_bytes,
-    uploaded_by_email=user_email,
-    source=RegistrationSource.UPLOAD
-)
-```
-
-### REGISTRATION METHODS
-
-| Method | Use Case |
-|--------|----------|
-| `register_structured()` | Excel/CSV → DuckDB |
-| `register_embedded()` | PDF/DOCX → ChromaDB |
-| `register_hybrid()` | PDF with tables → Both |
-| `register_standards()` | Regulatory/Reference docs |
-| `register_failed()` | Failed upload tracking |
-| `unregister()` | File deletion |
-
-**Current status:** This pattern is well-adopted. Maintain it.
-
----
-
-## 1.4 ConsultativeSynthesizer - Response Generation
-
-**What it is:** Transforms raw data into consultant-grade answers. Handles triangulation across Five Truths, conflict detection, "so-what" insights.
-
-**Where it lives:** `backend/utils/consultative_synthesis.py`
-
-### THE RULE
-
-**ALL user-facing responses that synthesize data MUST use ConsultativeSynthesizer.**
-
-```python
-# ❌ WRONG - Raw data dump
-return {"answer": f"Found {len(rows)} rows: {rows}"}
-
-# ❌ WRONG - Direct LLM call for synthesis
-response = orchestrator.synthesize(f"Summarize: {data}")
-return {"answer": response}
-
-# ✅ CORRECT - Use ConsultativeSynthesizer
-from backend.utils.consultative_synthesis import ConsultativeSynthesizer
-
-synthesizer = ConsultativeSynthesizer()
-answer = synthesizer.synthesize(
-    question=question,
-    reality=reality_truths,
-    configuration=config_truths,
-    reference=reference_truths,
-    regulatory=regulatory_truths,
-    structured_data=duckdb_results
-)
-return {"answer": answer.answer, "confidence": answer.confidence}
+┌─────────────────────────────────────────────────────────────────────┐
+│                     FOUNDATION (~50 hours)                          │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  PHASE 1-7: DuckDB Foundation (~26 hours)                          │
+│  ├── Phase 1: entity_type schema (2h)              ✅ DONE          │
+│  ├── Phase 2: Semantic inference update (1h)       ✅ DONE          │
+│  ├── Phase 3: API updates (1h)                     ✅ DONE          │
+│  ├── Phase 4: Component integration (8h)           🔄 IN PROGRESS   │
+│  │   └── Phase 4A: Data-driven hub detection (5h)  ⬜ PIVOT         │
+│  ├── Phase 5: UI updates (3h)                      ⬜ TODO          │
+│  ├── Phase 6: Query scoping (3h)                   ⬜ TODO          │
+│  └── Phase 7: Migration + testing (5h)             ⬜ TODO          │
+│                                                                     │
+│  PHASE 8: Holistic Extension (~24 hours)                           │
+│  ├── Phase 8A: Entity Registry (4h)                ⬜ TODO          │
+│  ├── Phase 8B: Entity Detection - ChromaDB (6h)    ⬜ TODO          │
+│  ├── Phase 8C: ChromaDB Integration (4h)           ⬜ TODO          │
+│  ├── Phase 8D: Unified Graph API (3h)              ⬜ TODO          │
+│  ├── Phase 8E: Intelligence Integration (4h)       ⬜ TODO          │
+│  └── Phase 8F: UI Updates (3h)                     ⬜ TODO          │
+│                                                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│                     VALUE ADD (After Foundation)                    │
+├─────────────────────────────────────────────────────────────────────┤
+│  Phase 9+: External Integrations (Smartsheet, Email, etc.)         │
+│  Playbook Builder polish                                            │
+│  Compliance automation                                              │
+│  UX improvements                                                    │
+│  Export engine                                                      │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 1.5 ComparisonEngine - Data Comparison
+## A.3 Phase 1-7: DuckDB Foundation (Detailed)
 
-**What it is:** SQL-based comparison of two DuckDB tables. Auto-detects join keys, finds gaps and mismatches.
+### Phase 1: Foundation (2 hours) ✅ COMPLETE
 
-**Where it lives:** `utils/features/comparison_engine.py`
+| Task | File | Status |
+|------|------|--------|
+| Add `entity_type`, `category` to schema | `structured_data_handler.py` | ✅ Done |
+| Add migration for existing DBs | `structured_data_handler.py` | ✅ Done |
+| Create `_derive_entity_metadata()` | `structured_data_handler.py` | ✅ Done |
+| Update `_store_single_table()` | `structured_data_handler.py` | ✅ Done |
+| Parse "Sheet - SubTable" format | `_derive_entity_metadata()` | ✅ Done |
 
-### THE RULE
+**Deliverable:** All new uploads have entity_type populated. ✅
 
-**ALL data comparison operations MUST use ComparisonEngine.**
+### Phase 2: Semantic Inference (1 hour) ✅ COMPLETE
+
+| Task | File | Status |
+|------|------|--------|
+| Update inference prompt with entity_type | `structured_data_handler.py` | ✅ Done |
+| Dynamic vocabulary search (not hardcoded) | `_fallback_column_inference()` | ✅ Done |
+| Test with "code" column in Change Reasons | Manual test | ✅ Done |
+
+**Deliverable:** `code` in `termination_reasons` → `termination_reason_code` ✅
+
+### Phase 3: API Updates (1 hour) ✅ COMPLETE
+
+| Task | File | Status |
+|------|------|--------|
+| Include entity_type in BI schema | `bi_router.py` | ✅ Done |
+| Include entity_type in classification | `classification_router.py` | ✅ Done |
+| Include entity_type in context graph | `data_model.py` | ✅ Done |
+| Include entity_type in dashboard | `dashboard.py` | ✅ Done |
+
+**Deliverable:** All APIs return entity_type for tables. ✅
+
+### Phase 4: Component Integration (8 hours) 🔄 IN PROGRESS
+
+#### Phase 4A: Data-Driven Hub Detection (5 hours) ⬜ THE PIVOT
+
+**Problem:** Current `compute_context_graph()` is vocabulary-gated. Only columns with known semantic types can become hubs. This prevents discovering hubs that aren't in vocabulary.
+
+**Solution:** Detect hubs from DATA PATTERNS, find relationships by VALUE MATCHING, then apply vocabulary labels.
+
+| Task | File | Est | Status |
+|------|------|-----|--------|
+| Rewrite `compute_context_graph()` | `structured_data_handler.py` | 4h | ⬜ TODO |
+| Add `auto_add_type()` to vocabulary | `semantic_vocabulary.py` | 30m | ⬜ TODO |
+| Add `is_discovered` flag to mappings | `structured_data_handler.py` | 30m | ⬜ TODO |
+
+**Algorithm:**
+
+```
+Step 1: Identify Hub Candidates from Data Patterns
+─────────────────────────────────────────────────
+Scan all tables. Score each as potential lookup table:
+
+| Pattern                                              | Score |
+|------------------------------------------------------|-------|
+| Has column named "code", "id", or ends with "_code"  | +2    |
+| Has column named "description", "name", or "label"   | +2    |
+| Key column has high uniqueness (distinct/rows > 0.8) | +2    |
+| Row count < 2000                                     | +1    |
+| Entity_type suggests reference (*_codes, *_types)    | +1    |
+| truth_type = 'configuration'                         | +1    |
+
+Threshold: Score >= 4 = hub candidate
+Output: List of (table, key_column, cardinality, values[])
+
+Step 2: Find Spokes by Value Matching
+─────────────────────────────────────
+For each hub candidate:
+1. Get distinct values from hub column
+2. Scan ALL other columns in project
+3. Calculate overlap:
+   - matched_count = how many spoke values exist in hub
+   - coverage_pct = matched_count / hub_cardinality
+   - is_subset = spoke values ⊆ hub values
+
+Threshold: coverage_pct >= MIN_COVERAGE_PCT OR is_subset = TRUE
+
+Step 3: Deduplicate Hubs
+────────────────────────
+Same concept in multiple tables → pick THE hub:
+- Prefer truth_type = 'configuration'
+- Then highest cardinality
+- Mark others as secondary/spokes
+
+Step 4: Apply Vocabulary Labels
+───────────────────────────────
+For each hub:
+1. Check if column has semantic_type from inference
+2. If not, derive from entity_type: {entity_singular}_code
+3. If no match, auto-add to vocabulary as discovered type
+4. Mark is_discovered = TRUE for auto-added types
+```
+
+**Configurable Thresholds:**
 
 ```python
-# ❌ WRONG - Manual comparison logic
-for row_a in table_a:
-    if row_a['id'] not in table_b_ids:
-        missing.append(row_a)
-
-# ✅ CORRECT - Use ComparisonEngine
-from utils.features.comparison_engine import ComparisonEngine
-
-engine = ComparisonEngine(structured_handler)
-result = engine.compare(
-    table_a="tea1000_tax_verification",
-    table_b="tea1000_company_master",
-    join_keys=["tax_code"],  # Optional - auto-detected if not provided
-    project_id=project_id
-)
-# result.only_in_a, result.only_in_b, result.mismatches, result.matches
+HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
+MIN_COVERAGE_PCT = 20             # Minimum overlap for relationship
+MIN_HUB_CARDINALITY = 3           # Skip hubs with fewer values
+MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 ```
+
+#### Phase 4B: Remaining Integration (3 hours)
+
+| Task | File | Est | Status |
+|------|------|-----|--------|
+| Intelligence Engine scopes to active values | `intelligence/engine.py` | 1h | ✅ Done |
+| SQL Generator uses graph for auto-filtering | `sql_generator.py` | 1h | ✅ Done |
+| Gap Detection from graph coverage | `playbook_framework.py` | 30m | ✅ Done |
+| Consultative synthesis uses graph | `consultative_synthesis.py` | 30m | ✅ Done |
+
+**Deliverable:** Query "Show me W2 issues" returns scoped, intelligent answer.
+
+### Phase 5: UI Updates (3 hours) ⬜ TODO
+
+| Task | File | Est | Status |
+|------|------|-----|--------|
+| Data Model UI shows hub/spoke hierarchy | `data_model.py` + frontend | 2h | ⬜ TODO |
+| DataExplorer shows entity_type | `DataExplorer.jsx` | 30m | ⬜ TODO |
+| AnalyticsPage shows entity_type | `AnalyticsPage.jsx` | 30m | ⬜ TODO |
+| Unrecognized Hubs UI (name discovered hubs) | Frontend | Parked | ⬜ TODO |
+
+**Deliverable:** UI shows data hierarchy, not flat list.
+
+### Phase 6: Query Scoping (3 hours) ⬜ TODO
+
+| Task | File | Est | Status |
+|------|------|-----|--------|
+| Chain context through graph | Multiple | 3h | ⬜ TODO |
+| "W2 → US → 2 companies" works | End-to-end | Included | ⬜ TODO |
+
+**Deliverable:** Complex scoped queries work automatically.
+
+### Phase 7: Migration + Testing (5 hours) ⬜ TODO
+
+| Task | File | Est | Status |
+|------|------|-----|--------|
+| Backfill entity_type for existing TEA1000 | Script | 1h | ⬜ TODO |
+| Recompute context graph for TEA1000 | Script | 30m | ⬜ TODO |
+| Verify all lookup tables become hubs | Manual test | 30m | ⬜ TODO |
+| Test full query flow | Manual test | 2h | ⬜ TODO |
+| Edge cases and bug fixes | Various | 1h | ⬜ TODO |
+
+**Deliverable:** TEA1000 has complete, working Context Graph.
 
 ---
 
-# PART 2: THE FIVE TRUTHS ARCHITECTURE
+## A.4 Phase 8: Holistic Extension (Detailed)
 
-Every question should be answered by triangulating across multiple data sources.
+### Phase 8A: Entity Registry (4 hours)
 
-## 2.1 The Five Truths
+| Task | File | Status |
+|------|------|--------|
+| Create entity_registry table in Supabase | Migration | ⬜ TODO |
+| Create entity_references table in Supabase | Migration | ⬜ TODO |
+| Create `EntityRegistry` class | `backend/utils/entity_registry.py` | ⬜ TODO |
+| Register DuckDB hubs in entity registry | `structured_data_handler.py` | ⬜ TODO |
+| Register DuckDB spokes in entity registry | `structured_data_handler.py` | ⬜ TODO |
 
-| # | Truth | Scope | Storage | What It Contains |
-|---|-------|-------|---------|------------------|
-| 1 | **Reality** | Customer | DuckDB | Employee data, payroll registers, transactions |
-| 2 | **Intent** | Customer | ChromaDB | SOWs, requirements, meeting notes |
-| 3 | **Configuration** | Customer | DuckDB | Code tables, mappings, system setup |
-| 4 | **Reference** | Global | ChromaDB | Product docs, how-to guides |
-| 5 | **Regulatory** | Global | ChromaDB | Laws, IRS rules, state mandates |
+**Deliverable:** All DuckDB entities appear in Supabase registry.
 
-Plus **Compliance** as sub-type for audit requirements.
+### Phase 8B: Entity Detection - ChromaDB (6 hours)
 
-## 2.2 Truth Routing
+| Task | File | Status |
+|------|------|--------|
+| Create `EntityDetector` class | `backend/utils/entity_detector.py` | ⬜ TODO |
+| Value matching detection | `entity_detector.py` | ⬜ TODO |
+| LLM-based semantic detection | `entity_detector.py` | ⬜ TODO |
+| Pattern matching for known formats | `entity_detector.py` | ⬜ TODO |
+| Unit tests for detection | `tests/test_entity_detector.py` | ⬜ TODO |
 
-```python
-TRUTH_ROUTING = {
-    'reality': 'duckdb',
-    'intent': 'chromadb',
-    'configuration': 'duckdb',  # Or 'both' for hybrid
-    'reference': 'chromadb',
-    'regulatory': 'chromadb',
-    'compliance': 'chromadb',
-}
-```
+**Deliverable:** Detector identifies entity references in unstructured text.
 
-## 2.3 The Magic: Triangulation
+### Phase 8C: ChromaDB Integration (4 hours)
 
-**Good Answer:**
-> "Your SUI rate is 2.7%. This matches the 2024 state requirement [Regulatory]. UKG recommends configuring this as tax code OHSUI [Reference]. Your system shows OHSUI configured at 2.7% [Configuration], and 47 employees have this applied [Reality]."
+| Task | File | Status |
+|------|------|--------|
+| Add entity detection to `add_document()` | `utils/rag_handler.py` | ⬜ TODO |
+| Store entity refs in registry during ingestion | `utils/rag_handler.py` | ⬜ TODO |
+| Update chunk metadata schema | `utils/rag_handler.py` | ⬜ TODO |
+| Backfill existing chunks (optional) | Script | ⬜ TODO |
 
-**Bad Answer:**
-> "Found 47 rows in tax table."
+**Deliverable:** New ChromaDB documents have entity references.
 
----
+### Phase 8D: Unified Graph API (3 hours)
 
-# PART 3: SOURCE OF TRUTH RULES
+| Task | File | Status |
+|------|------|--------|
+| Create `get_unified_context_graph()` | `structured_data_handler.py` | ⬜ TODO |
+| Create `query_entity()` | `backend/utils/entity_query.py` | ⬜ TODO |
+| API endpoint for entity query | `backend/routers/data_model.py` | ⬜ TODO |
+| Cross-storage gap detection | `entity_query.py` | ⬜ TODO |
 
-## 3.1 Data Ownership
+**Deliverable:** API returns unified view of entity across all storage.
 
-| Data Type | Source of Truth | Location |
-|-----------|-----------------|----------|
-| File metadata (who uploaded, when, truth_type) | `document_registry` | Supabase |
-| Table structure (columns, row_count) | `_schema_metadata` | DuckDB |
-| Column statistics (top values, distinct count) | `_column_profiles` | DuckDB |
-| Table data | Project tables | DuckDB |
-| Document chunks | Collections | ChromaDB |
-| User/Project info | `projects`, `users` | Supabase |
+### Phase 8E: Intelligence Integration (4 hours)
 
-## 3.2 The Cardinal Rule
+| Task | File | Status |
+|------|------|--------|
+| Update Intelligence Engine to use unified graph | `intelligence/engine.py` | ⬜ TODO |
+| Update gatherers to include semantic context | `intelligence/gatherers/*.py` | ⬜ TODO |
+| Update consultative synthesis | `consultative_synthesis.py` | ⬜ TODO |
 
-**Every piece of data has ONE authoritative source. Never duplicate.**
+**Deliverable:** "What do we know about X?" returns holistic answer.
 
-```python
-# ❌ WRONG - Duplicating registry data in DuckDB
-_schema_metadata.uploaded_by = ...  # This belongs in registry!
-_schema_metadata.domain = ...       # This belongs in registry!
+### Phase 8F: UI Updates (3 hours)
 
-# ✅ CORRECT - Pull from both sources
-registry_data = DocumentRegistryModel.find_by_filename(filename, project_id)
-schema_data = handler.get_table_metadata(table_name)
+| Task | File | Status |
+|------|------|--------|
+| Show semantic references in Context Graph UI | Frontend | ⬜ TODO |
+| Entity detail view (hub + spokes + docs) | Frontend | ⬜ TODO |
+| Cross-reference links (click entity → see all) | Frontend | ⬜ TODO |
 
-# Combine in API response
-response = {
-    "uploaded_by": registry_data.get("uploaded_by_email"),  # From registry
-    "row_count": schema_data.get("row_count"),              # From DuckDB
-}
-```
+**Deliverable:** UI shows unified entity view.
 
 ---
 
-# PART 4: OPERATIONAL HEALTH REQUIREMENTS
+## A.5 Phase 9+: Future (Not Detailed Yet)
 
-This is the gap that let PDF parsing break silently.
-
-## 4.1 What "Health" Actually Means
-
-Current health checks tell us:
-- ✅ DuckDB file exists
-- ✅ ChromaDB is reachable
-- ✅ Registry has N files
-- ❌ PDF parsing actually works
-- ❌ LLM cascade is functioning
-- ❌ Queries return valid results
-- ❌ Upload produces usable data
-
-**We need functional health, not existence health.**
-
-## 4.2 Required Health Metrics
-
-| Metric | What It Measures | How to Check |
-|--------|------------------|--------------|
-| **LLM Cascade Health** | Can we reach Groq? Ollama? Claude? | Ping each with test prompt, measure latency |
-| **PDF Parse Success Rate** | % of PDFs that produce valid tables | Track in processing_jobs, compare input/output row counts |
-| **Query Success Rate** | % of chat queries that return results | Track in metrics_service |
-| **Synthesis Quality** | % of responses that aren't template fallback | Track synthesis_method in responses |
-| **Upload Quality** | % of uploads that pass validation | Track health_score in registration |
-| **Orphan Detection** | Tables/chunks without registry entries | Run sync check every hour |
-
-## 4.3 Dashboard Requirements
-
-The System Monitor page MUST show:
-
-1. **LLM Status Panel**
-   - Groq: ✅ Online / ❌ Down / ⚠️ Slow
-   - Ollama: ✅ Online / ❌ Down / ⚠️ Slow  
-   - Claude: ✅ Online / ❌ Down / ⚠️ Rate Limited
-   - Last 10 calls: Success rate, avg latency
-
-2. **Processing Health Panel**
-   - Last 10 uploads: File, status, row count, quality score
-   - Any "failed" or "partial" uploads highlighted
-
-3. **Query Health Panel**
-   - Last 10 queries: Question preview, response length, synthesis method
-   - Any "template fallback" highlighted as degraded
-
-4. **Data Integrity Panel**
-   - Orphan tables: Count (should be 0)
-   - Orphan chunks: Count (should be 0)
-   - Registry/DuckDB sync: ✅ Healthy / ❌ Mismatch
+| Phase | Description | Estimate |
+|-------|-------------|----------|
+| Phase 9 | Smartsheet Integration | 8 hours |
+| Phase 10 | Email Integration | 12 hours |
+| Phase 11 | Meeting Notes Processing | 6 hours |
+| Phase 12 | Decision/Action Tracking | 8 hours |
+| Phase 13 | Timeline/History View | 6 hours |
 
 ---
 
-# PART 5: CODE QUALITY STANDARDS
+## A.6 Success Criteria (Phase 1-7)
 
-## 5.1 Error Handling Pattern
+After Phase 7, these must all be true:
 
-**Every external call MUST have error handling.**
-
-```python
-# ❌ WRONG - Unhandled exceptions
-result = orchestrator.synthesize(query, context)
-return {"answer": result["response"]}
-
-# ✅ CORRECT - Full error handling
-try:
-    result = orchestrator.synthesize(query, context)
-    if result.get("success"):
-        return {"answer": result["response"], "model": result.get("model_used")}
-    else:
-        logger.warning(f"Synthesis failed: {result.get('error')}")
-        return {"answer": "I couldn't generate a response. Please try again.", "degraded": True}
-except Exception as e:
-    logger.error(f"Synthesis exception: {e}")
-    return {"answer": "An error occurred. Please try again.", "error": True}
-```
-
-## 5.2 Logging Standards
-
-**Use WARNING level for operational visibility.**
-
-```python
-# ❌ WRONG - Debug level nobody sees
-logger.debug(f"Processing file {filename}")
-
-# ❌ WRONG - Info level buried in noise
-logger.info(f"TableSelector found 3 tables")
-
-# ✅ CORRECT - Warning level for operational visibility
-logger.warning(f"[TABLE-SEL] Selected 3 tables for query: {question[:50]}")
-logger.warning(f"[UPLOAD] Processing {filename} ({file_size} bytes)")
-logger.warning(f"[LLM] Groq succeeded ({len(response)} chars, {duration_ms}ms)")
-```
-
-**Prefix convention:**
-- `[TABLE-SEL]` - TableSelector operations
-- `[ENGINE-V2]` - Intelligence engine
-- `[UPLOAD]` - File processing
-- `[LLM]` - LLM calls
-- `[SYNTHESIS]` - Response synthesis
-- `[COMPARE]` - Comparison operations
-- `[SCAN]` - Playbook scanning
-
-## 5.3 Full File Replacements
-
-**Scott is not a developer. Never give patches.**
-
-```python
-# ❌ WRONG - Patch instructions
-# Add this at line 45:
-#   new_code_here()
-# Change line 72 from X to Y
-
-# ✅ CORRECT - Full file replacement
-# Here's the complete updated file:
-# (entire file contents)
-```
+- [ ] All lookup tables detected as hubs (not just vocabulary-matched ones)
+- [ ] Hubs discovered by data patterns, labeled by vocabulary
+- [ ] Unknown hubs auto-added to vocabulary with is_discovered flag
+- [ ] Context Graph shows 20+ hubs (was 14 with vocabulary-gating)
+- [ ] Query "Show me termination reason gaps" returns hub/spoke/gap breakdown
+- [ ] UI shows hierarchical view, not flat tables
+- [ ] "W2 issues" scopes to US companies automatically
 
 ---
 
-# PART 6: FEATURE DEVELOPMENT CHECKLIST
+## A.7 Conversation Continuity
 
-Before building ANY new feature:
+When starting a new conversation:
 
-## 6.1 Pre-Development
+```
+Continue Context Graph implementation.
+Reference: Architecture_Ways_of_Working.md Section A
 
-- [ ] Read this document
-- [ ] `grep` the codebase for similar functionality
-- [ ] Identify which existing patterns apply
-- [ ] Check if TableSelector, LLMOrchestrator, ComparisonEngine can be reused
-- [ ] Identify source of truth for any data involved
+Current status: Phase 4A - Data-driven hub detection rewrite
+Last completed: Phases 1-3 (entity_type foundation, semantic inference, APIs)
+Next task: Rewrite compute_context_graph() with data-driven algorithm
 
-## 6.2 During Development
+Start by viewing Section A.3 Phase 4A for the algorithm spec.
+```
 
-- [ ] Use TableSelector for any table/file matching
-- [ ] Use LLMOrchestrator for any LLM calls
-- [ ] Use RegistrationService for any file operations
-- [ ] Use ConsultativeSynthesizer for user-facing responses
-- [ ] Use ComparisonEngine for any data comparison
-- [ ] Add WARNING-level logging with prefixes
-- [ ] Add error handling for all external calls
-
-## 6.3 Post-Development
-
-- [ ] Verify feature works end-to-end
-- [ ] Check logs for errors
-- [ ] Verify no orphan data created
-- [ ] Run health check
-- [ ] Update ARCHITECTURE.md if new patterns introduced
+Update checkboxes (⬜ → ✅) as tasks complete.
 
 ---
 
-# PART 7: KNOWN TECHNICAL DEBT
+# SECTION B: THE ARCHITECTURE
 
-Items that violate these patterns but haven't been fixed yet:
-
-## 7.1 LLM Bypass Violations - ✅ RESOLVED (Jan 2, 2026)
-
-All critical LLM bypass violations have been fixed. Files now use orchestrator._call_claude():
-
-| File | Status |
-|------|--------|
-| `intent_parser.py` | ✅ Fixed |
-| `truth_enricher.py` | ✅ Fixed |
-| `hybrid_analyzer.py` | ✅ Fixed |
-| `llm_table_parser.py` | ✅ Fixed |
-| `advisor_router.py` | ✅ Fixed |
-| `playbook_framework.py` | ✅ Fixed |
-| `playbooks.py` | ✅ Fixed |
-| `consultative_synthesis.py` | ✅ Fixed |
-| `pdf_vision_analyzer.py` | ⚠️ Exception - Vision API |
-| `register_extractor.py` | ⚠️ Exception - Streaming API |
-
-## 7.2 Table Matching - Not Violations
-
-After review, these are **not** TableSelector violations. TableSelector is for query-time intelligent table selection. These files use simple string matching appropriately for:
-
-| File | Use Case | Verdict |
-|------|----------|---------|
-| `health.py` | Diagnostic file matching | ✅ Appropriate |
-| `cleanup.py` | File deletion matching | ✅ Appropriate |
-| `bi_router.py` | Value filtering (contains) | ✅ Appropriate |
-
-## 7.3 Operational Health - ✅ RESOLVED (Jan 2, 2026)
-
-Added `/api/health/operational` endpoint that tracks:
-
-| Metric | Status |
-|--------|--------|
-| LLM cascade health (per-provider stats) | ✅ Implemented |
-| Upload success rate (24h/7d) | ✅ Implemented |
-| Query success rate | ✅ Implemented |
-| PDF parse quality | ✅ Implemented |
-| Synthesis quality (LLM vs template) | ✅ Implemented |
-| Overall health score (0-100) | ✅ Implemented |
+This section answers: "How does it work?"
 
 ---
 
-# PART 8: EMERGENCY PROCEDURES
+## B.1 The Context Graph
 
-## 8.1 If PDF Parsing Breaks
-
-1. Check Railway logs for `[PDF]` or `pdf_vision_analyzer` errors
-2. Verify Groq API key is valid: `curl -H "Authorization: Bearer $GROQ_API_KEY" https://api.groq.com/openai/v1/models`
-3. Check if Ollama is responding: hit `/api/health` and look for `ollama_status`
-4. If all LLMs down, uploads will still work but produce raw text extraction
-
-## 8.2 If LLM Cascade Fails
-
-1. Check each provider in order:
-   - Groq: Rate limits? API key expired?
-   - Ollama: Is the server running? Auth working?
-   - Claude: Rate limits? API key valid?
-2. Temporary workaround: Chat will fall back to template responses
-3. Fix: Restore LLM connectivity, no code change needed
-
-## 8.3 If Data Gets Orphaned
-
-1. Run `/api/status/registry/health` - shows orphan counts
-2. For orphan DuckDB tables: `/api/cleanup/orphans` will remove them
-3. For orphan ChromaDB chunks: Manual cleanup or re-upload files
-4. Prevention: Always use RegistrationService for all file operations
-
----
-
-# APPENDIX A: QUICK REFERENCE
-
-## A.1 Import Patterns
-
-### THE RULE: utils/ vs backend/utils/
-
-App starts as `uvicorn backend.main:app` from repo root. Two utils directories exist:
-
-| Location | Purpose | Import Style |
-|----------|---------|--------------|
-| `utils/` (repo root) | Core data handlers | `from utils.X` |
-| `backend/utils/` | Backend services | `from backend.utils.X` |
-
-**Core Data Handlers (`utils/`):**
-- `structured_data_handler.py` - DuckDB operations
-- `rag_handler.py` - ChromaDB operations  
-- `llm_orchestrator.py` - LLM routing
-- `query_router.py`, `query_decomposition.py` - Query handling
-- `text_extraction.py`, `universal_chunker.py` - Document processing
-
-**Backend Services (`backend/utils/`):**
-- `classification_service.py` - Table/column classification
-- `registration_service.py` - File registration & lineage
-- `metrics_service.py` - Usage metrics
-- `pdf_vision_analyzer.py`, `smart_pdf_analyzer.py` - PDF processing
-- `consultative_synthesis.py` - Response generation
-- `intelligence/*.py` - Intelligence engine components
-
-**NEVER use try/except for imports:**
-```python
-# ❌ WRONG - Import guessing
-try:
-    from utils.structured_data_handler import get_structured_handler
-except ImportError:
-    from backend.utils.structured_data_handler import get_structured_handler
-
-# ✅ CORRECT - Know where it lives
-from utils.structured_data_handler import get_structured_handler  # Core handler
-from backend.utils.classification_service import ClassificationService  # Backend service
-```
-
-### Standard Imports
-
-```python
-# Core Data Handlers (from utils/)
-from utils.structured_data_handler import get_structured_handler
-from utils.rag_handler import RAGHandler
-from utils.llm_orchestrator import LLMOrchestrator
-
-# Backend Services (from backend/utils/)
-from backend.utils.intelligence.table_selector import TableSelector
-from backend.utils.registration_service import RegistrationService, RegistrationSource
-from backend.utils.consultative_synthesis import ConsultativeSynthesizer
-from backend.utils.classification_service import ClassificationService
-from backend.utils.metrics_service import MetricsService
-
-# Database (from utils/database/)
-from utils.database.supabase_client import get_supabase
-from utils.database.models import DocumentRegistryModel, LineageModel
-
-# Features (from utils/features/)
-from utils.features.comparison_engine import ComparisonEngine
-```
-
-## A.2 Common Operations
-
-**Select tables for a query:**
-```python
-selector = TableSelector(structured_handler=handler, project=project)
-tables = selector.select(all_tables, question, max_tables=5)
-```
-
-**Generate SQL:**
-```python
-orchestrator = LLMOrchestrator()
-result = orchestrator.generate_sql(prompt, schema_columns)
-sql = result.get("sql")
-```
-
-**Synthesize response:**
-```python
-synthesizer = ConsultativeSynthesizer()
-answer = synthesizer.synthesize(question=q, reality=r, configuration=c, ...)
-```
-
-**Compare tables:**
-```python
-engine = ComparisonEngine(structured_handler)
-result = engine.compare("table_a", "table_b", project_id=pid)
-```
-
-**Register upload:**
-```python
-result = RegistrationService.register_structured(
-    filename=f, project_id=pid, tables_created=tables,
-    row_count=rows, uploaded_by_email=email, source=RegistrationSource.UPLOAD
-)
-```
-
----
-
----
-
-# PART 9: IMPORT STANDARDS
-
-**Added:** January 3, 2026 after finding 27 routers with try/except import blocks.
-
-## 9.1 The Problem
-
-The codebase has two `utils` directories:
-- `/utils/` - At repo root
-- `/backend/utils/` - Inside backend
-
-App starts as `uvicorn backend.main:app` from repo root, so both are valid import paths. This led to inconsistent imports and try/except guessing blocks throughout the codebase.
-
-## 9.2 The Rule
-
-**Know where each module lives. Use the correct import. No try/except.**
-
-| Location | Contents | Import Style |
-|----------|----------|--------------|
-| `utils/` | Core data handlers (DuckDB, ChromaDB, LLM) | `from utils.X` |
-| `backend/utils/` | Backend services (classification, registration, etc.) | `from backend.utils.X` |
-| `utils/database/` | Database clients and models | `from utils.database.X` |
-| `utils/features/` | Feature modules (comparison, etc.) | `from utils.features.X` |
-
-## 9.3 Core Handlers (utils/)
-
-These handle direct data storage operations:
-
-```python
-from utils.structured_data_handler import get_structured_handler, StructuredDataHandler
-from utils.rag_handler import RAGHandler
-from utils.llm_orchestrator import LLMOrchestrator
-from utils.query_router import QueryRouter
-from utils.text_extraction import extract_text
-from utils.universal_chunker import UniversalChunker
-```
-
-## 9.4 Backend Services (backend/utils/)
-
-These provide higher-level business logic:
-
-```python
-from backend.utils.classification_service import ClassificationService, get_classification_service
-from backend.utils.registration_service import RegistrationService, RegistrationSource
-from backend.utils.metrics_service import MetricsService
-from backend.utils.consultative_synthesis import ConsultativeSynthesizer
-from backend.utils.pdf_vision_analyzer import PDFVisionAnalyzer
-from backend.utils.smart_pdf_analyzer import SmartPDFAnalyzer
-from backend.utils.intelligence.table_selector import TableSelector
-from backend.utils.intelligence.engine import IntelligenceEngineV2
-```
-
-## 9.5 Anti-Pattern: Import Guessing
-
-```python
-# ❌ NEVER DO THIS
-try:
-    from utils.classification_service import ClassificationService
-except ImportError:
-    from backend.utils.classification_service import ClassificationService
-
-try:
-    from backend.utils.structured_data_handler import get_structured_handler
-except ImportError:
-    from utils.structured_data_handler import get_structured_handler
-
-# ✅ INSTEAD: Know where it lives
-from utils.structured_data_handler import get_structured_handler  # It's in utils/
-from backend.utils.classification_service import ClassificationService  # It's in backend/utils/
-```
-
-## 9.6 When Adding New Modules
-
-**Question:** Is this a core data handler or a business service?
-
-- **Core handler** (direct DuckDB/ChromaDB/LLM operations) → `utils/`
-- **Business service** (uses handlers to provide features) → `backend/utils/`
-
----
-
-# PART 10: API ENDPOINT CONVENTIONS
-
-**Added:** January 3, 2026 after discovering routers had inconsistent prefix patterns.
-
-## 10.1 The Problem
-
-Some routers defined their own prefix (`/api/advisor`), some had no prefix (main.py adds `/api`), some had partial prefixes. You couldn't look at a router and know its actual path.
-
-## 10.2 The Rule
-
-**All endpoint prefixes are defined in main.py. Routers define NO prefix.**
-
-```python
-# ❌ WRONG - Router defines its own prefix
-router = APIRouter(prefix="/api/advisor", tags=["advisor"])
-
-# ✅ CORRECT - Router has no prefix
-router = APIRouter(tags=["advisor"])
-
-# main.py adds the prefix
-app.include_router(advisor_router.router, prefix="/api/advisor")
-```
-
-## 10.3 Endpoint Types
-
-### Resource Endpoints (REST)
-Standard CRUD on data entities. Noun-based, plural.
-
-```
-GET    /api/projects           → List all projects
-POST   /api/projects           → Create a project
-GET    /api/projects/{id}      → Get one project
-PUT    /api/projects/{id}      → Update a project
-DELETE /api/projects/{id}      → Delete a project
-```
-
-### Action Endpoints (RPC-style)
-Operations that DO something. Verb in path is OK.
-
-```
-POST   /api/upload             → Process an upload
-POST   /api/chat/unified       → Send a chat query
-POST   /api/playbooks/scan     → Run a scan
-```
-
-### Nested Resources
-Resources that belong to a parent.
-
-```
-GET    /api/projects/{id}/files      → Files in a project
-GET    /api/intelligence/{id}/tasks  → Tasks for a project
-```
-
-### System/Admin Endpoints
-Health, metrics, admin operations.
-
-```
-GET    /api/health             → System health
-GET    /api/metrics            → System metrics
-POST   /api/admin/cleanup      → Run cleanup
-DELETE /api/admin/cache        → Clear cache
-```
-
-## 10.4 Standard Structure
-
-```
-/api
-├── /projects                 # Resource: Projects
-├── /projects/{id}/files      # Nested: Files in project
-│
-├── /upload                   # Action: Upload files
-├── /chat                     # Action: Chat/query
-├── /bi                       # Action: BI queries
-│
-├── /playbooks                # Resource: Playbook definitions
-├── /playbook-builder         # Resource: Playbook configs
-│
-├── /classification           # Resource: Classifications
-├── /data-model               # Resource: Data models
-├── /intelligence             # Action: Intelligence analysis
-│
-├── /reference                # Resource: Reference library
-├── /standards                # Resource: Standards/rules
-├── /decoder                  # Action: Domain decoding
-│
-├── /health                   # System: Health check
-├── /metrics                  # System: Metrics
-├── /status                   # System: Status info
-│
-├── /admin                    # Admin operations
-│   ├── /registry
-│   ├── /learning
-│   └── /rules
-│
-├── /auth                     # Auth operations
-└── /security                 # Security operations
-```
-
-## 10.5 Router Template
-
-```python
-# myrouter.py
-from fastapi import APIRouter
-
-# NO prefix here - main.py handles it
-router = APIRouter(tags=["myrouter"])
-
-@router.get("/")
-async def list_items():
-    """GET /api/myrouter"""
-    pass
-
-@router.get("/{id}")
-async def get_item(id: str):
-    """GET /api/myrouter/{id}"""
-    pass
-
-@router.post("/{id}/process")
-async def process_item(id: str):
-    """POST /api/myrouter/{id}/process"""
-    pass
-```
-
-```python
-# main.py
-from backend.routers import myrouter
-
-app.include_router(myrouter.router, prefix="/api/myrouter")
-```
-
-## 10.6 Current Status
-
-As of January 3, 2026, all router prefixes have been removed and consolidated to main.py. The pattern is now consistent across all 27 routers.
-
-**This document is the law. Follow it.**
-
-**When in doubt, grep the codebase and match existing patterns.**
-
-**If you find yourself writing new infrastructure instead of using existing patterns, STOP and ask why.**
-
----
-
-# PART 11: FRONTEND COMPONENT STANDARDS
-
-**Added:** January 4, 2026 after finding 5 pages with duplicate local Tooltip components that didn't respect global settings.
-
-## 11.1 The Problem
-
-Pages were copy-pasting component implementations locally instead of using shared components. This led to:
-- Inconsistent behavior (local tooltips ignored global toggle)
-- Duplicated code across 5+ files
-- Style drift between implementations
-- Features not working (tooltip toggle only worked on nav, not page content)
-
-## 11.2 The Rule
-
-**NEVER define UI components locally in page files. Use shared components from `components/ui/`.**
-
-```jsx
-// ❌ WRONG - Local component definition in page file
-function Tooltip({ children, title, detail }) {
-  const [show, setShow] = useState(false);
-  return (
-    <div onMouseEnter={() => setShow(true)}>
-      {children}
-      {show && <div>{title}</div>}
-    </div>
-  );
-}
-
-// ✅ CORRECT - Import shared component
-import { Tooltip } from '../components/ui';
-```
-
-## 11.3 Shared UI Components
-
-All reusable UI components live in `frontend/src/components/ui/`:
-
-| Component | File | Purpose |
-|-----------|------|---------|
-| `Tooltip` | `Tooltip.jsx` | Fancy tooltips with title/detail/action, respects global toggle |
-| `SimpleTooltip` | `Tooltip.jsx` | Basic single-line tooltips for nav/buttons |
-| `Card` | `Card.jsx` | Consistent card styling |
-| `Button` | `Button.jsx` | Standard button variants |
-
-### Tooltip Usage
-
-```jsx
-import { Tooltip, SimpleTooltip } from '../components/ui';
-
-// Fancy tooltip (3-part: title, detail, action)
-<Tooltip 
-  title="Pipeline Status" 
-  detail="Real-time health checks for each pipeline stage."
-  action="Click to refresh"
->
-  <div>Hover me</div>
-</Tooltip>
-
-// Simple tooltip (single line, for nav/buttons)
-<SimpleTooltip text="Sign out of XLR8">
-  <button>Logout</button>
-</SimpleTooltip>
-```
-
-### Tooltip Global Toggle
-
-Tooltips respect `TooltipContext`:
-- Toggle button in nav bar controls all tooltips app-wide
-- Setting persists to localStorage
-- Individual tooltips can be disabled with `disabled` prop
-
-```jsx
-// In components/ui/Tooltip.jsx
-const { tooltipsEnabled } = useTooltips();
-if (!tooltipsEnabled) return children; // No tooltip shown
-```
-
-## 11.4 When Creating New Shared Components
-
-1. **Check if it exists first** - grep `frontend/src/components/`
-2. **If creating new** - put in `components/ui/` and export from `components/ui/index.js`
-3. **Add to this document** - update the table above
-
-## 11.5 Anti-Pattern: Component Duplication
-
-Files that HAD local Tooltip components (now fixed):
-- `DashboardPage.jsx` ❌ → ✅ Uses shared
-- `DataPage.jsx` ❌ → ✅ Uses shared
-- `DataExplorer.jsx` ❌ → ✅ Uses shared
-- `DataModelPage.jsx` ❌ → ✅ Uses shared
-- `MissionControl.jsx` ❌ → Deleted (orphaned file)
-
-**If you find yourself copy-pasting a component into a page file, STOP.**
-
----
-
-# PART 12: DEAD CODE REMOVAL
-
-**Added:** January 4, 2026
-
-## 12.1 The Rule
-
-**Delete orphaned files. Don't leave them around "just in case."**
-
-Orphaned files cause:
-- Confusion about what's actually used
-- Wasted effort updating dead code
-- False positives in grep/search
-- Technical debt accumulation
-
-## 12.2 How to Identify Orphaned Files
-
-```bash
-# Check if a component is imported anywhere
-grep -rn "import.*MyComponent" frontend/src/
-
-# Check if a page is routed
-grep -n "MyPage" frontend/src/App.jsx
-
-# Check if a backend module is used
-grep -rn "from.*mymodule\|import.*mymodule" backend/
-```
-
-## 12.3 Known Orphaned Files (Deleted)
-
-| File | Reason | Date Removed |
-|------|--------|--------------|
-| `MissionControl.jsx` | Replaced by DashboardPage, not routed | Jan 4, 2026 |
-
-**When you find orphaned code, delete it. Don't comment it out. Git has history.**
-
----
-
-# PART 13: DUCKDB CONNECTION MANAGEMENT
-
-**Added:** January 5, 2026 after segfaults from thread collisions during upload.
-
-## 13.1 The Problem
-
-DuckDB connections are NOT thread-safe for concurrent operations. When upload is writing to DuckDB and other code creates new connections or accesses the same connection from different threads, we get:
-- `malloc(): unaligned tcache chunk detected`
-- `Segmentation fault`
-- `Connection Error: Can't open a connection to same database file with a different configuration`
-
-## 13.2 The Architecture
-
-**Single Singleton Handler** - One DuckDB connection for the entire application:
-
-```python
-# utils/structured_data_handler.py
-def get_structured_handler() -> StructuredDataHandler:
-    """Returns the singleton handler with one DuckDB connection."""
-```
-
-**Handler Passing** - Functions in the upload pipeline receive the handler, they don't create new ones:
-
-```python
-# ❌ WRONG - Creates new connection, causes collision
-def detect_relationships(project: str):
-    handler = get_structured_handler()  # Might conflict with upload
-    result = handler.conn.execute("SELECT ...")
-
-# ✅ CORRECT - Uses passed handler
-def detect_relationships(project: str, handler):
-    result = handler.conn.execute("SELECT ...")  # Same connection as upload
-```
-
-## 13.3 The Upload Pipeline
-
-The upload flow maintains ONE handler throughout:
-
-```
-smart_router.py → upload.py:process_file_background
-                      │
-                      ├── handler = get_structured_handler()  ← Created ONCE
-                      │
-                      ├── handler.store_excel()              ← Uses same handler
-                      ├── handler.profile_columns_fast()     ← Uses same handler
-                      │
-                      ├── run_intelligence_analysis(handler) ← Passed down
-                      │       └── ProjectIntelligenceService(handler)
-                      │               └── analyze_project_relationships(handler)
-                      │
-                      └── enrich_structured_upload(handler)  ← Passed down
-                              └── _run_relationship_detection(handler)
-                                      └── analyze_project_relationships(handler)
-```
-
-## 13.4 The Rules
-
-### RULE 1: Upload Pipeline Functions MUST Accept Handler
-
-Any function called during upload processing MUST accept a `handler` parameter:
-
-```python
-# ✅ CORRECT
-def analyze_project_relationships(project: str, tables: List, handler=None) -> Dict:
-    if handler is None:
-        handler = get_structured_handler()  # Fallback for non-upload calls
-    ...
-
-# ✅ CORRECT  
-class ProjectIntelligenceService:
-    def __init__(self, project: str, handler=None):
-        self.handler = handler
-```
-
-### RULE 2: Upload Callers MUST Pass Handler
-
-```python
-# ✅ CORRECT - In upload.py
-handler = get_structured_handler()
-intelligence = ProjectIntelligenceService(project, handler)  # Pass it
-enrichment = enrich_structured_upload(project, handler=handler)  # Pass it
-```
-
-### RULE 3: API Endpoints Use Singleton Directly
-
-Endpoints NOT in the upload path can call `get_structured_handler()` directly:
-
-```python
-# ✅ CORRECT - API endpoint, not upload path
-@router.get("/tables")
-async def get_tables():
-    handler = get_structured_handler()
-    return handler.conn.execute("SHOW TABLES").fetchall()
-```
-
-This is safe because:
-- If upload is running, the singleton IS the upload's handler
-- The `_db_lock` in StructuredDataHandler serializes operations
-
-### RULE 4: No Background Threads During Upload
-
-Background inference was disabled because it created a separate thread hitting DuckDB while upload was writing:
-
-```python
-# In structured_data_handler.py store_excel_file():
-# DISABLED: queue_inference_job() - caused thread collision
-```
-
-If you need background processing, it must happen AFTER upload completes.
-
-## 13.5 Files Following This Pattern
-
-| File | Role | Handler Source |
-|------|------|----------------|
-| `upload.py` | Creates handler | `get_structured_handler()` |
-| `upload_enrichment.py` | Receives handler | Parameter from upload.py |
-| `project_intelligence.py` | Receives handler | Parameter from upload.py |
-| `relationship_detector.py` | Receives handler | Parameter from caller |
-| All API routers | Use singleton | `get_structured_handler()` |
-
-## 13.6 Debugging Connection Issues
-
-If you see these errors:
-
-**`malloc(): unaligned tcache chunk detected` / `Segmentation fault`**
-- Multiple threads hitting DuckDB simultaneously
-- Check for background threads or API calls during upload
-
-**`Connection Error: Can't open a connection to same database file with a different configuration`**
-- Mixed read_only and read-write connections
-- Don't use `duckdb.connect(path, read_only=True)` while write connection exists
-
-**Symptoms of thread collision:**
-- Upload hangs at random points
-- 0 relationships detected despite data existing
-- Logs show queries failing with "NoneType" errors
-
-## 13.7 Testing Upload Isolation
-
-To verify upload isn't being interrupted:
-
-1. Start an upload
-2. DON'T navigate to other pages
-3. Watch logs for `[QUEUE] ====== Job completed ======`
-
-If it completes, the connection management is working. If it fails when you navigate elsewhere, there's still a thread collision somewhere.
-
-**This is the law for DuckDB operations. Follow it.**
-
----
-
-# PART 14: SINGLE SOURCE OF TRUTH - FILE METADATA
-
-**Added:** January 5, 2026 after discovering `_pdf_tables` was a dead table causing PDF metadata to be invisible.
-
-## 14.1 The Problem We Fixed
-
-The codebase had two metadata tables:
-- `_schema_metadata` - Excel/CSV files went here
-- `_pdf_tables` - **NOTHING wrote here**, but code still read from it
-
-Result: PDF uploads succeeded, but APIs returned empty metadata.
-
-## 14.2 The Architecture Now
-
-**`_schema_metadata` is the SINGLE source of truth for ALL file types.**
-
-```
-┌─────────────────────────────────────────────────────────┐
-│                    _schema_metadata                      │
-│  (Single source of truth for ALL file type metadata)    │
-├─────────────────────────────────────────────────────────┤
-│  Excel/CSV  │  PDF       │  Fields                      │
-│  ───────────┼────────────┼─────────────────────────────│
-│  store_excel│  store_df  │  file_name, project,         │
-│             │            │  table_name, columns,        │
-│             │            │  row_count, truth_type,      │
-│             │            │  source_type, uploaded_by    │
-└─────────────────────────────────────────────────────────┘
-```
-
-## 14.3 The Rules
-
-### RULE 1: NEVER Query `_pdf_tables`
-
-```python
-# ❌ WRONG - Dead table, returns nothing
-pdf_result = conn.execute("SELECT * FROM _pdf_tables").fetchall()
-
-# ✅ CORRECT - Single source of truth
-result = conn.execute("SELECT * FROM _schema_metadata WHERE is_current = TRUE").fetchall()
-```
-
-### RULE 2: All Files Use Same Storage Path
-
-```python
-# Excel/CSV
-handler.store_excel(file_path, project, filename)  # → _schema_metadata
-
-# PDF
-handler.store_dataframe(df, project, filename, source_type='pdf')  # → _schema_metadata
-```
-
-### RULE 3: Filter by source_type if Needed
-
-```python
-# Get only PDF tables
-pdf_tables = conn.execute("""
-    SELECT * FROM _schema_metadata 
-    WHERE source_type = 'pdf' AND is_current = TRUE
-""").fetchall()
-
-# Get only Excel tables (no source_type means Excel legacy, or explicit)
-excel_tables = conn.execute("""
-    SELECT * FROM _schema_metadata 
-    WHERE (source_type IS NULL OR source_type = 'excel') AND is_current = TRUE
-""").fetchall()
-```
-
-## 14.4 Legacy Cleanup
-
-`deep_clean.py` still references `_pdf_tables` to clean up any legacy data. This is intentional - it removes orphaned entries from the deprecated table.
-
-## 14.5 Files That Were Fixed
-
-| File | What Was Wrong |
-|------|---------------|
-| `platform.py` | Queried `_pdf_tables` for PDF metadata |
-| `data_model.py` | Queried `_pdf_tables` for relationship analysis |
-| `playbooks.py` | Queried `_pdf_tables` for entity extraction |
-| `playbook_framework.py` | Queried `_pdf_tables` as "Source 2" |
-| `unified_chat.py` | Fallback query to `_pdf_tables` |
-| `upload.py` | Cleanup code for `_pdf_tables` |
-| `cleanup.py` | Refresh metrics queried `_pdf_tables` |
-
-**All now use `_schema_metadata` exclusively.**
-
-**When adding new file metadata queries, use `_schema_metadata`. Never `_pdf_tables`.**
-
----
-
-# PART 15: THE CONTEXT GRAPH - THIS IS THE PLATFORM
-
-**Added:** January 5, 2026  
-**Status:** BREAKTHROUGH - This defines how XLR8 understands data
-
-## 15.1 What This Is
-
-The Context Graph is not a feature. **It IS the platform.**
+**The Context Graph is not a feature. It IS the platform.**
 
 XLR8's entire value proposition is context-aware analysis. The Context Graph is how we deliver that. Without it, we're just a fancy ETL tool with a chatbot.
 
-**The pitch:** "Upload your HCM data, ask questions, get consultant-grade answers."
+### Hub/Spoke Model (Data-Driven)
 
-**The reality:** We can only deliver consultant-grade answers if we UNDERSTAND the data the way a consultant would:
-- Which table is the source of truth for company codes?
-- Which employees actually exist in payroll?
-- When someone asks about "W2", which 2 companies (of 13) are US-based?
+**OLD MODEL (Vocabulary-Gated):**
+```
+Vocabulary → Semantic Type → Hub Candidate → Check Data
+```
 
-The Context Graph computes this understanding ONCE at upload time, not at query time.
+**NEW MODEL (Data-Driven):**
+```
+Data Patterns → Hub Candidate → Value Matching → Vocabulary Labels
+```
 
-## 15.2 The Architecture
-
-### Hub/Spoke Model
-
-For each semantic type (company_code, job_code, earnings_code, etc.):
+For each discovered hub:
 
 ```
-HUB = Table with MAX cardinality (the source of truth)
-SPOKES = Tables that reference the hub (the consumers)
+HUB = Table matching lookup pattern (code+description, high uniqueness)
+SPOKES = Tables with columns whose values overlap hub values
 ```
 
 **Example:**
 ```
-company_code:
-├── HUB: Component_Company (13 values)      ← Source of truth
-├── SPOKE: Employee (6 values, 46% coverage) ← FK to hub
-├── SPOKE: Payroll (6 values, 46% coverage)  ← FK to hub
-└── SPOKE: Benefits (4 values, 31% coverage) ← FK to hub
+union_code (discovered, not in original vocabulary):
+├── HUB: Unions (45 values)                    ← Detected by pattern
+├── SPOKE: Employee (12 values, 27% coverage)  ← Found by value match
+└── SPOKE: Deductions (8 values, 18% coverage) ← Found by value match
 ```
-
-**Result:** 3 relationships, not 2,451 pairwise matches.
 
 ### Storage
 
-The Context Graph extends `_column_mappings` with hub/spoke metadata:
-
 ```sql
 _column_mappings:
-├── semantic_type          -- 'company_code', 'job_code', 'earnings_code'
-├── is_hub                  -- TRUE if this is THE hub for its semantic_type
-├── hub_table               -- If spoke, which table is the hub?
-├── hub_column              -- If spoke, which column in hub?
-├── hub_cardinality         -- How many values in the hub? (13)
-├── spoke_cardinality       -- How many values in this spoke? (6)
-├── coverage_pct            -- spoke_cardinality / hub_cardinality (46%)
-└── is_subset               -- Are ALL spoke values in hub? (FK integrity)
+├── semantic_type          -- 'company_code', 'job_code', 'union_code'
+├── is_hub                 -- TRUE if this is THE hub for its semantic_type
+├── is_discovered          -- NEW: TRUE if auto-detected (not in original vocab)
+├── hub_table              -- If spoke, which table is the hub?
+├── hub_column             -- If spoke, which column in hub?
+├── hub_cardinality        -- How many values in the hub? (13)
+├── spoke_cardinality      -- How many values in this spoke? (6)
+├── coverage_pct           -- spoke_cardinality / hub_cardinality (46%)
+└── is_subset              -- Are ALL spoke values in hub? (FK integrity)
 ```
 
-### Computation
-
-`handler.compute_context_graph(project)` runs after upload profiling:
-
-1. For each semantic_type in `_column_mappings`:
-2. Find table with MAX distinct_count in `_column_profiles` → mark as HUB
-3. All other tables with same semantic_type → mark as SPOKES
-4. Calculate coverage: `len(spoke_values ∩ hub_values) / hub_cardinality`
-5. Check is_subset: `spoke_values ⊆ hub_values`
-
 ### Query
-
-`handler.get_context_graph(project)` returns the graph for query-time use:
 
 ```python
 graph = handler.get_context_graph(project)
 # Returns:
 {
     'hubs': [
-        {'semantic_type': 'company_code', 'table': 'component_company', 'column': 'company_code', 'cardinality': 13},
-        {'semantic_type': 'job_code', 'table': 'job_master', 'column': 'job_code', 'cardinality': 45},
+        {'semantic_type': 'company_code', 'table': 'component_company', 
+         'column': 'company_code', 'cardinality': 13, 'entity_type': 'companies',
+         'is_discovered': False},
+        {'semantic_type': 'union_code', 'table': 'unions',
+         'column': 'union_code', 'cardinality': 45, 'entity_type': 'unions',
+         'is_discovered': True},  # Auto-detected
     ],
     'relationships': [
-        {'semantic_type': 'company_code', 'spoke_table': 'employee', 'hub_table': 'component_company', 
-         'coverage_pct': 46.0, 'is_valid_fk': True},
-        ...
+        {'semantic_type': 'company_code', 'spoke_table': 'employee', 
+         'hub_table': 'component_company', 'coverage_pct': 46.0, 'is_valid_fk': True},
     ]
 }
 ```
 
-## 15.3 The Rules
+---
 
-### RULE 1: Relationships Come From The Graph
+## B.2 The Entity Type Model
 
-```python
-# ❌ WRONG - O(n²) pairwise matching
-for table_a in tables:
-    for table_b in tables:
-        if table_a.company_code == table_b.company_code:
-            relationships.append(...)
+**Problem:** Generic column names can't be semantically typed without table context.
 
-# ❌ WRONG - Column name matching without value validation
-if col_a.name == col_b.name:
-    relationships.append(...)
-
-# ✅ CORRECT - Read from context graph
-graph = handler.get_context_graph(project)
-relationships = graph['relationships']  # Pre-computed hub→spoke
+```
+Table: tea1000_...change_reasons_termination_reasons
+Column: "code"
+Without entity_type: ??? (can't determine)
+With entity_type: termination_reason_code ✓
 ```
 
-### RULE 2: Query Scoping Uses The Graph
+### Schema Extension
 
-```python
-# ❌ WRONG - Query all tables for "W2"
-tables = get_all_tables()
-for table in tables:
-    if 'tax' in table.lower():
-        process(table)
-
-# ✅ CORRECT - Use context graph to scope
-graph = handler.get_context_graph(project)
-
-# Find companies where country_code = 'US'
-us_companies = query("SELECT company_code FROM companies WHERE country_code = 'US'")
-
-# Get all spokes that have those company codes
-relevant_spokes = [r for r in graph['relationships'] 
-                   if r['semantic_type'] == 'company_code']
-
-# Query only those tables, filtered to US companies
-for spoke in relevant_spokes:
-    query(f"SELECT * FROM {spoke['spoke_table']} WHERE company_code IN {us_companies}")
+```sql
+_schema_metadata:
+├── table_name             -- DuckDB identifier (ugly)
+├── display_name           -- Human-readable
+├── entity_type            -- What this table IS ('termination_reasons')
+├── category               -- Logical grouping ('change_reasons')
+├── file_name              -- Source file
+├── sheet_name             -- Source tab
+└── ...
 ```
 
-### RULE 3: Gap Detection Uses Coverage
+### Derivation Logic
 
 ```python
-# ❌ WRONG - Count everything
-configured = count("SELECT COUNT(*) FROM company")
-used = count("SELECT COUNT(DISTINCT company_code) FROM employee")
-
-# ✅ CORRECT - Read from graph
-graph = handler.get_context_graph(project)
-hub = next(h for h in graph['hubs'] if h['semantic_type'] == 'company_code')
-spoke = next(r for r in graph['relationships'] 
-             if r['semantic_type'] == 'company_code' and r['spoke_table'] == 'employee')
-
-# Gap analysis is pre-computed
-print(f"Configured: {hub['cardinality']}")  # 13
-print(f"In use: {spoke['spoke_cardinality']}")  # 6
-print(f"Coverage: {spoke['coverage_pct']}%")  # 46%
+def _derive_entity_metadata(file_name, sheet_name, sub_table_title=None):
+    # Handle "Sheet - SubTable" format from split detection
+    if sheet_name and ' - ' in sheet_name and not sub_table_title:
+        parts = sheet_name.split(' - ', 1)
+        sheet_name = parts[0]      # "Change Reasons" → category
+        sub_table_title = parts[1] # "Termination Reasons" → entity_type
+    
+    # Priority:
+    # 1. Sub-table title → entity_type (e.g., "Termination Reasons")
+    # 2. Sheet name → entity_type if no sub-table, or category if sub-table
+    # 3. File name → entity_type for simple files
 ```
-
-### RULE 4: Semantic Type Inference Uses Filename
-
-```python
-# ❌ WRONG - Ignore filename context
-# Column "code" in "Earnings Codes.pdf" → NONE (no idea what it is)
-
-# ✅ CORRECT - Use filename to infer semantic type
-# Column "code" in "Earnings Codes.pdf" → earnings_code (confident)
-# Column "code" in "Deduction Codes.xlsx" → deduction_code (confident)
-# Column "code" in "Tax Codes.csv" → tax_code (confident)
-```
-
-The LLM prompt for semantic type inference MUST include the filename.
-
-### RULE 5: The Graph is Computed Once
-
-```python
-# ❌ WRONG - Compute relationships at query time
-def answer_question(question):
-    relationships = analyze_project_relationships(project)  # SLOW
-    ...
-
-# ✅ CORRECT - Graph computed at upload, read at query
-def on_upload_complete(project, handler):
-    handler.compute_context_graph(project)  # Computed ONCE
-
-def answer_question(question, handler):
-    graph = handler.get_context_graph(project)  # Fast read
-    ...
-```
-
-## 15.4 Integration Points
-
-The Context Graph must be used by:
-
-| Component | How It Uses The Graph |
-|-----------|----------------------|
-| `relationship_detector.py` | Returns hub→spoke relationships from graph |
-| `table_selector.py` | Uses graph for join path discovery |
-| `intelligence/engine.py` | Scopes analysis to active values only |
-| `sql_generator.py` | Uses graph for automatic joins |
-| `gap_detection` | Reads coverage_pct directly from graph |
-| `data_model.py` | Shows hub/spoke hierarchy in UI |
-| `playbook_framework.py` | Scopes playbook queries to relevant data |
-| `consultative_synthesis.py` | Uses graph for "so what" insights |
-
-## 15.5 Example: "Show me W2 issues"
-
-**Without Context Graph (old way):**
-1. Parse question → detect "W2" keyword
-2. Search all tables for anything tax-related
-3. Return 50 tables, overwhelm user
-4. User gives up
-
-**With Context Graph (correct way):**
-1. Parse question → detect "W2" = US federal tax
-2. Query graph: What companies have country_code = 'US'? → 2 companies
-3. Query graph: What spokes reference those companies? → Employee, Payroll, Tax
-4. Query ONLY those tables, filtered to the 2 US companies
-5. Return focused, actionable answer: "2 US companies, 847 employees, 3 W2 issues found"
-
-**This is the consultant experience. This is what we're selling.**
-
-## 15.6 Files Implementing The Context Graph
-
-| File | Status | Role |
-|------|--------|------|
-| `utils/structured_data_handler.py` | ✅ Done | Schema + compute_context_graph() + get_context_graph() |
-| `backend/utils/relationship_detector.py` | ✅ Done | v6.0 - reads from context graph |
-| `backend/utils/intelligence/table_selector.py` | 🔄 TODO | Needs to use graph for join paths |
-| `backend/utils/intelligence/engine.py` | 🔄 TODO | Needs to scope to active values |
-| `backend/utils/intelligence/sql_generator.py` | 🔄 TODO | Needs to use graph for joins |
-| `backend/routers/data_model.py` | 🔄 TODO | Needs to show hub/spoke in UI |
-| `backend/utils/consultative_synthesis.py` | 🔄 TODO | Needs graph for insights |
-| `backend/utils/playbook_framework.py` | 🔄 TODO | Needs to scope queries |
-
-## 15.7 Why This Matters
-
-**Before:** 2,451 relationships for 64 tables. O(n²) matching. No understanding.
-
-**After:** ~50 relationships. Hub/spoke graph. Pre-computed context.
-
-**The difference:**
-- Query time: seconds → milliseconds
-- Answer quality: data dump → consultant insight
-- User experience: confused → informed
-- Exit readiness: not even close → viable
-
-**This is not optimization. This is the product working correctly for the first time.**
 
 ---
 
-## 15.8 Implementation Checklist
+## B.3 The Unified Entity Model (Phase 8+)
 
-- [x] Schema: Add hub/spoke columns to `_column_mappings`
-- [x] Compute: `handler.compute_context_graph(project)`
-- [x] Query: `handler.get_context_graph(project)`
-- [x] Migrate: Add columns to existing databases
-- [x] relationship_detector.py v6: Use graph instead of pairwise
-- [ ] Filename inference: Add filename to semantic type LLM prompt
-- [ ] table_selector.py: Use graph for join paths
-- [ ] intelligence/engine.py: Scope to active values
-- [ ] sql_generator.py: Use graph for automatic joins
-- [ ] data_model.py: Show hub/spoke hierarchy in UI
-- [ ] playbook_framework.py: Scope queries via graph
-- [ ] consultative_synthesis.py: Use graph for insights
-- [ ] End-to-end testing: "W2 issues" returns scoped answer
+After Phase 8, entities span ALL storage types:
 
-**Timeline:** 18-24 hours focused work
+```
+"termination_reasons" (entity_type)
+├── HUB: Config table (DuckDB) - 245 codes
+├── SPOKE: Employee terminations (DuckDB) - 47 used
+├── SPOKE: HR Policy v2.1.docx (ChromaDB) - discusses process
+├── SPOKE: Meeting note Dec 15 (ChromaDB) - mentions new codes
+└── SPOKE: RAID Log (Future) - risk about missing codes
+```
 
-**This is the law for understanding data relationships. Follow it.**
+### Supabase Tables
+
+```sql
+-- entity_registry: Master list of entities
+CREATE TABLE entity_registry (
+    id UUID PRIMARY KEY,
+    project_id UUID,
+    entity_type VARCHAR NOT NULL,
+    canonical_display VARCHAR,
+    hub_storage VARCHAR,
+    hub_table VARCHAR,
+    hub_column VARCHAR,
+    hub_cardinality INTEGER,
+    is_discovered BOOLEAN DEFAULT FALSE,
+    UNIQUE(project_id, entity_type)
+);
+
+-- entity_references: All references to entities
+CREATE TABLE entity_references (
+    id UUID PRIMARY KEY,
+    entity_id UUID REFERENCES entity_registry(id),
+    storage_type VARCHAR NOT NULL,  -- 'duckdb', 'chromadb', 'external'
+    reference_id VARCHAR NOT NULL,
+    reference_type VARCHAR NOT NULL, -- 'hub', 'spoke', 'mention'
+    cardinality INTEGER,            -- For structured
+    coverage_pct DECIMAL(5,2),      -- For structured
+    mention_count INTEGER,          -- For semantic
+    context_snippet TEXT,           -- For semantic
+    UNIQUE(entity_id, storage_type, reference_id)
+);
+```
+
+---
+
+## B.4 The Five Truths Architecture
+
+All data in XLR8 belongs to one of five "truths":
+
+| Truth | Storage | Description | Example |
+|-------|---------|-------------|---------|
+| **Reality** | DuckDB | Actual customer data | Employee records, payroll |
+| **Configuration** | DuckDB | System setup | Company codes, job codes, deductions |
+| **Intent** | ChromaDB | Human decisions | Policies, meeting notes |
+| **Reference** | ChromaDB | Domain knowledge | Tax tables, compliance guides |
+| **Regulatory** | ChromaDB | Legal requirements | Federal/state regulations |
+
+**The magic:** Triangulation across truths.
+
+```
+Question: "Are we compliant with overtime rules?"
+
+→ Reality: Who worked overtime? (DuckDB)
+→ Configuration: What's our OT policy setup? (DuckDB)
+→ Regulatory: What does FLSA require? (ChromaDB)
+→ Answer: "3 employees exceeded 40 hours but aren't flagged for OT pay"
+```
+
+---
+
+## B.5 Data Flow Diagrams
+
+### Upload Flow (Updated)
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                         UPLOAD FLOW                                 │
+├────────────────────────────────────────────────────────────────────┤
+│  File → Split Detection → Store Tables → Derive entity_type        │
+│                                              ↓                      │
+│                                    _schema_metadata                 │
+│                                    (entity_type, category)          │
+│                                              ↓                      │
+│                           Semantic Inference (uses entity_type)     │
+│                                              ↓                      │
+│                                    _column_mappings                 │
+│                                    (semantic_type - if known)       │
+│                                              ↓                      │
+│                         compute_context_graph() [DATA-DRIVEN]       │
+│                           1. Detect hub patterns from data          │
+│                           2. Find spokes by value matching          │
+│                           3. Apply vocabulary labels                │
+│                           4. Auto-add discovered types              │
+│                                              ↓                      │
+│                                    CONTEXT GRAPH                    │
+│                            (all hubs, including discovered)         │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Query Flow
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                         QUERY FLOW                                  │
+├────────────────────────────────────────────────────────────────────┤
+│  User Question → get_context_graph() → Scope to Active Universe    │
+│                          ↓                                          │
+│                  TableSelector (uses graph)                         │
+│                          ↓                                          │
+│                  SQL Generator (uses graph for joins)               │
+│                          ↓                                          │
+│                  Intelligence Engine (active data only)             │
+│                          ↓                                          │
+│                  Consultative Response                              │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+### Holistic Flow (Post Phase 8)
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│                      HOLISTIC DATA FLOW                             │
+├────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  Excel/CSV ───┐                                                     │
+│  PDF Tables ──┼──→ Structured Pipeline ──→ DuckDB ──┐              │
+│  Smartsheet ──┘                                      │              │
+│                                                      │              │
+│                                          Entity Registry            │
+│                                            (Supabase)               │
+│                                                      │              │
+│  Meeting Notes ─┐                                    │              │
+│  Policy Docs ───┼──→ Semantic Pipeline ──→ ChromaDB ─┘              │
+│  Email ─────────┘                                                   │
+│                                                                     │
+│                              ↓                                      │
+│                                                                     │
+│           get_unified_context_graph() spans ALL storage             │
+│                                                                     │
+└────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+# SECTION C: WAYS OF WORKING
+
+This section answers: "How do we work together?"
+
+---
+
+## C.1 The Prime Directives
+
+1. **Architecture.md is the source of truth** - Update it, don't contradict it
+2. **No hardcoding** - Vocabulary labels, thresholds are configurable
+3. **Data-driven** - Patterns in data determine structure, not predefined lists
+4. **Full file replacements** - No patches, no "add at line X"
+5. **Test before claiming done** - Deployed and verified
+
+---
+
+## C.2 File Handling
+
+**ALWAYS provide complete file replacements.** Never:
+- "Add this at line 47"
+- "Replace the function with..."
+- Partial snippets
+
+**ALWAYS verify:**
+- `python -m py_compile filename.py`
+- Deploy and test endpoint
+- Check actual data, not assumptions
+
+---
+
+## C.3 Conversation Continuity
+
+When context is lost, reference:
+1. This Architecture document (Section A for status)
+2. Transcript files in `/mnt/transcripts/`
+3. Memory (Claude's stored context)
+
+Start new conversations with status block from A.7.
+
+---
+
+## C.4 Parking Lot
+
+Items identified but not currently in scope:
+
+- Data Page UX improvements
+- Carbone document generation
+- Unified SQL Generation refactor
+- Chat improvements
+- Compliance automation
+- Hosting/SOC considerations
+- Github integration
+- File/Table name display improvements
+- Vocabulary CRUD UI (add/update/delete semantic types)
+- Unrecognized Hubs UI (name discovered hubs)
+
+---
+
+# SECTION D: REFERENCE
+
+## D.1 Key Files
+
+| File | Purpose |
+|------|---------|
+| `utils/structured_data_handler.py` | DuckDB operations, context graph |
+| `backend/utils/semantic_vocabulary.py` | Semantic type definitions |
+| `backend/utils/relationship_detector.py` | Relationship scoring |
+| `backend/routers/data_model.py` | Context graph API |
+| `backend/routers/bi_router.py` | BI queries, schema |
+| `intelligence/engine.py` | Query orchestration |
+
+## D.2 Key Tables
+
+| Table | Purpose |
+|-------|---------|
+| `_schema_metadata` | Table metadata (entity_type, category) |
+| `_column_mappings` | Semantic types, hub/spoke relationships |
+| `_column_profiles` | Column statistics, distinct values |
+
+## D.3 API Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/data-model/context-graph/{project}` | Get hub/spoke graph |
+| `GET /api/bi/schema/{project}` | Get tables with entity_type |
+| `GET /api/classification/{project}` | Get table classifications |
+| `GET /api/dashboard` | Dashboard metrics with entity breakdown |
