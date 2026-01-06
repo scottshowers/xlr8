@@ -89,10 +89,10 @@ async def analyze_project_relationships(project: str, tables: List[Dict], handle
             'confidence': confidence,
             'relationship_type': 'foreign_key' if rel.get('is_valid_fk') else 'reference',
             'match_type': f"context_graph:{rel['semantic_type']}",
-            'value_overlap': rel.get('coverage_pct', 0),
+            'value_overlap': rel.get('coverage_pct') or 0,  # Handle None
             'semantic_type': rel['semantic_type'],
-            'hub_cardinality': rel.get('hub_cardinality', 0),
-            'spoke_cardinality': rel.get('spoke_cardinality', 0),
+            'hub_cardinality': rel.get('hub_cardinality') or 0,  # Handle None
+            'spoke_cardinality': rel.get('spoke_cardinality') or 0,  # Handle None
             'is_valid_fk': rel.get('is_valid_fk', False),
             'needs_review': needs_review,
             'confirmed': False,
@@ -150,14 +150,14 @@ def _calculate_confidence(rel: Dict) -> float:
         confidence = 0.9
     
     # Boost for high coverage
-    coverage = rel.get('coverage_pct', 0)
+    coverage = rel.get('coverage_pct') or 0  # Handle None
     if coverage >= 50:
         confidence = min(0.95, confidence + 0.1)
     elif coverage >= 25:
         confidence = min(0.90, confidence + 0.05)
     
     # Boost for meaningful cardinality
-    spoke_card = rel.get('spoke_cardinality', 0)
+    spoke_card = rel.get('spoke_cardinality') or 0  # Handle None
     if spoke_card >= 5:
         confidence = min(0.98, confidence + 0.03)
     
