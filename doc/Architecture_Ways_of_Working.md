@@ -43,18 +43,19 @@ This section answers: "Where are we? What's next?"
 │  ├── Phase 1: entity_type schema (2h)              ✅ DONE          │
 │  ├── Phase 2: Semantic inference update (1h)       ✅ DONE          │
 │  ├── Phase 3: API updates (1h)                     ✅ DONE          │
-│  ├── Phase 4: Component integration (8h)           🔄 IN PROGRESS   │
-│  │   └── Phase 4A: Data-driven hub detection (5h)  ⬜ PIVOT         │
+│  ├── Phase 4: Component integration (8h)           ✅ DONE          │
+│  │   ├── Phase 4A: Data-driven hub detection (5h)  ✅ DONE          │
+│  │   └── Phase 4B: Intelligence integration (3h)   ✅ DONE          │
 │  ├── Phase 5: UI updates (3h)                      ⬜ TODO          │
 │  ├── Phase 6: Query scoping (3h)                   ⬜ TODO          │
 │  └── Phase 7: Migration + testing (5h)             ⬜ TODO          │
 │                                                                     │
 │  PHASE 8: Holistic Extension (~24 hours)                           │
-│  ├── Phase 8A: Entity Registry (4h)                ⬜ TODO          │
+│  ├── Phase 8A: Entity Registry (4h)                ✅ DONE          │
 │  ├── Phase 8B: Entity Detection - ChromaDB (6h)    ✅ DONE          │
 │  ├── Phase 8C: ChromaDB Integration (4h)           ✅ DONE          │
 │  ├── Phase 8D: Unified Graph API (3h)              ⬜ TODO          │
-│  ├── Phase 8E: Intelligence Integration (4h)       🟡 PARTIAL       │
+│  ├── Phase 8E: Intelligence Integration (4h)       ✅ DONE          │
 │  └── Phase 8F: UI Updates (3h)                     ⬜ TODO          │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -105,75 +106,28 @@ This section answers: "Where are we? What's next?"
 
 **Deliverable:** All APIs return entity_type for tables. ✅
 
-### Phase 4: Component Integration (8 hours) 🔄 IN PROGRESS
+### Phase 4: Component Integration (8 hours) ✅ COMPLETE
 
-#### Phase 4A: Data-Driven Hub Detection (5 hours) ⬜ THE PIVOT
+#### Phase 4A: Data-Driven Hub Detection (5 hours) ✅ COMPLETE (Jan 7, 2026)
 
-**Problem:** Current `compute_context_graph()` is vocabulary-gated. Only columns with known semantic types can become hubs. This prevents discovering hubs that aren't in vocabulary.
+**Problem:** Current `compute_context_graph()` was vocabulary-gated. Only columns with known semantic types could become hubs.
 
 **Solution:** Detect hubs from DATA PATTERNS, find relationships by VALUE MATCHING, then apply vocabulary labels.
 
 | Task | File | Est | Status |
 |------|------|-----|--------|
-| Rewrite `compute_context_graph()` | `structured_data_handler.py` | 4h | ⬜ TODO |
-| Add `auto_add_type()` to vocabulary | `semantic_vocabulary.py` | 30m | ⬜ TODO |
-| Add `is_discovered` flag to mappings | `structured_data_handler.py` | 30m | ⬜ TODO |
+| Rewrite `compute_context_graph()` | `structured_data_handler.py` | 4h | ✅ Done |
+| Add `is_discovered` flag to mappings | `structured_data_handler.py` | 30m | ✅ Done |
+| Add `auto_add_type()` to vocabulary | `semantic_vocabulary.py` | 30m | ⬜ Deferred (UI Phase) |
 
-**Algorithm:**
+**Implementation Notes:**
+- Data-driven scoring: code columns (+2), description columns (+2), uniqueness (+2), size (+1), entity_type patterns (+1), truth_type=configuration (+1)
+- Threshold: Score >= 4 = hub candidate
+- Value matching: MIN_COVERAGE_PCT = 20% or is_subset = TRUE
+- Deduplication: Same semantic_type → prefer configuration, then score, then cardinality
+- `is_discovered` flag tracks auto-discovered types for UI naming
 
-```
-Step 1: Identify Hub Candidates from Data Patterns
-─────────────────────────────────────────────────
-Scan all tables. Score each as potential lookup table:
-
-| Pattern                                              | Score |
-|------------------------------------------------------|-------|
-| Has column named "code", "id", or ends with "_code"  | +2    |
-| Has column named "description", "name", or "label"   | +2    |
-| Key column has high uniqueness (distinct/rows > 0.8) | +2    |
-| Row count < 2000                                     | +1    |
-| Entity_type suggests reference (*_codes, *_types)    | +1    |
-| truth_type = 'configuration'                         | +1    |
-
-Threshold: Score >= 4 = hub candidate
-Output: List of (table, key_column, cardinality, values[])
-
-Step 2: Find Spokes by Value Matching
-─────────────────────────────────────
-For each hub candidate:
-1. Get distinct values from hub column
-2. Scan ALL other columns in project
-3. Calculate overlap:
-   - matched_count = how many spoke values exist in hub
-   - coverage_pct = matched_count / hub_cardinality
-   - is_subset = spoke values ⊆ hub values
-
-Threshold: coverage_pct >= MIN_COVERAGE_PCT OR is_subset = TRUE
-
-Step 3: Deduplicate Hubs
-────────────────────────
-Same concept in multiple tables → pick THE hub:
-- Prefer truth_type = 'configuration'
-- Then highest cardinality
-- Mark others as secondary/spokes
-
-Step 4: Apply Vocabulary Labels
-───────────────────────────────
-For each hub:
-1. Check if column has semantic_type from inference
-2. If not, derive from entity_type: {entity_singular}_code
-3. If no match, auto-add to vocabulary as discovered type
-4. Mark is_discovered = TRUE for auto-added types
-```
-
-**Configurable Thresholds:**
-
-```python
-HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
-MIN_COVERAGE_PCT = 20             # Minimum overlap for relationship
-MIN_HUB_CARDINALITY = 3           # Skip hubs with fewer values
-MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
-```
+**Algorithm:** See lines 2185-2687 in `structured_data_handler.py`
 
 #### Phase 4B: Remaining Integration (3 hours)
 
@@ -222,17 +176,24 @@ MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 
 ## A.4 Phase 8: Holistic Extension (Detailed)
 
-### Phase 8A: Entity Registry (4 hours)
+### Phase 8A: Entity Registry (4 hours) ✅ COMPLETE (Jan 7, 2026)
 
 | Task | File | Status |
 |------|------|--------|
-| Create entity_registry table in Supabase | Migration | ⬜ TODO |
-| Create entity_references table in Supabase | Migration | ⬜ TODO |
-| Create `EntityRegistry` class | `backend/utils/entity_registry.py` | ⬜ TODO |
-| Register DuckDB hubs in entity registry | `structured_data_handler.py` | ⬜ TODO |
-| Register DuckDB spokes in entity registry | `structured_data_handler.py` | ⬜ TODO |
+| Create entity_registry table in Supabase | Migration | ✅ Done |
+| Create entity_references table in Supabase | Migration | ✅ Done |
+| Create `EntityRegistry` class | `backend/utils/entity_registry.py` | ✅ Done |
+| Register DuckDB hubs in entity registry | `structured_data_handler.py` | ✅ Done |
+| Register DuckDB spokes in entity registry | `structured_data_handler.py` | ✅ Done |
+| Register ChromaDB mentions in entity registry | `utils/rag_handler.py` | ✅ Done |
 
-**Deliverable:** All DuckDB entities appear in Supabase registry.
+**Implementation Notes:**
+- Supabase tables: `entity_registry` (master list), `entity_references` (where entities appear)
+- Views: `entity_summary`, `entity_gaps`
+- EntityRegistry class: singleton pattern, graceful degradation if Supabase unavailable
+- Auto-registration during upload: DuckDB (context graph) and ChromaDB (chunk metadata)
+
+**Deliverable:** All entities tracked in Supabase registry. ✅
 
 ### Phase 8B: Entity Detection - ChromaDB (6 hours) ✅ COMPLETE (Jan 7, 2026)
 
@@ -279,21 +240,22 @@ MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 
 **Deliverable:** API returns unified view of entity across all storage.
 
-### Phase 8E: Intelligence Integration (4 hours) 🟡 PARTIAL
+### Phase 8E: Intelligence Integration (4 hours) ✅ COMPLETE (Jan 7, 2026)
 
 | Task | File | Status |
 |------|------|--------|
 | Update Intelligence Engine to use unified graph | `intelligence/engine.py` | ✅ Done |
 | Update gatherers to include semantic context | `intelligence/gatherers/*.py` | ✅ Done |
 | Update consultative synthesis | `consultative_synthesis.py` | ✅ Done |
-| Works without DuckDB (ChromaDB-only mode) | `unified_chat.py` | ✅ Done (Jan 7) |
+| Works without DuckDB (ChromaDB-only mode) | `unified_chat.py` | ✅ Done |
 
-**Implementation Notes (Jan 7, 2026):**
+**Implementation Notes:**
 - Fixed: `load_context()` now called even without DuckDB tables
 - Five Truths triangulation working: Reality + Configuration + Reference + Regulatory
 - All 6 gatherers operational
+- System tagging for vendor docs (UKG Pro, Workday, etc.)
 
-**Deliverable:** "What do we know about X?" returns holistic answer. 🟡 Partial
+**Deliverable:** "What do we know about X?" returns holistic answer. ✅
 
 ### Phase 8F: UI Updates (3 hours)
 
@@ -317,6 +279,7 @@ Work completed that wasn't in the original plan but was necessary:
 | Add Tesseract OCR fallback | `utils/text_extraction.py` | ✅ Done |
 | Add OCR to standards processor | `backend/utils/standards_processor.py` | ✅ Done |
 | Add OCR to upload router | `backend/routers/upload.py` | ✅ Done |
+| Add OCR to smart PDF analyzer | `backend/utils/smart_pdf_analyzer.py` | ✅ Done |
 | Docker config for tesseract | `Dockerfile` | ✅ Done |
 
 **Why:** "Print to PDF" documents are image-based, not text-based. pdfplumber/PyMuPDF return 0 chars.
@@ -326,8 +289,20 @@ Work completed that wasn't in the original plan but was necessary:
 |------|------|--------|
 | Route `reference` → SEMANTIC (RAG only) | `backend/routers/smart_router.py` | ✅ Done |
 | Route `regulatory/compliance` → STANDARDS (rules) | `backend/routers/smart_router.py` | ✅ Done |
+| Reference docs skip table extraction | `backend/utils/smart_pdf_analyzer.py` | ✅ Done |
+| Tabular check gates Vision AI | `backend/utils/smart_pdf_analyzer.py` | ✅ Done |
 
-**Why:** Vendor guides (Locations Guide, etc.) shouldn't go through rule extraction. Only DOL/FLSA/regulatory docs need rules.
+**Why:** Vendor guides (Locations Guide, etc.) shouldn't go through rule extraction OR table extraction. Only config data needs DuckDB, only DOL/FLSA/regulatory docs need rules.
+
+### System Tagging for Vendor Docs
+| Task | File | Status |
+|------|------|--------|
+| System parameter in upload flow | `backend/routers/upload.py` | ✅ Done |
+| Auto-detect system from filename | `utils/rag_handler.py` | ✅ Done |
+| System dropdown UI (from Supabase) | `frontend/src/pages/DataPage.jsx` | ✅ Done |
+| Filter by system in ReferenceGatherer | `backend/utils/intelligence/gatherers/reference.py` | ✅ Done |
+
+**Why:** UKG project shouldn't see Workday docs. System tagging enables filtering.
 
 ### Cleanup Infrastructure
 | Task | File | Status |
@@ -336,6 +311,7 @@ Work completed that wasn't in the original plan but was necessary:
 | Nuclear rules/documents clear endpoint | `backend/routers/cleanup.py` | ✅ Done |
 | Combined semantic clear endpoint | `backend/routers/cleanup.py` | ✅ Done |
 | Fix ChromaDB path mismatch | `backend/routers/cleanup.py` | ✅ Done |
+| ChromaDB singleton pattern | `utils/rag_handler.py` | ✅ Done |
 
 **Endpoints:**
 - `DELETE /api/status/chromadb/all` - Clear all ChromaDB chunks
@@ -378,16 +354,25 @@ When starting a new conversation:
 Continue XLR8 FIVE TRUTHS implementation.
 Reference: Architecture_Ways_of_Working.md Section A
 
-Current status: Phase 8A - Entity Registry
+Current status: Foundation phases nearly complete
 Last completed: 
+  - Phase 1-4 (DuckDB Foundation) ✅
+  - Phase 8A (Entity Registry) ✅
   - Phase 8B (Entity Detection) ✅
   - Phase 8C (ChromaDB Integration) ✅
-  - Phase 8E (Intelligence Integration) 🟡 Partial
-  - Infrastructure: OCR, routing fix, cleanup endpoints
+  - Phase 8E (Intelligence Integration) ✅
+  - Infrastructure: OCR, routing fix, cleanup endpoints, system tagging
   
-Next task: Phase 8A - Create entity_registry table in Supabase
+Remaining Foundation:
+  - Phase 5: UI updates (3h)
+  - Phase 6: Query scoping (3h)  
+  - Phase 7: Migration + testing (5h)
+  - Phase 8D: Unified Graph API (3h)
+  - Phase 8F: UI Updates (3h)
+  
+EXIT BLOCKER: Playbook Builder UI (12h)
 
-Start by viewing Section A.4 Phase 8A for the spec.
+Start by viewing Section A.2 for the roadmap.
 ```
 
 Update checkboxes (⬜ → ✅) as tasks complete.
@@ -714,6 +699,217 @@ Items identified but not currently in scope:
 - File/Table name display improvements
 - Vocabulary CRUD UI (add/update/delete semantic types)
 - Unrecognized Hubs UI (name discovered hubs)
+
+---
+
+# SECTION C.5: RESPONSE PATTERNS - THE CONSULTANT'S BRAIN
+
+**Added:** January 7, 2026  
+**Status:** Implementation In Progress  
+**File:** `backend/utils/response_patterns.py`
+
+---
+
+## C.5.1 Philosophy
+
+**XLR8 is NOT a query engine.** The structured data exists to:
+1. Minimize hallucinations - ground everything in FACT
+2. Answer analysis questions customers never have accurate answers for
+3. Hunt for problems they don't know they have
+
+**Core insight:** Users don't know what they want, only what they don't want.
+
+When someone asks "list my deduction codes" they're really saying: "Something is probably wrong with my deductions and I don't know what. Help me."
+
+---
+
+## C.5.2 The Thinking Chain
+
+Every question, regardless of type, follows this consultant thinking pattern:
+
+```
+1. UNDERSTAND
+   - What did they literally ask? (surface question)
+   - What are they actually worried about? (real question)
+   - What fear is driving this? (hidden worry)
+
+2. HUNT
+   - Answer the surface question with FACTS (no hallucinations)
+   - Search across ALL truths for problems they didn't ask about
+   - Look for gaps, risks, compliance issues, orphaned data
+
+3. SYNTHESIZE
+   - Ground in facts (here's what you have)
+   - Problems found (here's what's wrong)
+   - Risk assessment (here's what breaks if ignored)
+   - Recommendations (here's what to do)
+
+4. DELIVER
+   - Excel workbook with evidence
+   - Sheet 1: Configuration (what's set up)
+   - Sheet 2: Reality (how it's being used)
+   - Sheet 3: Issues & Actions (what to fix)
+
+5. EXTEND
+   - Proactive offers (anticipate next 2-3 questions)
+   - HCMPACT hook (support path for complex issues)
+```
+
+---
+
+## C.5.3 Question Taxonomy (13 Types)
+
+### OPERATIONAL (Current State)
+| Type | Triggers | Real Question |
+|------|----------|---------------|
+| **INVENTORY** | "list", "show all", "what do I have" | Is everything set up that should be? |
+| **COUNT** | "how many", "total" | Is this number right? How does it break down? |
+| **LOOKUP** | "what is", "find", "show me [specific]" | Is this item configured correctly? |
+
+### DIAGNOSTIC (Is It Right)
+| Type | Triggers | Real Question |
+|------|----------|---------------|
+| **VALIDATION** | "is this right", "any issues", "check" | What's broken that I haven't noticed? |
+| **COMPARISON** | "compare", "difference", "vs" | Which one is right? What do I need to fix? |
+| **COMPLIANCE** | "compliant", "legal", "required" | What will get us fined or sued? |
+| **TROUBLESHOOT** | "why", "not working", "error" | What broke it and how do I fix it fast? |
+
+### ACTION (Do Something)
+| Type | Triggers | Real Question |
+|------|----------|---------------|
+| **HOW-TO** | "how do I", "configure", "set up" | Will I break something if I do this wrong? |
+| **IMPACT** | "what if", "who's affected", "change" | How badly can this blow up? |
+| **REPORT** | "report", "summary", "export" | I need to share this / document for audit |
+
+### ADVISORY (Think For Me) - Highest Value
+| Type | Triggers | Real Question |
+|------|----------|---------------|
+| **STRATEGY** | "how would I", "best way to", "recommend" | Tell me what to do so I don't screw this up |
+| **ANALYZE** | "analyze", "assess", "evaluate" | Find the problems I don't know about |
+| **ALTERNATIVES** | "other options", "different way", "instead of" | Is there a better way I haven't thought of? |
+
+---
+
+## C.5.4 Response Pattern Structure
+
+Each pattern defines:
+
+```python
+ResponsePattern(
+    # IDENTIFICATION
+    question_type="inventory",
+    trigger_patterns=["list", "show all", "what do I have"],
+    
+    # UNDERSTAND
+    surface_question="What items exist?",
+    real_question="Is everything set up that should be?",
+    hidden_worry="Something is missing and I don't know what.",
+    
+    # HUNT
+    primary_truths=[CONFIGURATION],      # Answer surface question
+    hunting_truths=[REALITY, REFERENCE, REGULATORY],  # Find problems
+    hunt_for=[
+        "Configured but never used",
+        "Used but not configured", 
+        "Missing vs vendor template",
+        "Missing vs regulatory requirements"
+    ],
+    
+    # DELIVER
+    excel_sheets=[
+        Sheet("Configuration", CONFIGURATION, "evidence"),
+        Sheet("Employee Usage", REALITY, "impact"),
+        Sheet("Gaps & Issues", CONFIGURATION, "action_items"),
+    ],
+    
+    # EXTEND
+    proactive_offers=[
+        "Compare against vendor standard?",
+        "Show employees missing assignments?",
+        "Run compliance check?"
+    ],
+    hcmpact_hook="Need help cleaning up configuration gaps?"
+)
+```
+
+---
+
+## C.5.5 The $500/hr Difference
+
+**Data Monkey Response:**
+```
+You have 127 deduction codes.
+```
+
+**Consultant Response:**
+```
+You have **127 deduction codes** configured across 4 categories:
+
+**Garnishments (23):** DEF, GARN, LEVY, CHSUP...
+**Benefits (45):** GTL, DEN, VIS, MED...
+**Retirement (12):** 401K, ROTH...
+**Other (47):** UNION, PARK...
+
+**Reality Check:** Of 1,847 active employees:
+- 1,823 (98.7%) have at least one deduction
+- 12 employees have ZERO deductions assigned ⚠️
+
+**Gap Detected:** Your reference docs mention "HSA" and "FSA" 
+but I don't see them configured.
+
+**Compliance Alert:** DOL issued guidance on garnishment limits 
+effective 3/1/2026. Review your GARN/LEVY codes.
+
+📎 **Attached: deductions_analysis.xlsx**
+- Sheet 1: All Deduction Codes (config)
+- Sheet 2: Employee Assignments (reality)
+- Sheet 3: Employees with No Deductions (action items)
+
+**Need help?** [Schedule HCMPACT Review]
+```
+
+---
+
+## C.5.6 Five Truths Integration
+
+Each response synthesizes across ALL available truths:
+
+| Truth | Role in Response |
+|-------|------------------|
+| **Configuration** | What's set up (ground facts) |
+| **Reality** | How it's being used (impact analysis) |
+| **Reference** | Vendor best practices (gap detection) |
+| **Regulatory** | Legal requirements (compliance alerts) |
+| **Intent** | Customer requirements (scope validation) |
+
+The magic is **triangulation** - finding where truths disagree:
+- Config says X, Reality shows Y → Data integrity issue
+- Config says X, Regulatory requires Z → Compliance gap
+- Config says X, Reference recommends W → Optimization opportunity
+
+---
+
+## C.5.7 Key Files
+
+| File | Purpose |
+|------|---------|
+| `backend/utils/response_patterns.py` | 13 response patterns with thinking chains |
+| `backend/utils/consultative_synthesis.py` | LLM synthesis using patterns |
+| `backend/utils/intelligence/synthesizer.py` | Template fallback synthesis |
+
+---
+
+## C.5.8 Implementation Status
+
+| Component | Status |
+|-----------|--------|
+| Response patterns defined | ✅ Complete |
+| Pattern detection (question → type) | ✅ Complete |
+| Thinking prompt generation | ✅ Complete |
+| Excel spec generation | ✅ Complete |
+| Wire into consultative_synthesis | 🔄 In Progress |
+| Excel deliverable generation | ⬜ TODO |
+| HCMPACT hook integration | ⬜ TODO |
 
 ---
 
