@@ -51,6 +51,21 @@ logger = logging.getLogger(__name__)
 
 __version__ = "7.0.0"  # v3.0: Context Graph integration
 
+# Try to load IntelligentScoping
+SCOPING_AVAILABLE = False
+analyze_question_scope = None
+try:
+    from backend.utils.intelligent_scoping import analyze_question_scope
+    SCOPING_AVAILABLE = True
+    logger.info("[ENGINE-V2] IntelligentScoping loaded")
+except ImportError:
+    try:
+        from utils.intelligent_scoping import analyze_question_scope
+        SCOPING_AVAILABLE = True
+        logger.info("[ENGINE-V2] IntelligentScoping loaded (alt path)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] IntelligentScoping not available")
+
 # Try to load ConsultativeSynthesizer
 SYNTHESIS_AVAILABLE = False
 ConsultativeSynthesizer = None
@@ -386,6 +401,69 @@ class IntelligenceEngineV2:
                 return clarification
         
         logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, validation={is_validation}, config={is_config}")
+        
+        # =====================================================================
+        # v4.0: INTELLIGENT SCOPING - The Consultant's First Move
+        # Before answering, understand the data landscape
+        # =====================================================================
+        if SCOPING_AVAILABLE and self.structured_handler:
+            # Check if this is a scope-sensitive question
+            scope_sensitive = any([
+                'list' in q_lower, 'show' in q_lower, 'all' in q_lower,
+                'how many' in q_lower, 'count' in q_lower,
+                is_config, is_validation
+            ])
+            
+            if scope_sensitive:
+                scope_analysis = analyze_question_scope(
+                    self.project_name, 
+                    question, 
+                    self.structured_handler
+                )
+                
+                if scope_analysis and scope_analysis.needs_clarification:
+                    logger.warning(f"[ENGINE-V2] Scoping clarification needed: {len(scope_analysis.segments)} segments")
+                    
+                    # Build scope options from segments
+                    scope_options = []
+                    for seg in scope_analysis.segments:
+                        scope_options.append({
+                            'id': f"{seg.dimension}:{seg.value}",
+                            'label': f"{seg.display_name} ({seg.employee_count:,} employees)"
+                        })
+                    scope_options.append({
+                        'id': 'all',
+                        'label': f"All ({scope_analysis.total_employees:,} employees) - export to Excel"
+                    })
+                    
+                    # Return the intelligent scoping question as the response
+                    return SynthesizedAnswer(
+                        question=question,
+                        answer=scope_analysis.suggested_question,
+                        confidence=0.95,
+                        structured_output={
+                            'type': 'scope_clarification',
+                            'questions': [{
+                                'id': 'scope',
+                                'question': f"Which {scope_analysis.segments[0].dimension.replace('_code', '').replace('_', ' ')} should I focus on?",
+                                'type': 'radio',
+                                'options': scope_options
+                            }],
+                            'domain': scope_analysis.question_domain,
+                            'total_employees': scope_analysis.total_employees,
+                            'original_question': question
+                        },
+                        reasoning=[
+                            f"Detected {scope_analysis.question_domain} domain",
+                            f"Found {len(scope_analysis.segments)} meaningful segments",
+                            f"Total {scope_analysis.total_employees:,} employees across segments",
+                            "Asking for scope clarification before querying"
+                        ]
+                    )
+                elif scope_analysis:
+                    # Add scope info to analysis context
+                    logger.warning(f"[ENGINE-V2] Scope analysis: {scope_analysis.question_domain}, "
+                                  f"{scope_analysis.total_employees} employees")
         
         # =====================================================================
         # COMPARISON MODE - Use ComparisonEngine for table comparisons
