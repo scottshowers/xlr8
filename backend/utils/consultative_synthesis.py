@@ -419,7 +419,31 @@ class ConsultativeSynthesizer:
                     snippet += "..."
                 key_facts.append(f"[{source_name}]: {snippet}")
             elif isinstance(content, dict):
-                key_facts.append(f"[{source_name}]: {json.dumps(content)[:200]}")
+                # v3.2: Safe serialization - filter out non-serializable objects
+                # Known problematic keys: 'classification' (contains TableClassification objects)
+                try:
+                    # Exclude known non-serializable keys and non-basic types
+                    exclude_keys = {'classification', 'table_classification', 'metadata_obj'}
+                    
+                    def is_serializable(v):
+                        """Check if value is JSON-serializable."""
+                        if v is None:
+                            return True
+                        if isinstance(v, (str, int, float, bool)):
+                            return True
+                        if isinstance(v, (list, tuple)):
+                            return all(is_serializable(item) for item in v)
+                        if isinstance(v, dict):
+                            return all(isinstance(k, str) and is_serializable(val) for k, val in v.items())
+                        return False
+                    
+                    safe_content = {k: v for k, v in content.items() 
+                                  if k not in exclude_keys and is_serializable(v)}
+                    key_facts.append(f"[{source_name}]: {json.dumps(safe_content)[:200]}")
+                except (TypeError, ValueError) as e:
+                    # Fallback to string representation
+                    logger.debug(f"[SYNTHESIS] JSON serialization failed: {e}, using string fallback")
+                    key_facts.append(f"[{source_name}]: {str(content)[:200]}")
             
             sources.append(source_name)
             total_confidence += confidence
