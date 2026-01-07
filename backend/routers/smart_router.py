@@ -3,6 +3,11 @@ Smart Router - Unified Upload Endpoint
 ======================================
 Consolidates all upload paths into a single intelligent router.
 
+v1.4 (January 2026):
+- FIXED: Reference docs → SEMANTIC (RAG chunking only, no rule extraction)
+- Regulatory/Compliance docs → STANDARDS (RAG + rule extraction)
+- Vendor guides, how-tos, etc. no longer run through rule extraction
+
 v1.3 (December 2025):
 - FIXED: Reference Library Excel/CSV files now create DuckDB tables
 - Standards route now processes: rules extraction + DuckDB tables
@@ -22,13 +27,11 @@ BEFORE (3 endpoints):
 AFTER (1 endpoint):
 - /api/upload         → Smart Router decides destination
 
-ROUTING LOGIC:
-1. User can specify processing_type explicitly
-2. If auto, Smart Router analyzes:
-   - truth_type parameter (reference → standards) - HIGHEST PRIORITY
-   - Filename patterns (register, payroll → register extractor)
-   - File extension (xlsx/csv → structured, pdf → analyze content)
-   - Content analysis for PDFs (tabular vs narrative)
+ROUTING LOGIC (by truth_type):
+1. regulatory/compliance → STANDARDS processor (rule extraction + RAG)
+2. reference/best_practice/intent → SEMANTIC processor (RAG only)
+3. reality/configuration → STRUCTURED processor (DuckDB)
+4. If no truth_type: filename patterns, extension, content analysis
 
 BACKWARD COMPATIBILITY:
 - /api/standards/upload → routes to smart_upload with processing_type=standards
@@ -170,10 +173,16 @@ def detect_processing_type(
     # 1. Explicit truth_type - HIGHEST PRIORITY
     # User's explicit intent overrides extension-based routing
     if truth_type:
-        if truth_type.lower() in ['reference', 'standards', 'best_practice', 'regulatory', 'compliance']:
-            logger.info(f"[SMART-ROUTER] Routing to STANDARDS based on truth_type={truth_type}")
+        truth_lower = truth_type.lower()
+        # Regulatory/compliance docs → standards processor (with rule extraction)
+        if truth_lower in ['regulatory', 'compliance']:
+            logger.info(f"[SMART-ROUTER] Routing to STANDARDS based on truth_type={truth_type} (rule extraction)")
             return ProcessingType.STANDARDS
-        elif truth_type.lower() in ['reality', 'configuration']:
+        # Reference docs → semantic/RAG (no rule extraction, just chunking)
+        elif truth_lower in ['reference', 'best_practice', 'intent']:
+            logger.info(f"[SMART-ROUTER] Routing to SEMANTIC based on truth_type={truth_type} (RAG only)")
+            return ProcessingType.SEMANTIC
+        elif truth_lower in ['reality', 'configuration']:
             logger.info(f"[SMART-ROUTER] Routing to STRUCTURED based on truth_type={truth_type}")
             return ProcessingType.STRUCTURED
     
