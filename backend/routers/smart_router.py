@@ -245,6 +245,7 @@ async def smart_upload(
     functional_area: Optional[str] = Form(None),
     truth_type: Optional[str] = Form(None),
     content_domain: Optional[str] = Form(None),
+    system: Optional[str] = Form(None),  # NEW: HCM/ERP system (ukg, workday, etc.)
     # Routing control
     processing_type: str = Form(default="auto"),
     # Register-specific (passed through if register route)
@@ -447,6 +448,7 @@ async def smart_upload(
                 functional_area=functional_area,
                 truth_type=truth_type,
                 content_domain=content_domain,
+                system=system,  # NEW: HCM/ERP system tag
                 uploaded_by_id=uploaded_by_id,
                 uploaded_by_email=uploaded_by_email,
                 async_mode=async_mode,
@@ -939,6 +941,7 @@ async def _route_to_semantic(
     functional_area: Optional[str],
     truth_type: Optional[str],
     content_domain: Optional[str],
+    system: Optional[str],  # NEW: HCM/ERP system tag
     uploaded_by_id: Optional[str],
     uploaded_by_email: Optional[str],
     async_mode: bool,
@@ -981,7 +984,7 @@ async def _route_to_semantic(
                 process_file_background,
                 args=(job_id, file_path, filename, project, project_id,
                       functional_area, file_size, truth_type, content_domain,
-                      file_hash, uploaded_by_id, uploaded_by_email),
+                      file_hash, uploaded_by_id, uploaded_by_email, system),
                 priority=10
             )
         else:
@@ -990,7 +993,7 @@ async def _route_to_semantic(
                 process_file_background,
                 job_id, file_path, filename, project, project_id,
                 functional_area, file_size, truth_type, content_domain,
-                file_hash, uploaded_by_id, uploaded_by_email
+                file_hash, uploaded_by_id, uploaded_by_email, system
             )
         
         return {
@@ -1018,6 +1021,7 @@ async def _route_to_semantic(
                 'project': project,
                 'project_id': project_id,
                 'truth_type': truth_type or 'intent',
+                'system': system,  # NEW: HCM/ERP system tag
                 'file_type': extension
             }
             
