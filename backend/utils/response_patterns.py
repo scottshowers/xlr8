@@ -849,6 +849,54 @@ def generate_thinking_prompt(pattern: ResponsePattern, question: str) -> str:
     
     This isn't about formatting the answer - it's about HOW to think.
     """
+    # Question-type specific instructions
+    type_specific = ""
+    
+    if pattern.question_type == "inventory":
+        type_specific = """
+CRITICAL FOR INVENTORY QUESTIONS:
+You MUST list the actual items with their codes and descriptions.
+Format: `CODE` - Description
+DISPLAY up to 30 items in response, but ANALYZE all data for gaps/issues.
+Group by category if there are clear categories.
+Note: "Full list of X items available in attached Excel"
+DO NOT just describe or summarize - SHOW THE ACTUAL DATA."""
+
+    elif pattern.question_type == "count":
+        type_specific = """
+CRITICAL FOR COUNT QUESTIONS:
+Lead with the exact number: "You have X [items]"
+Then break down by category/status/type.
+Show percentages where meaningful."""
+
+    elif pattern.question_type == "lookup":
+        type_specific = """
+CRITICAL FOR LOOKUP QUESTIONS:
+Show the complete details of the specific item requested.
+Include all fields/attributes.
+Then show what's connected to it."""
+
+    elif pattern.question_type == "validation":
+        type_specific = """
+CRITICAL FOR VALIDATION QUESTIONS:
+Start with overall assessment: COMPLIANT / NON-COMPLIANT / PARTIAL
+List specific issues found with evidence.
+List what IS correct (builds confidence)."""
+
+    elif pattern.question_type == "compliance":
+        type_specific = """
+CRITICAL FOR COMPLIANCE QUESTIONS:
+Reference specific regulations by name.
+Show current config vs requirement.
+Flag gaps with severity (critical/high/medium)."""
+
+    elif pattern.question_type in ["strategy", "analyze", "alternatives"]:
+        type_specific = """
+CRITICAL FOR ADVISORY QUESTIONS:
+Give a clear recommendation with rationale.
+Show alternatives considered and why not chosen.
+Be opinionated - they're paying for expertise, not options."""
+
     return f"""You are a senior implementation consultant. A client asked:
 
 "{question}"
@@ -857,31 +905,42 @@ UNDERSTAND THE QUESTION:
 - Surface question: {pattern.surface_question}
 - Real question: {pattern.real_question}  
 - Hidden worry: {pattern.hidden_worry}
+{type_specific}
+
+=== FORMATTING RULES (CRITICAL) ===
+1. USE BULLETS, NOT PARAGRAPHS - Nobody reads walls of text
+2. SHOW YOUR SOURCES - Start each section with "From [table_name]:" so they know where data came from
+3. DISPLAY MAX 30 ITEMS - Show up to 30 in response, note "Full list in Excel" if more exist
+4. ANALYZE EVERYTHING - Use ALL the data provided to find issues, gaps, and patterns
+5. BE CONCISE - Each bullet should be one line, not a paragraph
 
 YOUR TASK - Follow this thinking chain:
 
-1. GROUND IN FACTS
-   Answer the surface question with specific data. No vague statements.
+1. GROUND IN FACTS (with source attribution)
+   • From [table_name]: [specific data]
+   • Quote actual values, codes, names
+   • Show up to 30 items, note total count
    
-2. HUNT FOR PROBLEMS
+2. HUNT FOR PROBLEMS (analyze ALL data)
    Look for: {', '.join(pattern.hunt_for)}
-   Don't just answer - actively search for issues they didn't ask about.
+   • Flag each issue as a bullet with source
 
 3. ASSESS RISK
    {pattern.risk_framing}
 
-4. PROVIDE RECOMMENDATIONS
-   Prioritized actions based on what you found.
+4. RECOMMENDATIONS (bulleted, prioritized)
+   • Action 1 (highest priority)
+   • Action 2
+   • etc.
 
-5. OFFER NEXT STEPS
-   Proactive offers: {', '.join(pattern.proactive_offers)}
-   If complex: "{pattern.hcmpact_hook}"
-
-RESPONSE STRUCTURE:
-{chr(10).join(f'- {section}' for section in pattern.answer_sections)}
+5. NEXT STEPS
+   • {pattern.proactive_offers[0] if pattern.proactive_offers else 'Further analysis available'}
+   • Full data available in attached Excel
+   • If complex: "{pattern.hcmpact_hook}"
 
 Remember: They don't know what they want, only what they don't want. 
-Find the problems before they become crises."""
+Find the problems before they become crises.
+Keep it scannable. Bullets. Sources. No fluff."""
 
 
 def generate_excel_spec(pattern: ResponsePattern) -> List[Dict]:
