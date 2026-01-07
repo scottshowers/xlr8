@@ -390,7 +390,38 @@ async def get_context_graph(project_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/data-model/relationships/{project_name}/confirm")
+@router.post("/data-model/context-graph/{project_name}/compute")
+async def compute_context_graph(project_name: str):
+    """
+    Force recomputation of the context graph for a project.
+    
+    Use this when:
+    - Upload was interrupted before graph computation
+    - Data changed outside normal upload flow
+    - Need to refresh hub/spoke detection
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        
+        # Run context graph computation
+        result = handler.compute_context_graph(project_name)
+        
+        return {
+            "success": True,
+            "project": project_name,
+            "result": result
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to compute context graph: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 async def confirm_relationship(project_name: str, confirmation: RelationshipConfirmation):
     """
     Confirm or reject a suggested relationship.
