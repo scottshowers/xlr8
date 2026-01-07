@@ -78,12 +78,17 @@ def _get_chromadb():
         except Exception:
             try:
                 import chromadb
+                from chromadb.config import Settings
                 # Use same path logic as RAGHandler
                 if os.path.exists("/data"):
                     persist_dir = "/data/chromadb"
                 else:
                     persist_dir = os.getenv("CHROMADB_PATH", "./chroma_db")
-                client = chromadb.PersistentClient(path=persist_dir)
+                # Use same settings as rag_handler to avoid "different settings" error
+                client = chromadb.PersistentClient(
+                    path=persist_dir,
+                    settings=Settings(anonymized_telemetry=False, allow_reset=True)
+                )
                 return client.get_or_create_collection("documents")
             except Exception:
                 return None
