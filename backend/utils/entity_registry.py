@@ -160,7 +160,7 @@ class EntityRegistry:
                 'column_name': column_name,
                 'value_count': value_count,
                 'confidence': 1.0
-            }, on_conflict='entity_type,project_id,table_name,column_name').execute()
+            }, on_conflict='entity_type,storage_type,project_id,table_name,column_name').execute()
             
             # Update aggregate stats
             self._update_entity_stats(entity_type)
@@ -200,7 +200,7 @@ class EntityRegistry:
                 'value_count': value_count,
                 'coverage_pct': coverage_pct,
                 'confidence': 1.0
-            }, on_conflict='entity_type,project_id,table_name,column_name').execute()
+            }, on_conflict='entity_type,storage_type,project_id,table_name,column_name').execute()
             
             # Update aggregate stats
             self._update_entity_stats(entity_type)
@@ -243,7 +243,7 @@ class EntityRegistry:
                 'document_name': document_name,
                 'chunk_count': chunk_count,
                 'confidence': confidence
-            }, on_conflict='entity_type,project_id,document_id').execute()
+            }, on_conflict='entity_type,storage_type,project_id,document_id').execute()
             
             # Update aggregate stats
             self._update_entity_stats(entity_type)
