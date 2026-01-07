@@ -400,6 +400,47 @@ class RAGHandler:
         
         return result
 
+    def _detect_system(self, filename: str) -> Optional[str]:
+        """
+        Auto-detect HCM/ERP system from filename.
+        
+        Used to tag vendor docs with their system so we can filter
+        when querying from a project (e.g., UKG project only gets UKG docs).
+        
+        Returns:
+            System name (lowercase) or None if not detected
+        """
+        if not filename:
+            return None
+        
+        filename_lower = filename.lower()
+        
+        # System detection patterns
+        systems = {
+            'ukg': ['ukg', 'ultipro', 'kronos', 'ukg pro', 'ukgpro', 'workforce ready'],
+            'workday': ['workday', 'wday'],
+            'adp': ['adp', 'workforce now', 'vantage'],
+            'dayforce': ['dayforce', 'ceridian'],
+            'oracle': ['oracle', 'peoplesoft', 'jd edwards', 'jde', 'oracle hcm'],
+            'sap': ['sap', 'successfactors', 'success factors'],
+            'netsuite': ['netsuite', 'net suite'],
+            'bamboohr': ['bamboohr', 'bamboo hr'],
+            'paylocity': ['paylocity'],
+            'paycom': ['paycom'],
+            'paychex': ['paychex'],
+            'namely': ['namely'],
+            'gusto': ['gusto'],
+            'rippling': ['rippling'],
+            'zenefits': ['zenefits'],
+        }
+        
+        for system, patterns in systems.items():
+            for pattern in patterns:
+                if pattern in filename_lower:
+                    return system
+        
+        return None
+
     def add_document(
         self, 
         collection_name: str, 
@@ -421,11 +462,21 @@ class RAGHandler:
             
             project_id = metadata.get('project_id')
             truth_type = metadata.get('truth_type')  # NEW: Extract truth_type
+            system = metadata.get('system')  # NEW: System tag (UKG, Workday, etc.)
+            
+            # Auto-detect system from filename if not provided and it's vendor docs
+            if not system and truth_type == 'reference':
+                system = self._detect_system(filename)
+                if system:
+                    metadata['system'] = system
+                    logger.info(f"[SYSTEM] Auto-detected system: {system}")
             
             if project_id:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] Document tagged with truth_type: {truth_type}")
+            if system:
+                logger.info(f"[SYSTEM] Document tagged with system: {system}")
             
             file_type = metadata.get('file_type', 'txt')
             filename = metadata.get('filename', metadata.get('source', 'unknown'))
@@ -472,11 +523,13 @@ class RAGHandler:
                 
                 chunk_metadata = {**base_metadata, "chunk_index": i}
                 
-                # Preserve project_id and truth_type in chunk metadata
+                # Preserve project_id, truth_type, and system in chunk metadata
                 if project_id:
                     chunk_metadata['project_id'] = project_id
                 if truth_type:
                     chunk_metadata['truth_type'] = truth_type  # NEW: Preserve truth_type
+                if system:
+                    chunk_metadata['system'] = system  # NEW: Preserve system tag
                 
                 if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
                     chunk_dict = chunk_metadata_enhanced[i]
@@ -560,6 +613,36 @@ class RAGHandler:
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] All chunks tagged with truth_type: {truth_type}")
             
+            # NEW: Register detected entities in entity registry
+            if ENTITY_DETECTION_AVAILABLE and chunks_added > 0:
+                try:
+                    from backend.utils.entity_registry import get_entity_registry
+                    registry = get_entity_registry()
+                    
+                    # Collect all unique hub_references from chunks
+                    all_hub_refs = set()
+                    for meta in valid_metadatas:
+                        if meta.get('hub_references'):
+                            refs = meta['hub_references'].split(',')
+                            all_hub_refs.update(refs)
+                    
+                    if all_hub_refs:
+                        # Generate document_id from filename
+                        import hashlib
+                        doc_hash = hashlib.md5(filename.encode()).hexdigest()[:12]
+                        
+                        # Register each entity mention
+                        registered = registry.register_chromadb_mentions_batch(
+                            document_id=doc_hash,
+                            document_name=filename,
+                            hub_references=list(all_hub_refs),
+                            project_id=project_id,
+                            confidence=0.8  # Default confidence for document-level detection
+                        )
+                        logger.info(f"[ENTITY_REGISTRY] Registered {registered} entity mentions for {filename}")
+                except Exception as e:
+                    logger.debug(f"[ENTITY_REGISTRY] Failed to register entities: {e}")
+            
             return chunks_added
             
         except Exception as e:
@@ -574,12 +657,13 @@ class RAGHandler:
         project_id: Optional[str] = None,
         functional_areas: Optional[List[str]] = None,
         truth_type: Optional[str] = None,  # NEW: Filter by truth_type
+        system: Optional[str] = None,  # NEW: Filter by system (UKG, Workday, etc.)
         where: Optional[Dict] = None  # NEW: Custom where clause
     ) -> List[Dict[str, Any]]:
         """
         Search for relevant documents in a collection.
         
-        SUPPORTS PROJECT, FUNCTIONAL AREA, AND TRUTH_TYPE FILTERING
+        SUPPORTS PROJECT, FUNCTIONAL AREA, TRUTH_TYPE, AND SYSTEM FILTERING
         
         Args:
             collection_name: Name of the collection to search
@@ -588,6 +672,7 @@ class RAGHandler:
             project_id: Optional project ID to filter by
             functional_areas: Optional list of functional areas to filter by
             truth_type: Optional truth_type to filter by (intent, reference, etc.)
+            system: Optional system to filter by (ukg, workday, etc.) - for vendor docs
             where: Optional custom where clause (overrides other filters)
             
         Returns:
@@ -625,12 +710,23 @@ class RAGHandler:
                 if functional_areas:
                     conditions.append({"functional_area": {"$in": functional_areas}})
                 
+                # NEW: System filter for vendor docs
+                if system and truth_type == 'reference':
+                    # Include docs for this system OR universal/untagged docs
+                    conditions.append({
+                        "$or": [
+                            {"system": system.lower()},
+                            {"system": "universal"},
+                            {"system": None}  # Untagged legacy docs
+                        ]
+                    })
+                
                 if len(conditions) == 1:
                     where_clause = conditions[0]
                 else:
                     where_clause = {"$and": conditions}
                 
-                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id} (and short)")
+                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id}, system={system}")
             
             # Legacy filter logic (kept for backward compatibility)
             elif project_id and functional_areas:
@@ -770,17 +866,22 @@ class RAGHandler:
         self,
         collection_name: str,
         query: str,
-        n_results: int = 10
+        n_results: int = 10,
+        system: Optional[str] = None  # NEW: Filter vendor docs by system
     ) -> List[Dict[str, Any]]:
         """
         Search for REFERENCE documents (product docs, how-to guides, standards).
         Global-scoped - no project filter needed.
+        
+        Args:
+            system: Optional system filter (ukg, workday, etc.) for vendor docs
         """
         return self.search(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
-            truth_type='reference'
+            truth_type='reference',
+            system=system
         )
     
     def search_regulatory(
