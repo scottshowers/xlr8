@@ -51,10 +51,10 @@ This section answers: "Where are we? What's next?"
 │                                                                     │
 │  PHASE 8: Holistic Extension (~24 hours)                           │
 │  ├── Phase 8A: Entity Registry (4h)                ⬜ TODO          │
-│  ├── Phase 8B: Entity Detection - ChromaDB (6h)    ⬜ TODO          │
-│  ├── Phase 8C: ChromaDB Integration (4h)           ⬜ TODO          │
+│  ├── Phase 8B: Entity Detection - ChromaDB (6h)    ✅ DONE          │
+│  ├── Phase 8C: ChromaDB Integration (4h)           ✅ DONE          │
 │  ├── Phase 8D: Unified Graph API (3h)              ⬜ TODO          │
-│  ├── Phase 8E: Intelligence Integration (4h)       ⬜ TODO          │
+│  ├── Phase 8E: Intelligence Integration (4h)       🟡 PARTIAL       │
 │  └── Phase 8F: UI Updates (3h)                     ⬜ TODO          │
 │                                                                     │
 ├─────────────────────────────────────────────────────────────────────┤
@@ -234,28 +234,39 @@ MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 
 **Deliverable:** All DuckDB entities appear in Supabase registry.
 
-### Phase 8B: Entity Detection - ChromaDB (6 hours)
+### Phase 8B: Entity Detection - ChromaDB (6 hours) ✅ COMPLETE (Jan 7, 2026)
 
 | Task | File | Status |
 |------|------|--------|
-| Create `EntityDetector` class | `backend/utils/entity_detector.py` | ⬜ TODO |
-| Value matching detection | `entity_detector.py` | ⬜ TODO |
-| LLM-based semantic detection | `entity_detector.py` | ⬜ TODO |
-| Pattern matching for known formats | `entity_detector.py` | ⬜ TODO |
-| Unit tests for detection | `tests/test_entity_detector.py` | ⬜ TODO |
+| Create `EntityDetector` class | `backend/utils/entity_detector.py` | ✅ Done |
+| Value matching detection | `entity_detector.py` | ✅ Done |
+| LLM-based semantic detection | `entity_detector.py` | ⬜ Deferred (not needed) |
+| Pattern matching for known formats | `entity_detector.py` | ✅ Done (15 hub patterns) |
+| Unit tests for detection | `tests/test_entity_detector.py` | ⬜ Deferred |
 
-**Deliverable:** Detector identifies entity references in unstructured text.
+**Implementation Notes:**
+- Regex patterns + keywords + context hints for 15 hub types
+- Confidence scoring (0.0-1.0) based on match strength
+- Loads vendor vocabulary from `config/ukg_vocabulary_seed.json`
+- Returns `hub_references`, `primary_hub`, `hub_confidence`
 
-### Phase 8C: ChromaDB Integration (4 hours)
+**Deliverable:** Detector identifies entity references in unstructured text. ✅
+
+### Phase 8C: ChromaDB Integration (4 hours) ✅ COMPLETE (Jan 7, 2026)
 
 | Task | File | Status |
 |------|------|--------|
-| Add entity detection to `add_document()` | `utils/rag_handler.py` | ⬜ TODO |
-| Store entity refs in registry during ingestion | `utils/rag_handler.py` | ⬜ TODO |
-| Update chunk metadata schema | `utils/rag_handler.py` | ⬜ TODO |
-| Backfill existing chunks (optional) | Script | ⬜ TODO |
+| Add entity detection to `add_document()` | `utils/rag_handler.py` | ✅ Done |
+| Store entity refs in registry during ingestion | `utils/rag_handler.py` | ✅ Done (in chunk metadata) |
+| Update chunk metadata schema | `utils/rag_handler.py` | ✅ Done |
+| Backfill existing chunks (optional) | Script | ⬜ Skipped (re-upload easier) |
 
-**Deliverable:** New ChromaDB documents have entity references.
+**Implementation Notes:**
+- Entity detection runs automatically during `add_document()`
+- Chunk metadata includes: `hub_references`, `primary_hub`, `hub_confidence`
+- `hub_references` stored as comma-separated string (ChromaDB metadata limitation)
+
+**Deliverable:** New ChromaDB documents have entity references. ✅
 
 ### Phase 8D: Unified Graph API (3 hours)
 
@@ -268,15 +279,21 @@ MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 
 **Deliverable:** API returns unified view of entity across all storage.
 
-### Phase 8E: Intelligence Integration (4 hours)
+### Phase 8E: Intelligence Integration (4 hours) 🟡 PARTIAL
 
 | Task | File | Status |
 |------|------|--------|
-| Update Intelligence Engine to use unified graph | `intelligence/engine.py` | ⬜ TODO |
-| Update gatherers to include semantic context | `intelligence/gatherers/*.py` | ⬜ TODO |
-| Update consultative synthesis | `consultative_synthesis.py` | ⬜ TODO |
+| Update Intelligence Engine to use unified graph | `intelligence/engine.py` | ✅ Done |
+| Update gatherers to include semantic context | `intelligence/gatherers/*.py` | ✅ Done |
+| Update consultative synthesis | `consultative_synthesis.py` | ✅ Done |
+| Works without DuckDB (ChromaDB-only mode) | `unified_chat.py` | ✅ Done (Jan 7) |
 
-**Deliverable:** "What do we know about X?" returns holistic answer.
+**Implementation Notes (Jan 7, 2026):**
+- Fixed: `load_context()` now called even without DuckDB tables
+- Five Truths triangulation working: Reality + Configuration + Reference + Regulatory
+- All 6 gatherers operational
+
+**Deliverable:** "What do we know about X?" returns holistic answer. 🟡 Partial
 
 ### Phase 8F: UI Updates (3 hours)
 
@@ -287,6 +304,43 @@ MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
 | Cross-reference links (click entity → see all) | Frontend | ⬜ TODO |
 
 **Deliverable:** UI shows unified entity view.
+
+---
+
+## A.4.1 Infrastructure Improvements (Jan 7, 2026)
+
+Work completed that wasn't in the original plan but was necessary:
+
+### OCR Support for Image-Based PDFs
+| Task | File | Status |
+|------|------|--------|
+| Add Tesseract OCR fallback | `utils/text_extraction.py` | ✅ Done |
+| Add OCR to standards processor | `backend/utils/standards_processor.py` | ✅ Done |
+| Add OCR to upload router | `backend/routers/upload.py` | ✅ Done |
+| Docker config for tesseract | `Dockerfile` | ✅ Done |
+
+**Why:** "Print to PDF" documents are image-based, not text-based. pdfplumber/PyMuPDF return 0 chars.
+
+### Smart Router Truth Type Fix
+| Task | File | Status |
+|------|------|--------|
+| Route `reference` → SEMANTIC (RAG only) | `backend/routers/smart_router.py` | ✅ Done |
+| Route `regulatory/compliance` → STANDARDS (rules) | `backend/routers/smart_router.py` | ✅ Done |
+
+**Why:** Vendor guides (Locations Guide, etc.) shouldn't go through rule extraction. Only DOL/FLSA/regulatory docs need rules.
+
+### Cleanup Infrastructure
+| Task | File | Status |
+|------|------|--------|
+| Nuclear ChromaDB clear endpoint | `backend/routers/cleanup.py` | ✅ Done |
+| Nuclear rules/documents clear endpoint | `backend/routers/cleanup.py` | ✅ Done |
+| Combined semantic clear endpoint | `backend/routers/cleanup.py` | ✅ Done |
+| Fix ChromaDB path mismatch | `backend/routers/cleanup.py` | ✅ Done |
+
+**Endpoints:**
+- `DELETE /api/status/chromadb/all` - Clear all ChromaDB chunks
+- `DELETE /api/status/rules/all` - Clear all rules + documents
+- `DELETE /api/status/semantic/all` - Clear everything (combined)
 
 ---
 
@@ -321,14 +375,19 @@ After Phase 7, these must all be true:
 When starting a new conversation:
 
 ```
-Continue Context Graph implementation.
+Continue XLR8 FIVE TRUTHS implementation.
 Reference: Architecture_Ways_of_Working.md Section A
 
-Current status: Phase 4A - Data-driven hub detection rewrite
-Last completed: Phases 1-3 (entity_type foundation, semantic inference, APIs)
-Next task: Rewrite compute_context_graph() with data-driven algorithm
+Current status: Phase 8A - Entity Registry
+Last completed: 
+  - Phase 8B (Entity Detection) ✅
+  - Phase 8C (ChromaDB Integration) ✅
+  - Phase 8E (Intelligence Integration) 🟡 Partial
+  - Infrastructure: OCR, routing fix, cleanup endpoints
+  
+Next task: Phase 8A - Create entity_registry table in Supabase
 
-Start by viewing Section A.3 Phase 4A for the algorithm spec.
+Start by viewing Section A.4 Phase 8A for the spec.
 ```
 
 Update checkboxes (⬜ → ✅) as tasks complete.
