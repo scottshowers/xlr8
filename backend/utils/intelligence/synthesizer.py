@@ -129,11 +129,17 @@ class Synthesizer:
         is_config = self._context.get('is_config', False)
         is_config_listing = self._is_config_listing_question(question.lower())
         
+        logger.warning(f"[SYNTHESIZE] Data source selection: is_config={is_config}, "
+                      f"is_config_listing={is_config_listing}, "
+                      f"config_truths={len(configuration)}, reality_truths={len(reality)}")
+        
         # Decide primary data source
         if is_config_listing and configuration:
             # For config listings, use Configuration as primary
             logger.warning("[SYNTHESIZE] Config listing detected - using Configuration as primary data source")
             data_info = self._extract_data_info(configuration)
+            logger.warning(f"[SYNTHESIZE] Config data_info: rows={len(data_info.get('result_rows', []))}, "
+                          f"columns={data_info.get('result_columns', [])[:5]}")
             reasoning.append(f"Config listing: Using {len(configuration)} configuration results")
         else:
             # Default: use Reality
@@ -399,6 +405,39 @@ class Synthesizer:
         status_filter = self.confirmed_facts.get('status', '')
         q_lower = question.lower()
         
+        # =====================================================================
+        # v3.1: Detect config listing - use cleaner format without "Reality" label
+        # =====================================================================
+        is_config_listing = self._is_config_listing_question(q_lower)
+        
+        if is_config_listing and result_rows:
+            # Config listing gets dedicated clean format
+            config_response = self._format_config_listing(q_lower, result_rows, result_columns)
+            if config_response:
+                parts.append(config_response)
+            else:
+                # Fallback to simple table
+                parts.append(f"Found **{len(result_rows):,}** configured items:\n")
+                parts.extend(self._format_table(result_rows[:15], result_columns[:6]))
+                if len(result_rows) > 15:
+                    parts.append(f"\n*Showing first 15 of {len(result_rows):,} results*")
+            
+            # For config listings, skip the noisy truth sections - just add relevant reference
+            ref_docs = [d for d in reflib_context if 'Reference' in d]
+            if ref_docs:
+                parts.append("\n\n📚 **Related Documentation:**")
+                for doc in ref_docs[:1]:  # Just top 1
+                    content = doc.split('): ', 1)[-1] if '): ' in doc else doc
+                    # Extract just the first sentence
+                    first_sentence = content.split('. ')[0][:150]
+                    parts.append(f"- {first_sentence}...")
+            
+            return "\n".join(parts)
+        
+        # =====================================================================
+        # Standard response format for non-config questions
+        # =====================================================================
+        
         # REALITY section
         if query_type == 'count' and result_value is not None:
             try:
@@ -426,20 +465,9 @@ class Synthesizer:
                 parts.append(f"\n*Showing top 15 of {len(result_rows):,} groups*")
         
         elif result_rows:
-            # Check if this is a config listing question
-            if self._is_config_listing_question(q_lower):
-                config_response = self._format_config_listing(q_lower, result_rows, result_columns)
-                if config_response:
-                    parts.append(config_response)
-                else:
-                    # Fallback to table
-                    parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
-                    parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
-            else:
-                parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
-                parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
-            
-            if len(result_rows) > 12 and not self._is_config_listing_question(q_lower):
+            parts.append(f"📊 **Reality:** Found **{len(result_rows):,}** matching records\n")
+            parts.extend(self._format_table(result_rows[:12], result_columns[:6]))
+            if len(result_rows) > 12:
                 parts.append(f"\n*Showing first 12 of {len(result_rows):,} results*")
         else:
             parts.append("📊 **Reality:** No data found matching your criteria.")
