@@ -76,35 +76,53 @@ class IntelligentScoping:
     - What's configured vs what's actually used
     - Where employees are concentrated
     - What segmentation makes sense
+    
+    CRITICAL: This is VENDOR/PRODUCT AGNOSTIC.
+    We discover segmentation dimensions from the DATA, not hardcoded lists.
+    Works for UKG, Workday, SAP, or any system with hub/spoke patterns.
     """
     
-    # Domain keywords to hub mappings
-    DOMAIN_HUBS = {
-        'deduction': ['deductionbenefit_code', 'deduction_code', 'benefit_code'],
-        'earning': ['earnings_code', 'earning_code'],
-        'tax': ['tax_code', 'tax_type'],
-        'employee': ['employee_number', 'emp_id'],
-        'company': ['company_code', 'home_company_code'],
-        'pay': ['pay_group_code', 'pay_frequency_code'],
-        'job': ['job_code', 'position_code'],
-        'location': ['location_code', 'work_location_code'],
-        'org': ['org_level_1_code', 'org_level_2_code', 'org_level_3_code'],
-        'project': ['project_code'],
+    # Domain keywords to semantic type mappings (product-agnostic)
+    DOMAIN_PATTERNS = {
+        'deduction': ['deduction', 'benefit', 'garnish', '401k', 'insurance', 'withhold'],
+        'earning': ['earning', 'wage', 'salary', 'bonus', 'overtime', 'pay code', 'compensation'],
+        'tax': ['tax', 'withhold', 'sui', 'sdi', 'fica', 'w2', 'w4', 'federal', 'state tax'],
+        'employee': ['employee', 'worker', 'staff', 'headcount', 'roster', 'person', 'associate'],
+        'organization': ['company', 'entity', 'legal entity', 'org', 'department', 'division', 'cost center'],
+        'payroll': ['pay group', 'pay frequency', 'payroll', 'pay period', 'pay cycle'],
+        'job': ['job', 'position', 'title', 'role', 'grade', 'classification'],
+        'location': ['location', 'site', 'work location', 'office', 'address', 'geography'],
+        'project': ['project', 'project code', 'task', 'assignment'],
+        'time': ['time', 'hours', 'attendance', 'schedule', 'shift'],
     }
     
-    # Primary segmentation dimensions (in priority order)
-    SEGMENTATION_DIMS = [
-        ('country_code', 'Country'),
-        ('home_company_code', 'Company'),
-        ('company_code', 'Company'),
-        ('org_level_1_code', 'Division'),
-        ('pay_group_code', 'Pay Group'),
+    # Column patterns that indicate segmentation potential (product-agnostic)
+    SEGMENTATION_PATTERNS = [
+        # Geography
+        ('country', 'Country'),
+        ('region', 'Region'),
+        ('state', 'State'),
+        # Organization
+        ('company', 'Company'),
+        ('entity', 'Entity'),
+        ('division', 'Division'),
+        ('department', 'Department'),
+        ('org_level', 'Org Level'),
+        ('cost_center', 'Cost Center'),
+        ('business_unit', 'Business Unit'),
+        # Payroll
+        ('pay_group', 'Pay Group'),
+        ('pay_frequency', 'Pay Frequency'),
+        # Status
+        ('status', 'Status'),
+        ('type', 'Type'),
     ]
     
     # Thresholds
     MIN_SEGMENT_SIZE = 10          # Minimum employees to be a meaningful segment
     MIN_SEGMENTS_TO_ASK = 2        # Need at least 2 segments to ask clarification
     MAX_SEGMENTS_TO_SHOW = 5       # Don't overwhelm with too many options
+    MIN_HUB_SPOKES = 3             # Minimum spokes for a hub to be segmentation candidate
     
     def __init__(self, project_name: str, structured_handler=None):
         """
@@ -176,47 +194,119 @@ class IntelligentScoping:
         )
     
     def _detect_domain(self, question: str) -> str:
-        """Detect the domain of the question."""
+        """
+        Detect the domain of the question.
+        
+        VENDOR-AGNOSTIC: Uses generic domain patterns, not product-specific terms.
+        """
         q_lower = question.lower()
         
-        # Check each domain's keywords
-        for domain, keywords in [
-            ('deduction', ['deduction', 'benefit', 'garnish', '401k', 'insurance']),
-            ('earning', ['earning', 'wage', 'salary', 'bonus', 'overtime', 'pay code']),
-            ('tax', ['tax', 'withhold', 'sui', 'sdi', 'fica', 'w2', 'w4']),
-            ('employee', ['employee', 'worker', 'staff', 'headcount', 'roster']),
-            ('company', ['company', 'entity', 'legal entity']),
-            ('pay', ['pay group', 'pay frequency', 'payroll', 'pay period']),
-            ('job', ['job', 'position', 'title', 'role']),
-            ('location', ['location', 'site', 'work location', 'office']),
-            ('org', ['org level', 'department', 'division', 'cost center']),
-            ('project', ['project', 'project code']),
-        ]:
+        # Check each domain's keywords from class patterns
+        for domain, keywords in self.DOMAIN_PATTERNS.items():
             if any(kw in q_lower for kw in keywords):
                 return domain
         
         return 'general'
     
     def _get_relevant_hubs(self, domain: str, context: Dict = None) -> List[str]:
-        """Get hub columns relevant to this domain."""
-        hubs = self.DOMAIN_HUBS.get(domain, [])
+        """
+        Get hub columns relevant to this domain.
         
-        # Always include segmentation dimensions
-        hubs.extend([dim for dim, _ in self.SEGMENTATION_DIMS])
+        VENDOR-AGNOSTIC: Discovers hubs from Context Graph, not hardcoded lists.
+        """
+        hubs = []
+        
+        # First, try to get hubs from Context Graph
+        if self.handler:
+            discovered_hubs = self._discover_hubs_from_graph()
+            if discovered_hubs:
+                hubs.extend(discovered_hubs)
         
         return list(set(hubs))
     
+    def _discover_hubs_from_graph(self) -> List[str]:
+        """
+        Discover hub columns from Context Graph.
+        
+        Returns columns that:
+        1. Are marked as hubs (is_hub=True)
+        2. Have multiple spokes (connected to multiple tables)
+        3. Are good segmentation candidates
+        """
+        hubs = []
+        
+        try:
+            # Query _column_mappings for hub columns
+            sql = """
+                SELECT DISTINCT column_name, semantic_type, 
+                       COUNT(*) as table_count
+                FROM _column_mappings 
+                WHERE is_hub = TRUE OR is_hub = 1
+                GROUP BY column_name, semantic_type
+                ORDER BY table_count DESC
+            """
+            rows = self.handler.query(sql)
+            
+            for row in rows:
+                col = row.get('column_name', '')
+                count = row.get('table_count', 0)
+                if col and count >= self.MIN_HUB_SPOKES:
+                    hubs.append(col)
+                    
+        except Exception as e:
+            logger.debug(f"[SCOPE] Could not query hubs from graph: {e}")
+            # Fallback to discovering from column names
+            hubs = self._discover_hubs_from_patterns()
+        
+        return hubs
+    
+    def _discover_hubs_from_patterns(self) -> List[str]:
+        """
+        Fallback: Discover potential hub columns from column name patterns.
+        Used when Context Graph isn't available.
+        """
+        hubs = []
+        
+        try:
+            # Query all columns that look like segmentation candidates
+            patterns = [p[0] for p in self.SEGMENTATION_PATTERNS]
+            pattern_clause = " OR ".join([f"LOWER(column_name) LIKE '%{p}%'" for p in patterns])
+            
+            sql = f"""
+                SELECT DISTINCT column_name
+                FROM _column_mappings 
+                WHERE {pattern_clause}
+            """
+            rows = self.handler.query(sql)
+            hubs = [r.get('column_name') for r in rows if r.get('column_name')]
+            
+        except Exception as e:
+            logger.debug(f"[SCOPE] Could not discover hubs from patterns: {e}")
+        
+        return hubs
+    
     def _analyze_segments(self, domain: str, relevant_hubs: List[str], 
                          context: Dict = None) -> List[ScopeSegment]:
-        """Analyze data segments based on primary dimensions."""
+        """
+        Analyze data segments based on discovered dimensions.
+        
+        VENDOR-AGNOSTIC: Uses hub discovery, not hardcoded column names.
+        """
         segments = []
         
         if not self.handler:
             logger.warning("[SCOPE] No handler available for segment analysis")
             return segments
         
-        # Try each segmentation dimension
-        for dim_column, dim_name in self.SEGMENTATION_DIMS:
+        # Discover segmentation dimensions from the data
+        segmentation_dims = self._discover_segmentation_dimensions()
+        
+        if not segmentation_dims:
+            logger.warning("[SCOPE] No segmentation dimensions discovered")
+            return segments
+        
+        # Try each discovered dimension
+        for dim_column, dim_name in segmentation_dims:
             dim_segments = self._query_segment_stats(dim_column, dim_name, domain)
             if dim_segments and len(dim_segments) >= self.MIN_SEGMENTS_TO_ASK:
                 # Found meaningful segmentation
@@ -224,6 +314,69 @@ class IntelligentScoping:
                 break
         
         return segments
+    
+    def _discover_segmentation_dimensions(self) -> List[Tuple[str, str]]:
+        """
+        Discover which columns are good for segmentation.
+        
+        VENDOR-AGNOSTIC: Looks for columns that:
+        1. Appear in multiple tables (common dimension)
+        2. Have low cardinality (meaningful grouping)
+        3. Match segmentation patterns (country, company, etc.)
+        """
+        dimensions = []
+        
+        try:
+            # Find columns that appear in multiple tables and have low cardinality
+            sql = """
+                SELECT 
+                    cm.column_name,
+                    COUNT(DISTINCT cm.table_name) as table_count,
+                    MAX(cp.distinct_count) as max_distinct
+                FROM _column_mappings cm
+                LEFT JOIN _column_profiles cp 
+                    ON cm.table_name = cp.table_name 
+                    AND cm.column_name = cp.column_name
+                WHERE cm.column_name IS NOT NULL
+                GROUP BY cm.column_name
+                HAVING COUNT(DISTINCT cm.table_name) >= 2
+                ORDER BY table_count DESC, max_distinct ASC
+            """
+            rows = self.handler.query(sql)
+            
+            for row in rows:
+                col_name = row.get('column_name', '')
+                distinct = row.get('max_distinct', 0) or 999
+                
+                # Skip high-cardinality columns (not good for segmentation)
+                if distinct > 50:
+                    continue
+                
+                # Check if column matches segmentation patterns
+                col_lower = col_name.lower()
+                for pattern, display_name in self.SEGMENTATION_PATTERNS:
+                    if pattern in col_lower:
+                        # Format display name
+                        formatted_name = self._format_dimension_name(col_name, display_name)
+                        dimensions.append((col_name, formatted_name))
+                        break
+            
+        except Exception as e:
+            logger.warning(f"[SCOPE] Could not discover segmentation dimensions: {e}")
+            # Fallback: return empty, will skip scoping
+        
+        return dimensions[:10]  # Limit to top 10 candidates
+    
+    def _format_dimension_name(self, column_name: str, pattern_name: str) -> str:
+        """Format a column name for display."""
+        # Try to extract a nice name from the column
+        name = column_name.replace('_code', '').replace('_', ' ').title()
+        
+        # Use pattern name if it's more descriptive
+        if len(pattern_name) > len(name):
+            return pattern_name
+        
+        return name
     
     def _query_segment_stats(self, dimension: str, dim_name: str, 
                             domain: str) -> List[ScopeSegment]:
