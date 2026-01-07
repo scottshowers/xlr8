@@ -69,7 +69,8 @@ def extract_text(file_path: str, max_pages: int = 10) -> str:
 
 
 def _extract_pdf(file_path: str, max_pages: int = 10) -> str:
-    """Extract text from PDF using pdfplumber or PyPDF2."""
+    """Extract text from PDF using pdfplumber, PyPDF2, or OCR fallback."""
+    text = ""
     
     if PDF_LIBRARY == 'pdfplumber':
         try:
@@ -81,20 +82,46 @@ def _extract_pdf(file_path: str, max_pages: int = 10) -> str:
                     page_text = page.extract_text()
                     if page_text:
                         text_parts.append(page_text)
-            return '\n'.join(text_parts)
+            text = '\n'.join(text_parts)
         except Exception as e:
             logger.warning(f"[TEXT_EXTRACTION] pdfplumber failed: {e}")
             # Fall through to PyPDF2 if available
             if PyPDF2:
-                return _extract_pdf_pypdf2(file_path, max_pages)
-            return ""
+                text = _extract_pdf_pypdf2(file_path, max_pages)
     
     elif PDF_LIBRARY == 'PyPDF2':
-        return _extract_pdf_pypdf2(file_path, max_pages)
+        text = _extract_pdf_pypdf2(file_path, max_pages)
     
-    else:
-        logger.warning("[TEXT_EXTRACTION] No PDF library available")
-        return ""
+    # OCR fallback for image-based PDFs (print-to-PDF, scanned docs)
+    if len(text.strip()) < 100:
+        try:
+            from pdf2image import convert_from_path
+            import pytesseract
+            logger.info("[TEXT_EXTRACTION] Text extraction failed - trying Tesseract OCR...")
+            
+            # Convert PDF pages to images
+            images = convert_from_path(file_path, dpi=150, first_page=1, last_page=max_pages)
+            logger.info(f"[TEXT_EXTRACTION] Converting {len(images)} pages for OCR...")
+            
+            text_parts = []
+            for i, img in enumerate(images):
+                page_text = pytesseract.image_to_string(img)
+                if page_text.strip():
+                    text_parts.append(page_text)
+            
+            ocr_text = '\n'.join(text_parts)
+            if len(ocr_text) > len(text):
+                text = ocr_text
+                logger.info(f"[TEXT_EXTRACTION] Tesseract OCR extracted {len(text)} chars")
+        except ImportError as e:
+            logger.warning(f"[TEXT_EXTRACTION] OCR dependencies not available: {e}")
+        except Exception as e:
+            logger.warning(f"[TEXT_EXTRACTION] Tesseract OCR failed: {e}")
+    
+    if not text:
+        logger.warning("[TEXT_EXTRACTION] No PDF library available and OCR failed")
+    
+    return text
 
 
 def _extract_pdf_pypdf2(file_path: str, max_pages: int = 10) -> str:
@@ -143,9 +170,19 @@ def _extract_txt(file_path: str) -> str:
 # Quick availability check
 def is_available() -> dict:
     """Return availability status of extraction capabilities."""
+    # Check OCR availability
+    ocr_available = False
+    try:
+        from pdf2image import convert_from_path
+        import pytesseract
+        ocr_available = True
+    except ImportError:
+        pass
+    
     return {
-        "pdf": PDF_LIBRARY is not None,
+        "pdf": PDF_LIBRARY is not None or ocr_available,
         "pdf_library": PDF_LIBRARY,
+        "pdf_ocr": ocr_available,
         "docx": DOCX_AVAILABLE,
         "txt": True
     }
