@@ -534,18 +534,62 @@ class Synthesizer:
         
         logger.warning(f"[SYNTHESIZE] Config listing columns: {columns[:10]}")
         
-        # Identify key columns - order matters, first match wins
-        # For earnings/deductions, the "code" is usually short (3-10 chars)
-        code_col = self._find_column(columns, [
-            'code', 'earnings_code', 'earning_code', 'deduction_code', 
-            'ded_code', 'pay_code', 'code_description'  # Sometimes code is in description field
-        ])
+        # =====================================================================
+        # v3.2: Domain-aware column detection
+        # Prioritize domain-specific columns over generic ones
+        # =====================================================================
+        domain = self._detect_domain(q_lower)
         
-        # Description column
-        desc_col = self._find_column(columns, [
-            'description', 'code_description', 'earning_description',
-            'desc', 'name', 'label', 'long_description'
-        ])
+        # Domain-specific code column patterns (checked first)
+        domain_code_patterns = {
+            'deduction': ['deductionbenefit_code', 'deduction_code', 'benefit_code', 'ded_code'],
+            'earning': ['earnings_code', 'earning_code', 'earn_code'],
+            'tax': ['tax_code', 'tax_id'],
+            'location': ['location_code', 'loc_code', 'site_code'],
+            'job': ['job_code', 'job_id', 'position_code'],
+            'bank': ['bank_code', 'bank_id'],
+            'pto': ['pto_code', 'accrual_code'],
+            'gl': ['gl_code', 'account_code'],
+        }
+        
+        # Domain-specific description column patterns
+        domain_desc_patterns = {
+            'deduction': ['deductionbenefit', 'deduction_description', 'benefit_name', 'deductionbenefit_long'],
+            'earning': ['earnings', 'earning_description', 'earning_name', 'earnings_long'],
+            'tax': ['tax_description', 'tax_name'],
+            'location': ['location_description', 'location_name', 'loc_name'],
+            'job': ['job_description', 'job_name', 'job_title'],
+            'bank': ['bank_name', 'bank_description'],
+        }
+        
+        # Try domain-specific patterns first
+        code_col = None
+        desc_col = None
+        
+        if domain in domain_code_patterns:
+            code_col = self._find_column(columns, domain_code_patterns[domain])
+        if domain in domain_desc_patterns:
+            desc_col = self._find_column(columns, domain_desc_patterns[domain])
+        
+        # Fall back to generic patterns (but exclude country_code, state_code, etc.)
+        if not code_col:
+            # EXCLUDE geographic codes from being the main code column
+            generic_code_patterns = ['code', 'id']
+            exclude_patterns = ['country', 'state', 'zip', 'postal', 'address', 'region']
+            
+            for col in columns:
+                col_lower = col.lower()
+                # Must contain 'code' or 'id' but NOT be a geographic column
+                has_code = any(p in col_lower for p in generic_code_patterns)
+                is_geographic = any(p in col_lower for p in exclude_patterns)
+                if has_code and not is_geographic:
+                    code_col = col
+                    break
+        
+        if not desc_col:
+            desc_col = self._find_column(columns, [
+                'description', 'name', 'label', 'long_description', 'desc', 'long'
+            ])
         
         # If code_col same as desc_col, clear desc_col
         if code_col and desc_col and code_col == desc_col:
@@ -553,8 +597,9 @@ class Synthesizer:
         
         # Category/type column for grouping
         category_col = self._find_column(columns, [
-            'tax_category', 'category', 'type', 'group', 'class',
-            'earnings_group', 'earning_type', 'calc_type', 'calculation_rule'
+            'group', 'group_code', 'category', 'type', 'class',
+            'deductionbenefit_group', 'deductionbenefit_group_code',
+            'earnings_group', 'earning_type', 'calc_type'
         ])
         
         logger.warning(f"[SYNTHESIZE] Detected columns - code: {code_col}, desc: {desc_col}, category: {category_col}")
