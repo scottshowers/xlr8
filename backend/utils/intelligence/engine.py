@@ -416,7 +416,7 @@ class IntelligenceEngineV2:
             
             if scope_sensitive:
                 scope_analysis = analyze_question_scope(
-                    self.project_name, 
+                    self.project, 
                     question, 
                     self.structured_handler
                 )
