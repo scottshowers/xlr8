@@ -978,3 +978,86 @@ async def delete_all_chromadb_chunks():
     except Exception as e:
         logger.error(f"[CLEANUP] NUCLEAR failed: {e}")
         return {"success": False, "error": str(e)}
+
+
+@router.delete("/status/rules/all")
+async def delete_all_rules():
+    """
+    NUCLEAR OPTION: Delete ALL rules and documents from Supabase standards tables.
+    Use when re-uploading reference library from scratch.
+    """
+    logger.warning("[CLEANUP] NUCLEAR: Deleting ALL standards rules and documents!")
+    
+    supabase = _get_supabase()
+    if not supabase:
+        return {"success": False, "error": "Supabase not available"}
+    
+    result = {"success": True, "rules_deleted": 0, "documents_deleted": 0}
+    
+    try:
+        # Delete all rules
+        rules_result = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+        result['rules_deleted'] = len(rules_result.data) if rules_result.data else 0
+        logger.warning(f"[CLEANUP] Deleted {result['rules_deleted']} rules")
+    except Exception as e:
+        logger.warning(f"[CLEANUP] Rules delete error: {e}")
+    
+    try:
+        # Delete all documents from standards_documents
+        docs_result = supabase.table('standards_documents').delete().neq('document_id', '').execute()
+        result['documents_deleted'] = len(docs_result.data) if docs_result.data else 0
+        logger.warning(f"[CLEANUP] Deleted {result['documents_deleted']} standards documents")
+    except Exception as e:
+        logger.warning(f"[CLEANUP] Documents delete error: {e}")
+    
+    logger.warning(f"[CLEANUP] NUCLEAR complete: {result['rules_deleted']} rules, {result['documents_deleted']} documents deleted")
+    return result
+
+
+@router.delete("/status/semantic/all")
+async def delete_all_semantic_data():
+    """
+    NUCLEAR OPTION: Delete ALL semantic data (ChromaDB + rules + documents).
+    Use when starting fresh with reference library.
+    """
+    logger.warning("[CLEANUP] NUCLEAR: Deleting ALL semantic data!")
+    
+    result = {
+        "success": True,
+        "chromadb_chunks": 0,
+        "rules": 0,
+        "documents": 0
+    }
+    
+    # 1. Clear ChromaDB
+    collection = _get_chromadb()
+    if collection:
+        try:
+            all_docs = collection.get()
+            if all_docs and all_docs.get('ids'):
+                chunk_ids = all_docs['ids']
+                batch_size = 1000
+                for i in range(0, len(chunk_ids), batch_size):
+                    batch = chunk_ids[i:i+batch_size]
+                    collection.delete(ids=batch)
+                    result['chromadb_chunks'] += len(batch)
+        except Exception as e:
+            logger.warning(f"[CLEANUP] ChromaDB error: {e}")
+    
+    # 2. Clear rules and documents
+    supabase = _get_supabase()
+    if supabase:
+        try:
+            rules_result = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+            result['rules'] = len(rules_result.data) if rules_result.data else 0
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Rules error: {e}")
+        
+        try:
+            docs_result = supabase.table('standards_documents').delete().neq('document_id', '').execute()
+            result['documents'] = len(docs_result.data) if docs_result.data else 0
+        except Exception as e:
+            logger.warning(f"[CLEANUP] Documents error: {e}")
+    
+    logger.warning(f"[CLEANUP] NUCLEAR SEMANTIC complete: {result}")
+    return result
