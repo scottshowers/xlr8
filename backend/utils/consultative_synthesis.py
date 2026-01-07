@@ -58,6 +58,30 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Import response patterns - the consultant's thinking chain
+try:
+    from utils.response_patterns import (
+        detect_question_type, 
+        generate_thinking_prompt,
+        generate_excel_spec,
+        ResponsePattern,
+        QuestionCategory
+    )
+    PATTERNS_AVAILABLE = True
+except ImportError:
+    try:
+        from backend.utils.response_patterns import (
+            detect_question_type,
+            generate_thinking_prompt, 
+            generate_excel_spec,
+            ResponsePattern,
+            QuestionCategory
+        )
+        PATTERNS_AVAILABLE = True
+    except ImportError:
+        logger.warning("[CONSULTATIVE] Response patterns not available")
+        PATTERNS_AVAILABLE = False
+
 
 # =============================================================================
 # DATA CLASSES
@@ -92,6 +116,12 @@ class ConsultativeAnswer:
     recommended_actions: List[str]
     sources_used: List[str]
     synthesis_method: str  # 'mistral', 'claude', 'template'
+    # v4.0: Response pattern for deliverable generation
+    question_type: str = ""
+    question_category: str = ""
+    excel_spec: List[Dict] = field(default_factory=list)
+    proactive_offers: List[str] = field(default_factory=list)
+    hcmpact_hook: str = ""
 
 
 # =============================================================================
@@ -173,6 +203,15 @@ class ConsultativeSynthesizer:
         """
         logger.warning(f"[SYNTHESIS] Starting synthesis for: {question[:80]}...")
         
+        # =====================================================================
+        # v4.0: DETECT QUESTION TYPE AND GET RESPONSE PATTERN
+        # =====================================================================
+        pattern = None
+        if PATTERNS_AVAILABLE:
+            pattern = detect_question_type(question)
+            logger.warning(f"[SYNTHESIS] Question type: {pattern.question_type} ({pattern.category.value})")
+            logger.warning(f"[SYNTHESIS] Hidden worry: {pattern.hidden_worry}")
+        
         # Step 1: Summarize each truth source
         summaries = self._summarize_truths(
             reality=reality,
@@ -194,24 +233,43 @@ class ConsultativeSynthesizer:
         
         # Step 3: Determine complexity (for logging only now)
         complexity = self._assess_complexity(question, summaries, triangulation)
-        logger.warning(f"[SYNTHESIS] Complexity: {complexity} (using Qwen for all)")
+        logger.warning(f"[SYNTHESIS] Complexity: {complexity}")
         
-        # Step 4: Generate the answer - Qwen handles everything
+        # Step 4: Generate the answer using pattern-guided LLM
         answer_text, method = self._synthesize_with_llm(
             question=question,
             summaries=summaries,
             triangulation=triangulation,
             conflicts=conflicts or [],
-            complexity=complexity
+            complexity=complexity,
+            pattern=pattern  # v4.0: Pass pattern for thinking guidance
         )
         
         # Step 5: Extract recommended actions
         actions = self._extract_actions(answer_text, triangulation)
         
+        # v4.0: Add pattern-based proactive offers to actions
+        if pattern and pattern.proactive_offers:
+            actions.extend(pattern.proactive_offers)
+        
         # Step 6: Calculate overall confidence
         confidence = self._calculate_confidence(summaries, triangulation)
         
         self.last_method = method
+        
+        # v4.0: Build excel spec and extract pattern metadata
+        excel_spec = []
+        question_type = ""
+        question_category = ""
+        hcmpact_hook = ""
+        proactive_offers = []
+        
+        if pattern:
+            excel_spec = generate_excel_spec(pattern) if PATTERNS_AVAILABLE else []
+            question_type = pattern.question_type
+            question_category = pattern.category.value
+            hcmpact_hook = pattern.hcmpact_hook
+            proactive_offers = list(pattern.proactive_offers)
         
         return ConsultativeAnswer(
             answer=answer_text,
@@ -219,7 +277,12 @@ class ConsultativeSynthesizer:
             triangulation=triangulation,
             recommended_actions=actions,
             sources_used=[s.source_type for s in summaries if s.has_data],
-            synthesis_method=method
+            synthesis_method=method,
+            question_type=question_type,
+            question_category=question_category,
+            excel_spec=excel_spec,
+            proactive_offers=proactive_offers,
+            hcmpact_hook=hcmpact_hook
         )
     
     # =========================================================================
@@ -635,10 +698,13 @@ class ConsultativeSynthesizer:
         summaries: List[TruthSummary],
         triangulation: TriangulationResult,
         conflicts: List[Any],
-        complexity: str = 'complex'
+        complexity: str = 'complex',
+        pattern: Any = None  # v4.0: ResponsePattern for guided thinking
     ) -> Tuple[str, str]:
         """
         Use LLM to synthesize a consultative answer.
+        
+        v4.0: Now uses ResponsePattern to guide the LLM's thinking chain.
         
         MODEL CASCADE (in order):
         1. Groq (llama-3.3-70b) - Fast, reliable, high quality
@@ -671,8 +737,15 @@ class ConsultativeSynthesizer:
         
         context = "\n".join(context_parts)
         
-        # Expert prompt - consultative style
-        expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
+        # =====================================================================
+        # v4.0: USE PATTERN-GUIDED THINKING PROMPT
+        # =====================================================================
+        if pattern and PATTERNS_AVAILABLE:
+            expert_prompt = generate_thinking_prompt(pattern, question)
+            logger.warning(f"[CONSULTATIVE] Using pattern-guided prompt for: {pattern.question_type}")
+        else:
+            # Fallback to generic prompt
+            expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
 
 RESPONSE FORMAT:
 1. Direct answer to the question (YES/NO/PARTIALLY with specifics)
