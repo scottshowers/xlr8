@@ -415,6 +415,30 @@ def process_pdf(file_path: str, domain: str = "general") -> StandardsDocument:
                 domain=domain
             )
     
+    # OCR fallback for image-based PDFs (print-to-PDF, scanned docs)
+    if len(full_text.replace('--- PAGE', '').replace('---', '').strip()) < 100:
+        try:
+            from pdf2image import convert_from_path
+            import pytesseract
+            logger.info("[STANDARDS] Text extraction failed - trying Tesseract OCR...")
+            
+            # Convert PDF pages to images (limit to first 20 pages for performance)
+            images = convert_from_path(file_path, dpi=150, first_page=1, last_page=20)
+            page_count = len(images)
+            logger.info(f"[STANDARDS] Converting {page_count} pages for OCR...")
+            
+            full_text = ""
+            for i, img in enumerate(images):
+                page_text = pytesseract.image_to_string(img)
+                if page_text.strip():
+                    full_text += f"\n--- PAGE {i+1} ---\n{page_text}"
+            
+            logger.info(f"[STANDARDS] Tesseract OCR extracted {len(full_text)} chars from {page_count} pages")
+        except ImportError as e:
+            logger.warning(f"[STANDARDS] OCR dependencies not available: {e}")
+        except Exception as e:
+            logger.warning(f"[STANDARDS] Tesseract OCR failed: {e}")
+    
     # Extract title from first page
     title = filename
     first_lines = full_text[:500].split('\n')
