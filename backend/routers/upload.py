@@ -376,6 +376,33 @@ def extract_text(file_path: str) -> str:
                 except Exception as e:
                     logger.warning(f"[PDF] PyPDF2 failed: {e}")
             
+            # Method 4: OCR fallback for image-based PDFs (print-to-PDF, scanned docs)
+            if len(text) < 100:
+                try:
+                    from pdf2image import convert_from_path
+                    import pytesseract
+                    logger.info("[PDF] Text extraction failed - trying Tesseract OCR...")
+                    
+                    # Convert PDF pages to images (limit to first 20 pages for performance)
+                    images = convert_from_path(file_path, dpi=150, first_page=1, last_page=20)
+                    logger.info(f"[PDF] Converting {len(images)} pages for OCR...")
+                    
+                    page_texts = []
+                    for i, img in enumerate(images):
+                        page_text = pytesseract.image_to_string(img)
+                        if page_text.strip():
+                            page_texts.append(f"--- PAGE {i+1} ---\n{page_text}")
+                            pages_extracted += 1
+                    
+                    ocr_text = "\n\n".join(page_texts)
+                    if len(ocr_text) > len(text):
+                        text = ocr_text
+                        logger.info(f"[PDF] Tesseract OCR extracted {pages_extracted} pages, {len(text)} chars")
+                except ImportError as e:
+                    logger.warning(f"[PDF] OCR dependencies not available: {e}")
+                except Exception as e:
+                    logger.warning(f"[PDF] Tesseract OCR failed: {e}")
+            
             # Log final result
             if len(text) < 100:
                 logger.error(f"[PDF] All extraction methods failed or returned minimal text ({len(text)} chars)")
