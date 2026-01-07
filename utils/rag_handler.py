@@ -404,8 +404,8 @@ class RAGHandler:
         """
         Auto-detect HCM/ERP system from filename.
         
-        Used to tag vendor docs with their system so we can filter
-        when querying from a project (e.g., UKG project only gets UKG docs).
+        Used to pre-fill the system selector on upload.
+        User can override via UI dropdown.
         
         Returns:
             System name (lowercase) or None if not detected
@@ -417,12 +417,12 @@ class RAGHandler:
         
         # System detection patterns
         systems = {
-            'ukg': ['ukg', 'ultipro', 'kronos', 'ukg pro', 'ukgpro', 'workforce ready'],
+            'ukg': ['ukg', 'ultipro', 'kronos', 'ukg pro', 'ukgpro', 'workforce ready', 'ukg ready'],
             'workday': ['workday', 'wday'],
-            'adp': ['adp', 'workforce now', 'vantage'],
+            'adp': ['adp', 'workforce now', 'vantage', 'adp workforce'],
             'dayforce': ['dayforce', 'ceridian'],
-            'oracle': ['oracle', 'peoplesoft', 'jd edwards', 'jde', 'oracle hcm'],
-            'sap': ['sap', 'successfactors', 'success factors'],
+            'oracle': ['oracle', 'peoplesoft', 'jd edwards', 'jde', 'oracle hcm', 'oracle fusion'],
+            'sap': ['sap', 'successfactors', 'success factors', 'sap hcm'],
             'netsuite': ['netsuite', 'net suite'],
             'bamboohr': ['bamboohr', 'bamboo hr'],
             'paylocity': ['paylocity'],
@@ -437,6 +437,7 @@ class RAGHandler:
         for system, patterns in systems.items():
             for pattern in patterns:
                 if pattern in filename_lower:
+                    logger.info(f"[SYSTEM] Auto-detected '{system}' from filename")
                     return system
         
         return None
@@ -465,11 +466,11 @@ class RAGHandler:
             system = metadata.get('system')  # NEW: System tag (UKG, Workday, etc.)
             
             # Auto-detect system from filename if not provided and it's vendor docs
+            # User can override via UI dropdown
             if not system and truth_type == 'reference':
                 system = self._detect_system(filename)
                 if system:
                     metadata['system'] = system
-                    logger.info(f"[SYSTEM] Auto-detected system: {system}")
             
             if project_id:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
