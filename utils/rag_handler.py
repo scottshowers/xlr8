@@ -64,6 +64,23 @@ except ImportError as e:
 
 logger = logging.getLogger(__name__)
 
+# Import entity detector for hub reference tagging
+ENTITY_DETECTION_AVAILABLE = False
+entity_detector = None
+try:
+    from backend.utils.entity_detector import get_detector, enrich_chunk
+    entity_detector = get_detector()
+    ENTITY_DETECTION_AVAILABLE = True
+    logger.info("✅ Entity Detector loaded for hub reference tagging")
+except ImportError:
+    try:
+        from utils.entity_detector import get_detector, enrich_chunk
+        entity_detector = get_detector()
+        ENTITY_DETECTION_AVAILABLE = True
+        logger.info("✅ Entity Detector loaded for hub reference tagging (alt path)")
+    except ImportError:
+        logger.warning("Entity Detector not available - chunks will not be tagged with hub references")
+
 
 class RAGHandler:
     """
@@ -473,6 +490,19 @@ class RAGHandler:
                         }
                         fallback_metadata = {k: v for k, v in fallback_metadata.items() if v is not None}
                         chunk_metadata.update(fallback_metadata)
+                
+                # NEW: Detect and tag hub references in chunk
+                if ENTITY_DETECTION_AVAILABLE and entity_detector:
+                    try:
+                        detection = entity_detector.detect_entities(chunk)
+                        if detection.get('hub_references'):
+                            # Store as comma-separated string (ChromaDB doesn't support lists in metadata)
+                            chunk_metadata['hub_references'] = ','.join(detection['hub_references'])
+                            chunk_metadata['primary_hub'] = detection.get('primary_hub', '')
+                            if detection.get('hub_details', {}).get(detection.get('primary_hub', ''), {}):
+                                chunk_metadata['hub_confidence'] = detection['hub_details'][detection['primary_hub']]['confidence']
+                    except Exception as e:
+                        logger.debug(f"Entity detection failed for chunk {i}: {e}")
                 
                 chunk_metadata = {k: v for k, v in chunk_metadata.items() if v is not None}
                 
