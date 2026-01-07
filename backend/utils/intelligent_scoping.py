@@ -480,16 +480,11 @@ class IntelligentScoping:
         if len(segments) < self.MIN_SEGMENTS_TO_ASK:
             return False
         
-        # Check if segments are meaningfully different in size
-        if segments:
-            total = sum(s.employee_count for s in segments)
-            largest = max(s.employee_count for s in segments)
-            
-            # If one segment dominates (>80%), don't ask
-            if largest > total * 0.8:
-                return False
-            
-            # If we have meaningful distribution, ask
+        # Count segments with actual employees
+        segments_with_employees = [s for s in segments if s.employee_count > 0]
+        
+        # If 2+ segments have employees, ALWAYS ask
+        if len(segments_with_employees) >= 2:
             return True
         
         return False
