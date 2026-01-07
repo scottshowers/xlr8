@@ -384,7 +384,7 @@ def extract_text(file_path: str) -> str:
                     logger.info("[PDF] Text extraction failed - trying Tesseract OCR...")
                     
                     # Convert PDF pages to images (limit to first 20 pages for performance)
-                    images = convert_from_path(file_path, dpi=150, first_page=1, last_page=20)
+                    images = convert_from_path(file_path, dpi=100, first_page=1, last_page=20)
                     logger.info(f"[PDF] Converting {len(images)} pages for OCR...")
                     
                     page_texts = []
