@@ -479,6 +479,12 @@ class IntelligenceEngineV2:
             except Exception as e:
                 logger.debug(f"[ENGINE-V2] Could not get context graph: {e}")
         
+        # Merge analysis flags into context for synthesizer
+        synth_context = context.copy() if context else {}
+        synth_context['is_config'] = analysis.get('is_config', False)
+        synth_context['is_validation'] = analysis.get('is_validation', False)
+        synth_context['is_employee_question'] = analysis.get('is_employee_question', False)
+        
         # Synthesize answer
         answer = self.synthesizer.synthesize(
             question=question,
@@ -492,7 +498,7 @@ class IntelligenceEngineV2:
             conflicts=conflicts,
             insights=insights,
             compliance_check=compliance_check,
-            context=context,
+            context=synth_context,
             context_graph=context_graph  # v3.0
         )
         
