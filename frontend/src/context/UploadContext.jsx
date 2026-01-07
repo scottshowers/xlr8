@@ -172,6 +172,10 @@ export function UploadProvider({ children }) {
     if (options.truth_type) {
       formData.append('truth_type', options.truth_type);
     }
+    
+    if (options.system) {
+      formData.append('system', options.system);
+    }
 
     api.post('/upload', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
