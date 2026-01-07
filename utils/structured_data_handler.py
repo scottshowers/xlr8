@@ -2635,6 +2635,39 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 # Note: These are tracked via is_discovered flag
                 # UI can show them for user to name/confirm
             
+            # =================================================================
+            # STEP 9: Register entities in Entity Registry (Supabase)
+            # =================================================================
+            try:
+                from backend.utils.entity_registry import get_entity_registry
+                registry = get_entity_registry()
+                
+                # Register hubs
+                for hub in final_hubs:
+                    registry.register_duckdb_hub(
+                        entity_type=hub['semantic_type'],
+                        project_id=project,
+                        table_name=hub['table_name'],
+                        column_name=hub['key_column'],
+                        value_count=hub['cardinality']
+                    )
+                
+                # Register spokes
+                for rel in relationships:
+                    hub = rel['hub']
+                    registry.register_duckdb_spoke(
+                        entity_type=hub['semantic_type'],
+                        project_id=project,
+                        table_name=rel['spoke_table'],
+                        column_name=rel['spoke_column'],
+                        value_count=rel['spoke_cardinality'],
+                        coverage_pct=rel['coverage_pct']
+                    )
+                
+                logger.info(f"[ENTITY_REGISTRY] Registered {hub_count} hubs, {spoke_count} spokes for {project}")
+            except Exception as e:
+                logger.debug(f"[ENTITY_REGISTRY] Failed to register entities: {e}")
+            
             result = {
                 'hubs': hub_count,
                 'spokes': spoke_count,
