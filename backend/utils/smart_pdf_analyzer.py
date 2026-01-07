@@ -1006,6 +1006,7 @@ def process_pdf_intelligently(
     project: str,
     filename: str,
     project_id: str = None,
+    truth_type: str = None,  # NEW: Skip table extraction for reference docs
     status_callback=None
 ) -> Dict[str, Any]:
     """
@@ -1013,8 +1014,9 @@ def process_pdf_intelligently(
     
     Flow:
     1. Extract text from PDF (for ChromaDB semantic search)
-    2. Use Claude Vision to extract table data (structure + data)
-    3. Store tables to DuckDB, text to ChromaDB
+    2. Check if tabular structure (skip for reference docs)
+    3. Use Claude Vision to extract table data (structure + data) if tabular
+    4. Store tables to DuckDB, text to ChromaDB
     
     Vision handles everything - no gmft, no pdfplumber tables.
     """
@@ -1053,7 +1055,13 @@ def process_pdf_intelligently(
         
         # Step 2: Check if this looks like tabular data BEFORE calling Vision
         # This saves API costs and speeds up reference doc processing
-        tabular_check = detect_tabular_by_rules(text[:10000])  # Check first 10K chars
+        # IMPORTANT: Reference docs NEVER go through table extraction - semantic search only
+        if truth_type == 'reference':
+            tabular_check = {'is_tabular': False, 'reason': 'reference_doc_skip'}
+            update_status("Reference doc - skipping table extraction (semantic search only)", 30)
+            logger.info(f"[SMART-PDF] Skipping table extraction for reference doc: {filename}")
+        else:
+            tabular_check = detect_tabular_by_rules(text[:10000])  # Check first 10K chars
         
         if VISION_AVAILABLE and tabular_check.get('is_tabular'):
             update_status(f"Tabular structure detected ({tabular_check.get('reason', 'patterns')}), extracting with Vision AI...", 30)
