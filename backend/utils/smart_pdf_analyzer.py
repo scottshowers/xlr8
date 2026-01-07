@@ -1051,15 +1051,19 @@ def process_pdf_intelligently(
         rows = []
         analysis = {'is_tabular': False}
         
-        # Step 2: Use Claude Vision to extract tables
-        if VISION_AVAILABLE:
-            update_status("Extracting tables with Vision AI...", 30)
+        # Step 2: Check if this looks like tabular data BEFORE calling Vision
+        # This saves API costs and speeds up reference doc processing
+        tabular_check = detect_tabular_by_rules(text[:10000])  # Check first 10K chars
+        
+        if VISION_AVAILABLE and tabular_check.get('is_tabular'):
+            update_status(f"Tabular structure detected ({tabular_check.get('reason', 'patterns')}), extracting with Vision AI...", 30)
             
             try:
                 vision_result = extract_all_tables_with_vision(
                     file_path=file_path,
                     dpi=100,  # Reduced from 150 - sufficient for text/headers
                     redact_pii=True,
+                    max_pages=2,  # Only analyze first 2 pages for structure
                     status_callback=lambda msg: update_status(msg)
                 )
                 
@@ -1088,9 +1092,13 @@ def process_pdf_intelligently(
             except Exception as vision_error:
                 logger.error(f"[SMART-PDF] Vision error: {vision_error}")
                 update_status(f"Vision error: {vision_error}", 40)
+        elif not tabular_check.get('is_tabular'):
+            # Not tabular - skip Vision and DuckDB entirely, just use ChromaDB
+            update_status("No tabular structure detected - skipping table extraction", 30)
+            logger.info(f"[SMART-PDF] Skipping Vision AI - text doesn't appear tabular (reason: {tabular_check.get('reason', 'no patterns')})")
         
-        # Step 3: Fallback to LLM text analysis if Vision unavailable or found nothing
-        if not rows:
+        # Step 3: Fallback to LLM text analysis ONLY if tabular check passed but Vision failed/unavailable
+        if not rows and tabular_check.get('is_tabular'):
             update_status("Analyzing PDF structure with text AI...", 50)
             analysis = analyze_pdf_with_llm(text)
             
