@@ -1,219 +1,1049 @@
 """
-XLR8 Intelligence Engine - Configuration Gatherer
-==================================================
+XLR8 CONSULTATIVE SYNTHESIS MODULE v3.0.0
+==========================================
 
-Gathers CONFIGURATION truths - how the customer configured their system.
+Deploy to: backend/utils/consultative_synthesis.py
 
-Storage: DuckDB (structured queries)
-Source: Config tables (code tables, mappings, system setup)
-Scope: Project-scoped
+APPROACH: Let the LLM reason like a consultant
+- Send actual data rows (not just schema)
+- Reasoning framework: UNDERSTAND → DECOMPOSE → ANALYZE → SYNTHESIZE → VALIDATE → ANSWER
+- Trust the 14B model to find patterns (e.g., tax_type=SUI = SUI rate)
 
-NOTE: This queries DuckDB config tables, NOT ChromaDB documents.
-Per ARCHITECTURE.md: Configuration = DuckDB = "Code tables, mappings, system setup"
+ROUTING:
+- ALL synthesis → Qwen 14B 
+- FALLBACK → Claude (only if Qwen fails)
 
-Deploy to: backend/utils/intelligence/gatherers/configuration.py
+v3.0 CHANGES:
+- Reasoning framework prompt (chain of thought)
+- Send ALL key_facts to LLM (removed [:5] truncation)
+- Actual row data included so LLM can analyze values
+
+PURPOSE:
+This module transforms raw data retrieval into world-class consultative answers.
+It's the difference between "Here's 47 rows" and "Your SUI rates look compliant, 
+but I noticed 3 companies haven't updated since 2023 - here's what to check."
+
+ARCHITECTURE:
+    gather_five_truths() → ConsultativeSynthesizer.synthesize() → Consultative Answer
+                                     ↓
+                          1. Triangulate sources
+                          2. Detect gaps/conflicts  
+                          3. Add "so-what" context
+                          4. Signal confidence
+                          5. Recommend next steps
+
+LLM PRIORITY (via LLMOrchestrator):
+    1. Mistral:7b (local) - Fast, private, no cost
+    2. Claude API - Fallback for complex cases
+    3. Template - Graceful degradation if all LLMs fail
+
+USAGE:
+    from consultative_synthesis import ConsultativeSynthesizer
+    
+    synthesizer = ConsultativeSynthesizer()  # Uses LLMOrchestrator internally
+    answer = synthesizer.synthesize(
+        question="Are my SUI rates correct?",
+        reality=[...],
+        intent=[...],
+        # ... other truths
+    )
 """
 
+import os
+import re
+import json
 import logging
-from typing import Dict, List, Optional, Any
-
-from .base import DuckDBGatherer
-from ..types import Truth, TruthType
+from typing import Dict, List, Optional, Any, Tuple
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
 
-class ConfigurationGatherer(DuckDBGatherer):
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+@dataclass
+class TruthSummary:
+    """Condensed summary of a truth source for LLM consumption."""
+    source_type: str  # reality, intent, configuration, reference, regulatory
+    has_data: bool
+    summary: str
+    key_facts: List[str] = field(default_factory=list)
+    confidence: float = 0.0
+    sources: List[str] = field(default_factory=list)
+
+
+@dataclass
+class TriangulationResult:
+    """Result of comparing truths across sources."""
+    alignments: List[str]  # Where sources agree
+    conflicts: List[str]   # Where sources disagree
+    gaps: List[str]        # Missing information
+    confidence: float      # Overall confidence in the triangulation
+
+
+@dataclass 
+class ConsultativeAnswer:
+    """The final synthesized answer."""
+    answer: str
+    confidence: float
+    triangulation: TriangulationResult
+    recommended_actions: List[str]
+    sources_used: List[str]
+    synthesis_method: str  # 'mistral', 'claude', 'template'
+
+
+# =============================================================================
+# MAIN SYNTHESIZER CLASS
+# =============================================================================
+
+class ConsultativeSynthesizer:
     """
-    Gathers Configuration truths from DuckDB.
+    The consultant brain that transforms raw data into actionable insights.
     
-    Configuration represents how the system is set up:
-    - Earnings codes
-    - Deduction codes
-    - Tax codes
-    - Pay frequencies
-    - GL mappings
-    - Other code tables
+    This is what separates XLR8 from "fancy BI tool" - the ability to
+    triangulate across sources and provide the "so-what" that clients
+    actually pay consultants for.
     
-    This gatherer:
-    1. Identifies config tables (type='config' in _table_classifications)
-    2. Generates SQL to query relevant config data
-    3. Returns Truth objects with full provenance
-    
-    The key difference from RealityGatherer:
-    - Reality = transactional/employee data (payroll runs, employee records)
-    - Configuration = setup/code tables (how the system is configured)
+    Uses LLMOrchestrator for all LLM calls - Mistral first, Claude fallback.
     """
     
-    truth_type = TruthType.CONFIGURATION
-    
-    # Config table indicators (tables that represent configuration, not data)
-    CONFIG_INDICATORS = [
-        'code', 'codes', 'mapping', 'mappings', 'setup', 'config',
-        'type', 'types', 'category', 'categories', 'class', 'classes',
-        'plan', 'plans', 'rate', 'rates', 'rule', 'rules',
-        'earnings', 'deduction', 'deductions', 'tax', 'benefit',
-        'gl_', 'acct_', 'account_', 'pay_freq', 'frequency',
-    ]
-    
-    def __init__(self, project_name: str, project_id: str = None,
-                 structured_handler=None, schema: Dict = None,
-                 table_selector=None):
+    def __init__(self, **kwargs):
         """
-        Initialize Configuration gatherer.
+        Initialize synthesizer with LLMOrchestrator.
+        
+        Accepts legacy kwargs (ollama_host, claude_api_key, model_preference) 
+        for backwards compatibility but ignores them - LLMOrchestrator handles config.
+        """
+        # Use existing LLMOrchestrator - it handles all config (LLM_ENDPOINT, auth, etc.)
+        self._orchestrator = None
+        self.last_method = None
+        
+        # Log if legacy params passed (for debugging)
+        if kwargs:
+            logger.debug(f"[CONSULTATIVE] Ignoring legacy kwargs: {list(kwargs.keys())}")
+        
+        try:
+            from utils.llm_orchestrator import LLMOrchestrator
+            self._orchestrator = LLMOrchestrator()
+            logger.info("[CONSULTATIVE] Initialized with LLMOrchestrator")
+        except ImportError:
+            try:
+                from backend.utils.llm_orchestrator import LLMOrchestrator
+                self._orchestrator = LLMOrchestrator()
+                logger.info("[CONSULTATIVE] Initialized with LLMOrchestrator (backend path)")
+            except ImportError:
+                logger.warning("[CONSULTATIVE] LLMOrchestrator not available - template only")
+        
+    def synthesize(
+        self,
+        question: str,
+        reality: List[Any] = None,
+        intent: List[Any] = None,
+        configuration: List[Any] = None,
+        reference: List[Any] = None,
+        regulatory: List[Any] = None,
+        compliance: List[Any] = None,
+        conflicts: List[Any] = None,
+        insights: List[Any] = None,
+        structured_data: Dict = None,
+        context_graph: Dict = None  # v3.0: Context Graph for relationship context
+    ) -> ConsultativeAnswer:
+        """
+        Main entry point - synthesize all truths into a consultative answer.
+        
+        v3.0: Now accepts context_graph for relationship awareness.
         
         Args:
-            project_name: Project code
-            project_id: Project UUID
-            structured_handler: DuckDB handler
-            schema: Schema metadata (tables, columns)
-            table_selector: TableSelector instance for consistent scoring
-        """
-        super().__init__(project_name, project_id, structured_handler)
-        self.schema = schema or {}
-        self.table_selector = table_selector
-    
-    def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
-        """
-        Gather Configuration truths for the question.
-        
-        Args:
-            question: User's question
-            context: Analysis context
+            question: The user's question
+            reality: DuckDB query results (data truths)
+            intent: Customer requirement documents
+            configuration: System setup documents
+            reference: Best practice guides
+            regulatory: Legal/compliance requirements
+            compliance: Audit requirements
+            conflicts: Pre-detected conflicts between sources
+            insights: Pre-generated insights
+            structured_data: Raw query results (rows, columns, sql)
+            context_graph: Hub/spoke relationships and coverage info
             
         Returns:
-            List of Truth objects from config tables
+            ConsultativeAnswer with synthesized response
         """
-        self.log_gather_start(question)
+        logger.warning(f"[SYNTHESIS] Starting synthesis for: {question[:80]}...")
         
-        if not self.handler or not self.schema:
-            logger.debug("[GATHER-CONFIG] No handler or schema available")
-            return []
-        
-        truths = []
-        
-        try:
-            # Find relevant config tables
-            config_tables = self._find_config_tables(question, context)
-            
-            if not config_tables:
-                logger.debug("[GATHER-CONFIG] No relevant config tables found")
-                return []
-            
-            # Query each relevant config table
-            for table_info in config_tables[:3]:  # Limit to top 3 most relevant
-                table_name = table_info.get('table_name')
-                if not table_name:
-                    continue
-                
-                truth = self._query_config_table(table_name, table_info, question)
-                if truth:
-                    truths.append(truth)
-                    
-        except Exception as e:
-            logger.error(f"[GATHER-CONFIG] Error: {e}")
-        
-        self.log_gather_result(truths)
-        return truths
-    
-    def _find_config_tables(self, question: str, context: Dict) -> List[Dict]:
-        """Find config tables relevant to the question using TableSelector."""
-        if not self.table_selector:
-            logger.warning("[GATHER-CONFIG] No table_selector available")
-            return []
-        
-        # Extract tables list from schema
-        tables = self.schema.get('tables', [])
-        if not tables:
-            logger.warning("[GATHER-CONFIG] No tables in schema")
-            return []
-        
-        # Use TableSelector.select() method (not select_tables)
-        selected = self.table_selector.select(
-            tables=tables,
-            question=question,
-            max_tables=10  # Get more, then filter for config
+        # Step 1: Summarize each truth source
+        summaries = self._summarize_truths(
+            reality=reality,
+            intent=intent,
+            configuration=configuration,
+            reference=reference,
+            regulatory=regulatory,
+            structured_data=structured_data
         )
         
-        # Filter for config-type tables only
-        config_tables = []
-        for table_info in selected:
-            table_name = table_info.get('table_name', '').lower()
-            
-            # Check classification
-            classification = self.table_selector._classifications.get(table_name)
-            
-            is_config = False
-            if classification:
-                if hasattr(classification, 'table_type'):
-                    is_config = str(getattr(classification, 'table_type', '')).lower() == 'config'
-                elif isinstance(classification, dict):
-                    is_config = classification.get('table_type') == 'config'
-            
-            # Also check table name for config indicators
-            has_config_indicator = any(ind in table_name for ind in self.CONFIG_INDICATORS)
-            
-            if is_config or has_config_indicator:
-                config_tables.append({
-                    'table_name': table_info.get('table_name'),
-                    'display_name': table_info.get('display_name'),
-                    'score': table_info.get('score', 0),
-                    'classification': classification,
-                    'row_count': table_info.get('row_count', 0)
-                })
+        # v3.0: Add Context Graph context to summaries if available
+        if context_graph:
+            graph_summary = self._summarize_context_graph(context_graph)
+            if graph_summary:
+                summaries.append(graph_summary)
         
-        logger.warning(f"[GATHER-CONFIG] Found {len(config_tables)} config tables from selector, "
-                      f"top: {[t['table_name'][:40] for t in config_tables[:3]]}")
+        # Step 2: Triangulate - find alignments, conflicts, gaps
+        triangulation = self._triangulate(summaries, conflicts or [])
         
-        return config_tables
+        # Step 3: Determine complexity (for logging only now)
+        complexity = self._assess_complexity(question, summaries, triangulation)
+        logger.warning(f"[SYNTHESIS] Complexity: {complexity} (using Qwen for all)")
+        
+        # Step 4: Generate the answer - Qwen handles everything
+        answer_text, method = self._synthesize_with_llm(
+            question=question,
+            summaries=summaries,
+            triangulation=triangulation,
+            conflicts=conflicts or [],
+            complexity=complexity
+        )
+        
+        # Step 5: Extract recommended actions
+        actions = self._extract_actions(answer_text, triangulation)
+        
+        # Step 6: Calculate overall confidence
+        confidence = self._calculate_confidence(summaries, triangulation)
+        
+        self.last_method = method
+        
+        return ConsultativeAnswer(
+            answer=answer_text,
+            confidence=confidence,
+            triangulation=triangulation,
+            recommended_actions=actions,
+            sources_used=[s.source_type for s in summaries if s.has_data],
+            synthesis_method=method
+        )
     
-    def _query_config_table(self, table_name: str, table_info: Dict, 
-                           question: str) -> Optional[Truth]:
-        """Query a config table and return as Truth."""
-        try:
-            # Simple query - get all rows (config tables are usually small)
-            row_count = table_info.get('row_count', 0)
-            limit = min(100, max(50, row_count)) if row_count > 0 else 100
+    # =========================================================================
+    # STEP 1: SUMMARIZE TRUTHS
+    # =========================================================================
+    
+    def _summarize_truths(
+        self,
+        reality: List[Any] = None,
+        intent: List[Any] = None,
+        configuration: List[Any] = None,
+        reference: List[Any] = None,
+        regulatory: List[Any] = None,
+        structured_data: Dict = None
+    ) -> List[TruthSummary]:
+        """Convert raw truth objects into concise summaries for LLM."""
+        summaries = []
+        
+        # REALITY - What the data shows
+        reality_summary = self._summarize_reality(reality, structured_data)
+        summaries.append(reality_summary)
+        
+        # INTENT - What customer wants
+        intent_summary = self._summarize_documents(intent, 'intent', 'Customer Intent')
+        summaries.append(intent_summary)
+        
+        # CONFIGURATION - How it's set up  
+        config_summary = self._summarize_documents(configuration, 'configuration', 'Configuration')
+        summaries.append(config_summary)
+        
+        # REFERENCE - Best practices
+        ref_summary = self._summarize_documents(reference, 'reference', 'Reference/Best Practice')
+        summaries.append(ref_summary)
+        
+        # REGULATORY - Legal requirements
+        reg_summary = self._summarize_documents(regulatory, 'regulatory', 'Regulatory/Legal')
+        summaries.append(reg_summary)
+        
+        return summaries
+    
+    def _summarize_context_graph(self, context_graph: Dict) -> Optional[TruthSummary]:
+        """
+        Summarize Context Graph relationships for LLM context.
+        
+        v3.0: Provides hub/spoke relationship context so LLM understands
+        how data connects and where gaps exist.
+        """
+        if not context_graph:
+            return None
+        
+        hubs = context_graph.get('hubs', [])
+        relationships = context_graph.get('relationships', [])
+        
+        if not hubs and not relationships:
+            return None
+        
+        key_facts = []
+        
+        # Summarize hubs (master data)
+        if hubs:
+            key_facts.append(f"Data model has {len(hubs)} master data hubs:")
+            for hub in hubs[:5]:
+                sem_type = hub.get('semantic_type', 'unknown')
+                table = hub.get('table', 'unknown')
+                key_facts.append(f"  - {sem_type}: {table}")
+        
+        # Summarize coverage gaps
+        low_coverage = [r for r in relationships if (r.get('coverage_pct') or 0) < 70]
+        if low_coverage:
+            key_facts.append(f"\nData coverage gaps ({len(low_coverage)} tables with <70% coverage):")
+            for rel in low_coverage[:5]:
+                spoke = rel.get('spoke_table', 'unknown')
+                sem_type = rel.get('semantic_type', 'unknown')
+                coverage = rel.get('coverage_pct', 0)
+                matched = rel.get('matched_count', 0)
+                total = rel.get('hub_count', 0)
+                key_facts.append(f"  - {spoke}: only {matched}/{total} {sem_type}s ({coverage:.0f}%)")
+        
+        if not key_facts:
+            return None
+        
+        return TruthSummary(
+            source_type='data_model',
+            has_data=True,
+            summary=f"Context Graph: {len(hubs)} hubs, {len(relationships)} relationships",
+            key_facts=key_facts,
+            confidence=0.95,
+            sources=['context_graph']
+        )
+    
+    def _summarize_reality(self, reality: List[Any], structured_data: Dict = None) -> TruthSummary:
+        """Summarize data/query results."""
+        if not reality and not structured_data:
+            return TruthSummary(
+                source_type='reality',
+                has_data=False,
+                summary="No data found matching the query.",
+                confidence=0.0
+            )
+        
+        key_facts = []
+        sources = []
+        
+        # Extract from structured_data if available
+        if structured_data:
+            rows = structured_data.get('rows', [])
+            cols = structured_data.get('columns', [])
+            query_type = structured_data.get('query_type', 'list')
+            sql = structured_data.get('sql', '')
             
-            sql = f'SELECT * FROM "{table_name}" LIMIT {limit}'
-            rows = self.handler.query(sql)
+            if query_type == 'count' and rows:
+                count = list(rows[0].values())[0] if rows[0] else 0
+                key_facts.append(f"Count: {count:,} records")
+            elif query_type == 'group' and rows:
+                key_facts.append(f"Found {len(rows)} groups/categories")
+                for row in rows[:5]:
+                    vals = list(row.values())
+                    if len(vals) >= 2:
+                        key_facts.append(f"  - {vals[0]}: {vals[1]}")
+            elif rows:
+                # =====================================================================
+                # SEND ACTUAL DATA - Trust the LLM to reason over it
+                # The AI should be able to see tax_type=SUI and understand that's the SUI rate
+                # =====================================================================
+                key_facts.append(f"Table: {len(rows)} records, {len(cols)} columns")
+                key_facts.append(f"Columns: {', '.join(cols)}")
+                
+                # Send sample rows - this is the ACTUAL DATA the LLM needs to reason over
+                key_facts.append("\nSample data:")
+                for i, row in enumerate(rows[:15]):  # Up to 15 rows
+                    row_str = " | ".join(f"{k}={v}" for k, v in list(row.items())[:8])
+                    key_facts.append(f"  Row {i+1}: {row_str}")
+                
+                if len(rows) > 15:
+                    key_facts.append(f"  ... and {len(rows) - 15} more rows")
             
-            if not rows:
-                return None
+            if sql:
+                # Extract table name from SQL for clarity
+                table_match = re.search(r'FROM\s+["\']?(\w+)["\']?', sql, re.IGNORECASE)
+                if table_match:
+                    key_facts.append(f"\nSource: {table_match.group(1)}")
+        
+        # Extract from Truth objects
+        if reality:
+            for truth in reality[:3]:
+                content = getattr(truth, 'content', truth) if hasattr(truth, 'content') else truth
+                source_name = getattr(truth, 'source_name', 'Data') if hasattr(truth, 'source_name') else 'Data'
+                
+                if isinstance(content, dict):
+                    if 'rows' in content:
+                        key_facts.append(f"From {source_name}: {len(content['rows'])} rows")
+                elif isinstance(content, str):
+                    key_facts.append(f"From {source_name}: {content[:100]}")
+                
+                sources.append(source_name)
+        
+        summary = "; ".join(key_facts[:5]) if key_facts else "Data retrieved but no specific findings."
+        
+        return TruthSummary(
+            source_type='reality',
+            has_data=True,
+            summary=summary,
+            key_facts=key_facts,
+            confidence=0.9 if rows else 0.5,
+            sources=sources
+        )
+    
+    def _summarize_documents(
+        self, 
+        truths: List[Any], 
+        source_type: str, 
+        display_name: str
+    ) -> TruthSummary:
+        """Summarize document-based truths (intent, config, reference, regulatory)."""
+        if not truths:
+            return TruthSummary(
+                source_type=source_type,
+                has_data=False,
+                summary=f"No {display_name.lower()} documents found.",
+                confidence=0.0
+            )
+        
+        key_facts = []
+        sources = []
+        total_confidence = 0.0
+        
+        for truth in truths[:5]:  # Limit to top 5 most relevant
+            content = getattr(truth, 'content', str(truth))
+            source_name = getattr(truth, 'source_name', 'Document')
+            confidence = getattr(truth, 'confidence', 0.5)
             
-            columns = list(rows[0].keys()) if rows else []
-            display_name = table_info.get('display_name') or table_name
+            # Extract key content
+            if isinstance(content, str):
+                # Take first 200 chars as summary
+                snippet = content[:200].strip()
+                if len(content) > 200:
+                    snippet += "..."
+                key_facts.append(f"[{source_name}]: {snippet}")
+            elif isinstance(content, dict):
+                # v3.2: Safe serialization - filter out non-serializable objects
+                # Known problematic keys: 'classification' (contains TableClassification objects)
+                try:
+                    # Exclude known non-serializable keys and non-basic types
+                    exclude_keys = {'classification', 'table_classification', 'metadata_obj'}
+                    
+                    def is_serializable(v):
+                        """Check if value is JSON-serializable."""
+                        if v is None:
+                            return True
+                        if isinstance(v, (str, int, float, bool)):
+                            return True
+                        if isinstance(v, (list, tuple)):
+                            return all(is_serializable(item) for item in v)
+                        if isinstance(v, dict):
+                            return all(isinstance(k, str) and is_serializable(val) for k, val in v.items())
+                        return False
+                    
+                    safe_content = {k: v for k, v in content.items() 
+                                  if k not in exclude_keys and is_serializable(v)}
+                    key_facts.append(f"[{source_name}]: {json.dumps(safe_content)[:200]}")
+                except (TypeError, ValueError) as e:
+                    # Fallback to string representation
+                    logger.debug(f"[SYNTHESIS] JSON serialization failed: {e}, using string fallback")
+                    key_facts.append(f"[{source_name}]: {str(content)[:200]}")
             
-            # Get domain from classification (handle both object and dict)
-            classification = table_info.get('classification')
-            if classification is None:
-                domain = None
-            elif hasattr(classification, 'domain'):
-                domain = str(getattr(classification, 'domain', ''))
+            sources.append(source_name)
+            total_confidence += confidence
+        
+        avg_confidence = total_confidence / len(truths) if truths else 0.0
+        summary = f"Found {len(truths)} relevant {display_name.lower()} documents."
+        
+        return TruthSummary(
+            source_type=source_type,
+            has_data=True,
+            summary=summary,
+            key_facts=key_facts[:5],
+            confidence=avg_confidence,
+            sources=sources
+        )
+    
+    # =========================================================================
+    # STEP 2: TRIANGULATE
+    # =========================================================================
+    
+    def _triangulate(
+        self, 
+        summaries: List[TruthSummary],
+        pre_detected_conflicts: List[Any]
+    ) -> TriangulationResult:
+        """
+        Compare truths across sources to find alignments, conflicts, and gaps.
+        
+        This is the core "consultant" logic - finding where sources agree,
+        disagree, or where information is missing.
+        """
+        alignments = []
+        conflicts = []
+        gaps = []
+        
+        # Check which sources have data
+        has_reality = any(s.has_data for s in summaries if s.source_type == 'reality')
+        has_intent = any(s.has_data for s in summaries if s.source_type == 'intent')
+        has_config = any(s.has_data for s in summaries if s.source_type == 'configuration')
+        has_reference = any(s.has_data for s in summaries if s.source_type == 'reference')
+        has_regulatory = any(s.has_data for s in summaries if s.source_type == 'regulatory')
+        
+        # Identify gaps
+        if not has_intent:
+            gaps.append("No customer requirement documents found - unable to verify against stated intent")
+        if not has_config:
+            gaps.append("No configuration documentation found - unable to verify system setup")
+        if not has_reference:
+            gaps.append("No best practice reference found - unable to compare against standards")
+        if not has_regulatory:
+            gaps.append("No regulatory documentation found - compliance verification limited")
+        
+        # Convert pre-detected conflicts
+        for conflict in pre_detected_conflicts:
+            if hasattr(conflict, 'description'):
+                conflicts.append(conflict.description)
+            elif isinstance(conflict, dict):
+                conflicts.append(conflict.get('description', str(conflict)))
             else:
-                domain = classification.get('domain') if isinstance(classification, dict) else None
+                conflicts.append(str(conflict))
+        
+        # If we have both reality and regulatory, that's a key alignment point
+        if has_reality and has_regulatory and not conflicts:
+            alignments.append("Data appears consistent with available regulatory guidance")
+        
+        # If we have reality and config, note alignment
+        if has_reality and has_config and not conflicts:
+            alignments.append("System configuration aligns with observed data patterns")
+        
+        # Calculate triangulation confidence
+        sources_available = sum([has_reality, has_intent, has_config, has_reference, has_regulatory])
+        base_confidence = sources_available / 5.0  # 5 truth types
+        
+        # Reduce confidence if there are conflicts
+        conflict_penalty = min(len(conflicts) * 0.1, 0.3)
+        gap_penalty = min(len(gaps) * 0.05, 0.2)
+        
+        confidence = max(0.1, base_confidence - conflict_penalty - gap_penalty)
+        
+        return TriangulationResult(
+            alignments=alignments,
+            conflicts=conflicts,
+            gaps=gaps,
+            confidence=confidence
+        )
+    
+    # =========================================================================
+    # STEP 3: ASSESS COMPLEXITY
+    # =========================================================================
+    
+    def _assess_complexity(
+        self,
+        question: str,
+        summaries: List[TruthSummary],
+        triangulation: TriangulationResult
+    ) -> str:
+        """
+        Determine if this needs full LLM synthesis or simple template.
+        
+        Returns: 'simple' or 'complex'
+        """
+        q_lower = question.lower()
+        
+        # Simple queries - just need data display
+        simple_patterns = [
+            'how many',
+            'count of',
+            'list all',
+            'show me',
+            'what are the',
+        ]
+        
+        # Complex queries - need triangulation and analysis
+        complex_patterns = [
+            'correct',
+            'valid',
+            'compliant',
+            'should',
+            'recommend',
+            'issue',
+            'problem',
+            'compare',
+            'why',
+            'risk',
+            'audit',
+        ]
+        
+        # Check for complexity indicators
+        has_conflicts = len(triangulation.conflicts) > 0
+        has_multiple_sources = sum(1 for s in summaries if s.has_data) > 1
+        is_validation_question = any(p in q_lower for p in complex_patterns)
+        is_simple_question = any(p in q_lower for p in simple_patterns) and not is_validation_question
+        
+        if is_simple_question and not has_conflicts and not has_multiple_sources:
+            return 'simple'
+        
+        return 'complex'
+    
+    # =========================================================================
+    # STEP 4A: SIMPLE SYNTHESIS (Template-based)
+    # =========================================================================
+    
+    def _synthesize_simple(self, question: str, structured_data: Dict) -> str:
+        """Generate a simple, direct answer for straightforward queries."""
+        rows = structured_data.get('rows', [])
+        cols = structured_data.get('columns', [])
+        query_type = structured_data.get('query_type', 'list')
+        
+        if query_type == 'count' and rows:
+            count = list(rows[0].values())[0] if rows[0] else 0
+            try:
+                count = int(count)
+                return f"Based on your data, the count is **{count:,}**."
+            except Exception:
+                return f"Based on your data, the result is **{count}**."
+        
+        elif query_type == 'group' and rows:
+            parts = [f"Here's the breakdown ({len(rows)} categories):\n"]
+            for row in rows[:10]:
+                vals = list(row.values())
+                if len(vals) >= 2:
+                    parts.append(f"- **{vals[0]}**: {vals[1]}")
+            if len(rows) > 10:
+                parts.append(f"\n*...and {len(rows) - 10} more*")
+            return "\n".join(parts)
+        
+        elif rows:
+            parts = [f"Found **{len(rows)}** matching records.\n"]
+            if cols and len(cols) <= 6:
+                # Show as table
+                parts.append("| " + " | ".join(cols) + " |")
+                parts.append("|" + "---|" * len(cols))
+                for row in rows[:10]:
+                    vals = [str(row.get(c, ''))[:25] for c in cols]
+                    parts.append("| " + " | ".join(vals) + " |")
+            if len(rows) > 10:
+                parts.append(f"\n*Showing first 10 of {len(rows)} results*")
+            return "\n".join(parts)
+        
+        return "No data found matching your query."
+    
+    # =========================================================================
+    # STEP 4B: LLM SYNTHESIS
+    # =========================================================================
+    
+    def _synthesize_with_llm(
+        self,
+        question: str,
+        summaries: List[TruthSummary],
+        triangulation: TriangulationResult,
+        conflicts: List[Any],
+        complexity: str = 'complex'
+    ) -> Tuple[str, str]:
+        """
+        Use LLM to synthesize a consultative answer.
+        
+        MODEL CASCADE (in order):
+        1. Groq (llama-3.3-70b) - Fast, reliable, high quality
+        2. Local Ollama (deepseek-r1:14b) - If Groq unavailable
+        3. Claude API - Final fallback
+        
+        Returns: (answer_text, method_used)
+        """
+        # Build context from summaries
+        context_parts = []
+        for summary in summaries:
+            if summary.has_data:
+                context_parts.append(f"=== {summary.source_type.upper()} ===")
+                context_parts.append(summary.summary)
+                # Send ALL key_facts - this is the actual data the LLM needs
+                for fact in summary.key_facts:
+                    context_parts.append(f"  {fact}")
+        
+        # Add conflicts
+        if triangulation.conflicts:
+            context_parts.append("\n=== CONFLICTS DETECTED ===")
+            for c in triangulation.conflicts[:5]:
+                context_parts.append(f"  ⚠ {c}")
+        
+        # Add gaps
+        if triangulation.gaps:
+            context_parts.append("\n=== INFORMATION GAPS ===")
+            for g in triangulation.gaps[:3]:
+                context_parts.append(f"  • {g}")
+        
+        context = "\n".join(context_parts)
+        
+        # Expert prompt - consultative style
+        expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
+
+RESPONSE FORMAT:
+1. Direct answer to the question (YES/NO/PARTIALLY with specifics)
+2. Key findings from the data (bullet points with actual values)
+3. Issues or gaps identified (if any)
+4. Recommended next steps
+
+Be specific. Quote actual values from the data. Do not be vague."""
+
+        MIN_RESPONSE_LENGTH = 150
+        
+        # =====================================================================
+        # USE LLM ORCHESTRATOR - Handles cascade internally
+        # =====================================================================
+        if not self._orchestrator:
+            logger.warning("[CONSULTATIVE] LLMOrchestrator not available, using template")
+            return self._template_fallback(question, summaries, triangulation), 'template'
+        
+        logger.warning("[CONSULTATIVE] Using LLMOrchestrator for synthesis...")
+        result = self._orchestrator.synthesize_answer(
+            question=question,
+            context=context,
+            expert_prompt=expert_prompt,
+            use_claude_fallback=True
+        )
+        
+        if result.get('success') and result.get('response'):
+            response_len = len(result.get('response', ''))
+            model_used = result.get('model_used', 'unknown')
             
-            logger.debug(f"[GATHER-CONFIG] Queried {table_name}: {len(rows)} rows")
+            if response_len >= MIN_RESPONSE_LENGTH:
+                logger.warning(f"[CONSULTATIVE] {model_used} succeeded ({response_len} chars)")
+                return result['response'], model_used
+            else:
+                logger.warning(f"[CONSULTATIVE] {model_used} response too short ({response_len} chars)")
+        else:
+            logger.warning(f"[CONSULTATIVE] LLM failed: {result.get('error', 'unknown')}")
+        
+        # Final fallback - template-based
+        logger.warning("[CONSULTATIVE] All LLMs failed, using template")
+        return self._template_fallback(question, summaries, triangulation), 'template'
+    
+    def _call_local_model(self, model: str, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
+        """
+        Call a specific local Ollama model for synthesis.
+        """
+        try:
+            import requests
+            from requests.auth import HTTPBasicAuth
+            import os
             
-            return self.create_truth(
-                source_name=display_name,
-                content={
-                    'sql': sql,
-                    'columns': columns,
-                    'rows': rows,
-                    'total': len(rows),
-                    'table': table_name,
-                    'display_name': display_name,
-                    'is_config_table': True,
-                    'classification': classification
-                },
-                location=f"Config table: {display_name}",
-                confidence=0.90,
-                row_count=len(rows),
-                column_count=len(columns),
-                domain=domain
+            ollama_url = os.getenv("LLM_ENDPOINT", "").rstrip('/')
+            ollama_username = os.getenv("LLM_USERNAME", "")
+            ollama_password = os.getenv("LLM_PASSWORD", "")
+            
+            if not ollama_url:
+                logger.warning("[CONSULTATIVE] No LLM_ENDPOINT configured")
+                return {"success": False, "error": "No Ollama URL"}
+            
+            prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context[:10000]}
+
+Provide a direct answer based ONLY on the data above."""
+
+            url = f"{ollama_url}/api/generate"
+            payload = {
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "options": {
+                    "temperature": 0.3,  # Slightly higher for more natural output
+                    "num_predict": 1000  # Allow longer responses
+                }
+            }
+            
+            logger.warning(f"[CONSULTATIVE] Calling {model} ({len(prompt)} chars)")
+            
+            if ollama_username and ollama_password:
+                response = requests.post(
+                    url, json=payload,
+                    auth=HTTPBasicAuth(ollama_username, ollama_password),
+                    timeout=90
+                )
+            else:
+                response = requests.post(url, json=payload, timeout=90)
+            
+            if response.status_code == 200:
+                result = response.json().get("response", "").strip()
+                if result and len(result) > 30:
+                    logger.warning(f"[CONSULTATIVE] {model} succeeded ({len(result)} chars)")
+                    return {
+                        "success": True,
+                        "response": result,
+                        "model_used": model
+                    }
+                else:
+                    logger.warning(f"[CONSULTATIVE] {model} returned empty/short response")
+                    return {"success": False, "error": "Empty response"}
+            else:
+                logger.warning(f"[CONSULTATIVE] {model} HTTP error: {response.status_code}")
+                return {"success": False, "error": f"HTTP {response.status_code}"}
+                
+        except Exception as e:
+            logger.error(f"[CONSULTATIVE] {model} error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _call_claude_direct(self, question: str, context: str, expert_prompt: str) -> Dict[str, Any]:
+        """
+        Call Claude via LLMOrchestrator.
+        
+        This method is kept for backward compatibility but now delegates to orchestrator.
+        """
+        if not self._orchestrator:
+            logger.warning("[CONSULTATIVE] LLMOrchestrator not available for Claude call")
+            return {"success": False, "error": "No orchestrator"}
+        
+        try:
+            prompt = f"""{expert_prompt}
+
+QUESTION: {question}
+
+DATA:
+{context}
+
+Provide a direct answer based ONLY on the data above."""
+
+            result = self._orchestrator.synthesize_answer(
+                question=prompt,
+                context="",
+                use_claude_fallback=True
             )
             
+            if result.get('success') and result.get('response'):
+                logger.warning(f"[CONSULTATIVE] Claude via orchestrator succeeded ({len(result['response'])} chars)")
+                return {
+                    "success": True,
+                    "response": result['response'].strip(),
+                    "model_used": result.get('model_used', 'claude-via-orchestrator')
+                }
+            
+            return {"success": False, "error": result.get('error', 'Unknown error')}
+            
         except Exception as e:
-            logger.error(f"[GATHER-CONFIG] Error querying {table_name}: {e}")
-            return None
+            logger.error(f"[CONSULTATIVE] Claude call failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _template_fallback(
+        self,
+        question: str,
+        summaries: List[TruthSummary],
+        triangulation: TriangulationResult
+    ) -> str:
+        """Generate answer using templates when LLMs are unavailable."""
+        parts = []
+        
+        # Lead with reality
+        reality = next((s for s in summaries if s.source_type == 'reality'), None)
+        if reality and reality.has_data:
+            parts.append(f"**What the data shows:** {reality.summary}")
+            for fact in reality.key_facts[:3]:
+                parts.append(f"  - {fact}")
+        else:
+            parts.append("**Data:** No matching records found.")
+        
+        # Note any conflicts
+        if triangulation.conflicts:
+            parts.append("\n**⚠️ Potential issues detected:**")
+            for conflict in triangulation.conflicts[:3]:
+                parts.append(f"  - {conflict}")
+        
+        # Note information gaps
+        if triangulation.gaps:
+            parts.append("\n**ℹ️ Note:** " + triangulation.gaps[0])
+        
+        # Add supporting context from other truths
+        for source_type in ['regulatory', 'reference', 'configuration']:
+            source = next((s for s in summaries if s.source_type == source_type and s.has_data), None)
+            if source:
+                label = {
+                    'regulatory': '⚖️ Regulatory context',
+                    'reference': '📚 Best practice',
+                    'configuration': '⚙️ Configuration'
+                }.get(source_type, source_type)
+                parts.append(f"\n**{label}:** {source.key_facts[0] if source.key_facts else source.summary}")
+        
+        return "\n".join(parts)
+    
+    # =========================================================================
+    # STEP 5: EXTRACT ACTIONS
+    # =========================================================================
+    
+    def _extract_actions(
+        self,
+        answer_text: str,
+        triangulation: TriangulationResult
+    ) -> List[str]:
+        """Extract recommended next steps from the answer."""
+        actions = []
+        
+        # Look for action phrases in the answer
+        action_phrases = [
+            'recommend',
+            'should',
+            'next step',
+            'verify',
+            'check',
+            'review',
+            'update',
+            'confirm',
+        ]
+        
+        lines = answer_text.split('.')
+        for line in lines:
+            line_lower = line.lower()
+            if any(phrase in line_lower for phrase in action_phrases):
+                # Clean up the line
+                action = line.strip()
+                if len(action) > 20 and len(action) < 200:
+                    actions.append(action)
+        
+        # Add gap-based recommendations
+        if triangulation.gaps:
+            for gap in triangulation.gaps[:2]:
+                if 'regulatory' in gap.lower():
+                    actions.append("Consider uploading relevant regulatory documentation for compliance verification")
+                elif 'reference' in gap.lower():
+                    actions.append("Consider uploading implementation standards for best practice comparison")
+        
+        return actions[:5]  # Limit to 5 actions
+    
+    # =========================================================================
+    # STEP 6: CALCULATE CONFIDENCE
+    # =========================================================================
+    
+    def _calculate_confidence(
+        self,
+        summaries: List[TruthSummary],
+        triangulation: TriangulationResult
+    ) -> float:
+        """Calculate overall confidence in the answer."""
+        
+        # Start with triangulation confidence
+        confidence = triangulation.confidence
+        
+        # Boost for having reality (data)
+        reality = next((s for s in summaries if s.source_type == 'reality'), None)
+        if reality and reality.has_data:
+            confidence += 0.2
+        
+        # Boost for having regulatory backing
+        regulatory = next((s for s in summaries if s.source_type == 'regulatory'), None)
+        if regulatory and regulatory.has_data:
+            confidence += 0.1
+        
+        # Penalty for conflicts
+        confidence -= len(triangulation.conflicts) * 0.1
+        
+        return max(0.1, min(0.95, confidence))
+
+
+# =============================================================================
+# INTEGRATION HELPER
+# =============================================================================
+
+def integrate_with_intelligence_engine(engine_instance, synthesizer: ConsultativeSynthesizer):
+    """
+    Helper to integrate the synthesizer with an existing IntelligenceEngine.
+    
+    Call this after creating both objects to wire them together.
+    
+    Usage:
+        engine = IntelligenceEngine(...)
+        synthesizer = ConsultativeSynthesizer(...)
+        integrate_with_intelligence_engine(engine, synthesizer)
+    """
+    # Store synthesizer reference
+    engine._synthesizer = synthesizer
+    
+    # Store original method
+    original_generate = engine._generate_consultative_response
+    
+    def enhanced_generate(
+        question: str,
+        query_type: str,
+        result_value: Any,
+        result_rows: List[Dict],
+        result_columns: List[str],
+        data_context: List[str],
+        doc_context: List[str],
+        reflib_context: List[str],
+        filters_applied: List[str],
+        insights: List,
+        conflicts: List = None,
+        compliance_check: Optional[Dict] = None
+    ) -> str:
+        """Enhanced response generation using ConsultativeSynthesizer."""
+        
+        # Build structured_data from params
+        structured_data = {
+            'rows': result_rows,
+            'columns': result_columns,
+            'query_type': query_type,
+        }
+        if result_value is not None:
+            structured_data['rows'] = [{'value': result_value}]
+        
+        try:
+            # Use new synthesizer
+            answer = synthesizer.synthesize(
+                question=question,
+                structured_data=structured_data,
+                conflicts=conflicts,
+                insights=insights,
+            )
+            return answer.answer
+        except Exception as e:
+            logger.error(f"[SYNTHESIS] Enhanced synthesis failed: {e}, falling back to original")
+            # Fall back to original implementation
+            return original_generate(
+                question=question,
+                query_type=query_type,
+                result_value=result_value,
+                result_rows=result_rows,
+                result_columns=result_columns,
+                data_context=data_context,
+                doc_context=doc_context,
+                reflib_context=reflib_context,
+                filters_applied=filters_applied,
+                insights=insights,
+                conflicts=conflicts,
+                compliance_check=compliance_check
+            )
+    
+    # Replace method
+    engine._generate_consultative_response = enhanced_generate
+    logger.info("[SYNTHESIS] Successfully integrated ConsultativeSynthesizer with IntelligenceEngine")
+
+
+# =============================================================================
+# STANDALONE TEST
+# =============================================================================
+
+if __name__ == "__main__":
+    # Quick test
+    synthesizer = ConsultativeSynthesizer()
+    
+    # Simulate some data
+    test_structured = {
+        'rows': [
+            {'state': 'TX', 'rate': 0.031, 'company': 'ACME'},
+            {'state': 'CA', 'rate': 0.034, 'company': 'ACME'},
+            {'state': 'NY', 'rate': 0.039, 'company': 'ACME'},
+        ],
+        'columns': ['state', 'rate', 'company'],
+        'query_type': 'list'
+    }
+    
+    result = synthesizer.synthesize(
+        question="Are my SUI rates correct?",
+        structured_data=test_structured
+    )
+    
+    logger.debug("=" * 60)
+    logger.debug("CONSULTATIVE ANSWER:")
+    logger.debug("=" * 60)
+    logger.debug(f"Debug output: {result.answer}")
+    logger.debug("=" * 60)
+    logger.debug(f"Confidence: {result.confidence:.1%}")
+    logger.debug(f"Method: {result.synthesis_method}")
+    logger.debug(f"Actions: {result.recommended_actions}")
