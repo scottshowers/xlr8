@@ -610,19 +610,25 @@ async def delete_all_project_data(project_id: str):
     collection = _get_chromadb()
     if collection:
         try:
+            # Try both field names - some chunks use project_id, others use project
             results = collection.get(where={"project_id": project_id})
             if results and results['ids']:
                 collection.delete(ids=results['ids'])
                 deleted["documents"] = len(results['ids'])
-        except Exception:
-            # Try alternate field name
+                logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (project_id)")
+        except Exception as e1:
+            logger.debug(f"[CLEANUP] project_id query failed: {e1}")
+        
+        # Also try 'project' field
+        if deleted["documents"] == 0:
             try:
                 results = collection.get(where={"project": project_id})
                 if results and results['ids']:
                     collection.delete(ids=results['ids'])
                     deleted["documents"] = len(results['ids'])
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+                    logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (project)")
+            except Exception as e2:
+                logger.debug(f"[CLEANUP] project query failed: {e2}")
     
     # 3. Jobs and Relationships in Supabase
     supabase = _get_supabase()
@@ -934,3 +940,41 @@ async def get_data_integrity():
         }
     except Exception as e:
         return {"healthy": False, "issues": [], "error": str(e)}
+
+
+@router.delete("/status/chromadb/all")
+async def delete_all_chromadb_chunks():
+    """
+    NUCLEAR OPTION: Delete ALL chunks from ChromaDB.
+    Use when normal cleanup fails.
+    """
+    logger.warning("[CLEANUP] NUCLEAR: Deleting ALL ChromaDB chunks!")
+    
+    collection = _get_chromadb()
+    if not collection:
+        return {"success": False, "error": "ChromaDB not available"}
+    
+    try:
+        # Get all document IDs
+        all_docs = collection.get()
+        if not all_docs or not all_docs.get('ids'):
+            return {"success": True, "deleted": 0, "message": "No chunks found"}
+        
+        chunk_ids = all_docs['ids']
+        total = len(chunk_ids)
+        
+        # Delete in batches of 1000 to avoid timeouts
+        batch_size = 1000
+        deleted = 0
+        for i in range(0, total, batch_size):
+            batch = chunk_ids[i:i+batch_size]
+            collection.delete(ids=batch)
+            deleted += len(batch)
+            logger.warning(f"[CLEANUP] Deleted batch {i//batch_size + 1}: {len(batch)} chunks")
+        
+        logger.warning(f"[CLEANUP] NUCLEAR complete: {deleted} total chunks deleted")
+        return {"success": True, "deleted": deleted}
+        
+    except Exception as e:
+        logger.error(f"[CLEANUP] NUCLEAR failed: {e}")
+        return {"success": False, "error": str(e)}
