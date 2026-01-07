@@ -237,18 +237,19 @@ class IntelligentScoping:
         
         try:
             # Query _column_mappings for hub columns
+            # Schema: original_column (not column_name), semantic_type, is_hub
             sql = """
-                SELECT DISTINCT column_name, semantic_type, 
+                SELECT DISTINCT original_column, semantic_type, 
                        COUNT(*) as table_count
                 FROM _column_mappings 
                 WHERE is_hub = TRUE OR is_hub = 1
-                GROUP BY column_name, semantic_type
+                GROUP BY original_column, semantic_type
                 ORDER BY table_count DESC
             """
             rows = self.handler.query(sql)
             
             for row in rows:
-                col = row.get('column_name', '')
+                col = row.get('original_column', '')
                 count = row.get('table_count', 0)
                 if col and count >= self.MIN_HUB_SPOKES:
                     hubs.append(col)
@@ -269,16 +270,17 @@ class IntelligentScoping:
         
         try:
             # Query all columns that look like segmentation candidates
+            # Schema uses original_column, not column_name
             patterns = [p[0] for p in self.SEGMENTATION_PATTERNS]
-            pattern_clause = " OR ".join([f"LOWER(column_name) LIKE '%{p}%'" for p in patterns])
+            pattern_clause = " OR ".join([f"LOWER(original_column) LIKE '%{p}%'" for p in patterns])
             
             sql = f"""
-                SELECT DISTINCT column_name
+                SELECT DISTINCT original_column
                 FROM _column_mappings 
                 WHERE {pattern_clause}
             """
             rows = self.handler.query(sql)
-            hubs = [r.get('column_name') for r in rows if r.get('column_name')]
+            hubs = [r.get('original_column') for r in rows if r.get('original_column')]
             
         except Exception as e:
             logger.debug(f"[SCOPE] Could not discover hubs from patterns: {e}")
@@ -328,29 +330,23 @@ class IntelligentScoping:
         
         try:
             # Find columns that appear in multiple tables and have low cardinality
+            # Schema: _column_mappings has original_column, table_name
+            # Schema: _column_profiles has column_name (different!), distinct_count
             sql = """
                 SELECT 
-                    cm.column_name,
-                    COUNT(DISTINCT cm.table_name) as table_count,
-                    MAX(cp.distinct_count) as max_distinct
+                    cm.original_column,
+                    COUNT(DISTINCT cm.table_name) as table_count
                 FROM _column_mappings cm
-                LEFT JOIN _column_profiles cp 
-                    ON cm.table_name = cp.table_name 
-                    AND cm.column_name = cp.column_name
-                WHERE cm.column_name IS NOT NULL
-                GROUP BY cm.column_name
+                WHERE cm.original_column IS NOT NULL
+                GROUP BY cm.original_column
                 HAVING COUNT(DISTINCT cm.table_name) >= 2
-                ORDER BY table_count DESC, max_distinct ASC
+                ORDER BY table_count DESC
+                LIMIT 50
             """
             rows = self.handler.query(sql)
             
             for row in rows:
-                col_name = row.get('column_name', '')
-                distinct = row.get('max_distinct', 0) or 999
-                
-                # Skip high-cardinality columns (not good for segmentation)
-                if distinct > 50:
-                    continue
+                col_name = row.get('original_column', '')
                 
                 # Check if column matches segmentation patterns
                 col_lower = col_name.lower()
@@ -433,11 +429,11 @@ class IntelligentScoping:
         tables = []
         
         try:
-            # Query _column_mappings or information_schema
+            # Query _column_mappings - uses original_column, not column_name
             sql = f"""
                 SELECT DISTINCT table_name 
                 FROM _column_mappings 
-                WHERE LOWER(column_name) = LOWER('{column}')
+                WHERE LOWER(original_column) = LOWER('{column}')
             """
             rows = self.handler.query(sql)
             tables = [r.get('table_name') for r in rows if r.get('table_name')]
