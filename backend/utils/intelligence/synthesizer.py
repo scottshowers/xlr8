@@ -116,11 +116,29 @@ class Synthesizer:
         self._last_regulatory = regulatory
         self._context_graph = context_graph  # v3.0
         
+        # Store context for routing decisions
+        self._context = context or {}
+        
         reasoning = []
         
-        # Extract data from reality truths
-        data_info = self._extract_data_info(reality)
-        reasoning.append(f"Found {len(reality)} data results (Reality)")
+        # =====================================================================
+        # v3.1: Smart Data Source Selection
+        # For config listing questions (list earnings, show deductions, etc.),
+        # use Configuration data, not Reality (which may have employee data)
+        # =====================================================================
+        is_config = self._context.get('is_config', False)
+        is_config_listing = self._is_config_listing_question(question.lower())
+        
+        # Decide primary data source
+        if is_config_listing and configuration:
+            # For config listings, use Configuration as primary
+            logger.warning("[SYNTHESIZE] Config listing detected - using Configuration as primary data source")
+            data_info = self._extract_data_info(configuration)
+            reasoning.append(f"Config listing: Using {len(configuration)} configuration results")
+        else:
+            # Default: use Reality
+            data_info = self._extract_data_info(reality)
+            reasoning.append(f"Found {len(reality)} data results (Reality)")
         
         # Extract document context
         doc_context = self._build_doc_context(intent, configuration)
