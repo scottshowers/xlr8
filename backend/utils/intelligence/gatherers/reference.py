@@ -32,7 +32,7 @@ class ReferenceGatherer(ChromaDBGatherer):
     - Best practices
     
     IMPORTANT: Reference is GLOBAL - it applies to all projects.
-    We do NOT filter by project_id.
+    We do NOT filter by project_id, BUT we DO filter by system (UKG, Workday, etc.)
     
     This enables the "Regulatory ↔ Reference dovetail" described in ARCHITECTURE.md:
     - Regulatory says "Secure 2.0 requires X"
@@ -42,7 +42,7 @@ class ReferenceGatherer(ChromaDBGatherer):
     truth_type = TruthType.REFERENCE
     
     def __init__(self, project_name: str = None, project_id: str = None,
-                 rag_handler=None):
+                 rag_handler=None, system: str = None):
         """
         Initialize Reference gatherer.
         
@@ -50,9 +50,11 @@ class ReferenceGatherer(ChromaDBGatherer):
             project_name: Project code (optional, for logging only)
             project_id: Project UUID (NOT used for filtering - Reference is global)
             rag_handler: ChromaDB/RAG handler instance
+            system: System filter (ukg, workday, etc.) - filters vendor docs
         """
         # Pass project_id to parent but we won't use it for filtering
         super().__init__(project_name or "global", project_id, rag_handler)
+        self.system = system.lower() if system else None
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
         """
@@ -60,7 +62,7 @@ class ReferenceGatherer(ChromaDBGatherer):
         
         Args:
             question: User's question
-            context: Analysis context
+            context: Analysis context (may contain 'system' override)
             
         Returns:
             List of Truth objects from reference documentation
@@ -73,14 +75,33 @@ class ReferenceGatherer(ChromaDBGatherer):
         
         truths = []
         
+        # Get system from context if not set at init
+        system = context.get('system', self.system)
+        
         try:
-            # Search GLOBAL reference documents (NO project_id filter)
-            logger.warning(f"[GATHER-REFERENCE] Searching ChromaDB for: {question[:50]}...")
+            # Build where clause - Reference is GLOBAL (no project_id)
+            # But we DO filter by system for vendor docs
+            if system:
+                where_clause = {
+                    "$and": [
+                        {"truth_type": "reference"},
+                        {"$or": [
+                            {"system": system.lower()},
+                            {"system": "universal"},
+                            {"system": None}  # Legacy untagged docs
+                        ]}
+                    ]
+                }
+                logger.warning(f"[GATHER-REFERENCE] Searching ChromaDB for system={system}: {question[:50]}...")
+            else:
+                where_clause = {"truth_type": "reference"}
+                logger.warning(f"[GATHER-REFERENCE] Searching ChromaDB (all systems): {question[:50]}...")
+            
             results = self.rag_handler.search(
-                collection_name="documents",  # CRITICAL: Must specify collection
+                collection_name="documents",
                 query=question,
                 n_results=5,
-                where={"truth_type": "reference"}  # Global - no project_id!
+                where=where_clause
             )
             
             logger.warning(f"[GATHER-REFERENCE] Got {len(results)} results from ChromaDB")
