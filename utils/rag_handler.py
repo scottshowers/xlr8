@@ -4,6 +4,10 @@ RAG Handler for XLR8 - FIVE TRUTHS ARCHITECTURE
 
 Handles all RAG operations including document processing, embedding, and retrieval.
 
+Version: 2.3 - ChromaDB Singleton Fix (Jan 7, 2026)
+- Fixed: "different settings" error by using module-level singleton for ChromaDB client
+- Multiple RAGHandler instances now share the same persistent client
+
 Version: 2.2 - Five Truths Architecture Support
 - Added support for 5 truth types: intent, configuration, reference, regulatory, compliance
 - Customer Truths (project-scoped): intent, configuration
@@ -51,6 +55,46 @@ from chromadb.config import Settings
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
+
+# Module-level singleton for ChromaDB client
+# This prevents "different settings" errors when multiple RAGHandler instances exist
+_chromadb_client: Optional[chromadb.ClientAPI] = None
+_chromadb_path: Optional[str] = None
+
+def _get_chromadb_client(persist_directory: Optional[str] = None) -> chromadb.ClientAPI:
+    """Get or create the singleton ChromaDB client."""
+    global _chromadb_client, _chromadb_path
+    
+    # Determine path
+    if persist_directory is None:
+        if os.path.exists("/data"):
+            persist_directory = "/data/chromadb"
+        else:
+            persist_directory = os.path.join(os.getcwd(), ".chromadb")
+    
+    # If we already have a client for this path, return it
+    if _chromadb_client is not None and _chromadb_path == persist_directory:
+        return _chromadb_client
+    
+    # Create directory if needed
+    os.makedirs(persist_directory, exist_ok=True)
+    
+    # Create new client
+    try:
+        _chromadb_client = chromadb.PersistentClient(
+            path=persist_directory,
+            settings=Settings(anonymized_telemetry=False, allow_reset=True)
+        )
+        _chromadb_path = persist_directory
+        logging.info(f"ChromaDB singleton initialized at {persist_directory}")
+    except Exception as e:
+        logging.error(f"Failed to initialize ChromaDB PersistentClient: {e}")
+        logging.warning("Falling back to in-memory ChromaDB (data will not persist)")
+        _chromadb_client = chromadb.Client()
+        _chromadb_path = None
+    
+    return _chromadb_client
+
 
 # Import universal document intelligence system
 try:
@@ -112,34 +156,9 @@ class RAGHandler:
     ):
         """Initialize the RAG handler with ChromaDB and embedding configuration."""
         try:
-            if persist_directory is None:
-                if os.path.exists("/data") or os.access("/", os.W_OK):
-                    try:
-                        persist_directory = "/data/chromadb"
-                        os.makedirs(persist_directory, exist_ok=True)
-                        logger.info(f"Using persistent storage at {persist_directory}")
-                    except (OSError, PermissionError) as e:
-                        logger.warning(f"Cannot use /data: {e}, falling back to local storage")
-                        persist_directory = None
-                
-                if persist_directory is None:
-                    persist_directory = os.path.join(os.getcwd(), ".chromadb")
-                    os.makedirs(persist_directory, exist_ok=True)
-                    logger.warning(f"Using local storage at {persist_directory} (will reset on deploy)")
-            else:
-                os.makedirs(persist_directory, exist_ok=True)
-                logger.info(f"Using provided storage at {persist_directory}")
-            
-            try:
-                self.client = chromadb.PersistentClient(
-                    path=persist_directory,
-                    settings=Settings(anonymized_telemetry=False, allow_reset=True)
-                )
-                logger.info(f"ChromaDB client initialized successfully at {persist_directory}")
-            except Exception as e:
-                logger.error(f"Failed to initialize ChromaDB PersistentClient: {e}")
-                logger.warning("Falling back to in-memory ChromaDB (data will not persist)")
-                self.client = chromadb.Client()
+            # Use module-level singleton for ChromaDB client
+            # This prevents "different settings" errors when multiple RAGHandler instances exist
+            self.client = _get_chromadb_client(persist_directory)
             
             self.ollama_base_url = embed_endpoint or llm_endpoint or os.getenv("LLM_ENDPOINT")
             
