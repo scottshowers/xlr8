@@ -730,7 +730,8 @@ def process_file_background(
     content_domain: Optional[str] = None,
     file_hash: Optional[str] = None,
     uploaded_by_id: Optional[str] = None,
-    uploaded_by_email: Optional[str] = None
+    uploaded_by_email: Optional[str] = None,
+    system: Optional[str] = None  # NEW: HCM/ERP system tag
 ):
     """
     Background processing function - runs in separate thread
@@ -1546,7 +1547,8 @@ def process_file_background(
             "file_type": file_ext,
             "source": filename,
             "upload_date": datetime.now().isoformat(),
-            "truth_type": truth_type  # NEW: Enable truth_type filtering in searches
+            "truth_type": truth_type,  # NEW: Enable truth_type filtering in searches
+            "system": system  # NEW: HCM/ERP system tag for vendor doc filtering
         }
         
         if project_id:
