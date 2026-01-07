@@ -1165,6 +1165,7 @@ def process_file_background(
                     project=project,
                     filename=filename,
                     project_id=project_id,
+                    truth_type=truth_type,  # Pass truth_type to skip table extraction for reference docs
                     status_callback=status_callback
                 )
                 
