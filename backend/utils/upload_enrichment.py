@@ -726,9 +726,10 @@ def _enrich_chromadb_by_filename(
             logger.debug(f"[ENRICHMENT] ChromaDB path doesn't exist: {chroma_path}")
             return 0
         
+        # Use same settings as rag_handler to avoid "different settings" error
         client = chromadb.PersistentClient(
             path=chroma_path,
-            settings=Settings(anonymized_telemetry=False)
+            settings=Settings(anonymized_telemetry=False, allow_reset=True)
         )
         
         collection = client.get_or_create_collection(
