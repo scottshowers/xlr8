@@ -252,7 +252,7 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
 # =============================================================================
 
 def extract_pdf_text(file_path: str) -> str:
-    """Extract all text from a PDF."""
+    """Extract all text from a PDF, with OCR fallback for image-based PDFs."""
     if not PDFPLUMBER_AVAILABLE:
         logger.error("[PDF] pdfplumber not available")
         return ""
@@ -267,6 +267,19 @@ def extract_pdf_text(file_path: str) -> str:
         
         full_text = '\n\n'.join(text_parts)
         logger.warning(f"[PDF] Extracted {len(full_text):,} chars from {len(text_parts)} pages")
+        
+        # OCR FALLBACK: If no text extracted, try OCR
+        if len(full_text.strip()) < 100:
+            logger.warning(f"[PDF] Low text extraction ({len(full_text)} chars), attempting OCR fallback...")
+            try:
+                from utils.text_extraction import extract_text as extract_text_with_ocr
+                ocr_text = extract_text_with_ocr(file_path)
+                if ocr_text and len(ocr_text.strip()) > len(full_text.strip()):
+                    logger.warning(f"[PDF] OCR extracted {len(ocr_text):,} chars (vs {len(full_text)} from pdfplumber)")
+                    return ocr_text
+            except Exception as ocr_e:
+                logger.warning(f"[PDF] OCR fallback failed: {ocr_e}")
+        
         return full_text
     except Exception as e:
         logger.error(f"[PDF] Extraction failed: {e}")
