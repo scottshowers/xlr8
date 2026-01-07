@@ -404,20 +404,39 @@ class ConsultativeSynthesizer:
                         key_facts.append(f"  - {vals[0]}: {vals[1]}")
             elif rows:
                 # =====================================================================
-                # SEND ACTUAL DATA - Trust the LLM to reason over it
-                # The AI should be able to see tax_type=SUI and understand that's the SUI rate
+                # v4.0: SEND DATA FOR ANALYSIS
+                # Reality tables (employees) can be huge, so cap at 100 for analysis
+                # LLM will display max 30 but analyze all provided
                 # =====================================================================
                 key_facts.append(f"Table: {len(rows)} records, {len(cols)} columns")
                 key_facts.append(f"Columns: {', '.join(cols)}")
                 
-                # Send sample rows - this is the ACTUAL DATA the LLM needs to reason over
-                key_facts.append("\nSample data:")
-                for i, row in enumerate(rows[:15]):  # Up to 15 rows
-                    row_str = " | ".join(f"{k}={v}" for k, v in list(row.items())[:8])
-                    key_facts.append(f"  Row {i+1}: {row_str}")
+                # Detect code/description columns for cleaner formatting
+                code_col = None
+                desc_col = None
+                for col in cols:
+                    col_lower = col.lower()
+                    if 'code' in col_lower and 'country' not in col_lower and 'group' not in col_lower:
+                        code_col = col
+                    elif any(x in col_lower for x in ['desc', 'name', 'label']) and 'group' not in col_lower:
+                        desc_col = col
                 
-                if len(rows) > 15:
-                    key_facts.append(f"  ... and {len(rows) - 15} more rows")
+                # Send up to 100 rows for analysis (reality tables can be huge)
+                max_rows = min(100, len(rows))
+                key_facts.append("\nData:")
+                for i, row in enumerate(rows[:max_rows]):
+                    if code_col and desc_col:
+                        # Format as code - description
+                        code = row.get(code_col, '')
+                        desc = row.get(desc_col, '')
+                        key_facts.append(f"  - `{code}` - {desc}")
+                    else:
+                        # Fallback to key=value format
+                        row_str = " | ".join(f"{k}={v}" for k, v in list(row.items())[:8])
+                        key_facts.append(f"  Row {i+1}: {row_str}")
+                
+                if len(rows) > max_rows:
+                    key_facts.append(f"  ... and {len(rows) - max_rows} more rows (full data in Excel)")
             
             if sql:
                 # Extract table name from SQL for clarity
@@ -482,31 +501,65 @@ class ConsultativeSynthesizer:
                     snippet += "..."
                 key_facts.append(f"[{source_name}]: {snippet}")
             elif isinstance(content, dict):
-                # v3.2: Safe serialization - filter out non-serializable objects
-                # Known problematic keys: 'classification' (contains TableClassification objects)
-                try:
-                    # Exclude known non-serializable keys and non-basic types
-                    exclude_keys = {'classification', 'table_classification', 'metadata_obj'}
+                # v4.0: Special handling for config tables with rows
+                # These contain actual data that needs to be shown, not truncated
+                if 'rows' in content and content['rows']:
+                    rows = content['rows']
+                    cols = content.get('columns', list(rows[0].keys()) if rows else [])
+                    table_name = content.get('display_name') or content.get('table') or source_name
                     
-                    def is_serializable(v):
-                        """Check if value is JSON-serializable."""
-                        if v is None:
-                            return True
-                        if isinstance(v, (str, int, float, bool)):
-                            return True
-                        if isinstance(v, (list, tuple)):
-                            return all(is_serializable(item) for item in v)
-                        if isinstance(v, dict):
-                            return all(isinstance(k, str) and is_serializable(val) for k, val in v.items())
-                        return False
+                    key_facts.append(f"\n[{table_name}] - {len(rows)} records:")
+                    key_facts.append(f"Columns: {', '.join(cols)}")
                     
-                    safe_content = {k: v for k, v in content.items() 
-                                  if k not in exclude_keys and is_serializable(v)}
-                    key_facts.append(f"[{source_name}]: {json.dumps(safe_content)[:200]}")
-                except (TypeError, ValueError) as e:
-                    # Fallback to string representation
-                    logger.debug(f"[SYNTHESIS] JSON serialization failed: {e}, using string fallback")
-                    key_facts.append(f"[{source_name}]: {str(content)[:200]}")
+                    # v4.0: Send ALL data for analysis (LLM limits display to 30)
+                    # Config tables are typically small, send everything
+                    max_rows = len(rows)  # No limit - send all for analysis
+                    key_facts.append("Data:")
+                    for i, row in enumerate(rows[:max_rows]):
+                        # Format as code - description if we can detect those columns
+                        code_col = None
+                        desc_col = None
+                        for col in cols:
+                            col_lower = col.lower()
+                            if 'code' in col_lower and 'country' not in col_lower:
+                                code_col = col
+                            elif any(x in col_lower for x in ['desc', 'name', 'label']):
+                                desc_col = col
+                        
+                        if code_col and desc_col:
+                            code = row.get(code_col, '')
+                            desc = row.get(desc_col, '')
+                            key_facts.append(f"  - `{code}` - {desc}")
+                        else:
+                            # Fallback to key=value format
+                            row_str = " | ".join(f"{k}={v}" for k, v in list(row.items())[:6])
+                            key_facts.append(f"  Row {i+1}: {row_str}")
+                    
+                    if len(rows) > max_rows:
+                        key_facts.append(f"  ... and {len(rows) - max_rows} more rows")
+                else:
+                    # Regular dict - safe serialization with truncation
+                    try:
+                        exclude_keys = {'classification', 'table_classification', 'metadata_obj'}
+                        
+                        def is_serializable(v):
+                            """Check if value is JSON-serializable."""
+                            if v is None:
+                                return True
+                            if isinstance(v, (str, int, float, bool)):
+                                return True
+                            if isinstance(v, (list, tuple)):
+                                return all(is_serializable(item) for item in v)
+                            if isinstance(v, dict):
+                                return all(isinstance(k, str) and is_serializable(val) for k, val in v.items())
+                            return False
+                        
+                        safe_content = {k: v for k, v in content.items() 
+                                      if k not in exclude_keys and is_serializable(v)}
+                        key_facts.append(f"[{source_name}]: {json.dumps(safe_content)[:200]}")
+                    except (TypeError, ValueError) as e:
+                        logger.debug(f"[SYNTHESIS] JSON serialization failed: {e}, using string fallback")
+                        key_facts.append(f"[{source_name}]: {str(content)[:200]}")
             
             sources.append(source_name)
             total_confidence += confidence
