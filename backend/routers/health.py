@@ -33,7 +33,12 @@ router = APIRouter()
 # =============================================================================
 
 def check_duckdb_health() -> Dict[str, Any]:
-    """Check DuckDB storage health."""
+    """
+    Check DuckDB storage health.
+    
+    CRITICAL: Uses safe_* methods to prevent thread collision with uploads.
+    Direct conn.execute() calls were causing deadlocks during file processing.
+    """
     result = {
         "status": "unknown",
         "latency_ms": None,
@@ -46,12 +51,12 @@ def check_duckdb_health() -> Dict[str, Any]:
         from utils.structured_data_handler import get_structured_handler
         handler = get_structured_handler()
         
-        # Basic connectivity
+        # Basic connectivity - USE SAFE METHOD
         conn_start = time.time()
-        test = handler.conn.execute("SELECT 1").fetchone()
+        test = handler.safe_fetchone("SELECT 1")
         result["latency_ms"] = int((time.time() - conn_start) * 1000)
         
-        # Database file info
+        # Database file info (no lock needed - just filesystem)
         db_path = handler.db_path
         if os.path.exists(db_path):
             result["details"]["db_file_exists"] = True
@@ -61,11 +66,11 @@ def check_duckdb_health() -> Dict[str, Any]:
             result["status"] = "critical"
             return result
         
-        # Table counts
-        tables = handler.conn.execute("""
+        # Table counts - USE SAFE METHOD
+        tables = handler.safe_fetchall("""
             SELECT table_name FROM information_schema.tables 
             WHERE table_schema = 'main' AND table_type = 'BASE TABLE'
-        """).fetchall()
+        """)
         all_tables = [t[0] for t in tables]
         
         # Separate system tables from data tables
@@ -76,31 +81,28 @@ def check_duckdb_health() -> Dict[str, Any]:
         result["details"]["system_tables"] = len(system_tables)
         result["details"]["data_tables"] = len(data_tables)
         
-        # Row counts
-        total_rows = 0
-        empty_tables = []
-        table_sizes = []
-        
-        for table in data_tables:
-            try:
-                count = handler.conn.execute(f'SELECT COUNT(*) FROM "{table}"').fetchone()[0]
-                total_rows += count
-                table_sizes.append({"table": table, "rows": count})
-                if count == 0:
-                    empty_tables.append(table)
-            except Exception as e:
-                logger.debug(f"Suppressed: {e}")
+        # Row counts - USE SAFE METHOD
+        # OPTIMIZATION: Skip individual table counts during health check to reduce lock contention
+        # Just get total from _schema_metadata which is faster
+        try:
+            row_data = handler.safe_fetchone(
+                "SELECT SUM(row_count) FROM _schema_metadata WHERE is_current = TRUE"
+            )
+            total_rows = row_data[0] if row_data and row_data[0] else 0
+        except Exception:
+            total_rows = 0
         
         result["details"]["total_rows"] = total_rows
-        result["details"]["empty_tables"] = len(empty_tables)
-        result["details"]["empty_table_names"] = empty_tables[:5]
-        result["details"]["table_sizes"] = sorted(table_sizes, key=lambda x: -x["rows"])[:10]
+        result["details"]["empty_tables"] = 0  # Skip expensive check
+        result["details"]["empty_table_names"] = []
+        result["details"]["table_sizes"] = []  # Skip expensive check
         
-        # Schema metadata check
+        # Schema metadata check - USE SAFE METHOD
         try:
-            meta_count = handler.conn.execute(
+            meta_result = handler.safe_fetchone(
                 "SELECT COUNT(*) FROM _schema_metadata WHERE is_current = TRUE"
-            ).fetchone()[0]
+            )
+            meta_count = meta_result[0] if meta_result else 0
             result["details"]["schema_metadata_count"] = meta_count
             result["details"]["metadata_table_mismatch"] = meta_count != len(data_tables)
         except Exception:
