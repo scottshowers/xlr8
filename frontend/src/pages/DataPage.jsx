@@ -166,24 +166,32 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
   const [newDomainSignals, setNewDomainSignals] = useState('');
   
   // System selection state (for vendor docs)
-  const [selectedSystem, setSelectedSystem] = useState('ukg');
+  const [selectedSystem, setSelectedSystem] = useState('');
+  const [allSystems, setAllSystems] = useState([]);
   
-  // Supported HCM/ERP systems
-  const systems = [
-    { value: 'ukg', label: 'UKG', desc: 'UKG Pro, UKG Ready, Kronos' },
-    { value: 'workday', label: 'Workday', desc: 'Workday HCM' },
-    { value: 'adp', label: 'ADP', desc: 'Workforce Now, Vantage' },
-    { value: 'dayforce', label: 'Dayforce', desc: 'Ceridian Dayforce' },
-    { value: 'oracle', label: 'Oracle', desc: 'Oracle HCM, PeopleSoft' },
-    { value: 'sap', label: 'SAP', desc: 'SuccessFactors, SAP HCM' },
-    { value: 'netsuite', label: 'NetSuite', desc: 'Oracle NetSuite' },
-    { value: 'paylocity', label: 'Paylocity', desc: 'Paylocity' },
-    { value: 'paycom', label: 'Paycom', desc: 'Paycom' },
-    { value: 'paychex', label: 'Paychex', desc: 'Paychex Flex' },
-    { value: 'bamboohr', label: 'BambooHR', desc: 'BambooHR' },
-    { value: 'other', label: 'Other', desc: 'Other system' },
-    { value: 'universal', label: 'Universal', desc: 'Applies to all systems' },
-  ];
+  // Fetch systems from API (same source as Projects page)
+  useEffect(() => {
+    api.get('/reference/systems')
+      .then(res => {
+        const systems = res.data || [];
+        setAllSystems(systems);
+        // Default to first system if available
+        if (systems.length > 0 && !selectedSystem) {
+          setSelectedSystem(systems[0].code);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load systems:', err);
+        // Fallback to basic list
+        setAllSystems([
+          { code: 'ukg_pro', name: 'UKG Pro' },
+          { code: 'ukg_ready', name: 'UKG Ready' },
+          { code: 'ukg_wfm', name: 'UKG WFM' },
+          { code: 'universal', name: 'Universal' }
+        ]);
+        setSelectedSystem('ukg_pro');
+      });
+  }, []);
   
   // Built-in domains
   const builtInDomains = [
@@ -504,8 +512,10 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
                 fontWeight: 600
               }}
             >
-              {systems.map(s => (
-                <option key={s.value} value={s.value}>{s.label} - {s.desc}</option>
+              {allSystems.map(s => (
+                <option key={s.code} value={s.code}>
+                  {s.name}{s.vendor ? ` (${s.vendor})` : ''}
+                </option>
               ))}
             </select>
             <p style={{ 
