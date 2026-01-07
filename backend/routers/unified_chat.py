@@ -1713,9 +1713,10 @@ async def unified_chat(request: UnifiedChatRequest):
                 if handler and handler.conn:
                     schema = await get_project_schema(project, request.scope, handler)
                     
+                    # Always initialize engine - ChromaDB works even without DuckDB tables
+                    engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
+                    
                     if schema['tables']:
-                        # Pass rag_handler to load_context so gatherers get it
-                        engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
                         logger.info(f"[UNIFIED] Loaded {len(schema['tables'])} tables")
                         
                         # Initialize Data Model Service
@@ -1725,6 +1726,8 @@ async def unified_chat(request: UnifiedChatRequest):
                         
                         # Initialize Quality Service
                         quality_service = DataQualityService(project)
+                    else:
+                        logger.warning("[UNIFIED] No DuckDB tables, but engine initialized for ChromaDB")
                         
             except Exception as e:
                 logger.error(f"[UNIFIED] Structured handler error: {e}")
