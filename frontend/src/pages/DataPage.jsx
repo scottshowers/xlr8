@@ -165,6 +165,26 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
   const [newDomainName, setNewDomainName] = useState('');
   const [newDomainSignals, setNewDomainSignals] = useState('');
   
+  // System selection state (for vendor docs)
+  const [selectedSystem, setSelectedSystem] = useState('ukg');
+  
+  // Supported HCM/ERP systems
+  const systems = [
+    { value: 'ukg', label: 'UKG', desc: 'UKG Pro, UKG Ready, Kronos' },
+    { value: 'workday', label: 'Workday', desc: 'Workday HCM' },
+    { value: 'adp', label: 'ADP', desc: 'Workforce Now, Vantage' },
+    { value: 'dayforce', label: 'Dayforce', desc: 'Ceridian Dayforce' },
+    { value: 'oracle', label: 'Oracle', desc: 'Oracle HCM, PeopleSoft' },
+    { value: 'sap', label: 'SAP', desc: 'SuccessFactors, SAP HCM' },
+    { value: 'netsuite', label: 'NetSuite', desc: 'Oracle NetSuite' },
+    { value: 'paylocity', label: 'Paylocity', desc: 'Paylocity' },
+    { value: 'paycom', label: 'Paycom', desc: 'Paycom' },
+    { value: 'paychex', label: 'Paychex', desc: 'Paychex Flex' },
+    { value: 'bamboohr', label: 'BambooHR', desc: 'BambooHR' },
+    { value: 'other', label: 'Other', desc: 'Other system' },
+    { value: 'universal', label: 'Universal', desc: 'Applies to all systems' },
+  ];
+  
   // Built-in domains
   const builtInDomains = [
     { value: 'auto', label: '🔮 Auto-detect', desc: 'Let AI determine the domain' },
@@ -290,10 +310,13 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
     Array.from(files).forEach(file => {
       // For regulatory docs, trigger rule extraction
       const isRuleSource = truthType === 'regulatory';
+      const isVendorDocs = truthType === 'reference';
+      
       addUpload(file, projectId, projectName, { 
         truth_type: truthType,
         standards_mode: isRuleSource,
-        domain: selectedDomain !== 'auto' ? selectedDomain : (isRuleSource ? 'regulatory' : undefined)
+        domain: selectedDomain !== 'auto' ? selectedDomain : (isRuleSource ? 'regulatory' : undefined),
+        system: isVendorDocs ? selectedSystem : undefined  // Only for vendor docs
       });
     });
   };
@@ -453,6 +476,44 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
             >
               <Sparkles size={14} /> Create Custom Domain
             </button>
+          </div>
+        )}
+
+        {/* System Selection - Only for Vendor Docs (reference) */}
+        {truthType === 'reference' && targetScope === 'global' && (
+          <div style={{ marginBottom: '1rem' }}>
+            <label style={{ 
+              fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, 
+              textTransform: 'uppercase', letterSpacing: '0.05em', 
+              display: 'block', marginBottom: '0.5rem' 
+            }}>
+              System <span style={{ color: c.primary }}>*</span>
+            </label>
+            <select
+              value={selectedSystem}
+              onChange={(e) => setSelectedSystem(e.target.value)}
+              style={{
+                width: '100%',
+                padding: '0.6rem 0.75rem',
+                borderRadius: 8,
+                border: `2px solid ${c.primary}`,
+                background: `${c.primary}10`,
+                color: c.text,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                fontWeight: 600
+              }}
+            >
+              {systems.map(s => (
+                <option key={s.value} value={s.value}>{s.label} - {s.desc}</option>
+              ))}
+            </select>
+            <p style={{ 
+              fontSize: '0.7rem', color: c.textMuted, marginTop: '0.4rem', 
+              lineHeight: 1.4 
+            }}>
+              Tag docs with their system so projects only see relevant vendor docs.
+            </p>
           </div>
         )}
 
