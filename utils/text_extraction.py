@@ -100,7 +100,7 @@ def _extract_pdf(file_path: str, max_pages: int = 10) -> str:
             logger.info("[TEXT_EXTRACTION] Text extraction failed - trying Tesseract OCR...")
             
             # Convert PDF pages to images
-            images = convert_from_path(file_path, dpi=150, first_page=1, last_page=max_pages)
+            images = convert_from_path(file_path, dpi=100, first_page=1, last_page=max_pages)
             logger.info(f"[TEXT_EXTRACTION] Converting {len(images)} pages for OCR...")
             
             text_parts = []
