@@ -1751,7 +1751,33 @@ async def unified_chat(request: UnifiedChatRequest):
             engine.confirmed_facts.update(request.clarifications)
             session['skip_learning'] = False
             
+            # v4.0: If we have a pending question from clarification, use it
+            if session.get('pending_clarification_question'):
+                original_question = session.pop('pending_clarification_question')
+                logger.warning(f"[UNIFIED] Using pending question: {original_question[:50]}...")
+                message = original_question  # Use original question, not the clarification answer
+            
             # Record to learning module
+        
+        # v4.0: Auto-detect scope clarification responses
+        # If we have a pending question and the message looks like a scope value, auto-apply it
+        elif session.get('pending_clarification_question'):
+            pending_q = session.get('pending_clarification_question')
+            # Check if current message could be a scope value (short, no spaces, uppercase company code)
+            if len(message) < 30 and ' ' not in message.strip():
+                logger.warning(f"[UNIFIED] Auto-detecting scope clarification: '{message}' for pending question")
+                # Treat this as a scope clarification
+                # Try to detect the dimension from the message
+                # Common patterns: company code, country code, etc.
+                scope_value = message.strip()
+                
+                # Apply as scope clarification
+                engine.confirmed_facts['scope'] = f"company:{scope_value}"  # Default to company
+                logger.warning(f"[UNIFIED] Auto-applied scope: {engine.confirmed_facts['scope']}")
+                
+                # Use the original question
+                message = session.pop('pending_clarification_question')
+                logger.warning(f"[UNIFIED] Using pending question: {message[:50]}...")
             if LEARNING_AVAILABLE:
                 try:
                     learning = get_learning_module()
@@ -2323,6 +2349,10 @@ async def unified_chat(request: UnifiedChatRequest):
             if questions:
                 q_text = questions[0].get('question', 'I need more information')
                 response["answer"] = f"Before I can answer, {q_text.lower()}"
+            
+            # v4.0: Store the original question so we can use it after clarification
+            session['pending_clarification_question'] = message
+            logger.warning(f"[UNIFIED] Stored pending question for clarification: {message[:50]}...")
         
         # Update session
         actual_sql = getattr(answer, 'executed_sql', None) or learned_sql
