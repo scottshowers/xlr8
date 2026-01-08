@@ -378,6 +378,48 @@ async def get_lookups(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/metrics")
+async def get_organizational_metrics(
+    project: str,
+    category: Optional[str] = Query(None, description="Filter by category: workforce, compensation, benefits, demographics, configuration, dimensional")
+):
+    """
+    Get organizational metrics computed from data.
+    
+    These are the metrics every HR/Payroll/Benefits leader wants:
+    - Headcount (total and by dimension)
+    - Hub usage (configured vs in use)
+    - Participation rates
+    - Coverage gaps
+    
+    All computed dynamically from Context Graph and Lookups.
+    """
+    try:
+        service = _get_intelligence_service(project)
+        metrics = service.get_organizational_metrics(category)
+        
+        # Group by category for easier consumption
+        by_category = {}
+        for m in metrics:
+            cat = m.category.value
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(m.to_dict())
+        
+        return {
+            'project': project,
+            'total': len(metrics),
+            'by_category': by_category,
+            'metrics': [m.to_dict() for m in metrics]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[INTELLIGENCE_API] Metrics error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/{project}/relationships")
 async def get_relationships(project: str):
     """
