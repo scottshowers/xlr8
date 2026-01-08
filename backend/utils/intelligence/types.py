@@ -122,6 +122,9 @@ class SynthesizedAnswer:
     
     # The SQL that was executed (if any)
     executed_sql: Optional[str] = None
+    
+    # v3.2: Rich consultative metadata (excel_spec, proactive_offers, hcmpact_hook)
+    consultative_metadata: Optional[Dict] = None
 
 
 # =============================================================================
