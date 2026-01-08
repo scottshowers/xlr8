@@ -504,12 +504,28 @@ class Synthesizer:
             except Exception as e:
                 logger.warning(f"[SYNTHESIZE] Pattern detection failed: {e}")
         
-        # Build context for LLM
+        # =====================================================================
+        # v4.1: Build GROUNDED context - actual data rows for analysis
+        # =====================================================================
         context_parts = []
+        
+        # CRITICAL: Include actual data rows so LLM can analyze real values
+        result_rows = data_info.get('result_rows', [])
+        result_columns = data_info.get('result_columns', [])
+        if result_rows:
+            context_parts.append("=== ACTUAL DATA FROM DATABASE ===")
+            context_parts.append(f"Columns: {', '.join(result_columns)}")
+            context_parts.append(f"Total rows: {len(result_rows)}")
+            context_parts.append("Data:")
+            for i, row in enumerate(result_rows[:30]):  # Limit to 30 rows
+                row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
+                context_parts.append(f"  {i+1}. {row_str}")
+            if len(result_rows) > 30:
+                context_parts.append(f"  ... and {len(result_rows) - 30} more rows")
         
         # Add document context
         if doc_context:
-            context_parts.append("=== CUSTOMER DOCUMENTS ===")
+            context_parts.append("\n=== CUSTOMER DOCUMENTS ===")
             for doc in doc_context[:3]:
                 context_parts.append(doc[:400])
         
@@ -522,13 +538,13 @@ class Synthesizer:
         if insights:
             context_parts.append("\n=== SYSTEM DETECTED INSIGHTS ===")
             for insight in insights[:5]:
-                context_parts.append(f"- [{insight.severity.upper()}] {insight.title}: {insight.description}")
+                context_parts.append(f"• [{insight.severity.upper()}] {insight.title}: {insight.description}")
         
         # Add conflicts
         if conflicts:
             context_parts.append("\n=== DETECTED CONFLICTS ===")
             for conflict in conflicts[:5]:
-                context_parts.append(f"- {conflict.description}")
+                context_parts.append(f"• {conflict.description}")
         
         # Add context graph summary if available
         if hasattr(self, '_context_graph') and self._context_graph:
@@ -540,64 +556,65 @@ class Synthesizer:
         context = "\n".join(context_parts)
         
         # =====================================================================
-        # v4.0: Build pattern-guided overlay prompt
+        # v4.1: Build pattern-guided overlay prompt with STRICT formatting
         # =====================================================================
         if pattern:
             # Use pattern-specific guidance
             hunt_for_list = "\n".join(f"  • {item}" for item in pattern.hunt_for)
-            proactive_list = "\n".join(f"  • {offer}" for offer in pattern.proactive_offers)
+            proactive_list = "\n".join(f"• {offer}" for offer in pattern.proactive_offers)
             
             overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
 
 The client asked: "{question}"
 
 UNDERSTAND THE QUESTION:
-- Surface question: {pattern.surface_question}
-- Real question: {pattern.real_question}
-- Hidden worry: {pattern.hidden_worry}
+• Surface question: {pattern.surface_question}
+• Real question: {pattern.real_question}  
+• Hidden worry: {pattern.hidden_worry}
 
 Here is the accurate data listing (DO NOT MODIFY THIS DATA):
 ---
 {template_response}
 ---
 
-Additional context from documents and system analysis:
+ACTUAL DATA FOR YOUR ANALYSIS:
 {context}
 
 YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
 
-RULES:
-1. DO NOT repeat or modify the data listing above - it is accurate
-2. DO NOT make up any codes, values, or numbers
-3. ADD analysis that provides consultant value
+CRITICAL RULES:
+1. DO NOT repeat or modify the data listing - it is accurate
+2. DO NOT invent codes, values, or numbers - use ONLY what's in ACTUAL DATA above
+3. If you don't see evidence in the data/context, say "Unable to assess - need [X] documentation"
+4. EVERY statement must be a bullet point - NO PARAGRAPHS
 
-HUNT FOR THESE SPECIFIC PROBLEMS:
+HUNT FOR THESE SPECIFIC PROBLEMS (only if evidence exists):
 {hunt_for_list}
 
-RISK FRAMING:
-{pattern.risk_framing}
+RISK FRAMING: {pattern.risk_framing}
 
-FORMAT YOUR RESPONSE AS:
-[Keep the original data listing exactly as shown]
+=== REQUIRED FORMAT (BULLETS ONLY) ===
 
 ---
 
 **🔍 Consultant Analysis**
 
 **Gap Analysis:**
-• [Specific gaps based on hunt_for items above]
+• [One specific gap per bullet - cite the actual data]
+• [Another gap - or "No gaps detected in available data"]
 
 **Risk Assessment:**
-• [Frame using: {pattern.risk_framing}]
+• [One risk per bullet - be specific]
+• [If no evidence, state "Requires [X] to assess"]
 
 **Recommendations:**
-• [Prioritized action items based on gaps found]
+• [One action per bullet - prioritized]
 
 **Next Steps:**
 {proactive_list}
 • {pattern.hcmpact_hook}
 
-Keep it concise. Bullets only. No fluff."""
+REMEMBER: Bullets only. One idea per bullet. No paragraphs. No invented data."""
 
         else:
             # Fallback generic prompt
@@ -610,41 +627,37 @@ Here is the accurate data listing (DO NOT MODIFY THIS DATA):
 {template_response}
 ---
 
-Additional context from documents and system analysis:
+ACTUAL DATA FOR YOUR ANALYSIS:
 {context}
 
 YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
 
-RULES:
-1. DO NOT repeat or modify the data listing above - it is accurate
-2. DO NOT make up any codes, values, or numbers
-3. ADD analysis that provides consultant value:
-   - Gap Analysis: What's missing or incomplete?
-   - Risk Assessment: What could go wrong?
-   - Recommendations: What should they do next?
-   - Proactive Offers: What related analysis would help?
+CRITICAL RULES:
+1. DO NOT repeat or modify the data listing - it is accurate
+2. DO NOT invent codes, values, or numbers - use ONLY what's in ACTUAL DATA above
+3. If you don't see evidence, say "Unable to assess - need [X] documentation"
+4. EVERY statement must be a bullet point - NO PARAGRAPHS
 
-FORMAT YOUR RESPONSE AS:
-[Keep the original data listing exactly as shown]
+=== REQUIRED FORMAT (BULLETS ONLY) ===
 
 ---
 
 **🔍 Consultant Analysis**
 
 **Gap Analysis:**
-• [Specific gaps found based on context]
+• [One specific gap per bullet - cite the actual data]
 
 **Risk Assessment:**
-• [Potential issues if not addressed]
+• [One risk per bullet - be specific]
 
 **Recommendations:**
-• [Prioritized action items]
+• [One action per bullet - prioritized]
 
 **Next Steps:**
-• [Proactive offers for related analysis]
+• [Proactive offers]
 • Need help with implementation? HCMPACT can assist.
 
-Keep it concise. Bullets only. No fluff."""
+REMEMBER: Bullets only. One idea per bullet. No paragraphs. No invented data."""
 
         try:
             # Use the LLM synthesizer's orchestrator directly
