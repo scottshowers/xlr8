@@ -563,7 +563,7 @@ class Synthesizer:
             hunt_for_list = "\n".join(f"  • {item}" for item in pattern.hunt_for)
             proactive_list = "\n".join(f"• {offer}" for offer in pattern.proactive_offers)
             
-            overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
+            overlay_prompt = f"""You are a senior HCM implementation consultant. Analyze this data and provide insights.
 
 The client asked: "{question}"
 
@@ -572,109 +572,79 @@ UNDERSTAND THE QUESTION:
 • Real question: {pattern.real_question}  
 • Hidden worry: {pattern.hidden_worry}
 
-Here is the accurate data listing (DO NOT MODIFY THIS DATA):
----
-{template_response}
----
-
-ACTUAL DATA FOR YOUR ANALYSIS:
+ACTUAL DATA TO ANALYZE:
 {context}
 
-YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
-
-CRITICAL RULES:
-1. DO NOT repeat or modify the data listing - it is accurate
-2. DO NOT invent codes, values, or numbers - use ONLY what's in ACTUAL DATA above
-3. If you don't see evidence in the data/context, say "Unable to assess - need [X] documentation"
-4. EVERY statement must be a bullet point - NO PARAGRAPHS
-
-HUNT FOR THESE SPECIFIC PROBLEMS (only if evidence exists):
+HUNT FOR THESE PROBLEMS (only mention if you find evidence):
 {hunt_for_list}
 
-RISK FRAMING: {pattern.risk_framing}
-
-=== REQUIRED FORMAT (BULLETS ONLY) ===
-
----
+OUTPUT FORMAT - Bullets only, no paragraphs:
 
 **🔍 Consultant Analysis**
 
-**Gap Analysis:**
-• [One specific gap per bullet - cite the actual data]
-• [Another gap - or "No gaps detected in available data"]
-
-**Risk Assessment:**
-• [One risk per bullet - be specific]
-• [If no evidence, state "Requires [X] to assess"]
+**What I Found:**
+• [Cite specific codes/values - e.g., "TCAN is the only Ontario earning, may need REG, OT, etc."]
+• [Another finding with evidence]
 
 **Recommendations:**
-• [One action per bullet - prioritized]
+• [Specific action based on findings]
 
 **Next Steps:**
 {proactive_list}
 • {pattern.hcmpact_hook}
 
-REMEMBER: Bullets only. One idea per bullet. No paragraphs. No invented data."""
+RULES:
+• Cite specific codes/values from the data
+• If no issues found, say "Configuration looks complete for [X] earnings"
+• No paragraphs - bullets only
+• Skip sections with no findings"""
 
         else:
             # Fallback generic prompt
-            overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
+            overlay_prompt = f"""You are a senior HCM implementation consultant. Analyze this data and provide insights.
 
 The client asked: "{question}"
 
-Here is the accurate data listing (DO NOT MODIFY THIS DATA):
----
-{template_response}
----
-
-ACTUAL DATA FOR YOUR ANALYSIS:
+ACTUAL DATA TO ANALYZE:
 {context}
 
-YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
-
-CRITICAL RULES:
-1. DO NOT repeat or modify the data listing - it is accurate
-2. DO NOT invent codes, values, or numbers - use ONLY what's in ACTUAL DATA above
-3. If you don't see evidence, say "Unable to assess - need [X] documentation"
-4. EVERY statement must be a bullet point - NO PARAGRAPHS
-
-=== REQUIRED FORMAT (BULLETS ONLY) ===
-
----
+OUTPUT FORMAT - Bullets only, no paragraphs:
 
 **🔍 Consultant Analysis**
 
-**Gap Analysis:**
-• [One specific gap per bullet - cite the actual data]
-
-**Risk Assessment:**
-• [One risk per bullet - be specific]
+**What I Found:**
+• [Cite specific codes/values from the data]
 
 **Recommendations:**
-• [One action per bullet - prioritized]
+• [Specific action based on findings]
 
 **Next Steps:**
 • [Proactive offers]
 • Need help with implementation? HCMPACT can assist.
 
-REMEMBER: Bullets only. One idea per bullet. No paragraphs. No invented data."""
+RULES:
+• Cite specific codes/values from the data
+• If no issues found, say "Configuration looks complete"
+• No paragraphs - bullets only"""
 
         try:
             # Use the LLM synthesizer's orchestrator directly
             if hasattr(self.llm_synthesizer, '_orchestrator') and self.llm_synthesizer._orchestrator:
                 result = self.llm_synthesizer._orchestrator.synthesize_answer(
                     question=f"Add consultant analysis to: {question}",
-                    context=template_response,
+                    context=context,  # Just the data context, not template
                     expert_prompt=overlay_prompt,
                     use_claude_fallback=False  # Local only for speed
                 )
                 
                 if result.get('success') and result.get('response'):
-                    response = result['response']
+                    analysis = result['response'].strip()
                     
-                    # Validate the response contains the original data
-                    # If LLM ignored instructions, fall back to template
-                    if len(response) > len(template_response) * 0.5:
+                    # Validate the analysis is meaningful
+                    if len(analysis) > 50 and '**' in analysis:
+                        # CONCATENATE: Template data + separator + LLM analysis
+                        combined_response = f"{template_response}\n\n---\n\n{analysis}"
+                        
                         # Store metadata for later retrieval
                         self._last_consultative_answer = type('ConsultativeAnswer', (), {
                             'question_type': pattern.question_type if pattern else 'hybrid_analysis',
@@ -690,9 +660,9 @@ REMEMBER: Bullets only. One idea per bullet. No paragraphs. No invented data."""
                         })()
                         
                         logger.warning(f"[SYNTHESIZE] Overlay success via {result.get('model_used')}, pattern={pattern.question_type if pattern else 'none'}")
-                        return response
+                        return combined_response
                     else:
-                        logger.warning("[SYNTHESIZE] LLM response too short, using template")
+                        logger.warning(f"[SYNTHESIZE] LLM analysis too short or malformed ({len(analysis)} chars), using template only")
                         
         except Exception as e:
             logger.warning(f"[SYNTHESIZE] Overlay LLM error: {e}")
