@@ -1,8 +1,13 @@
 """
-XLR8 CONSULTATIVE SYNTHESIS MODULE v3.0.0
+XLR8 CONSULTATIVE SYNTHESIS MODULE v4.7.0
 ==========================================
 
 Deploy to: backend/utils/consultative_synthesis.py
+
+v4.7 CHANGES:
+- Organizational metrics now injected as GROUNDING FACTS at the top of LLM context
+- These are "WHAT YOU KNOW ABOUT THIS CLIENT" - verified facts to inform every answer
+- Enhanced expert prompt references grounding facts for consultative responses
 
 APPROACH: Let the LLM reason like a consultant
 - Send actual data rows (not just schema)
@@ -839,7 +844,9 @@ class ConsultativeSynthesizer:
         """
         Use LLM to synthesize a consultative answer.
         
-        v4.0: Now uses ResponsePattern to guide the LLM's thinking chain.
+        v4.7: Organizational metrics are now injected as GROUNDING FACTS at the
+        top of the context - these are KNOWN TRUTHS about the client that should
+        inform every answer.
         
         MODEL CASCADE (in order):
         1. Groq (llama-3.3-70b) - Fast, reliable, high quality
@@ -848,13 +855,35 @@ class ConsultativeSynthesizer:
         
         Returns: (answer_text, method_used)
         """
-        # Build context from summaries
-        context_parts = []
+        # =====================================================================
+        # v4.7: EXTRACT ORGANIZATIONAL METRICS AS GROUNDING FACTS
+        # These go at the TOP - they're what the consultant KNOWS about this client
+        # =====================================================================
+        grounding_facts = []
+        other_summaries = []
+        
         for summary in summaries:
+            if summary.source_type == 'organizational_metrics':
+                # Extract the key facts as grounding
+                grounding_facts.extend(summary.key_facts)
+            else:
+                other_summaries.append(summary)
+        
+        # Build context - GROUNDING FACTS FIRST
+        context_parts = []
+        
+        if grounding_facts:
+            context_parts.append("=== WHAT YOU KNOW ABOUT THIS CLIENT (VERIFIED FACTS) ===")
+            context_parts.append("Use these facts to inform your analysis. These are computed from actual data.")
+            for fact in grounding_facts:
+                context_parts.append(f"  {fact}")
+            context_parts.append("")  # Blank line separator
+        
+        # Then add other data sources
+        for summary in other_summaries:
             if summary.has_data:
                 context_parts.append(f"=== {summary.source_type.upper()} ===")
                 context_parts.append(summary.summary)
-                # Send ALL key_facts - this is the actual data the LLM needs
                 for fact in summary.key_facts:
                     context_parts.append(f"  {fact}")
         
@@ -873,14 +902,29 @@ class ConsultativeSynthesizer:
         context = "\n".join(context_parts)
         
         # =====================================================================
-        # v4.0: USE PATTERN-GUIDED THINKING PROMPT
+        # v4.7: ENHANCED EXPERT PROMPT - References grounding facts
         # =====================================================================
         if pattern and PATTERNS_AVAILABLE:
             expert_prompt = generate_thinking_prompt(pattern, question)
             logger.warning(f"[CONSULTATIVE] Using pattern-guided prompt for: {pattern.question_type}")
         else:
-            # Fallback to generic prompt
-            expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
+            # Enhanced fallback prompt that references grounding facts
+            if grounding_facts:
+                expert_prompt = """You are a senior HCM implementation consultant who KNOWS this client well.
+
+YOU ALREADY KNOW key facts about this organization (headcount, configuration usage, etc.) - 
+these are listed at the top of the context as "WHAT YOU KNOW ABOUT THIS CLIENT".
+Use these facts naturally in your response as a consultant who is familiar with their setup.
+
+RESPONSE APPROACH:
+1. Answer the question directly, referencing specific facts you know about their organization
+2. Provide context using your knowledge of their size, structure, and configuration
+3. Identify any issues or opportunities based on what you see
+4. Recommend concrete next steps
+
+Be consultative, not robotic. You're a trusted advisor who knows their business."""
+            else:
+                expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
 
 RESPONSE FORMAT:
 1. Direct answer to the question (YES/NO/PARTIALLY with specifics)
@@ -900,6 +944,8 @@ Be specific. Quote actual values from the data. Do not be vague."""
             return self._template_fallback(question, summaries, triangulation), 'template'
         
         logger.warning("[CONSULTATIVE] Using LLMOrchestrator for synthesis...")
+        logger.warning(f"[CONSULTATIVE] Grounding facts: {len(grounding_facts)}, Other sources: {len(other_summaries)}")
+        
         result = self._orchestrator.synthesize_answer(
             question=question,
             context=context,
