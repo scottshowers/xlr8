@@ -73,7 +73,8 @@ class Synthesizer:
     """
     
     def __init__(self, llm_synthesizer=None, confirmed_facts: Dict = None,
-                 filter_candidates: Dict = None, schema: Dict = None):
+                 filter_candidates: Dict = None, schema: Dict = None,
+                 structured_handler=None):
         """
         Initialize the synthesizer.
         
@@ -82,11 +83,13 @@ class Synthesizer:
             confirmed_facts: Dict of confirmed filter facts (status=active, etc.)
             filter_candidates: Dict of filter category → candidates
             schema: Schema metadata for suggestions
+            structured_handler: DuckDB handler for running queries (v4.4)
         """
         self.llm_synthesizer = llm_synthesizer
         self.confirmed_facts = confirmed_facts or {}
         self.filter_candidates = filter_candidates or {}
         self.schema = schema or {}
+        self.structured_handler = structured_handler  # v4.4: For hub usage analysis
         
         # Store last gathered truths for LLM synthesis
         self._last_reality: List[Truth] = []
@@ -103,6 +106,9 @@ class Synthesizer:
         
         # v4.2: Store context_graph for entity context
         self._context_graph: Dict = None
+        
+        # v4.4: Store project for usage queries
+        self._project: str = None
     
     def _get_entity_context(self, table_name: str, columns: List[str]) -> str:
         """
@@ -265,6 +271,129 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         return ""
     
+    def _get_hub_usage_analysis(self, table_name: str, code_column: str, 
+                                 result_rows: List[Dict]) -> Optional[str]:
+        """
+        v4.4: Analyze hub usage by querying spoke (Reality) tables.
+        
+        For a hub table like earnings_earnings, this finds employee-level
+        spoke tables and counts how many employees have each code assigned.
+        
+        Returns formatted usage analysis or None if no spoke data.
+        """
+        if not self.structured_handler or not self._context_graph or not self._project:
+            logger.debug("[SYNTHESIZE] Cannot run hub usage analysis - missing handler/graph/project")
+            return None
+        
+        # Find this table's semantic type in the hub list
+        hub_info = None
+        for hub in self._context_graph.get('hubs', []):
+            if hub.get('table', '').lower() == table_name.lower():
+                hub_info = hub
+                break
+        
+        if not hub_info:
+            logger.debug(f"[SYNTHESIZE] Table {table_name} is not a hub")
+            return None
+        
+        semantic_type = hub_info.get('semantic_type', '')
+        logger.warning(f"[SYNTHESIZE] Hub usage analysis for {semantic_type} in {table_name}")
+        
+        # Find Reality spoke tables that reference this hub
+        reality_spokes = []
+        for rel in self._context_graph.get('relationships', []):
+            if (rel.get('hub_table', '').lower() == table_name.lower() and 
+                rel.get('truth_type') == 'reality'):
+                reality_spokes.append(rel)
+        
+        if not reality_spokes:
+            logger.debug(f"[SYNTHESIZE] No Reality spokes found for hub {table_name}")
+            return None
+        
+        logger.warning(f"[SYNTHESIZE] Found {len(reality_spokes)} Reality spokes")
+        
+        # Build usage counts from the first spoke table
+        # (typically the employee-level assignment table)
+        spoke = reality_spokes[0]
+        spoke_table = spoke.get('spoke_table', '')
+        spoke_column = spoke.get('spoke_column', '')
+        
+        if not spoke_table or not spoke_column:
+            return None
+        
+        try:
+            # Count occurrences in spoke table
+            count_sql = f'''
+                SELECT "{spoke_column}" as code, COUNT(*) as employee_count
+                FROM "{spoke_table}"
+                WHERE "{spoke_column}" IS NOT NULL
+                GROUP BY "{spoke_column}"
+                ORDER BY employee_count DESC
+            '''
+            
+            count_result = self.structured_handler.conn.execute(count_sql).fetchall()
+            
+            # Build lookup: code -> count
+            usage_counts = {row[0]: row[1] for row in count_result}
+            
+            # Get total employees with any assignment
+            total_with = sum(usage_counts.values())
+            
+            # Get unique employee count (assuming there's an employee_id-like column)
+            unique_sql = f'SELECT COUNT(DISTINCT "{spoke_column}") FROM "{spoke_table}"'
+            # This gives unique codes used, not unique employees
+            
+            # Format the analysis
+            analysis_parts = []
+            analysis_parts.append("\n📊 **Usage Analysis** (from employee data):")
+            
+            # Codes in use
+            used_codes = []
+            unused_codes = []
+            
+            # Extract code column from result_rows
+            hub_codes = set()
+            for row in result_rows:
+                # Try to find the code value
+                for key in row.keys():
+                    if 'code' in key.lower():
+                        hub_codes.add(row[key])
+                        break
+            
+            for code in hub_codes:
+                count = usage_counts.get(code, 0)
+                if count > 0:
+                    used_codes.append((code, count))
+                else:
+                    unused_codes.append(code)
+            
+            # Sort by count descending
+            used_codes.sort(key=lambda x: x[1], reverse=True)
+            
+            if used_codes:
+                analysis_parts.append(f"• **{len(used_codes)} codes in active use:**")
+                for code, count in used_codes[:5]:  # Top 5
+                    analysis_parts.append(f"  - `{code}`: {count} employees")
+                if len(used_codes) > 5:
+                    analysis_parts.append(f"  - *...and {len(used_codes) - 5} more*")
+            
+            if unused_codes:
+                analysis_parts.append(f"• **{len(unused_codes)} codes configured but UNUSED:**")
+                for code in unused_codes[:5]:
+                    analysis_parts.append(f"  - `{code}` (0 employees)")
+                if len(unused_codes) > 5:
+                    analysis_parts.append(f"  - *...and {len(unused_codes) - 5} more*")
+            
+            if not used_codes and not unused_codes:
+                analysis_parts.append("• No usage data available")
+            
+            logger.warning(f"[SYNTHESIZE] Usage analysis: {len(used_codes)} used, {len(unused_codes)} unused")
+            return "\n".join(analysis_parts)
+            
+        except Exception as e:
+            logger.warning(f"[SYNTHESIZE] Hub usage analysis failed: {e}")
+            return None
+    
     def synthesize(
         self,
         question: str,
@@ -314,6 +443,7 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         # Store context for routing decisions
         self._context = context or {}
+        self._project = self._context.get('project', None)  # v4.4: For usage analysis
         
         reasoning = []
         
@@ -603,6 +733,27 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         )
         
         result_rows = data_info.get('result_rows', [])
+        table_name = data_info.get('table_name', '')
+        result_columns = data_info.get('result_columns', [])
+        
+        # =====================================================================
+        # STEP 1.5: Add Hub Usage Analysis (if this is a hub table)
+        # v4.4: Show how config codes are used in employee data
+        # =====================================================================
+        if result_rows and table_name:
+            # Find code column
+            code_col = None
+            for col in result_columns:
+                if 'code' in col.lower():
+                    code_col = col
+                    break
+            
+            if code_col:
+                usage_analysis = self._get_hub_usage_analysis(table_name, code_col, result_rows)
+                if usage_analysis:
+                    # Insert usage analysis after template response
+                    template_response = template_response + "\n" + usage_analysis
+                    logger.warning(f"[SYNTHESIZE] Added hub usage analysis")
         
         # =====================================================================
         # STEP 2: Add Consultant Overlay via LLM
