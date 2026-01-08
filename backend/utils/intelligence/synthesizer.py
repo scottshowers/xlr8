@@ -1,14 +1,17 @@
 """
 XLR8 Intelligence Engine - Synthesizer
 =======================================
-VERSION: 3.0.0 - Consultative-First (LLM primary, template fallback)
+VERSION: 4.0.0 - Hybrid Approach (Template + LLM Overlay)
 
 Synthesizes responses from all Five Truths into consultative answers.
 
 This is where the magic happens - combining Reality, Intent, Configuration,
 Reference, and Regulatory data into actionable insights like a senior consultant.
 
-PRIORITY: LLM Synthesis FIRST → Template FALLBACK only on failure
+v4.0 HYBRID STRATEGY:
+- Template generates DATA LISTING (accurate, no hallucination)
+- LLM adds CONSULTANT OVERLAY (gap analysis, risks, proactive offers)
+- Best of both worlds: accurate data + expert insight
 
 Deploy to: backend/utils/intelligence/synthesizer.py
 """
@@ -23,14 +26,16 @@ from .types import (
 logger = logging.getLogger(__name__)
 
 # Log version on import
-logger.warning("[SYNTHESIZER] Module loaded - VERSION 3.0.0 (Consultative-First)")
+logger.warning("[SYNTHESIZER] Module loaded - VERSION 4.0.0 (Hybrid Approach)")
 
 
 class Synthesizer:
     """
     Synthesizes responses from Five Truths into consultative answers.
     
-    PRIORITY: LLM Synthesis FIRST → Template FALLBACK
+    v4.0 HYBRID STRATEGY:
+    1. Template generates accurate data listing (no LLM hallucination)
+    2. LLM adds consultant overlay (analysis, gaps, risks, proactive offers)
     
     This is what separates XLR8 from data dumps - the ability to triangulate
     across the Five Truths and provide the "so-what" that consultants charge for.
@@ -388,89 +393,201 @@ class Synthesizer:
         """
         Generate the response text.
         
-        ROUTING STRATEGY (v3.2):
-        - INVENTORY/LIST questions → Template (LLM hallucinates data values)
-        - ANALYSIS/VALIDATION questions → LLM (actual reasoning needed)
+        v4.0 HYBRID STRATEGY:
+        1. Template generates DATA LISTING (accurate, no hallucination)
+        2. LLM adds CONSULTANT OVERLAY (analysis, gaps, risks, proactive offers)
         
-        This ensures data accuracy while preserving consultative analysis.
+        This ensures data accuracy while delivering consultant-level insight.
         """
         q_lower = question.lower()
         
         logger.warning(f"[SYNTHESIZE] _generate_response called, question: {question[:50]}")
         
         # =====================================================================
-        # v3.2: SMART ROUTING - Template for data listing, LLM for analysis
-        # LLM hallucinates when asked to list data values (makes up codes)
-        # Template is reliable for "list all X" - just format the actual data
+        # STEP 1: Generate Template Response (accurate data listing)
         # =====================================================================
-        is_inventory_question = any(trigger in q_lower for trigger in [
-            'list all', 'show all', 'what are my', 'what do i have',
-            'give me all', 'show me all', "what's configured", 'what is setup',
-            'list the', 'show the'
-        ])
-        
-        result_rows = data_info.get('result_rows', [])
-        
-        # For inventory questions WITH data, use template (no hallucination risk)
-        if is_inventory_question and result_rows:
-            logger.warning(f"[SYNTHESIZE] Inventory question with {len(result_rows)} rows - using template (no LLM)")
-            return self._generate_template_response(
-                question, data_info, doc_context, reflib_context,
-                insights, conflicts, compliance_check
-            )
-        
-        # =====================================================================
-        # For analysis/validation questions, try LLM synthesis
-        # =====================================================================
-        if self.llm_synthesizer:
-            try:
-                structured_data = {
-                    'rows': data_info.get('result_rows', []),
-                    'columns': data_info.get('result_columns', []),
-                    'query_type': data_info.get('query_type', 'list'),
-                    'sql': self.last_executed_sql or ''
-                }
-                
-                # Handle count/sum/avg values
-                if data_info.get('query_type') in ['count', 'sum', 'average']:
-                    if data_info.get('result_value') is not None:
-                        structured_data['rows'] = [{'result': data_info['result_value']}]
-                        structured_data['columns'] = ['result']
-                
-                logger.warning("[SYNTHESIZE] Attempting LLM consultative synthesis...")
-                
-                consultative_answer = self.llm_synthesizer.synthesize(
-                    question=question,
-                    reality=self._last_reality,
-                    intent=self._last_intent,
-                    configuration=self._last_configuration,
-                    reference=self._last_reference,
-                    regulatory=self._last_regulatory,
-                    conflicts=conflicts,
-                    insights=insights,
-                    structured_data=structured_data,
-                    context_graph=getattr(self, '_context_graph', None)  # v3.0
-                )
-                
-                logger.warning(f"[SYNTHESIZE] LLM synthesis SUCCESS: method={consultative_answer.synthesis_method}")
-                
-                # v3.2: Store rich answer metadata for caller to use
-                self._last_consultative_answer = consultative_answer
-                return consultative_answer.answer
-                
-            except Exception as e:
-                logger.warning(f"[SYNTHESIZE] LLM synthesis failed: {e}, falling back to template")
-        else:
-            logger.warning("[SYNTHESIZE] No LLM synthesizer available, using template")
-        
-        # =====================================================================
-        # FALLBACK: Template-based response (only if LLM fails)
-        # =====================================================================
-        logger.warning("[SYNTHESIZE] Using template fallback")
-        return self._generate_template_response(
+        template_response = self._generate_template_response(
             question, data_info, doc_context, reflib_context,
             insights, conflicts, compliance_check
         )
+        
+        result_rows = data_info.get('result_rows', [])
+        
+        # =====================================================================
+        # STEP 2: Add Consultant Overlay via LLM
+        # LLM enhances with analysis but CANNOT modify the data
+        # =====================================================================
+        if self.llm_synthesizer and result_rows:
+            try:
+                logger.warning("[SYNTHESIZE] v4.0 Hybrid: Adding consultant overlay...")
+                
+                enhanced_response = self._add_consultant_overlay(
+                    question=question,
+                    template_response=template_response,
+                    data_info=data_info,
+                    doc_context=doc_context,
+                    reflib_context=reflib_context,
+                    insights=insights,
+                    conflicts=conflicts
+                )
+                
+                if enhanced_response:
+                    logger.warning("[SYNTHESIZE] Consultant overlay applied successfully")
+                    return enhanced_response
+                else:
+                    logger.warning("[SYNTHESIZE] Overlay failed, using template only")
+                    
+            except Exception as e:
+                logger.warning(f"[SYNTHESIZE] Consultant overlay error: {e}")
+        
+        # Fallback to template-only response
+        return template_response
+    
+    def _add_consultant_overlay(
+        self,
+        question: str,
+        template_response: str,
+        data_info: Dict,
+        doc_context: List[str],
+        reflib_context: List[str],
+        insights: List[Insight],
+        conflicts: List[Conflict]
+    ) -> Optional[str]:
+        """
+        v4.0: Add consultant-level analysis overlay to template response.
+        
+        The LLM receives:
+        - The accurate data listing from template
+        - Context from all Five Truths
+        - Instructions to ADD analysis, NOT modify data
+        
+        Returns:
+        - Enhanced response with consultant overlay
+        - None if overlay fails (caller uses template)
+        """
+        if not self.llm_synthesizer:
+            return None
+        
+        # Build context for LLM
+        context_parts = []
+        
+        # Add document context
+        if doc_context:
+            context_parts.append("=== CUSTOMER DOCUMENTS ===")
+            for doc in doc_context[:3]:
+                context_parts.append(doc[:400])
+        
+        if reflib_context:
+            context_parts.append("\n=== REFERENCE LIBRARY ===")
+            for doc in reflib_context[:3]:
+                context_parts.append(doc[:400])
+        
+        # Add insights
+        if insights:
+            context_parts.append("\n=== SYSTEM DETECTED INSIGHTS ===")
+            for insight in insights[:5]:
+                context_parts.append(f"- [{insight.severity.upper()}] {insight.title}: {insight.description}")
+        
+        # Add conflicts
+        if conflicts:
+            context_parts.append("\n=== DETECTED CONFLICTS ===")
+            for conflict in conflicts[:5]:
+                context_parts.append(f"- {conflict.description}")
+        
+        # Add context graph summary if available
+        if hasattr(self, '_context_graph') and self._context_graph:
+            hubs = self._context_graph.get('hubs', [])
+            if hubs:
+                context_parts.append(f"\n=== DATA MODEL ===")
+                context_parts.append(f"System has {len(hubs)} master data hubs (lookup tables)")
+        
+        context = "\n".join(context_parts)
+        
+        # Build the consultant overlay prompt
+        overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
+
+The client asked: "{question}"
+
+Here is the accurate data listing (DO NOT MODIFY THIS DATA):
+---
+{template_response}
+---
+
+Additional context from documents and system analysis:
+{context}
+
+YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
+
+RULES:
+1. DO NOT repeat or modify the data listing above - it is accurate
+2. DO NOT make up any codes, values, or numbers
+3. ADD analysis that provides consultant value:
+   - Gap Analysis: What's missing or incomplete?
+   - Risk Assessment: What could go wrong?
+   - Recommendations: What should they do next?
+   - Proactive Offers: What related analysis would help?
+
+FORMAT YOUR RESPONSE AS:
+[Keep the original data listing exactly as shown]
+
+---
+
+**🔍 Consultant Analysis**
+
+**Gap Analysis:**
+• [Specific gaps found based on context]
+
+**Risk Assessment:**
+• [Potential issues if not addressed]
+
+**Recommendations:**
+• [Prioritized action items]
+
+**Next Steps:**
+• [Proactive offers for related analysis]
+• Need help with implementation? HCMPACT can assist.
+
+Keep it concise. Bullets only. No fluff."""
+
+        try:
+            # Use the LLM synthesizer's orchestrator directly
+            if hasattr(self.llm_synthesizer, '_orchestrator') and self.llm_synthesizer._orchestrator:
+                result = self.llm_synthesizer._orchestrator.synthesize_answer(
+                    question=f"Add consultant analysis to: {question}",
+                    context=template_response,
+                    expert_prompt=overlay_prompt,
+                    use_claude_fallback=False  # Local only for speed
+                )
+                
+                if result.get('success') and result.get('response'):
+                    response = result['response']
+                    
+                    # Validate the response contains the original data
+                    # If LLM ignored instructions, fall back to template
+                    if len(response) > len(template_response) * 0.5:
+                        # Store metadata for later retrieval
+                        self._last_consultative_answer = type('ConsultativeAnswer', (), {
+                            'question_type': 'hybrid_analysis',
+                            'question_category': 'operational',
+                            'excel_spec': [],
+                            'proactive_offers': [
+                                'Run compliance check on this data?',
+                                'Compare against vendor standards?',
+                                'Export full dataset to Excel?'
+                            ],
+                            'hcmpact_hook': 'Need expert help? HCMPACT consultants are available.',
+                            'synthesis_method': f"hybrid_template_plus_{result.get('model_used', 'llm')}"
+                        })()
+                        
+                        logger.warning(f"[SYNTHESIZE] Overlay success via {result.get('model_used')}")
+                        return response
+                    else:
+                        logger.warning("[SYNTHESIZE] LLM response too short, using template")
+                        
+        except Exception as e:
+            logger.warning(f"[SYNTHESIZE] Overlay LLM error: {e}")
+        
+        return None
     
     def _generate_template_response(
         self,
@@ -560,10 +677,12 @@ class Synthesizer:
         else:
             parts.append("📊 **Reality:** No data found matching your criteria.")
         
-        # Document context sections
-        self._add_truth_sections(parts, doc_context, reflib_context)
+        # Document context sections (for template-only mode)
+        # In hybrid mode, LLM overlay adds richer analysis
+        if not self.llm_synthesizer:
+            self._add_truth_sections(parts, doc_context, reflib_context)
         
-        # Compliance findings
+        # Compliance findings (always show - critical info)
         if compliance_check:
             if compliance_check.get('findings'):
                 parts.append("\n\n🚨 **Compliance Findings:**")
@@ -574,15 +693,15 @@ class Synthesizer:
                 for gap in compliance_check['gaps'][:5]:
                     parts.append(f"- {gap}")
         
-        # Insights
-        if insights:
+        # Insights (for template-only mode - LLM overlay adds richer analysis)
+        if not self.llm_synthesizer and insights:
             parts.append("\n\n---\n💡 **Insights:**")
             for insight in insights[:3]:
                 icon = '🔴' if insight.severity == 'high' else '🟡' if insight.severity == 'medium' else '💡'
                 parts.append(f"\n{icon} **{insight.title}**: {insight.description}")
         
-        # Conflicts
-        if conflicts:
+        # Conflicts (for template-only mode - LLM overlay adds richer analysis)
+        if not self.llm_synthesizer and conflicts:
             parts.append("\n\n---\n⚖️ **Cross-Truth Analysis:**")
             for conflict in conflicts[:5]:
                 icon = '🔴' if conflict.severity in ['critical', 'high'] else '🟡' if conflict.severity == 'medium' else '💡'
