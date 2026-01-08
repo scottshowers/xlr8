@@ -605,7 +605,7 @@ SELECT"""
                 if not invalid:
                     return {
                         'sql': sql,
-                        'table': short_alias,
+                        'table': table_name,  # v4.4 FIX: Use full table name, not alias
                         'query_type': 'list',
                         'all_columns': valid_columns
                     }
@@ -621,7 +621,7 @@ SELECT"""
         
         return {
             'sql': fallback_sql,
-            'table': short_alias,
+            'table': table_name,  # v4.4 FIX: Use full table name, not alias
             'query_type': 'list',
             'all_columns': valid_columns
         }
