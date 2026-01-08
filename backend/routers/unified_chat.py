@@ -1916,6 +1916,14 @@ async def unified_chat(request: UnifiedChatRequest):
             "follow_up_suggestions": [],
             "citations": None,
             
+            # v3.2: Consultative metadata (excel_spec, proactive_offers, hcmpact_hook)
+            "question_type": None,
+            "question_category": None,
+            "excel_spec": [],
+            "proactive_offers": [],
+            "hcmpact_hook": None,
+            "synthesis_method": None,
+            
             # Learning
             "used_learning": learned_sql is not None,
             
@@ -1923,6 +1931,19 @@ async def unified_chat(request: UnifiedChatRequest):
             "answer": None,
             "success": True
         }
+        
+        # v3.2: Extract consultative metadata if available
+        if hasattr(answer, 'consultative_metadata') and answer.consultative_metadata:
+            cm = answer.consultative_metadata
+            response["question_type"] = cm.get('question_type')
+            response["question_category"] = cm.get('question_category')
+            response["excel_spec"] = cm.get('excel_spec', [])
+            response["proactive_offers"] = cm.get('proactive_offers', [])
+            response["hcmpact_hook"] = cm.get('hcmpact_hook')
+            response["synthesis_method"] = cm.get('synthesis_method')
+            logger.warning(f"[UNIFIED] Consultative metadata: type={cm.get('question_type')}, "
+                          f"offers={len(cm.get('proactive_offers', []))}, "
+                          f"excel_sheets={len(cm.get('excel_spec', []))}")
         
         # Serialize truths (Five Truths)
         for truth in answer.from_reality:
