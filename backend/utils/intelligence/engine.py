@@ -49,7 +49,22 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "7.0.0"  # v3.0: Context Graph integration
+__version__ = "8.0.0"  # v8.0: Project Intelligence integration
+
+# Try to load Project Intelligence
+PROJECT_INTELLIGENCE_AVAILABLE = False
+get_project_intelligence = None
+try:
+    from backend.utils.project_intelligence import get_project_intelligence
+    PROJECT_INTELLIGENCE_AVAILABLE = True
+    logger.info("[ENGINE-V2] ProjectIntelligence available")
+except ImportError:
+    try:
+        from utils.project_intelligence import get_project_intelligence
+        PROJECT_INTELLIGENCE_AVAILABLE = True
+        logger.info("[ENGINE-V2] ProjectIntelligence available (alt import)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] ProjectIntelligence not available")
 
 # Try to load IntelligentScoping
 SCOPING_AVAILABLE = False
@@ -200,6 +215,13 @@ class IntelligenceEngineV2:
         self._pending_clarification = None
         self._last_validation_export = None
         
+        # v8.0: Project Intelligence - loaded on context load
+        self.project_intelligence = None
+        self.vocabulary: Dict = {}  # column_name -> {label, values}
+        self.dimensions: List[str] = []  # Natural breakdown hierarchy
+        self.scope: Dict = {}  # countries, companies, active/termed counts
+        self.coverage: Dict = {}  # entity -> {configured, used, pct}
+        
         # Initialize LLM synthesizer
         self._llm_synthesizer = None
         if SYNTHESIS_AVAILABLE and ConsultativeSynthesizer:
@@ -238,6 +260,19 @@ class IntelligenceEngineV2:
         self.schema = schema or {}
         self.relationships = relationships or []
         
+        # =====================================================================
+        # v8.0: Load Project Intelligence (computed on upload)
+        # This is the BRAIN - vocabulary, dimensions, coverage, findings
+        # =====================================================================
+        if PROJECT_INTELLIGENCE_AVAILABLE and structured_handler:
+            try:
+                self.project_intelligence = get_project_intelligence(self.project, structured_handler)
+                if self.project_intelligence:
+                    self._load_intelligence_context()
+                    logger.warning(f"[ENGINE-V2] ✅ Project Intelligence loaded: vocab={len(self.vocabulary)}, dims={len(self.dimensions)}")
+            except Exception as e:
+                logger.warning(f"[ENGINE-V2] Project Intelligence load failed: {e}")
+        
         # Extract filter candidates from schema if not provided explicitly
         self.filter_candidates = filter_candidates or self.schema.get('filter_candidates', {})
         if self.filter_candidates:
@@ -267,7 +302,11 @@ class IntelligenceEngineV2:
             confirmed_facts=self.confirmed_facts,
             filter_candidates=self.filter_candidates,
             schema=self.schema,
-            structured_handler=structured_handler  # v4.4: For hub usage analysis
+            structured_handler=structured_handler,  # v4.4: For hub usage analysis
+            vocabulary=self.vocabulary,  # v8.0: What they call things
+            dimensions=self.dimensions,  # v8.0: Breakdown hierarchy
+            scope=self.scope,  # v8.0: Who's in the data
+            coverage=self.coverage  # v8.0: Config vs used
         )
         
         self.reality_gatherer = RealityGatherer(
@@ -344,6 +383,232 @@ class IntelligenceEngineV2:
         """
         # Pattern cache feature removed - RealityGatherer handles None gracefully
         pass
+    
+    def _load_intelligence_context(self):
+        """
+        v8.0: Extract vocabulary, dimensions, coverage from Project Intelligence.
+        
+        This transforms raw intelligence data into actionable context:
+        - vocabulary: What they call things (org_level_1 = "Division")
+        - dimensions: Natural breakdown hierarchy (Country → Company → Division)
+        - scope: Who's in the data (countries, companies, active/termed)
+        - coverage: What's configured vs used (earnings: 20 config, 8 used)
+        """
+        if not self.project_intelligence:
+            return
+        
+        pi = self.project_intelligence
+        
+        # =====================================================================
+        # 1. VOCABULARY - Learn what they call things
+        # From lookups and column profiles with low cardinality
+        # =====================================================================
+        try:
+            # From lookups (pre-detected code/description pairs)
+            if hasattr(pi, 'lookups') and pi.lookups:
+                for lookup in pi.lookups:
+                    col = lookup.code_column if hasattr(lookup, 'code_column') else None
+                    if col:
+                        self.vocabulary[col] = {
+                            'table': lookup.table_name if hasattr(lookup, 'table_name') else '',
+                            'type': 'lookup',
+                            'values': list(lookup.lookup_data.keys()) if hasattr(lookup, 'lookup_data') and lookup.lookup_data else []
+                        }
+            
+            # From column profiles (low cardinality = categorical)
+            if self.structured_handler:
+                try:
+                    profiles = self.structured_handler.conn.execute("""
+                        SELECT column_name, distinct_count, top_values_json, filter_category
+                        FROM _column_profiles
+                        WHERE project = ?
+                          AND distinct_count BETWEEN 2 AND 50
+                          AND top_values_json IS NOT NULL
+                        ORDER BY distinct_count
+                    """, [self.project]).fetchall()
+                    
+                    for col_name, distinct_count, values_json, filter_cat in profiles:
+                        if col_name not in self.vocabulary:
+                            try:
+                                import json
+                                values = json.loads(values_json) if values_json else []
+                                # Infer friendly label from column name
+                                label = self._infer_column_label(col_name, values)
+                                self.vocabulary[col_name] = {
+                                    'label': label,
+                                    'type': filter_cat or 'categorical',
+                                    'values': values[:20],  # Top 20
+                                    'count': distinct_count
+                                }
+                            except:
+                                pass
+                except Exception as e:
+                    logger.debug(f"[ENGINE-V2] Column profiles load failed: {e}")
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Vocabulary extraction failed: {e}")
+        
+        # =====================================================================
+        # 2. DIMENSIONS - Natural breakdown hierarchy
+        # Infer from vocabulary + Context Graph relationships
+        # =====================================================================
+        try:
+            # Standard HCM hierarchy - look for what exists in vocabulary
+            dimension_priority = [
+                ('country', ['country_code', 'country', 'country_name']),
+                ('company', ['company_code', 'company', 'company_id']),
+                ('division', ['org_level_1', 'division', 'division_code']),
+                ('department', ['org_level_2', 'department', 'department_code', 'dept']),
+                ('location', ['location_code', 'location', 'work_location']),
+                ('employee_type', ['employee_type', 'emp_type', 'worker_type']),
+                ('pay_type', ['pay_type', 'pay_frequency', 'salary_type']),
+            ]
+            
+            vocab_cols = set(self.vocabulary.keys())
+            for dim_name, possible_cols in dimension_priority:
+                for col in possible_cols:
+                    if col in vocab_cols:
+                        self.dimensions.append(col)
+                        # Store friendly name
+                        if col in self.vocabulary:
+                            self.vocabulary[col]['dimension'] = dim_name
+                        break
+            
+            logger.debug(f"[ENGINE-V2] Detected dimensions: {self.dimensions}")
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Dimension detection failed: {e}")
+        
+        # =====================================================================
+        # 3. SCOPE - Who's in the data
+        # Active vs termed, by country/company
+        # =====================================================================
+        try:
+            if self.structured_handler:
+                # Try to get employee counts by status
+                try:
+                    # Find employee table
+                    emp_tables = self.structured_handler.conn.execute("""
+                        SELECT table_name FROM _schema_metadata
+                        WHERE project = ? AND (
+                            entity_type ILIKE '%employee%' OR 
+                            table_name ILIKE '%employee%' OR
+                            table_name ILIKE '%summary%'
+                        ) AND truth_type = 'reality'
+                        AND is_current = TRUE
+                        LIMIT 1
+                    """, [self.project]).fetchone()
+                    
+                    if emp_tables:
+                        emp_table = emp_tables[0]
+                        
+                        # Get status breakdown
+                        status_sql = f"""
+                            SELECT 
+                                COALESCE(status, 'Unknown') as status,
+                                COUNT(*) as cnt
+                            FROM "{emp_table}"
+                            GROUP BY status
+                        """
+                        try:
+                            status_result = self.structured_handler.conn.execute(status_sql).fetchall()
+                            for status, cnt in status_result:
+                                status_key = status.lower() if status else 'unknown'
+                                if 'active' in status_key or status_key == 'a':
+                                    self.scope['active_employees'] = cnt
+                                elif 'term' in status_key or status_key == 't':
+                                    self.scope['termed_employees'] = cnt
+                                else:
+                                    self.scope.setdefault('other_status', {})[status] = cnt
+                        except:
+                            pass
+                        
+                        # Get country breakdown if available
+                        for dim_col in ['country_code', 'country']:
+                            try:
+                                country_sql = f"""
+                                    SELECT "{dim_col}", COUNT(*) as cnt
+                                    FROM "{emp_table}"
+                                    WHERE "{dim_col}" IS NOT NULL
+                                    GROUP BY "{dim_col}"
+                                    ORDER BY cnt DESC
+                                """
+                                country_result = self.structured_handler.conn.execute(country_sql).fetchall()
+                                if country_result:
+                                    self.scope['by_country'] = {r[0]: r[1] for r in country_result}
+                                    break
+                            except:
+                                continue
+                except Exception as e:
+                    logger.debug(f"[ENGINE-V2] Employee scope extraction failed: {e}")
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Scope extraction failed: {e}")
+        
+        # =====================================================================
+        # 4. COVERAGE - What's configured vs used
+        # From Context Graph hub/spoke analysis
+        # =====================================================================
+        try:
+            if self.structured_handler and hasattr(self.structured_handler, 'get_context_graph'):
+                graph = self.structured_handler.get_context_graph(self.project)
+                
+                for hub in graph.get('hubs', []):
+                    semantic_type = hub.get('semantic_type', '')
+                    entity_type = hub.get('entity_type', semantic_type)
+                    cardinality = hub.get('cardinality', 0)
+                    has_reality = hub.get('has_reality_spokes', False)
+                    
+                    if entity_type:
+                        self.coverage[entity_type] = {
+                            'configured': cardinality,
+                            'has_employee_data': has_reality,
+                            'hub_table': hub.get('table', '')
+                        }
+                
+                # Count used codes from relationships
+                for rel in graph.get('relationships', []):
+                    if rel.get('truth_type') == 'reality':
+                        hub_table = rel.get('hub_table', '')
+                        spoke_cardinality = rel.get('spoke_cardinality', 0)
+                        
+                        # Find matching coverage entry
+                        for entity, cov in self.coverage.items():
+                            if cov.get('hub_table', '').lower() == hub_table.lower():
+                                cov['used'] = spoke_cardinality
+                                cov['usage_pct'] = round(100 * spoke_cardinality / cov['configured'], 1) if cov['configured'] > 0 else 0
+                                break
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Coverage extraction failed: {e}")
+        
+        logger.warning(f"[ENGINE-V2] Intelligence context loaded: "
+                      f"vocab={len(self.vocabulary)}, dims={self.dimensions}, "
+                      f"scope={list(self.scope.keys())}, coverage={list(self.coverage.keys())}")
+    
+    def _infer_column_label(self, col_name: str, values: List) -> str:
+        """Infer a friendly label for a column based on name and values."""
+        col_lower = col_name.lower()
+        
+        # Known mappings
+        label_map = {
+            'org_level_1': 'Division',
+            'org_level_2': 'Department', 
+            'org_level_3': 'Team',
+            'org_level_4': 'Unit',
+            'employee_type': 'Employee Type',
+            'emp_type': 'Employee Type',
+            'pay_type': 'Pay Type',
+            'status': 'Status',
+            'country_code': 'Country',
+            'company_code': 'Company',
+            'location_code': 'Location',
+            'earnings_group': 'Earnings Group',
+            'deduction_group': 'Deduction Group',
+        }
+        
+        if col_lower in label_map:
+            return label_map[col_lower]
+        
+        # Generate from column name
+        label = col_name.replace('_', ' ').title()
+        return label
     
     # =========================================================================
     # MAIN ENTRY POINT
