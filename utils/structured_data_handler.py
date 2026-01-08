@@ -2626,28 +2626,18 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                     if table_name == matching_hub['table_name'] and col_name == matching_hub['key_column']:
                                         continue
                                     
-                                    # Get cardinality for this spoke column
-                                    try:
-                                        card_result = self.conn.execute(f"""
-                                            SELECT COUNT(DISTINCT "{col_name}") 
-                                            FROM "{table_name}" 
-                                            WHERE "{col_name}" IS NOT NULL
-                                        """).fetchone()
-                                        spoke_cardinality = card_result[0] if card_result else 0
-                                    except:
-                                        spoke_cardinality = 0
-                                    
+                                    # Skip cardinality query - too slow. Will be 0 for schema matches.
                                     relationships.append({
                                         'hub': matching_hub,
                                         'spoke_table': table_name,
                                         'spoke_column': col_name,
-                                        'spoke_cardinality': spoke_cardinality,
+                                        'spoke_cardinality': 0,  # Skip query - schema match is enough
                                         'coverage_pct': 100.0,  # Schema-defined = 100% confidence
                                         'is_subset': True,
                                         'truth_type': truth_type,
                                         'entity_type': entity_type,
                                         'file_name': file_name,
-                                        'match_source': 'schema'  # Mark as schema-matched
+                                        'match_source': 'schema'
                                     })
                                     schema_matched_columns.add((table_name, col_name))
                                     logger.debug(f"[CONTEXT-GRAPH] SCHEMA MATCH: {table_name}.{col_name} → {matching_hub['semantic_type']}")
