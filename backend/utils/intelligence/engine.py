@@ -126,6 +126,21 @@ except ImportError:
     except ImportError:
         logger.warning("[ENGINE-V2] ComplianceEngine not available")
 
+# Try to load ProjectIntelligence for organizational metrics
+PROJECT_INTELLIGENCE_AVAILABLE = False
+get_project_intelligence = None
+try:
+    from backend.utils.project_intelligence import get_project_intelligence
+    PROJECT_INTELLIGENCE_AVAILABLE = True
+    logger.info("[ENGINE-V2] ProjectIntelligence loaded")
+except ImportError:
+    try:
+        from utils.project_intelligence import get_project_intelligence
+        PROJECT_INTELLIGENCE_AVAILABLE = True
+        logger.info("[ENGINE-V2] ProjectIntelligence loaded (alt path)")
+    except ImportError:
+        logger.warning("[ENGINE-V2] ProjectIntelligence not available")
+
 
 class IntelligenceEngineV2:
     """
@@ -862,6 +877,18 @@ class IntelligenceEngineV2:
         except Exception as e:
             logger.debug(f"[ENGINE-V2] Could not get entity gaps: {e}")
         
+        # v4.5: Get organizational metrics from ProjectIntelligence
+        organizational_metrics = []
+        try:
+            if PROJECT_INTELLIGENCE_AVAILABLE and get_project_intelligence and self.structured_handler:
+                intelligence = get_project_intelligence(self.project, self.structured_handler)
+                if intelligence:
+                    organizational_metrics = intelligence.get_organizational_metrics()
+                    if organizational_metrics:
+                        logger.warning(f"[ENGINE-V2] Loaded {len(organizational_metrics)} organizational metrics")
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Could not get organizational metrics: {e}")
+        
         # Merge analysis flags into context for synthesizer
         synth_context = context.copy() if context else {}
         synth_context['is_config'] = analysis.get('is_config', False)
@@ -869,6 +896,7 @@ class IntelligenceEngineV2:
         synth_context['is_employee_question'] = analysis.get('is_employee_question', False)
         synth_context['entity_gaps'] = entity_gaps  # v3.2: Pass gaps for synthesis
         synth_context['project'] = self.project  # v4.4: Pass project for usage analysis
+        synth_context['organizational_metrics'] = organizational_metrics  # v4.5: Pre-computed org metrics
         
         # Synthesize answer
         answer = self.synthesizer.synthesize(
