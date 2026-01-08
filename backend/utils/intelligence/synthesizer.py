@@ -74,7 +74,8 @@ class Synthesizer:
     
     def __init__(self, llm_synthesizer=None, confirmed_facts: Dict = None,
                  filter_candidates: Dict = None, schema: Dict = None,
-                 structured_handler=None):
+                 structured_handler=None, vocabulary: Dict = None,
+                 dimensions: List = None, scope: Dict = None, coverage: Dict = None):
         """
         Initialize the synthesizer.
         
@@ -84,12 +85,22 @@ class Synthesizer:
             filter_candidates: Dict of filter category → candidates
             schema: Schema metadata for suggestions
             structured_handler: DuckDB handler for running queries (v4.4)
+            vocabulary: Column name → label/values mapping (v8.0)
+            dimensions: Natural breakdown hierarchy (v8.0)
+            scope: Who's in the data - countries, companies, active/termed (v8.0)
+            coverage: Config vs used per entity type (v8.0)
         """
         self.llm_synthesizer = llm_synthesizer
         self.confirmed_facts = confirmed_facts or {}
         self.filter_candidates = filter_candidates or {}
         self.schema = schema or {}
         self.structured_handler = structured_handler  # v4.4: For hub usage analysis
+        
+        # v8.0: Project Intelligence context
+        self.vocabulary = vocabulary or {}
+        self.dimensions = dimensions or []
+        self.scope = scope or {}
+        self.coverage = coverage or {}
         
         # Store last gathered truths for LLM synthesis
         self._last_reality: List[Truth] = []
@@ -109,6 +120,12 @@ class Synthesizer:
         
         # v4.4: Store project for usage queries
         self._project: str = None
+        
+        # Log intelligence context
+        if vocabulary or dimensions or scope or coverage:
+            logger.warning(f"[SYNTHESIZE] v8.0 Intelligence context: vocab={len(self.vocabulary)}, "
+                          f"dims={self.dimensions}, scope={list(self.scope.keys())}, "
+                          f"coverage={list(self.coverage.keys())}")
     
     def _get_entity_context(self, table_name: str, columns: List[str]) -> str:
         """
@@ -273,15 +290,10 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
     
     def _infer_grouping_dimensions(self, table_name: str, result_rows: List[Dict]) -> List[str]:
         """
-        v4.5: Infer natural grouping dimensions from Context Graph.
+        v4.5/v8.0: Get grouping dimensions from Project Intelligence.
         
-        Looks at columns in the config table and checks which ones are 
-        spokes to other hubs. Those are natural grouping dimensions.
-        
-        Hierarchy priority:
-        1. Country (country_code, country)
-        2. Company (company_code, company)
-        3. Entity-specific group (earnings_group, deduction_group, etc.)
+        v8.0 CHANGE: Use pre-computed dimensions from engine instead of re-inferring.
+        Falls back to inference if intelligence not available.
         
         Returns list of column names to group by, in priority order.
         """
@@ -292,18 +304,30 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         available_cols = list(result_rows[0].keys()) if result_rows else []
         available_lower = {c.lower(): c for c in available_cols}
         
+        # =====================================================================
+        # v8.0: USE PRE-COMPUTED DIMENSIONS from Project Intelligence
+        # =====================================================================
+        if self.dimensions:
+            found_dims = []
+            for dim_col in self.dimensions:
+                dim_lower = dim_col.lower()
+                if dim_lower in available_lower:
+                    found_dims.append(available_lower[dim_lower])
+                    logger.debug(f"[HUB-USAGE] Using intelligence dimension: {dim_col}")
+            
+            if found_dims:
+                logger.warning(f"[HUB-USAGE] Using {len(found_dims)} dimensions from intelligence: {found_dims}")
+                return found_dims
+        
+        # =====================================================================
+        # FALLBACK: Infer from column names (original logic)
+        # =====================================================================
         # Define grouping hierarchy (in priority order)
-        # These are common dimensional columns in HCM data
         grouping_priority = [
-            # Country level
             ('country_code', 'country'),
             ('country', 'country'),
-            
-            # Company level  
             ('company_code', 'company'),
             ('company', 'company'),
-            
-            # Entity-specific groups (inferred from table name)
             ('earnings_group', 'earnings_group'),
             ('earning_group', 'earnings_group'),
             ('deduction_group', 'deduction_group'),
@@ -311,8 +335,6 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             ('tax_group', 'tax_group'),
             ('location_group', 'location_group'),
             ('job_family', 'job_group'),
-            
-            # Organization level
             ('org_level', 'organization'),
             ('organization_code', 'organization'),
         ]
@@ -337,7 +359,6 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                     spoke_col = rel.get('spoke_column', '')
                     hub_semantic = rel.get('semantic_type', '')
                     
-                    # This column references another hub - it's a natural dimension
                     if spoke_col and spoke_col in available_lower:
                         actual_col = available_lower[spoke_col]
                         if actual_col not in found_groups:
@@ -483,6 +504,20 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             # =================================================================
             analysis_parts = []
             analysis_parts.append("\n📊 **Usage Analysis** (from employee data):")
+            
+            # v8.0: Add scope context if available
+            if self.scope:
+                scope_parts = []
+                if 'active_employees' in self.scope:
+                    scope_parts.append(f"{self.scope['active_employees']:,} active")
+                if 'termed_employees' in self.scope:
+                    scope_parts.append(f"{self.scope['termed_employees']:,} termed")
+                if scope_parts:
+                    analysis_parts.append(f"*Population: {', '.join(scope_parts)}*")
+                
+                if 'by_country' in self.scope and len(self.scope['by_country']) > 1:
+                    countries = [f"{k}: {v:,}" for k, v in list(self.scope['by_country'].items())[:3]]
+                    analysis_parts.append(f"*Countries: {', '.join(countries)}*")
             
             # Summarize by group if we have grouping info
             if grouping_columns and code_to_groups:
