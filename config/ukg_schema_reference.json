@@ -2221,6 +2221,27 @@
         "entity": "EmpPriorYearWages",
         "original_column": "Tax Code"
       }
+    ],
+    "earningscode": [
+      {
+        "hub": "earning_code",
+        "entity": "Employee Data",
+        "original_column": "earnings_code"
+      }
+    ],
+    "earnings_code": [
+      {
+        "hub": "earning_code",
+        "entity": "Employee Data",
+        "original_column": "earnings_code"
+      }
+    ],
+    "deductionscode": [
+      {
+        "hub": "deduction_code",
+        "entity": "Employee Data",
+        "original_column": "deductions_code"
+      }
     ]
   },
   "join_keys": {
