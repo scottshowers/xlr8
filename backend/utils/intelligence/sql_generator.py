@@ -293,7 +293,7 @@ class SQLGenerator:
         
         Args:
             result: SQL generation result with 'sql' key
-            entity_scope: Dict with semantic_type, value, hub_table, hub_column
+            entity_scope: Dict with semantic_type, value, hub_column
         """
         sql = result.get('sql', '')
         if not sql:
@@ -302,8 +302,9 @@ class SQLGenerator:
         semantic_type = entity_scope.get('semantic_type')
         scope_value = entity_scope.get('value')
         hub_column = entity_scope.get('hub_column')
+        scope_column = entity_scope.get('scope_column')  # v4.0: Direct column name
         
-        if not semantic_type or not scope_value:
+        if not scope_value:
             return result
         
         # Find the scoping column in the target table(s)
@@ -312,16 +313,32 @@ class SQLGenerator:
         
         try:
             if self.handler and target_table:
-                # Find column in target table that matches this semantic type
-                scope_col = self.handler.conn.execute("""
-                    SELECT column_name FROM _column_mappings
-                    WHERE LOWER(table_name) = LOWER(?)
-                    AND semantic_type = ?
-                    LIMIT 1
-                """, [target_table, semantic_type]).fetchone()
+                col_name = None
                 
-                if scope_col:
-                    col_name = scope_col[0]
+                # v4.0: First try direct column name match
+                if scope_column:
+                    check_col = self.handler.conn.execute(f"""
+                        SELECT column_name FROM (
+                            SELECT column_name FROM pragma_table_info('{target_table}')
+                        ) WHERE LOWER(column_name) = LOWER(?)
+                    """, [scope_column]).fetchone()
+                    if check_col:
+                        col_name = check_col[0]
+                        logger.warning(f"[SQL-GEN] Found scope column directly: {col_name}")
+                
+                # Fallback: Find column by semantic type mapping
+                if not col_name and semantic_type:
+                    scope_col = self.handler.conn.execute("""
+                        SELECT original_column FROM _column_mappings
+                        WHERE LOWER(table_name) = LOWER(?)
+                        AND semantic_type = ?
+                        LIMIT 1
+                    """, [target_table, semantic_type]).fetchone()
+                    
+                    if scope_col:
+                        col_name = scope_col[0]
+                
+                if col_name:
                     # Add WHERE clause
                     scope_filter = f'"{col_name}" = \'{scope_value}\''
                     sql = self._inject_where_clause(sql, scope_filter)
