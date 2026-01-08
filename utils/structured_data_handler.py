@@ -2793,36 +2793,25 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             
             # =================================================================
             # STEP 9: Register entities in Entity Registry (Supabase)
+            # BATCHED: Collect all data, then single API calls
             # =================================================================
             try:
                 from backend.utils.entity_registry import get_entity_registry
                 registry = get_entity_registry()
                 
-                # Register hubs
-                for hub in final_hubs:
-                    registry.register_duckdb_hub(
-                        entity_type=hub['semantic_type'],
-                        project_id=project,
-                        table_name=hub['table_name'],
-                        column_name=hub['key_column'],
-                        value_count=hub['cardinality']
-                    )
-                
-                # Register spokes
-                for rel in relationships:
-                    hub = rel['hub']
-                    registry.register_duckdb_spoke(
-                        entity_type=hub['semantic_type'],
-                        project_id=project,
-                        table_name=rel['spoke_table'],
-                        column_name=rel['spoke_column'],
-                        value_count=rel['spoke_cardinality'],
-                        coverage_pct=rel['coverage_pct']
-                    )
-                
-                logger.info(f"[ENTITY_REGISTRY] Registered {hub_count} hubs, {spoke_count} spokes for {project}")
+                if registry and registry.supabase:
+                    # Batch register - single API calls instead of 1500+
+                    hub_registered = registry.register_duckdb_hubs_batch(final_hubs, project)
+                    spoke_registered = registry.register_duckdb_spokes_batch(relationships, project)
+                    logger.info(f"[ENTITY_REGISTRY] Batch registered {hub_registered} hubs, {spoke_registered} spokes for {project}")
+                else:
+                    logger.debug("[ENTITY_REGISTRY] Supabase not available, skipping registry sync")
+                    
+            except ImportError:
+                logger.debug("[ENTITY_REGISTRY] Entity registry module not available")
             except Exception as e:
-                logger.debug(f"[ENTITY_REGISTRY] Failed to register entities: {e}")
+                # Non-fatal - context graph still works without registry
+                logger.warning(f"[ENTITY_REGISTRY] Failed to sync (non-fatal): {e}")
             
             result = {
                 'hubs': hub_count,
