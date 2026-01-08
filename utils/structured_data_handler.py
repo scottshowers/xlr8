@@ -2609,6 +2609,11 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                     target_normalized = target_hub_type.replace('_', '')
                                     hub_semantic_normalized = hub_semantic.replace('_', '')
                                     
+                                    # v4.1: Fix singular/plural matching for 'earning' vs 'earnings'
+                                    # The 's' is internal (earning+s+code), not trailing, so rstrip doesn't work
+                                    target_singular = target_normalized.replace('ings', 'ing').replace('ions', 'ion')
+                                    hub_singular = hub_semantic_normalized.replace('ings', 'ing').replace('ions', 'ion')
+                                    
                                     if (target_hub_type in hub_semantic or 
                                         target_hub_type == hub_entity or
                                         f"{target_hub_type}_code" == hub_semantic or
@@ -2617,7 +2622,9 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                         # Handle singular/plural: earning vs earnings
                                         target_normalized + 's' == hub_semantic_normalized or
                                         target_normalized == hub_semantic_normalized + 's' or
-                                        target_normalized.rstrip('s') == hub_semantic_normalized.rstrip('s')):
+                                        target_normalized.rstrip('s') == hub_semantic_normalized.rstrip('s') or
+                                        # v4.1: Handle internal plural (earningscode vs earningcode)
+                                        target_singular == hub_singular):
                                         matching_hub = hub
                                         break
                                 
