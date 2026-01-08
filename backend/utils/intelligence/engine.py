@@ -584,11 +584,24 @@ class IntelligenceEngineV2:
             except Exception as e:
                 logger.debug(f"[ENGINE-V2] Could not get context graph: {e}")
         
+        # v3.2: Get entity gaps from Entity Registry (configured but not in docs, or vice versa)
+        entity_gaps = []
+        try:
+            from backend.utils.entity_registry import get_entity_registry
+            registry = get_entity_registry()
+            if registry:
+                entity_gaps = registry.get_gaps() or []
+                if entity_gaps:
+                    logger.warning(f"[ENGINE-V2] Found {len(entity_gaps)} entity gaps for gap detection")
+        except Exception as e:
+            logger.debug(f"[ENGINE-V2] Could not get entity gaps: {e}")
+        
         # Merge analysis flags into context for synthesizer
         synth_context = context.copy() if context else {}
         synth_context['is_config'] = analysis.get('is_config', False)
         synth_context['is_validation'] = analysis.get('is_validation', False)
         synth_context['is_employee_question'] = analysis.get('is_employee_question', False)
+        synth_context['entity_gaps'] = entity_gaps  # v3.2: Pass gaps for synthesis
         
         # Synthesize answer
         answer = self.synthesizer.synthesize(
@@ -611,6 +624,14 @@ class IntelligenceEngineV2:
         if self.reality_gatherer:
             self.last_executed_sql = self.reality_gatherer.last_executed_sql
             answer.executed_sql = self.last_executed_sql
+        
+        # v3.2: Attach consultative metadata (excel_spec, proactive_offers, etc.)
+        if self.synthesizer and hasattr(self.synthesizer, 'get_consultative_metadata'):
+            consultative_meta = self.synthesizer.get_consultative_metadata()
+            if consultative_meta:
+                answer.consultative_metadata = consultative_meta
+                logger.warning(f"[ENGINE-V2] Consultative metadata: type={consultative_meta.get('question_type')}, "
+                             f"offers={len(consultative_meta.get('proactive_offers', []))}")
         
         # Update history
         self.conversation_history.append({
