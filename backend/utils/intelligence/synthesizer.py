@@ -66,6 +66,9 @@ class Synthesizer:
         self._last_reference: List[Truth] = []
         self._last_regulatory: List[Truth] = []
         
+        # v3.2: Store last consultative answer for rich metadata access
+        self._last_consultative_answer = None
+        
         # Track last executed SQL for provenance
         self.last_executed_sql: Optional[str] = None
     
@@ -170,6 +173,32 @@ class Synthesizer:
         if compliance:
             reasoning.append(f"Found {len(compliance)} compliance documents")
         
+        # v3.2: Add entity gaps as insights
+        entity_gaps = self._context.get('entity_gaps', [])
+        if entity_gaps:
+            reasoning.append(f"Found {len(entity_gaps)} entity gaps (config vs docs)")
+            # Convert gaps to Insight objects for synthesis
+            from .types import Insight
+            for gap in entity_gaps[:5]:  # Limit to top 5 gaps
+                gap_type = gap.get('gap_type', 'unknown')
+                entity = gap.get('entity_type', 'unknown')
+                if gap_type == 'config_only':
+                    insights.append(Insight(
+                        type='gap_detection',
+                        title=f'Configured but not documented: {entity}',
+                        description=f'{entity} is configured in the system but not mentioned in any reference documents',
+                        severity='medium',
+                        action_required=True
+                    ))
+                elif gap_type == 'docs_only':
+                    insights.append(Insight(
+                        type='gap_detection',
+                        title=f'Documented but not configured: {entity}',
+                        description=f'{entity} is mentioned in documents but not found in system configuration',
+                        severity='high',
+                        action_required=True
+                    ))
+        
         # Generate the response
         answer_text = self._generate_response(
             question=question,
@@ -203,6 +232,32 @@ class Synthesizer:
             reasoning=reasoning,
             executed_sql=self.last_executed_sql
         )
+    
+    def get_consultative_metadata(self) -> Optional[Dict]:
+        """
+        Get rich metadata from last consultative synthesis.
+        
+        v3.2: Returns the full ConsultativeAnswer fields that were previously
+        discarded. Enables excel_spec, proactive_offers, hcmpact_hook.
+        
+        Returns:
+            Dict with: question_type, question_category, excel_spec, 
+                      proactive_offers, hcmpact_hook, synthesis_method
+            None if no consultative synthesis was performed
+        """
+        if not self._last_consultative_answer:
+            return None
+        
+        ca = self._last_consultative_answer
+        return {
+            'question_type': getattr(ca, 'question_type', ''),
+            'question_category': getattr(ca, 'question_category', ''),
+            'excel_spec': getattr(ca, 'excel_spec', []),
+            'proactive_offers': getattr(ca, 'proactive_offers', []),
+            'hcmpact_hook': getattr(ca, 'hcmpact_hook', ''),
+            'synthesis_method': getattr(ca, 'synthesis_method', ''),
+            'recommended_actions': getattr(ca, 'recommended_actions', []),
+        }
     
     def _extract_data_info(self, reality: List[Truth]) -> Dict:
         """Extract query results and metadata from reality truths."""
@@ -384,7 +439,7 @@ class Synthesizer:
                 
                 logger.warning("[SYNTHESIZE] Attempting LLM consultative synthesis...")
                 
-                answer = self.llm_synthesizer.synthesize(
+                consultative_answer = self.llm_synthesizer.synthesize(
                     question=question,
                     reality=self._last_reality,
                     intent=self._last_intent,
@@ -397,8 +452,11 @@ class Synthesizer:
                     context_graph=getattr(self, '_context_graph', None)  # v3.0
                 )
                 
-                logger.warning(f"[SYNTHESIZE] LLM synthesis SUCCESS: method={answer.synthesis_method}")
-                return answer.answer
+                logger.warning(f"[SYNTHESIZE] LLM synthesis SUCCESS: method={consultative_answer.synthesis_method}")
+                
+                # v3.2: Store rich answer metadata for caller to use
+                self._last_consultative_answer = consultative_answer
+                return consultative_answer.answer
                 
             except Exception as e:
                 logger.warning(f"[SYNTHESIZE] LLM synthesis failed: {e}, falling back to template")
