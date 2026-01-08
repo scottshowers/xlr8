@@ -3,6 +3,9 @@ PROJECT INTELLIGENCE SERVICE
 =============================
 The Universal Analysis Engine - The Brain of XLR8
 
+v4.7: Organizational metrics now use Context Graph for dimensional breakdowns.
+      Merges dimensions across all employee tables (company, country, org_levels, location).
+
 This is NOT a UKG tool. This is NOT an HCM tool.
 This is a UNIVERSAL ANALYSIS ENGINE that works on ANY data.
 
@@ -1953,16 +1956,25 @@ class ProjectIntelligenceService:
         """
         Find employee/reality tables that contain headcount data.
         
+        v4.7: Now uses Context Graph to identify dimensional columns.
+        The graph tells us which columns are spokes to dimensional hubs
+        (company, country, location, org_level).
+        
         Looks for:
         - Tables with employee_number, emp_id, etc.
         - Tables marked as truth_type = 'reality'
         - Tables with status columns
+        - Dimensional columns from Context Graph relationships
         """
         employee_tables = []
         
         # Employee identifier patterns
         employee_id_patterns = ['employee_number', 'employee_id', 'emp_id', 'emp_no', 
                                'worker_id', 'person_id', 'ssn']
+        
+        # Build dimensional lookup from Context Graph
+        # Maps table.column -> semantic_type for dimensional hubs
+        dimensional_spokes = self._get_dimensional_spokes_from_graph(context_graph)
         
         for table_info in tables:
             table_name = table_info.get('table_name', '')
@@ -1990,18 +2002,32 @@ class ProjectIntelligenceService:
                         status_col = col
                         break
                 
-                # Check for dimensional columns (company, location, etc.)
+                # Get dimensional columns FROM CONTEXT GRAPH
                 dimensional_cols = {}
                 for col in table_info.get('columns', []):
+                    key = f"{table_name}.{col}".lower()
+                    if key in dimensional_spokes:
+                        dim_info = dimensional_spokes[key]
+                        dim_name = dim_info['dimension_name']
+                        dimensional_cols[dim_name] = {
+                            'column': col,
+                            'hub_table': dim_info['hub_table'],
+                            'hub_column': dim_info['hub_column'],
+                            'semantic_type': dim_info['semantic_type']
+                        }
+                
+                # Fallback: also check by name patterns for any missed
+                for col in table_info.get('columns', []):
                     col_lower = col.lower()
-                    if 'company' in col_lower and 'code' in col_lower:
-                        dimensional_cols['company'] = col
-                    elif 'location' in col_lower and 'code' in col_lower:
-                        dimensional_cols['location'] = col
-                    elif 'department' in col_lower:
-                        dimensional_cols['department'] = col
-                    elif 'org_level' in col_lower:
-                        dimensional_cols[col_lower] = col
+                    if 'country' in col_lower and 'code' in col_lower and 'country' not in dimensional_cols:
+                        dimensional_cols['country'] = {'column': col, 'hub_table': None, 'hub_column': None, 'semantic_type': 'country_code'}
+                    elif 'company' in col_lower and 'code' in col_lower and 'company' not in dimensional_cols:
+                        dimensional_cols['company'] = {'column': col, 'hub_table': None, 'hub_column': None, 'semantic_type': 'company_code'}
+                    elif 'location' in col_lower and 'code' in col_lower and 'location' not in dimensional_cols:
+                        dimensional_cols['location'] = {'column': col, 'hub_table': None, 'hub_column': None, 'semantic_type': 'location_code'}
+                    elif 'org_level' in col_lower and col_lower not in [d.get('column', '').lower() for d in dimensional_cols.values()]:
+                        dim_name = col_lower.replace('_code', '')
+                        dimensional_cols[dim_name] = {'column': col, 'hub_table': None, 'hub_column': None, 'semantic_type': col_lower}
                 
                 employee_tables.append({
                     'table_name': table_name,
@@ -2015,16 +2041,75 @@ class ProjectIntelligenceService:
         # Sort by row count descending - primary employee table usually has most rows
         employee_tables.sort(key=lambda x: x.get('row_count', 0), reverse=True)
         
+        logger.debug(f"[METRICS] Found {len(employee_tables)} employee tables")
+        for et in employee_tables[:3]:
+            logger.debug(f"[METRICS]   {et['table_name']}: {list(et['dimensional_columns'].keys())}")
+        
         return employee_tables
+    
+    def _get_dimensional_spokes_from_graph(self, context_graph: Dict) -> Dict:
+        """
+        Extract dimensional spoke columns from Context Graph.
+        
+        Returns dict mapping "table.column" (lowercase) to dimension info:
+        {
+            "table.column": {
+                "dimension_name": "company",  # simplified name for grouping
+                "semantic_type": "company_code",
+                "hub_table": "...",
+                "hub_column": "..."
+            }
+        }
+        """
+        dimensional_spokes = {}
+        
+        # Dimensional hub types we care about for organizational breakdowns
+        dimensional_hub_types = {
+            'company_code': 'company',
+            'home_company_code': 'company', 
+            'country_code': 'country',
+            'location_code': 'location',
+            'org_level_1_code': 'org_level_1',
+            'org_level_2_code': 'org_level_2',
+            'org_level_3_code': 'org_level_3',
+            'org_level_4_code': 'org_level_4',
+            'department_code': 'department',
+            'pay_group_code': 'pay_group',
+        }
+        
+        relationships = context_graph.get('relationships', [])
+        
+        for rel in relationships:
+            spoke_table = rel.get('spoke_table', '')
+            spoke_column = rel.get('spoke_column', '')
+            hub_semantic_type = rel.get('hub_semantic_type', '')
+            
+            # Check if this spoke connects to a dimensional hub
+            for hub_type, dim_name in dimensional_hub_types.items():
+                if hub_type in hub_semantic_type.lower() or hub_type in spoke_column.lower():
+                    key = f"{spoke_table}.{spoke_column}".lower()
+                    dimensional_spokes[key] = {
+                        'dimension_name': dim_name,
+                        'semantic_type': hub_semantic_type or spoke_column,
+                        'hub_table': rel.get('hub_table'),
+                        'hub_column': rel.get('hub_column')
+                    }
+                    break
+        
+        logger.debug(f"[METRICS] Found {len(dimensional_spokes)} dimensional spokes from Context Graph")
+        return dimensional_spokes
     
     def _compute_workforce_metrics(self, employee_tables: List[Dict], status_info: Dict) -> None:
         """
         Compute workforce metrics: headcount, by dimension, demographics.
+        
+        v4.7: Now uses Context Graph dimensional structure.
+        Merges dimensions across all employee tables and uses hub tables for descriptions.
         """
         if not employee_tables:
             return
         
-        # Use the primary employee table (usually personal/master)
+        # Use the primary employee table for headcount (usually personal/master)
         primary_table = None
         for et in employee_tables:
             tn = et.get('table_name', '').lower()
@@ -2039,7 +2124,6 @@ class ProjectIntelligenceService:
         table_name = primary_table['table_name']
         emp_col = primary_table['employee_column']
         status_col = primary_table.get('status_column')
-        dimensional_cols = primary_table.get('dimensional_columns', {})
         
         # Determine active filter
         active_filter = ""
@@ -2073,45 +2157,111 @@ class ProjectIntelligenceService:
                 source_table=table_name,
                 source_query=sql
             ))
-            logger.debug(f"[METRICS] Total headcount: {total_count}")
+            logger.info(f"[METRICS] Total headcount: {total_count}")
         except Exception as e:
             logger.warning(f"[METRICS] Failed to compute total headcount: {e}")
         
-        # 2. Headcount by dimension (company, location, etc.)
-        for dim_name, dim_col in dimensional_cols.items():
+        # 2. MERGE dimensions from ALL employee tables
+        # Personal might have company, Company sheet has org_levels
+        all_dimensions = {}
+        for et in employee_tables:
+            for dim_name, dim_info in et.get('dimensional_columns', {}).items():
+                if dim_name not in all_dimensions:
+                    all_dimensions[dim_name] = {
+                        'table_name': et['table_name'],
+                        'employee_column': et['employee_column'],
+                        'status_column': et.get('status_column'),
+                        'dim_info': dim_info
+                    }
+        
+        logger.info(f"[METRICS] Computing breakdowns for {len(all_dimensions)} dimensions: {list(all_dimensions.keys())}")
+        
+        # 3. Headcount by each dimension
+        for dim_name, dim_data in all_dimensions.items():
             try:
-                # Also get the description column if available
-                desc_col = dim_col.replace('_code', '_name').replace('_code', '')
-                columns = primary_table.get('columns', [])
+                source_table = dim_data['table_name']
+                source_emp_col = dim_data['employee_column']
+                source_status_col = dim_data.get('status_column')
+                dim_info = dim_data['dim_info']
                 
-                # Find matching description column
-                actual_desc = None
-                for col in columns:
-                    if col.lower() == desc_col.lower() or col.lower() == dim_col.lower().replace('_code', ''):
-                        actual_desc = col
-                        break
-                
-                if actual_desc:
-                    sql = f'''
-                        SELECT "{dim_col}", "{actual_desc}", COUNT(DISTINCT "{emp_col}") as cnt 
-                        FROM "{table_name}" 
-                        {active_filter}
-                        GROUP BY "{dim_col}", "{actual_desc}"
-                        ORDER BY cnt DESC
-                    '''
+                # Handle new structure: dim_info is now a dict with 'column', 'hub_table', etc.
+                if isinstance(dim_info, dict):
+                    dim_col = dim_info.get('column')
+                    hub_table = dim_info.get('hub_table')
+                    hub_column = dim_info.get('hub_column')
                 else:
-                    sql = f'''
-                        SELECT "{dim_col}", COUNT(DISTINCT "{emp_col}") as cnt 
-                        FROM "{table_name}" 
-                        {active_filter}
-                        GROUP BY "{dim_col}"
-                        ORDER BY cnt DESC
-                    '''
+                    # Legacy: dim_info is just the column name
+                    dim_col = dim_info
+                    hub_table = None
+                    hub_column = None
+                
+                if not dim_col:
+                    continue
+                
+                # Build status filter for this table
+                source_filter = ""
+                if source_status_col:
+                    for col_name, info in status_info.get('status_columns', {}).items():
+                        if col_name.lower() == source_status_col.lower():
+                            source_filter = f'WHERE "{source_status_col}" = \'{info.get("active_value", "A")}\''
+                            break
+                    if not source_filter and source_status_col:
+                        source_filter = f'WHERE "{source_status_col}" = \'A\''
+                
+                # Try to get description from hub table via JOIN
+                if hub_table and hub_column:
+                    # Find description column in hub table (usually ends with _name or description)
+                    desc_col = self._find_description_column_in_hub(hub_table, hub_column)
+                    
+                    if desc_col:
+                        sql = f'''
+                            SELECT e."{dim_col}", h."{desc_col}", COUNT(DISTINCT e."{source_emp_col}") as cnt 
+                            FROM "{source_table}" e
+                            LEFT JOIN "{hub_table}" h ON e."{dim_col}" = h."{hub_column}"
+                            {source_filter}
+                            GROUP BY e."{dim_col}", h."{desc_col}"
+                            ORDER BY cnt DESC
+                        '''
+                    else:
+                        sql = f'''
+                            SELECT "{dim_col}", COUNT(DISTINCT "{source_emp_col}") as cnt 
+                            FROM "{source_table}" 
+                            {source_filter}
+                            GROUP BY "{dim_col}"
+                            ORDER BY cnt DESC
+                        '''
+                else:
+                    # No hub - look for description column in same table
+                    desc_col = None
+                    columns = [c for c in dim_data.get('columns', []) if isinstance(c, str)]
+                    base_name = dim_col.lower().replace('_code', '')
+                    for col in columns:
+                        col_lower = col.lower()
+                        if col_lower == f"{base_name}_name" or col_lower == base_name or col_lower == f"{base_name}_description":
+                            desc_col = col
+                            break
+                    
+                    if desc_col:
+                        sql = f'''
+                            SELECT "{dim_col}", "{desc_col}", COUNT(DISTINCT "{source_emp_col}") as cnt 
+                            FROM "{source_table}" 
+                            {source_filter}
+                            GROUP BY "{dim_col}", "{desc_col}"
+                            ORDER BY cnt DESC
+                        '''
+                    else:
+                        sql = f'''
+                            SELECT "{dim_col}", COUNT(DISTINCT "{source_emp_col}") as cnt 
+                            FROM "{source_table}" 
+                            {source_filter}
+                            GROUP BY "{dim_col}"
+                            ORDER BY cnt DESC
+                        '''
                 
                 results = self.handler.conn.execute(sql).fetchall()
                 
                 for row in results:
-                    if actual_desc:
+                    if len(row) == 3:
                         dim_value, dim_desc, count = row[0], row[1], row[2]
                         display_value = f"{dim_desc} ({dim_value})" if dim_desc else str(dim_value)
                     else:
@@ -2127,13 +2277,33 @@ class ProjectIntelligenceService:
                             value_formatted=f"{count:,}",
                             dimension=dim_name,
                             dimension_value=display_value,
-                            source_table=table_name,
+                            source_table=source_table,
                             source_query=sql
                         ))
                 
-                logger.debug(f"[METRICS] Headcount by {dim_name}: {len(results)} values")
+                logger.info(f"[METRICS] Headcount by {dim_name}: {len(results)} values")
             except Exception as e:
                 logger.warning(f"[METRICS] Failed to compute headcount by {dim_name}: {e}")
+    
+    def _find_description_column_in_hub(self, hub_table: str, hub_column: str) -> Optional[str]:
+        """Find the description column in a hub table for a given code column."""
+        try:
+            # Query the hub table schema
+            sql = f"SELECT * FROM \"{hub_table}\" LIMIT 1"
+            result = self.handler.conn.execute(sql)
+            columns = [desc[0] for desc in result.description]
+            
+            # Look for description column
+            base_name = hub_column.lower().replace('_code', '')
+            for col in columns:
+                col_lower = col.lower()
+                if col_lower in [f"{base_name}_name", f"{base_name}", 'description', 'name', f"{base_name}_description"]:
+                    return col
+            
+            return None
+        except Exception as e:
+            logger.debug(f"[METRICS] Could not find description column in {hub_table}: {e}")
+            return None
     
     def _compute_hub_usage_metrics(self, context_graph: Dict, status_info: Dict, 
                                    employee_tables: List[Dict]) -> None:
