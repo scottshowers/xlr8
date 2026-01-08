@@ -77,12 +77,6 @@ export default function Chat({ functionalAreas = [] }) {
   const [pendingClarification, setPendingClarification] = useState(null)
   const [learningStats, setLearningStats] = useState(null)
   
-  // Experimental: Use new modular engine
-  const [useEngineV2, setUseEngineV2] = useState(false)
-  
-  // Persona state
-  const [debugInfo, setDebugInfo] = useState(null)
-  
   // Persona state
   const [currentPersona, setCurrentPersona] = useState({
     id: 'bessie',
@@ -208,24 +202,10 @@ export default function Chat({ functionalAreas = [] }) {
         clarifications: clarifications,
         include_citations: true,
         include_quality_alerts: true,
-        include_follow_ups: true,
-        use_engine_v2: useEngineV2
+        include_follow_ups: true
       })
 
       const data = response.data
-      
-      // DEBUG - shows on screen
-      const debugData = {
-        needs_clarification: data.needs_clarification,
-        has_answer: !!data.answer,
-        answer_length: data.answer?.length,
-        answer_preview: data.answer?.substring(0, 200),
-        from_reality: data.from_reality?.length || 0,
-        from_intent: data.from_intent?.length || 0,
-        timestamp: new Date().toISOString()
-      }
-      console.log('[CHAT DEBUG] Response:', debugData)
-      setDebugInfo(debugData)
 
       if (data.export) {
         const { filename, data: base64Data, mime_type } = data.export
@@ -391,36 +371,6 @@ export default function Chat({ functionalAreas = [] }) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {/* Engine V2 Toggle (experimental) */}
-          <Tooltip 
-            title="Engine V2 (Beta)" 
-            detail="Experimental modular intelligence engine with improved query routing and source synthesis."
-            action="Toggle to test new engine"
-          >
-            <label
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.375rem',
-                padding: '0.375rem 0.5rem',
-                fontSize: '0.75rem',
-                borderRadius: 6,
-                cursor: 'pointer',
-                background: useEngineV2 ? colors.successLight : colors.inputBg,
-                border: `1px solid ${useEngineV2 ? colors.success : colors.divider}`,
-                color: useEngineV2 ? colors.success : colors.textMuted,
-              }}
-            >
-              <input
-                type="checkbox"
-                checked={useEngineV2}
-                onChange={(e) => setUseEngineV2(e.target.checked)}
-                style={{ margin: 0, cursor: 'pointer' }}
-              />
-              V2
-            </label>
-          </Tooltip>
-          
           {/* Scope Selector */}
           <Tooltip 
             title="Query Scope" 
@@ -487,30 +437,6 @@ export default function Chat({ functionalAreas = [] }) {
               <span title="Feedback records">{learningStats.feedback_records || 0} feedback</span>
             </div>
           )}
-        </div>
-      )}
-
-      {/* DEBUG PANEL - Remove after fixing */}
-      {debugInfo && (
-        <div style={{
-          padding: '0.5rem 1rem',
-          background: '#ffe4e4',
-          borderBottom: '2px solid #ff6b6b',
-          fontSize: '0.75rem',
-          fontFamily: 'monospace',
-        }}>
-          <strong>DEBUG:</strong> needs_clarification={String(debugInfo.needs_clarification)} | 
-          has_answer={String(debugInfo.has_answer)} | 
-          len={debugInfo.answer_length} | 
-          reality={debugInfo.from_reality} | 
-          intent={debugInfo.from_intent} |
-          preview: "{debugInfo.answer_preview?.substring(0, 60)}..."
-          <button 
-            onClick={() => setDebugInfo(null)} 
-            style={{ marginLeft: '1rem', cursor: 'pointer' }}
-          >
-            ✕ Close
-          </button>
         </div>
       )}
 
