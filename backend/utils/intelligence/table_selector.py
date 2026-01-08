@@ -278,7 +278,14 @@ class TableSelector:
             hub_table = hub.get('table', '').lower()
             hub_semantic_type = hub.get('semantic_type', '')
             
-            if hub_table == table_lower and hub_semantic_type in relevant_semantic_types:
+            # Debug: Log comparison for relevant semantic types
+            if hub_semantic_type in relevant_semantic_types:
+                logger.warning(f"[TABLE-SEL] HUB CHECK: table='{table_lower[-50:]}' vs hub='{hub_table[-50:]}' semantic={hub_semantic_type}")
+            
+            # Try both exact match and suffix match (handle prefix differences)
+            is_match = (hub_table == table_lower) or (table_lower.endswith(hub_table)) or (hub_table.endswith(table_lower))
+            
+            if is_match and hub_semantic_type in relevant_semantic_types:
                 score += 120  # Strong boost for being THE hub
                 logger.warning(f"[TABLE-SEL] CONTEXT GRAPH HUB: {table_name[-40:]} is hub for {hub_semantic_type} (+120)")
                 
@@ -291,7 +298,10 @@ class TableSelector:
             spoke_table = rel.get('spoke_table', '').lower()
             rel_semantic_type = rel.get('semantic_type', '')
             
-            if spoke_table == table_lower and rel_semantic_type in relevant_semantic_types:
+            # Try both exact match and suffix match (handle prefix differences)
+            is_match = (spoke_table == table_lower) or (table_lower.endswith(spoke_table)) or (spoke_table.endswith(table_lower))
+            
+            if is_match and rel_semantic_type in relevant_semantic_types:
                 score += 80  # Good boost for being a spoke
                 
                 # Extra boost for high coverage (>50%)
