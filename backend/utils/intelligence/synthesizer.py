@@ -25,6 +25,30 @@ from .types import (
 
 logger = logging.getLogger(__name__)
 
+# Import response patterns for consultant thinking
+PATTERNS_AVAILABLE = False
+detect_question_type = None
+generate_thinking_prompt = None
+try:
+    from backend.utils.response_patterns import (
+        detect_question_type,
+        generate_thinking_prompt,
+        ResponsePattern
+    )
+    PATTERNS_AVAILABLE = True
+    logger.info("[SYNTHESIZER] Response patterns loaded")
+except ImportError:
+    try:
+        from utils.response_patterns import (
+            detect_question_type,
+            generate_thinking_prompt,
+            ResponsePattern
+        )
+        PATTERNS_AVAILABLE = True
+        logger.info("[SYNTHESIZER] Response patterns loaded (alt path)")
+    except ImportError:
+        logger.warning("[SYNTHESIZER] Response patterns not available")
+
 # Log version on import
 logger.warning("[SYNTHESIZER] Module loaded - VERSION 4.0.0 (Hybrid Approach)")
 
@@ -456,10 +480,11 @@ class Synthesizer:
         """
         v4.0: Add consultant-level analysis overlay to template response.
         
-        The LLM receives:
-        - The accurate data listing from template
-        - Context from all Five Truths
-        - Instructions to ADD analysis, NOT modify data
+        Uses Response Patterns to guide the LLM's thinking:
+        - Pattern's hunt_for → Gap Analysis targets
+        - Pattern's hidden_worry → Risk framing
+        - Pattern's proactive_offers → Next steps
+        - Pattern's hcmpact_hook → Support path
         
         Returns:
         - Enhanced response with consultant overlay
@@ -467,6 +492,17 @@ class Synthesizer:
         """
         if not self.llm_synthesizer:
             return None
+        
+        # =====================================================================
+        # v4.0: Detect question type and get response pattern
+        # =====================================================================
+        pattern = None
+        if PATTERNS_AVAILABLE and detect_question_type:
+            try:
+                pattern = detect_question_type(question)
+                logger.warning(f"[SYNTHESIZE] Pattern detected: {pattern.question_type} ({pattern.category.value})")
+            except Exception as e:
+                logger.warning(f"[SYNTHESIZE] Pattern detection failed: {e}")
         
         # Build context for LLM
         context_parts = []
@@ -503,8 +539,69 @@ class Synthesizer:
         
         context = "\n".join(context_parts)
         
-        # Build the consultant overlay prompt
-        overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
+        # =====================================================================
+        # v4.0: Build pattern-guided overlay prompt
+        # =====================================================================
+        if pattern:
+            # Use pattern-specific guidance
+            hunt_for_list = "\n".join(f"  • {item}" for item in pattern.hunt_for)
+            proactive_list = "\n".join(f"  • {offer}" for offer in pattern.proactive_offers)
+            
+            overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
+
+The client asked: "{question}"
+
+UNDERSTAND THE QUESTION:
+- Surface question: {pattern.surface_question}
+- Real question: {pattern.real_question}
+- Hidden worry: {pattern.hidden_worry}
+
+Here is the accurate data listing (DO NOT MODIFY THIS DATA):
+---
+{template_response}
+---
+
+Additional context from documents and system analysis:
+{context}
+
+YOUR TASK: Add a CONSULTANT ANALYSIS section AFTER the data listing.
+
+RULES:
+1. DO NOT repeat or modify the data listing above - it is accurate
+2. DO NOT make up any codes, values, or numbers
+3. ADD analysis that provides consultant value
+
+HUNT FOR THESE SPECIFIC PROBLEMS:
+{hunt_for_list}
+
+RISK FRAMING:
+{pattern.risk_framing}
+
+FORMAT YOUR RESPONSE AS:
+[Keep the original data listing exactly as shown]
+
+---
+
+**🔍 Consultant Analysis**
+
+**Gap Analysis:**
+• [Specific gaps based on hunt_for items above]
+
+**Risk Assessment:**
+• [Frame using: {pattern.risk_framing}]
+
+**Recommendations:**
+• [Prioritized action items based on gaps found]
+
+**Next Steps:**
+{proactive_list}
+• {pattern.hcmpact_hook}
+
+Keep it concise. Bullets only. No fluff."""
+
+        else:
+            # Fallback generic prompt
+            overlay_prompt = f"""You are a senior HCM implementation consultant reviewing data for a client.
 
 The client asked: "{question}"
 
@@ -567,19 +664,19 @@ Keep it concise. Bullets only. No fluff."""
                     if len(response) > len(template_response) * 0.5:
                         # Store metadata for later retrieval
                         self._last_consultative_answer = type('ConsultativeAnswer', (), {
-                            'question_type': 'hybrid_analysis',
-                            'question_category': 'operational',
+                            'question_type': pattern.question_type if pattern else 'hybrid_analysis',
+                            'question_category': pattern.category.value if pattern else 'operational',
                             'excel_spec': [],
-                            'proactive_offers': [
+                            'proactive_offers': list(pattern.proactive_offers) if pattern else [
                                 'Run compliance check on this data?',
                                 'Compare against vendor standards?',
                                 'Export full dataset to Excel?'
                             ],
-                            'hcmpact_hook': 'Need expert help? HCMPACT consultants are available.',
-                            'synthesis_method': f"hybrid_template_plus_{result.get('model_used', 'llm')}"
+                            'hcmpact_hook': pattern.hcmpact_hook if pattern else 'Need expert help? HCMPACT consultants are available.',
+                            'synthesis_method': f"hybrid_pattern_{pattern.question_type}_{result.get('model_used', 'llm')}" if pattern else f"hybrid_generic_{result.get('model_used', 'llm')}"
                         })()
                         
-                        logger.warning(f"[SYNTHESIZE] Overlay success via {result.get('model_used')}")
+                        logger.warning(f"[SYNTHESIZE] Overlay success via {result.get('model_used')}, pattern={pattern.question_type if pattern else 'none'}")
                         return response
                     else:
                         logger.warning("[SYNTHESIZE] LLM response too short, using template")
