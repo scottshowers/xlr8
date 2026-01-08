@@ -2085,14 +2085,20 @@ async def unified_chat(request: UnifiedChatRequest):
             # DEBUG - always log this to see what's happening
             logger.warning(f"[UNIFIED] EXPERT CHECK: is_analytical={is_analytical}, EXPERT_AVAILABLE={EXPERT_CONTEXT_AVAILABLE}, msg='{message[:50]}'")
             
-            # Check if engine already produced a validation analysis (has our consultant formatting)
-            # OR if consultative synthesis produced a substantial answer (v5.20.0+)
+            # Check if engine already produced a validation analysis (has our OLD consultant formatting)
+            # v4.0: Don't trigger on hybrid responses (those have the data listing first)
+            # Only trigger on OLD-style responses that start with emojis
             is_validation_response = engine_answer and (
-                # Original emoji-based detection
-                any(indicator in engine_answer for indicator in ['🔴', '🟡', '✅', 'Rates Valid', 'Rate Issues', 'Zero Rates', 'Years Old'])
-                # Consultative synthesis detection - substantial prose answer
-                or (len(engine_answer) > 200 and not any(g in engine_answer.lower() for g in ['configured correctly', 'no issues found', 'everything looks', 'appears to be']))
+                # Original emoji-based detection - must START with these indicators
+                engine_answer.strip().startswith(('🔴', '🟡', '✅', '**Rates', '**Rate', '**Zero'))
+                # OR contains the old validation markers
+                or any(marker in engine_answer for marker in ['Rates Valid', 'Rate Issues', 'Zero Rates', 'Years Old'])
             )
+            # v4.0: Hybrid responses contain "🔍 Consultant Analysis" but should NOT trigger this bypass
+            # because they already have the template + analysis concatenated
+            if '🔍 Consultant Analysis' in engine_answer:
+                is_validation_response = False
+                logger.warning("[UNIFIED] Hybrid response detected - not bypassing")
             
             # Detect garbage SQL responses (just literals, no real data)
             garbage_indicators = [
