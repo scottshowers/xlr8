@@ -406,7 +406,22 @@ class IntelligenceEngineV2:
         # v4.0: INTELLIGENT SCOPING - The Consultant's First Move
         # Before answering, understand the data landscape
         # =====================================================================
-        if SCOPING_AVAILABLE and self.structured_handler:
+        scope_filter = None
+        
+        # Check if scope was already provided via clarification
+        if self.confirmed_facts.get('scope'):
+            scope_value = self.confirmed_facts['scope']
+            logger.warning(f"[ENGINE-V2] Scope already confirmed: {scope_value}")
+            
+            if scope_value != 'all':
+                # Parse "dimension:value" format
+                if ':' in scope_value:
+                    dim, val = scope_value.split(':', 1)
+                    scope_filter = {'dimension': dim, 'value': val}
+                    logger.warning(f"[ENGINE-V2] Applying scope filter: {scope_filter}")
+        
+        # Only ask for scoping if not already answered
+        elif SCOPING_AVAILABLE and self.structured_handler:
             # Check if this is a scope-sensitive question
             scope_sensitive = any([
                 'list' in q_lower, 'show' in q_lower, 'all' in q_lower,
@@ -481,7 +496,8 @@ class IntelligenceEngineV2:
             'is_validation': is_validation,
             'is_config': is_config,
             'question': question,
-            'q_lower': q_lower
+            'q_lower': q_lower,
+            'scope_filter': scope_filter  # v4.0: Pass scope filter for SQL generation
         }
         
         # v3.0: Detect entity scoping from Context Graph
@@ -490,6 +506,17 @@ class IntelligenceEngineV2:
         if entity_scope:
             analysis['entity_scope'] = entity_scope
             logger.warning(f"[ENGINE-V2] Entity scope detected: {entity_scope}")
+        
+        # v4.0: Also use scope_filter as entity_scope if provided
+        if scope_filter and not entity_scope:
+            # Format for SQL generator: needs semantic_type, value, hub_column
+            analysis['entity_scope'] = {
+                'semantic_type': scope_filter['dimension'],  # e.g., 'company'
+                'value': scope_filter['value'],              # e.g., 'TISI'
+                'hub_column': scope_filter['dimension'],     # try direct column match too
+                'scope_column': scope_filter['dimension']    # original column name
+            }
+            logger.warning(f"[ENGINE-V2] Using scope as entity filter: {analysis['entity_scope']}")
         
         # =====================================================================
         # GATHER ALL FIVE TRUTHS - NO SKIPPING
