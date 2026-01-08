@@ -250,7 +250,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
     - background (Tier 3): ~2-3 minutes - patterns, correlations, anomalies
     """
     try:
-        from project_intelligence import ProjectIntelligenceService, AnalysisTier
+        from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
         from utils.structured_data_handler import get_structured_handler
         
         handler = get_structured_handler()
@@ -506,7 +506,7 @@ async def complete_task(project: str, task_id: str, request: TaskCompleteRequest
             raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found")
         
         # Update task status
-        from project_intelligence import TaskStatus
+        from backend.utils.project_intelligence import TaskStatus
         from datetime import datetime
         
         task.status = TaskStatus.COMPLETE
