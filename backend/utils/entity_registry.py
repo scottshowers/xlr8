@@ -212,6 +212,150 @@ class EntityRegistry:
             logger.error(f"[ENTITY_REGISTRY] Failed to register DuckDB spoke: {e}")
             return False
     
+    def register_duckdb_hubs_batch(self, hubs: List[Dict], project_id: str) -> int:
+        """
+        Batch register DuckDB hubs - minimal API calls.
+        
+        Args:
+            hubs: List of hub dicts with: semantic_type, table_name, key_column, cardinality
+            project_id: Project ID
+            
+        Returns:
+            Number of hubs registered
+        """
+        if not self.supabase or not hubs:
+            return 0
+        
+        try:
+            # 1. Ensure all entity types exist (batched)
+            entity_types = list(set(h.get('semantic_type') for h in hubs if h.get('semantic_type')))
+            self._ensure_entities_batch(entity_types, source="duckdb")
+            
+            # 2. Build batch records
+            records = [
+                {
+                    'entity_type': h.get('semantic_type'),
+                    'storage_type': 'duckdb',
+                    'project_id': project_id,
+                    'reference_type': 'hub',
+                    'table_name': h.get('table_name'),
+                    'column_name': h.get('key_column'),
+                    'value_count': h.get('cardinality', 0),
+                    'confidence': 1.0
+                }
+                for h in hubs if h.get('semantic_type') and h.get('table_name')
+            ]
+            
+            # 3. Single batch upsert
+            if records:
+                self.supabase.table('entity_references').upsert(
+                    records,
+                    on_conflict='entity_type,storage_type,project_id,table_name,column_name'
+                ).execute()
+            
+            return len(records)
+            
+        except Exception as e:
+            logger.error(f"[ENTITY_REGISTRY] Batch hub registration failed: {e}")
+            return 0
+    
+    def register_duckdb_spokes_batch(self, spokes: List[Dict], project_id: str) -> int:
+        """
+        Batch register DuckDB spokes - minimal API calls.
+        
+        Args:
+            spokes: List of spoke dicts with: hub (dict), spoke_table, spoke_column, spoke_cardinality, coverage_pct
+            project_id: Project ID
+            
+        Returns:
+            Number of spokes registered
+        """
+        if not self.supabase or not spokes:
+            return 0
+        
+        try:
+            # 1. Ensure all entity types exist (batched)
+            entity_types = list(set(
+                s.get('hub', {}).get('semantic_type') 
+                for s in spokes 
+                if s.get('hub', {}).get('semantic_type')
+            ))
+            self._ensure_entities_batch(entity_types, source="duckdb")
+            
+            # 2. Build batch records
+            records = [
+                {
+                    'entity_type': s.get('hub', {}).get('semantic_type'),
+                    'storage_type': 'duckdb',
+                    'project_id': project_id,
+                    'reference_type': 'spoke',
+                    'table_name': s.get('spoke_table'),
+                    'column_name': s.get('spoke_column'),
+                    'value_count': s.get('spoke_cardinality', 0),
+                    'coverage_pct': s.get('coverage_pct', 0),
+                    'confidence': 1.0
+                }
+                for s in spokes 
+                if s.get('hub', {}).get('semantic_type') and s.get('spoke_table')
+            ]
+            
+            # 3. Single batch upsert
+            if records:
+                self.supabase.table('entity_references').upsert(
+                    records,
+                    on_conflict='entity_type,storage_type,project_id,table_name,column_name'
+                ).execute()
+            
+            return len(records)
+            
+        except Exception as e:
+            logger.error(f"[ENTITY_REGISTRY] Batch spoke registration failed: {e}")
+            return 0
+    
+    def _ensure_entities_batch(self, entity_types: List[str], source: str = "duckdb") -> int:
+        """
+        Ensure multiple entity types exist - 2 API calls max.
+        
+        Args:
+            entity_types: List of entity type strings
+            source: Source system (duckdb, chromadb)
+            
+        Returns:
+            Number of new entities created
+        """
+        if not self.supabase or not entity_types:
+            return 0
+        
+        try:
+            # 1. Check which exist (single SELECT)
+            existing = self.supabase.table('entity_registry').select('entity_type').in_('entity_type', entity_types).execute()
+            existing_set = set(e['entity_type'] for e in (existing.data or []))
+            
+            # 2. Find missing
+            missing = [et for et in entity_types if et not in existing_set]
+            if not missing:
+                return 0
+            
+            # 3. Insert all missing (single INSERT)
+            records = [
+                {
+                    'entity_type': et,
+                    'display_name': et.replace('_', ' ').title(),
+                    'category': self._infer_category(et),
+                    'source': source,
+                    'is_discovered': True
+                }
+                for et in missing
+            ]
+            
+            self.supabase.table('entity_registry').insert(records).execute()
+            logger.info(f"[ENTITY_REGISTRY] Created {len(records)} new entities")
+            return len(records)
+            
+        except Exception as e:
+            logger.warning(f"[ENTITY_REGISTRY] Batch entity ensure failed: {e}")
+            return 0
+    
     def register_chromadb_mention(
         self,
         entity_type: str,
