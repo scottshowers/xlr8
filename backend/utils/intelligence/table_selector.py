@@ -133,6 +133,24 @@ SEMANTIC_TYPE_KEYWORDS = {
     'tax_code': ['tax', 'taxes', 'withholding', 'w2', 'w-2', 'fica', 'sui', 'futa'],
 }
 
+# =============================================================================
+# TABLE NAME DOMAIN KEYWORDS (v4.0 - explicit table name matching)
+# =============================================================================
+# When user asks for "earnings", a table with "earnings" in its NAME should 
+# massively outrank tables that just MENTION earnings in column values
+TABLE_NAME_DOMAIN_KEYWORDS = {
+    'earnings': ['earning', 'earnings'],
+    'deductions': ['deduction', 'deductions', 'benefit'],
+    'jobs': ['job', 'jobs', 'position'],
+    'locations': ['location', 'locations', 'site'],
+    'employees': ['employee', 'employees'],
+    'taxes': ['tax', 'taxes'],
+    'companies': ['company', 'companies'],
+    'departments': ['department', 'departments', 'dept'],
+    'pto': ['pto', 'accrual', 'time off'],
+    'gl': ['gl', 'general ledger'],
+}
+
 
 # =============================================================================
 # TABLE SELECTOR CLASS
@@ -185,20 +203,32 @@ class TableSelector:
         if self._context_graph_loaded:
             return
         
+        logger.warning(f"[TABLE-SEL] Loading context graph: project={self.project}, has_handler={self.structured_handler is not None}")
+        
         if not self.project or not self.structured_handler:
+            logger.warning(f"[TABLE-SEL] Cannot load context graph: project={self.project}, handler={self.structured_handler}")
             self._context_graph_loaded = True
             return
         
         try:
-            if hasattr(self.structured_handler, 'get_context_graph'):
+            has_method = hasattr(self.structured_handler, 'get_context_graph')
+            logger.warning(f"[TABLE-SEL] Handler has get_context_graph: {has_method}")
+            
+            if has_method:
                 self._context_graph = self.structured_handler.get_context_graph(self.project)
                 hub_count = len(self._context_graph.get('hubs', []))
                 rel_count = len(self._context_graph.get('relationships', []))
-                logger.warning(f"[TABLE-SEL] Loaded context graph: {hub_count} hubs, {rel_count} relationships")
+                logger.warning(f"[TABLE-SEL] ✅ Context graph loaded: {hub_count} hubs, {rel_count} relationships")
+                
+                # Log first few hubs for debugging
+                for hub in self._context_graph.get('hubs', [])[:3]:
+                    logger.warning(f"[TABLE-SEL]   Hub: {hub.get('semantic_type')} in {hub.get('table', '')[-40:]}")
             else:
-                logger.debug("[TABLE-SEL] Handler does not have get_context_graph method")
+                logger.warning("[TABLE-SEL] ❌ Handler does not have get_context_graph method")
         except Exception as e:
-            logger.warning(f"[TABLE-SEL] Failed to load context graph: {e}")
+            logger.warning(f"[TABLE-SEL] ❌ Failed to load context graph: {e}")
+            import traceback
+            logger.warning(f"[TABLE-SEL] Traceback: {traceback.format_exc()}")
         
         self._context_graph_loaded = True
     
@@ -233,7 +263,11 @@ class TableSelector:
             return 0
         
         graph = self._get_context_graph()
-        if not graph.get('hubs') and not graph.get('relationships'):
+        hubs = graph.get('hubs', [])
+        relationships = graph.get('relationships', [])
+        
+        if not hubs and not relationships:
+            logger.debug(f"[TABLE-SEL] Context graph empty for {table_name[-30:]}")
             return 0
         
         score = 0
@@ -508,15 +542,21 @@ class TableSelector:
         q_lower = question.lower()
         words = re.findall(r'\b[a-z]+\b', q_lower)
         
+        logger.warning(f"[TABLE-SEL] ========== SELECT START ==========")
+        logger.warning(f"[TABLE-SEL] Question: {question[:80]}")
+        logger.warning(f"[TABLE-SEL] Tables to score: {len(tables)}")
+        
         # Detect what domain the question is about
         question_domain = self._detect_question_domain(q_lower)
-        if question_domain:
-            logger.warning(f"[TABLE-SEL] Detected question domain: {question_domain}")
+        logger.warning(f"[TABLE-SEL] Question domain: {question_domain}")
         
         # v3.0: Detect relevant semantic types for Context Graph matching
         relevant_semantic_types = self._detect_semantic_types(q_lower)
-        if relevant_semantic_types:
-            logger.warning(f"[TABLE-SEL] Detected semantic types: {relevant_semantic_types}")
+        logger.warning(f"[TABLE-SEL] Semantic types: {relevant_semantic_types}")
+        
+        # v4.0: Force load context graph and report status
+        graph = self._get_context_graph()
+        logger.warning(f"[TABLE-SEL] Context graph: {len(graph.get('hubs', []))} hubs, {len(graph.get('relationships', []))} relationships")
         
         # Check if this is a config/setup question
         is_config_question = any(term in q_lower for term in [
@@ -559,6 +599,7 @@ class TableSelector:
             relevant = [tables[0]]
         
         logger.warning(f"[TABLE-SEL] Selected {len(relevant)} tables from {len(tables)}")
+        logger.warning(f"[TABLE-SEL] ========== SELECT END ==========")
         
         return relevant
     
@@ -592,7 +633,35 @@ class TableSelector:
         score = 0
         
         # =====================================================================
-        # 0. CONTEXT GRAPH SCORING (highest priority - v3.0)
+        # 0a. TABLE NAME DOMAIN MATCH (v4.0 - highest priority)
+        # When user asks for "earnings", table NAMED earnings_earnings should 
+        # crush tables that just mention earnings in column values
+        # =====================================================================
+        requested_domain = None
+        for domain, keywords in TABLE_NAME_DOMAIN_KEYWORDS.items():
+            # Check if question contains this domain keyword
+            if any(kw in q_lower for kw in keywords):
+                requested_domain = domain
+                # Check if table NAME contains the domain
+                if domain in table_name or any(kw in table_name for kw in keywords):
+                    score += 200  # Massive boost - table IS the domain
+                    logger.warning(f"[TABLE-SEL] TABLE NAME DOMAIN MATCH: {table_name[-45:]} matches '{domain}' (+200)")
+                break
+        
+        # Penalize tables that are clearly WRONG domain when user asked for something specific
+        if requested_domain:
+            # List of domains that are DIFFERENT from requested
+            wrong_domains = [d for d in TABLE_NAME_DOMAIN_KEYWORDS.keys() if d != requested_domain]
+            for wrong_domain in wrong_domains:
+                wrong_keywords = TABLE_NAME_DOMAIN_KEYWORDS[wrong_domain]
+                # If table name contains a DIFFERENT domain keyword, penalize
+                if wrong_domain in table_name or any(kw in table_name for kw in wrong_keywords if len(kw) > 3):
+                    score -= 150  # Heavy penalty for wrong domain
+                    logger.warning(f"[TABLE-SEL] WRONG TABLE NAME DOMAIN: {table_name[-45:]} is '{wrong_domain}', want '{requested_domain}' (-150)")
+                    break
+        
+        # =====================================================================
+        # 0b. CONTEXT GRAPH SCORING (v3.0)
         # =====================================================================
         if relevant_semantic_types:
             context_score = self._score_context_graph(table_name, relevant_semantic_types)
