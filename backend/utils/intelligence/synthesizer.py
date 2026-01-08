@@ -271,6 +271,81 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         return ""
     
+    def _infer_grouping_dimensions(self, table_name: str, result_rows: List[Dict]) -> List[str]:
+        """
+        v4.5: Infer natural grouping dimensions from Context Graph.
+        
+        Looks at columns in the config table and checks which ones are 
+        spokes to other hubs. Those are natural grouping dimensions.
+        
+        Hierarchy priority:
+        1. Country (country_code, country)
+        2. Company (company_code, company)
+        3. Entity-specific group (earnings_group, deduction_group, etc.)
+        
+        Returns list of column names to group by, in priority order.
+        """
+        if not result_rows:
+            return []
+        
+        # Get available columns from the result
+        available_cols = list(result_rows[0].keys()) if result_rows else []
+        available_lower = {c.lower(): c for c in available_cols}
+        
+        # Define grouping hierarchy (in priority order)
+        # These are common dimensional columns in HCM data
+        grouping_priority = [
+            # Country level
+            ('country_code', 'country'),
+            ('country', 'country'),
+            
+            # Company level  
+            ('company_code', 'company'),
+            ('company', 'company'),
+            
+            # Entity-specific groups (inferred from table name)
+            ('earnings_group', 'earnings_group'),
+            ('earning_group', 'earnings_group'),
+            ('deduction_group', 'deduction_group'),
+            ('deductionbenefit_group', 'deduction_group'),
+            ('tax_group', 'tax_group'),
+            ('location_group', 'location_group'),
+            ('job_family', 'job_group'),
+            
+            # Organization level
+            ('org_level', 'organization'),
+            ('organization_code', 'organization'),
+        ]
+        
+        found_groups = []
+        
+        for col_pattern, group_type in grouping_priority:
+            if col_pattern in available_lower:
+                actual_col = available_lower[col_pattern]
+                if actual_col not in found_groups:
+                    found_groups.append(actual_col)
+                    logger.debug(f"[HUB-USAGE] Found grouping column: {actual_col} ({group_type})")
+        
+        # Also check Context Graph for columns that are spokes to other hubs
+        if self._context_graph:
+            relationships = self._context_graph.get('relationships', [])
+            table_lower = table_name.lower()
+            
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '').lower()
+                if spoke_table == table_lower:
+                    spoke_col = rel.get('spoke_column', '')
+                    hub_semantic = rel.get('semantic_type', '')
+                    
+                    # This column references another hub - it's a natural dimension
+                    if spoke_col and spoke_col in available_lower:
+                        actual_col = available_lower[spoke_col]
+                        if actual_col not in found_groups:
+                            found_groups.append(actual_col)
+                            logger.debug(f"[HUB-USAGE] Found spoke dimension: {actual_col} → {hub_semantic}")
+        
+        return found_groups
+    
     def _get_hub_usage_analysis(self, table_name: str, code_column: str, 
                                  result_rows: List[Dict]) -> Optional[str]:
         """
@@ -281,36 +356,66 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         Returns formatted usage analysis or None if no spoke data.
         """
+        # Debug: Log what we have
+        logger.warning(f"[HUB-USAGE] Starting: table={table_name[-50:]}, handler={self.structured_handler is not None}, graph={self._context_graph is not None}, project={self._project}")
+        
         if not self.structured_handler or not self._context_graph or not self._project:
-            logger.debug("[SYNTHESIZE] Cannot run hub usage analysis - missing handler/graph/project")
+            logger.warning(f"[HUB-USAGE] Missing: handler={self.structured_handler is not None}, graph={self._context_graph is not None}, project={self._project}")
             return None
         
         # Find this table's semantic type in the hub list
+        # First try exact match, then try semantic domain match
         hub_info = None
-        for hub in self._context_graph.get('hubs', []):
-            if hub.get('table', '').lower() == table_name.lower():
+        hubs = self._context_graph.get('hubs', [])
+        logger.warning(f"[HUB-USAGE] Searching {len(hubs)} hubs for table match")
+        
+        # Exact match first
+        for hub in hubs:
+            hub_table = hub.get('table', '').lower()
+            if hub_table == table_name.lower():
                 hub_info = hub
+                logger.warning(f"[HUB-USAGE] Exact match found: {hub_table[-40:]}")
                 break
         
+        # Fallback: Match by domain (e.g., both are earnings tables)
         if not hub_info:
-            logger.debug(f"[SYNTHESIZE] Table {table_name} is not a hub")
+            table_lower = table_name.lower()
+            for hub in hubs:
+                hub_table = hub.get('table', '').lower()
+                semantic_type = hub.get('semantic_type', '')
+                
+                # Match if table contains the hub's domain
+                # e.g., earnings_groups_table_2 matches earnings_code hub
+                domain_keywords = ['earning', 'deduction', 'location', 'job', 'tax', 'organization']
+                for keyword in domain_keywords:
+                    if keyword in table_lower and keyword in hub_table:
+                        hub_info = hub
+                        logger.warning(f"[HUB-USAGE] Domain match: query={table_lower[-30:]} → hub={hub_table[-30:]} (keyword={keyword})")
+                        break
+                if hub_info:
+                    break
+        
+        if not hub_info:
+            logger.warning(f"[HUB-USAGE] Table {table_name[-40:]} has no matching hub (checked {len(hubs)} hubs)")
             return None
         
         semantic_type = hub_info.get('semantic_type', '')
-        logger.warning(f"[SYNTHESIZE] Hub usage analysis for {semantic_type} in {table_name}")
+        hub_table_name = hub_info.get('table', '')
+        logger.warning(f"[HUB-USAGE] Using hub: {semantic_type} from {hub_table_name[-40:]}")
         
-        # Find Reality spoke tables that reference this hub
+        # Find Reality spoke tables that reference this hub (use hub_table_name, not query table)
         reality_spokes = []
-        for rel in self._context_graph.get('relationships', []):
-            if (rel.get('hub_table', '').lower() == table_name.lower() and 
+        relationships = self._context_graph.get('relationships', [])
+        for rel in relationships:
+            if (rel.get('hub_table', '').lower() == hub_table_name.lower() and 
                 rel.get('truth_type') == 'reality'):
                 reality_spokes.append(rel)
         
         if not reality_spokes:
-            logger.debug(f"[SYNTHESIZE] No Reality spokes found for hub {table_name}")
+            logger.warning(f"[HUB-USAGE] No Reality spokes for hub {hub_table_name[-40:]} (checked {len(relationships)} relationships)")
             return None
         
-        logger.warning(f"[SYNTHESIZE] Found {len(reality_spokes)} Reality spokes")
+        logger.warning(f"[HUB-USAGE] Found {len(reality_spokes)} Reality spokes")
         
         # Build usage counts from the first spoke table
         # (typically the employee-level assignment table)
@@ -322,6 +427,16 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             return None
         
         try:
+            # =================================================================
+            # STEP 1: Infer grouping dimensions from Context Graph
+            # Look for columns that are spokes to other hubs = natural groups
+            # =================================================================
+            grouping_columns = self._infer_grouping_dimensions(table_name, result_rows)
+            logger.warning(f"[HUB-USAGE] Inferred grouping dimensions: {grouping_columns}")
+            
+            # =================================================================
+            # STEP 2: Count usage with grouping breakdown
+            # =================================================================
             # Count occurrences in spoke table
             count_sql = f'''
                 SELECT "{spoke_column}" as code, COUNT(*) as employee_count
@@ -339,55 +454,114 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             # Get total employees with any assignment
             total_with = sum(usage_counts.values())
             
-            # Get unique employee count (assuming there's an employee_id-like column)
-            unique_sql = f'SELECT COUNT(DISTINCT "{spoke_column}") FROM "{spoke_table}"'
-            # This gives unique codes used, not unique employees
+            # =================================================================
+            # STEP 3: Build grouped analysis from config table
+            # =================================================================
+            # Extract codes and their groups from result_rows
+            code_to_groups = {}  # code -> {group_col: value}
+            code_col_name = None
             
-            # Format the analysis
+            for row in result_rows:
+                code_val = None
+                groups = {}
+                
+                for key, val in row.items():
+                    key_lower = key.lower()
+                    if 'code' in key_lower and code_val is None:
+                        code_val = val
+                        code_col_name = key
+                    # Capture grouping columns
+                    for group_col in grouping_columns:
+                        if key_lower == group_col.lower():
+                            groups[group_col] = val
+                
+                if code_val:
+                    code_to_groups[code_val] = groups
+            
+            # =================================================================
+            # STEP 4: Format the analysis with hierarchy
+            # =================================================================
             analysis_parts = []
             analysis_parts.append("\n📊 **Usage Analysis** (from employee data):")
             
-            # Codes in use
-            used_codes = []
-            unused_codes = []
+            # Summarize by group if we have grouping info
+            if grouping_columns and code_to_groups:
+                # Group codes by their primary grouping dimension
+                primary_group = grouping_columns[0]  # e.g., 'earnings_group'
+                by_group = {}
+                
+                for code, groups in code_to_groups.items():
+                    group_val = groups.get(primary_group, 'Ungrouped')
+                    if group_val not in by_group:
+                        by_group[group_val] = {'used': [], 'unused': []}
+                    
+                    count = usage_counts.get(code, 0)
+                    if count > 0:
+                        by_group[group_val]['used'].append((code, count))
+                    else:
+                        by_group[group_val]['unused'].append(code)
+                
+                # Format by group
+                for group_name, data in by_group.items():
+                    used = data['used']
+                    unused = data['unused']
+                    total_in_group = len(used) + len(unused)
+                    
+                    analysis_parts.append(f"\n**{group_name}** ({total_in_group} codes):")
+                    
+                    if used:
+                        used.sort(key=lambda x: x[1], reverse=True)
+                        analysis_parts.append(f"  • {len(used)} in use:")
+                        for code, count in used[:3]:
+                            analysis_parts.append(f"    - `{code}`: {count} employees")
+                        if len(used) > 3:
+                            analysis_parts.append(f"    - *...and {len(used) - 3} more*")
+                    
+                    if unused:
+                        analysis_parts.append(f"  • {len(unused)} unused: {', '.join(f'`{c}`' for c in unused[:5])}")
+                        if len(unused) > 5:
+                            analysis_parts.append(f"    *...and {len(unused) - 5} more*")
+            else:
+                # Fallback: Simple used/unused without grouping
+                used_codes = []
+                unused_codes = []
+                
+                hub_codes = set(code_to_groups.keys()) if code_to_groups else set()
+                if not hub_codes:
+                    # Extract from result_rows directly
+                    for row in result_rows:
+                        for key in row.keys():
+                            if 'code' in key.lower():
+                                hub_codes.add(row[key])
+                                break
+                
+                for code in hub_codes:
+                    count = usage_counts.get(code, 0)
+                    if count > 0:
+                        used_codes.append((code, count))
+                    else:
+                        unused_codes.append(code)
+                
+                used_codes.sort(key=lambda x: x[1], reverse=True)
+                
+                if used_codes:
+                    analysis_parts.append(f"• **{len(used_codes)} codes in active use:**")
+                    for code, count in used_codes[:5]:
+                        analysis_parts.append(f"  - `{code}`: {count} employees")
+                    if len(used_codes) > 5:
+                        analysis_parts.append(f"  - *...and {len(used_codes) - 5} more*")
+                
+                if unused_codes:
+                    analysis_parts.append(f"• **{len(unused_codes)} codes configured but UNUSED:**")
+                    for code in unused_codes[:5]:
+                        analysis_parts.append(f"  - `{code}` (0 employees)")
+                    if len(unused_codes) > 5:
+                        analysis_parts.append(f"  - *...and {len(unused_codes) - 5} more*")
             
-            # Extract code column from result_rows
-            hub_codes = set()
-            for row in result_rows:
-                # Try to find the code value
-                for key in row.keys():
-                    if 'code' in key.lower():
-                        hub_codes.add(row[key])
-                        break
-            
-            for code in hub_codes:
-                count = usage_counts.get(code, 0)
-                if count > 0:
-                    used_codes.append((code, count))
-                else:
-                    unused_codes.append(code)
-            
-            # Sort by count descending
-            used_codes.sort(key=lambda x: x[1], reverse=True)
-            
-            if used_codes:
-                analysis_parts.append(f"• **{len(used_codes)} codes in active use:**")
-                for code, count in used_codes[:5]:  # Top 5
-                    analysis_parts.append(f"  - `{code}`: {count} employees")
-                if len(used_codes) > 5:
-                    analysis_parts.append(f"  - *...and {len(used_codes) - 5} more*")
-            
-            if unused_codes:
-                analysis_parts.append(f"• **{len(unused_codes)} codes configured but UNUSED:**")
-                for code in unused_codes[:5]:
-                    analysis_parts.append(f"  - `{code}` (0 employees)")
-                if len(unused_codes) > 5:
-                    analysis_parts.append(f"  - *...and {len(unused_codes) - 5} more*")
-            
-            if not used_codes and not unused_codes:
+            if len(analysis_parts) == 1:  # Only header
                 analysis_parts.append("• No usage data available")
             
-            logger.warning(f"[SYNTHESIZE] Usage analysis: {len(used_codes)} used, {len(unused_codes)} unused")
+            logger.warning(f"[HUB-USAGE] Analysis complete: {len(usage_counts)} codes tracked")
             return "\n".join(analysis_parts)
             
         except Exception as e:
@@ -748,6 +922,8 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                     code_col = col
                     break
             
+            logger.warning(f"[SYNTHESIZE] Hub usage check: table={table_name[-40:]}, code_col={code_col}, cols={result_columns[:5]}")
+            
             if code_col:
                 usage_analysis = self._get_hub_usage_analysis(table_name, code_col, result_rows)
                 if usage_analysis:
@@ -757,7 +933,8 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         # =====================================================================
         # STEP 2: Add Consultant Overlay via LLM
-        # LLM enhances with analysis but CANNOT modify the data
+        # LLM makes observations based on REAL data (template + usage analysis)
+        # With entity context + domain rules, it won't hallucinate
         # =====================================================================
         if self.llm_synthesizer and result_rows:
             try:
