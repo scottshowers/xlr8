@@ -49,7 +49,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.0"  # v8.0: Project Intelligence integration
+__version__ = "8.1.0"  # v8.1: Organizational metrics bypass clarification
 
 # Try to load Project Intelligence
 PROJECT_INTELLIGENCE_AVAILABLE = False
@@ -663,6 +663,16 @@ class IntelligenceEngineV2:
         if export_result:
             return export_result
         
+        # =====================================================================
+        # v4.6: CHECK ORGANIZATIONAL METRICS FIRST
+        # If we have a pre-computed answer, skip clarification entirely
+        # This handles "what is the active headcount?" -> 3,976 directly
+        # =====================================================================
+        metric_answer = self._check_organizational_metrics(question, q_lower)
+        if metric_answer:
+            logger.warning(f"[ENGINE-V2] Returning pre-computed metric answer")
+            return metric_answer
+        
         # Analyze question
         mode = mode or self._detect_mode(q_lower)
         is_employee_question = self._is_employee_question(q_lower)
@@ -1067,6 +1077,181 @@ class IntelligenceEngineV2:
             logger.debug(f"[ENGINE-V2] Entity scope detection failed: {e}")
         
         return None
+    
+    # =========================================================================
+    # ORGANIZATIONAL METRICS (v4.6)
+    # Check pre-computed metrics BEFORE triggering clarification
+    # =========================================================================
+    
+    def _check_organizational_metrics(self, question: str, 
+                                      q_lower: str) -> Optional[SynthesizedAnswer]:
+        """
+        Check if question can be answered by pre-computed organizational metrics.
+        
+        This runs BEFORE clarification to avoid "which employees?" when we already
+        have the answer. For example:
+        - "what is the active headcount?" → active_headcount: 3,976
+        - "how many active employees?" → active_headcount: 3,976
+        - "what's the earnings code usage?" → earnings_code_usage: 48 of 230 (20.9%)
+        
+        Returns:
+            SynthesizedAnswer if we have a pre-computed answer, None otherwise
+        """
+        if not PROJECT_INTELLIGENCE_AVAILABLE or not get_project_intelligence:
+            return None
+        if not self.structured_handler:
+            return None
+            
+        try:
+            intelligence = get_project_intelligence(self.project, self.structured_handler)
+            if not intelligence:
+                return None
+                
+            metrics = intelligence.get_organizational_metrics()
+            if not metrics:
+                return None
+            
+            logger.warning(f"[ENGINE-V2] Checking {len(metrics)} organizational metrics for direct answer")
+            
+            # Build metric lookup by name for fast matching
+            metrics_by_name = {m.metric_name: m for m in metrics}
+            
+            # Pattern matching for common questions
+            matched_metric = None
+            
+            # HEADCOUNT patterns
+            headcount_patterns = [
+                'active headcount', 'headcount', 'how many active employees',
+                'how many employees', 'employee count', 'active employee count',
+                'total headcount', 'total employees', 'number of employees',
+                'how many people', 'how many active', 'active employees'
+            ]
+            
+            for pattern in headcount_patterns:
+                if pattern in q_lower:
+                    if 'active_headcount' in metrics_by_name:
+                        matched_metric = metrics_by_name['active_headcount']
+                        break
+            
+            # HUB USAGE patterns (earnings, deductions, job codes, etc.)
+            if not matched_metric:
+                usage_match = self._match_usage_metric(q_lower, metrics_by_name)
+                if usage_match:
+                    matched_metric = usage_match
+            
+            # PARTICIPATION patterns
+            if not matched_metric:
+                participation_match = self._match_participation_metric(q_lower, metrics_by_name)
+                if participation_match:
+                    matched_metric = participation_match
+            
+            if matched_metric:
+                logger.warning(f"[ENGINE-V2] Matched metric: {matched_metric.metric_name} = {matched_metric.value_formatted}")
+                return self._build_metric_answer(question, matched_metric, metrics)
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Organizational metrics check failed: {e}")
+            return None
+    
+    def _match_usage_metric(self, q_lower: str, metrics_by_name: Dict) -> Optional[Any]:
+        """Match hub usage questions to metrics."""
+        # Map question terms to metric names
+        usage_terms = {
+            'earnings': 'earnings_code_usage',
+            'earning code': 'earnings_code_usage',
+            'earning': 'earnings_code_usage',
+            'deduction': 'deduction_code_usage',
+            'deductions': 'deduction_code_usage',
+            'job code': 'job_code_usage',
+            'job codes': 'job_code_usage',
+            'jobs': 'job_code_usage',
+            'location': 'location_code_usage',
+            'locations': 'location_code_usage',
+            'department': 'department_code_usage',
+            'departments': 'department_code_usage',
+            'pay group': 'pay_group_code_usage',
+            'pay groups': 'pay_group_code_usage',
+        }
+        
+        # Check for usage questions
+        if 'usage' in q_lower or 'in use' in q_lower or 'being used' in q_lower or 'how many' in q_lower:
+            for term, metric_name in usage_terms.items():
+                if term in q_lower and metric_name in metrics_by_name:
+                    return metrics_by_name[metric_name]
+        
+        return None
+    
+    def _match_participation_metric(self, q_lower: str, metrics_by_name: Dict) -> Optional[Any]:
+        """Match participation/coverage questions to metrics."""
+        if 'participation' not in q_lower and 'coverage' not in q_lower:
+            return None
+            
+        # Map terms to metric patterns
+        participation_terms = {
+            '401k': '401k_participation',
+            '401(k)': '401k_participation',
+            'retirement': '401k_participation',
+            'health': 'health_participation',
+            'medical': 'medical_participation',
+            'dental': 'dental_participation',
+            'vision': 'vision_participation',
+        }
+        
+        for term, metric_name in participation_terms.items():
+            if term in q_lower and metric_name in metrics_by_name:
+                return metrics_by_name[metric_name]
+        
+        return None
+    
+    def _build_metric_answer(self, question: str, metric: Any, 
+                             all_metrics: List) -> SynthesizedAnswer:
+        """Build a SynthesizedAnswer from a matched metric."""
+        # Format the answer based on metric type
+        metric_name_display = metric.metric_name.replace('_', ' ').title()
+        
+        if metric.numerator is not None and metric.denominator is not None:
+            # Coverage/usage metric: "48 of 230 earnings codes in use (20.9%)"
+            answer = (f"**{metric.value_formatted}**\n\n"
+                     f"{metric.numerator:,} of {metric.denominator:,} "
+                     f"{metric_name_display.lower().replace(' usage', '')} are currently in use.")
+        else:
+            # Simple count metric: "3,976 active employees"
+            if 'headcount' in metric.metric_name:
+                answer = f"**{metric.value_formatted}** active employees."
+            else:
+                answer = f"**{metric.value_formatted}**"
+        
+        # Add dimensional breakdowns if available
+        dimensional_metrics = [m for m in all_metrics 
+                             if m.metric_name.startswith(metric.metric_name.split('_')[0] + '_by_')]
+        if dimensional_metrics:
+            answer += "\n\n**Breakdown:**\n"
+            for dm in dimensional_metrics[:5]:  # Top 5
+                answer += f"- {dm.dimension_value}: {dm.value_formatted}\n"
+        
+        # Build reasoning
+        reasoning = [
+            f"Used pre-computed organizational metric: {metric.metric_name}",
+            f"Source: {metric.source_table or 'organizational analysis'}",
+        ]
+        if metric.source_query:
+            reasoning.append(f"Query: {metric.source_query[:100]}...")
+        
+        return SynthesizedAnswer(
+            question=question,
+            answer=answer,
+            confidence=0.95,
+            structured_output={
+                'type': 'metric_answer',
+                'metric_name': metric.metric_name,
+                'value': metric.value,
+                'value_formatted': metric.value_formatted,
+                'source': 'organizational_metrics'
+            },
+            reasoning=reasoning
+        )
     
     # =========================================================================
     # CLARIFICATION HANDLING
