@@ -484,6 +484,66 @@ class CollisionWarning:
         }
 
 
+class MetricCategory(Enum):
+    """Categories for organizational metrics."""
+    WORKFORCE = "workforce"           # Headcount, FT/PT, employee types
+    COMPENSATION = "compensation"     # Payroll totals, averages
+    BENEFITS = "benefits"             # Participation rates, coverage
+    DEMOGRAPHICS = "demographics"     # Age, tenure, gender, ethnicity
+    CONFIGURATION = "configuration"   # Hub usage, coverage gaps
+    DIMENSIONAL = "dimensional"       # Breakdowns by company/location/etc
+
+
+@dataclass
+class OrganizationalMetric:
+    """
+    A computed organizational metric.
+    
+    These are the metrics every HR/Payroll/Benefits leader wants:
+    headcount, turnover, participation rates, coverage gaps, etc.
+    
+    Computed dynamically from Context Graph relationships and lookups.
+    """
+    id: str
+    category: MetricCategory
+    metric_name: str              # e.g., "active_headcount", "401k_participation"
+    
+    # The value
+    value: float
+    value_formatted: str          # e.g., "1,234" or "78.5%"
+    
+    # Context
+    dimension: Optional[str] = None      # e.g., "home_company_code" for breakdowns
+    dimension_value: Optional[str] = None  # e.g., "ACME Corp"
+    
+    # For coverage/gap metrics
+    numerator: Optional[int] = None      # e.g., in_use count
+    denominator: Optional[int] = None    # e.g., configured count
+    
+    # Source tables for transparency
+    source_table: Optional[str] = None
+    source_query: Optional[str] = None
+    
+    # Metadata
+    computed_at: datetime = field(default_factory=datetime.now)
+    
+    def to_dict(self) -> Dict:
+        return {
+            'id': self.id,
+            'category': self.category.value,
+            'metric_name': self.metric_name,
+            'value': self.value,
+            'value_formatted': self.value_formatted,
+            'dimension': self.dimension,
+            'dimension_value': self.dimension_value,
+            'numerator': self.numerator,
+            'denominator': self.denominator,
+            'source_table': self.source_table,
+            'source_query': self.source_query,
+            'computed_at': self.computed_at.isoformat()
+        }
+
+
 @dataclass
 class TableClassification:
     """
@@ -646,6 +706,7 @@ class ProjectIntelligenceService:
         self.lookups: List[ReferenceLookup] = []
         self.relationships: List[Relationship] = []
         self.work_trail: List[WorkTrailEntry] = []
+        self.metrics: List[OrganizationalMetric] = []  # NEW: Organizational metrics
         
         # Summary stats
         self.total_tables = 0
@@ -1137,6 +1198,9 @@ class ProjectIntelligenceService:
         
         # Run gap detection (Configuration vs Reality)
         self._run_gap_detection(tables)
+        
+        # NEW: Compute organizational metrics using Context Graph
+        self._compute_organizational_metrics(tables)
     
     def _detect_reference_tables(self, tables: List[Dict]) -> None:
         """
@@ -1776,6 +1840,493 @@ class ProjectIntelligenceService:
         pass
     
     # =========================================================================
+    # ORGANIZATIONAL METRICS COMPUTATION
+    # =========================================================================
+    
+    def _compute_organizational_metrics(self, tables: List[Dict]) -> None:
+        """
+        Compute organizational metrics using Context Graph and Lookups.
+        
+        This is the AI consultant intelligence layer:
+        - Headcount (total, by company, by location, by status)
+        - Hub usage (configured vs in use)
+        - Coverage gaps (config items with no reality usage)
+        - Benefits participation
+        - Demographics breakdowns
+        
+        All computed DYNAMICALLY from the data - not hardcoded.
+        """
+        logger.info("[INTELLIGENCE] Computing organizational metrics...")
+        
+        if not self.handler:
+            logger.warning("[INTELLIGENCE] No handler for metrics computation")
+            return
+        
+        try:
+            # Step 1: Get Context Graph
+            context_graph = None
+            if hasattr(self.handler, 'get_context_graph'):
+                context_graph = self.handler.get_context_graph(self.project)
+            
+            if not context_graph:
+                logger.warning("[INTELLIGENCE] No context graph available for metrics")
+                return
+            
+            hubs = context_graph.get('hubs', [])
+            relationships = context_graph.get('relationships', [])
+            
+            if not hubs and not relationships:
+                logger.info("[INTELLIGENCE] No hubs or relationships in context graph")
+                return
+            
+            # Step 2: Discover status columns and active values from lookups
+            status_info = self._discover_status_columns()
+            
+            # Step 3: Find employee identifier column and reality tables  
+            employee_tables = self._find_employee_tables(tables, context_graph)
+            
+            if not employee_tables:
+                logger.info("[INTELLIGENCE] No employee/reality tables found")
+                return
+            
+            # Step 4: Compute workforce metrics (headcount, demographics)
+            self._compute_workforce_metrics(employee_tables, status_info)
+            
+            # Step 5: Compute hub usage metrics (configured vs in use)
+            self._compute_hub_usage_metrics(context_graph, status_info, employee_tables)
+            
+            # Step 6: Compute coverage/gap metrics
+            self._compute_coverage_metrics(context_graph, status_info, employee_tables)
+            
+            logger.info(f"[INTELLIGENCE] Computed {len(self.metrics)} organizational metrics")
+            
+        except Exception as e:
+            logger.warning(f"[INTELLIGENCE] Metrics computation failed: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+    
+    def _discover_status_columns(self) -> Dict:
+        """
+        Discover status columns and their active values from lookups.
+        
+        Returns dict with:
+        - status_columns: {column_name: {'active_value': 'A', 'table': '...'}}
+        - active_patterns: ['A', 'Y', 'Active', etc.]
+        """
+        status_info = {
+            'status_columns': {},
+            'active_patterns': ['A', 'Y', 'Active', 'ACTIVE', '1', 'true', 'True']
+        }
+        
+        # Scan lookups for status patterns
+        for lookup in self.lookups:
+            code_col = lookup.code_column.lower()
+            lookup_data = lookup.lookup_data or {}
+            
+            # Check if this looks like a status column
+            if any(pattern in code_col for pattern in ['status', 'active', 'is_']):
+                # Find which value means "active"
+                active_value = None
+                for code, desc in lookup_data.items():
+                    desc_lower = str(desc).lower()
+                    if desc_lower == 'active' or desc_lower.startswith('active'):
+                        active_value = code
+                        break
+                    elif code.upper() == 'A' and 'active' in desc_lower:
+                        active_value = code
+                        break
+                    elif code.upper() == 'Y':
+                        active_value = code
+                        break
+                
+                if active_value:
+                    status_info['status_columns'][lookup.code_column] = {
+                        'active_value': active_value,
+                        'table': lookup.table_name,
+                        'lookup_type': lookup.lookup_type
+                    }
+                    logger.debug(f"[METRICS] Found status column: {lookup.code_column} = '{active_value}' means active")
+        
+        return status_info
+    
+    def _find_employee_tables(self, tables: List[Dict], context_graph: Dict) -> List[Dict]:
+        """
+        Find employee/reality tables that contain headcount data.
+        
+        Looks for:
+        - Tables with employee_number, emp_id, etc.
+        - Tables marked as truth_type = 'reality'
+        - Tables with status columns
+        """
+        employee_tables = []
+        
+        # Employee identifier patterns
+        employee_id_patterns = ['employee_number', 'employee_id', 'emp_id', 'emp_no', 
+                               'worker_id', 'person_id', 'ssn']
+        
+        for table_info in tables:
+            table_name = table_info.get('table_name', '')
+            columns = [c.lower() for c in table_info.get('columns', [])]
+            
+            # Check for employee identifier
+            has_employee_id = any(
+                any(pattern in col for pattern in employee_id_patterns)
+                for col in columns
+            )
+            
+            if has_employee_id:
+                # Find the actual employee ID column name
+                emp_col = None
+                for col in table_info.get('columns', []):
+                    if any(pattern in col.lower() for pattern in employee_id_patterns):
+                        emp_col = col
+                        break
+                
+                # Check for status column
+                status_col = None
+                for col in table_info.get('columns', []):
+                    col_lower = col.lower()
+                    if 'employment_status' in col_lower or col_lower == 'status_code':
+                        status_col = col
+                        break
+                
+                # Check for dimensional columns (company, location, etc.)
+                dimensional_cols = {}
+                for col in table_info.get('columns', []):
+                    col_lower = col.lower()
+                    if 'company' in col_lower and 'code' in col_lower:
+                        dimensional_cols['company'] = col
+                    elif 'location' in col_lower and 'code' in col_lower:
+                        dimensional_cols['location'] = col
+                    elif 'department' in col_lower:
+                        dimensional_cols['department'] = col
+                    elif 'org_level' in col_lower:
+                        dimensional_cols[col_lower] = col
+                
+                employee_tables.append({
+                    'table_name': table_name,
+                    'employee_column': emp_col,
+                    'status_column': status_col,
+                    'dimensional_columns': dimensional_cols,
+                    'columns': table_info.get('columns', []),
+                    'row_count': table_info.get('row_count', 0)
+                })
+        
+        # Sort by row count descending - primary employee table usually has most rows
+        employee_tables.sort(key=lambda x: x.get('row_count', 0), reverse=True)
+        
+        return employee_tables
+    
+    def _compute_workforce_metrics(self, employee_tables: List[Dict], status_info: Dict) -> None:
+        """
+        Compute workforce metrics: headcount, by dimension, demographics.
+        """
+        if not employee_tables:
+            return
+        
+        # Use the primary employee table (usually personal/master)
+        primary_table = None
+        for et in employee_tables:
+            tn = et.get('table_name', '').lower()
+            # Prefer personal or employee master table
+            if 'personal' in tn or ('employee' in tn and 'master' in tn):
+                primary_table = et
+                break
+        
+        if not primary_table:
+            primary_table = employee_tables[0]
+        
+        table_name = primary_table['table_name']
+        emp_col = primary_table['employee_column']
+        status_col = primary_table.get('status_column')
+        dimensional_cols = primary_table.get('dimensional_columns', {})
+        
+        # Determine active filter
+        active_filter = ""
+        active_value = None
+        
+        if status_col:
+            # Check if we know the active value from lookups
+            for col_name, info in status_info.get('status_columns', {}).items():
+                if col_name.lower() == status_col.lower():
+                    active_value = info.get('active_value')
+                    break
+            
+            # Default to 'A' if we have a status column but didn't find in lookups
+            if not active_value:
+                active_value = 'A'
+            
+            active_filter = f'WHERE "{status_col}" = \'{active_value}\''
+        
+        # 1. Total headcount
+        try:
+            sql = f'SELECT COUNT(DISTINCT "{emp_col}") as cnt FROM "{table_name}" {active_filter}'
+            result = self.handler.conn.execute(sql).fetchone()
+            total_count = result[0] if result else 0
+            
+            self.metrics.append(OrganizationalMetric(
+                id=f"{self.project}_headcount_total",
+                category=MetricCategory.WORKFORCE,
+                metric_name="active_headcount",
+                value=float(total_count),
+                value_formatted=f"{total_count:,}",
+                source_table=table_name,
+                source_query=sql
+            ))
+            logger.debug(f"[METRICS] Total headcount: {total_count}")
+        except Exception as e:
+            logger.warning(f"[METRICS] Failed to compute total headcount: {e}")
+        
+        # 2. Headcount by dimension (company, location, etc.)
+        for dim_name, dim_col in dimensional_cols.items():
+            try:
+                # Also get the description column if available
+                desc_col = dim_col.replace('_code', '_name').replace('_code', '')
+                columns = primary_table.get('columns', [])
+                
+                # Find matching description column
+                actual_desc = None
+                for col in columns:
+                    if col.lower() == desc_col.lower() or col.lower() == dim_col.lower().replace('_code', ''):
+                        actual_desc = col
+                        break
+                
+                if actual_desc:
+                    sql = f'''
+                        SELECT "{dim_col}", "{actual_desc}", COUNT(DISTINCT "{emp_col}") as cnt 
+                        FROM "{table_name}" 
+                        {active_filter}
+                        GROUP BY "{dim_col}", "{actual_desc}"
+                        ORDER BY cnt DESC
+                    '''
+                else:
+                    sql = f'''
+                        SELECT "{dim_col}", COUNT(DISTINCT "{emp_col}") as cnt 
+                        FROM "{table_name}" 
+                        {active_filter}
+                        GROUP BY "{dim_col}"
+                        ORDER BY cnt DESC
+                    '''
+                
+                results = self.handler.conn.execute(sql).fetchall()
+                
+                for row in results:
+                    if actual_desc:
+                        dim_value, dim_desc, count = row[0], row[1], row[2]
+                        display_value = f"{dim_desc} ({dim_value})" if dim_desc else str(dim_value)
+                    else:
+                        dim_value, count = row[0], row[1]
+                        display_value = str(dim_value)
+                    
+                    if dim_value:  # Skip nulls
+                        self.metrics.append(OrganizationalMetric(
+                            id=f"{self.project}_headcount_{dim_name}_{dim_value}",
+                            category=MetricCategory.DIMENSIONAL,
+                            metric_name=f"headcount_by_{dim_name}",
+                            value=float(count),
+                            value_formatted=f"{count:,}",
+                            dimension=dim_name,
+                            dimension_value=display_value,
+                            source_table=table_name,
+                            source_query=sql
+                        ))
+                
+                logger.debug(f"[METRICS] Headcount by {dim_name}: {len(results)} values")
+            except Exception as e:
+                logger.warning(f"[METRICS] Failed to compute headcount by {dim_name}: {e}")
+    
+    def _compute_hub_usage_metrics(self, context_graph: Dict, status_info: Dict, 
+                                   employee_tables: List[Dict]) -> None:
+        """
+        Compute hub usage metrics: how many config items are actually in use.
+        
+        For each hub (earnings, deductions, etc.) with reality spokes:
+        - Count distinct values in config (hub)
+        - Count distinct values in reality (spoke) for active employees
+        - Calculate coverage percentage
+        """
+        hubs = context_graph.get('hubs', [])
+        relationships = context_graph.get('relationships', [])
+        
+        # Find hubs that have reality spokes
+        for hub in hubs:
+            hub_type = hub.get('semantic_type', '')
+            hub_table = hub.get('table', '')
+            hub_column = hub.get('column', '')
+            hub_cardinality = hub.get('cardinality', 0)
+            truth_type = hub.get('truth_type', '')
+            
+            # Only process configuration hubs
+            if truth_type != 'configuration':
+                continue
+            
+            # Find reality spokes for this hub
+            reality_spokes = [
+                r for r in relationships
+                if r.get('semantic_type') == hub_type and r.get('truth_type') == 'reality'
+            ]
+            
+            if not reality_spokes:
+                continue
+            
+            # Use the first reality spoke to compute usage
+            spoke = reality_spokes[0]
+            spoke_table = spoke.get('spoke_table', '')
+            spoke_column = spoke.get('spoke_column', '')
+            
+            try:
+                # Find active filter for this spoke table
+                active_filter = ""
+                for et in employee_tables:
+                    if et['table_name'] == spoke_table:
+                        status_col = et.get('status_column')
+                        if status_col:
+                            # Check for active column in this table
+                            cols_lower = [c.lower() for c in et.get('columns', [])]
+                            if 'active' in cols_lower:
+                                active_filter = "WHERE active = 'Y'"
+                            elif 'benefit_status_code' in cols_lower:
+                                active_filter = "WHERE benefit_status_code = 'A'"
+                        break
+                
+                # Count distinct in-use values
+                sql = f'''
+                    SELECT COUNT(DISTINCT "{spoke_column}") 
+                    FROM "{spoke_table}"
+                    {active_filter}
+                '''
+                result = self.handler.conn.execute(sql).fetchone()
+                in_use_count = result[0] if result else 0
+                
+                # Coverage percentage
+                coverage = (in_use_count / hub_cardinality * 100) if hub_cardinality > 0 else 0
+                
+                self.metrics.append(OrganizationalMetric(
+                    id=f"{self.project}_hub_usage_{hub_type}",
+                    category=MetricCategory.CONFIGURATION,
+                    metric_name=f"{hub_type}_usage",
+                    value=coverage,
+                    value_formatted=f"{in_use_count:,} of {hub_cardinality:,} ({coverage:.1f}%)",
+                    numerator=in_use_count,
+                    denominator=hub_cardinality,
+                    source_table=spoke_table,
+                    source_query=sql
+                ))
+                
+                logger.debug(f"[METRICS] Hub usage {hub_type}: {in_use_count}/{hub_cardinality} ({coverage:.1f}%)")
+                
+            except Exception as e:
+                logger.warning(f"[METRICS] Failed to compute hub usage for {hub_type}: {e}")
+    
+    def _compute_coverage_metrics(self, context_graph: Dict, status_info: Dict,
+                                  employee_tables: List[Dict]) -> None:
+        """
+        Compute coverage gap metrics: employees with/without certain assignments.
+        
+        For each hub type with reality spokes:
+        - Count employees WITH at least one assignment
+        - Count employees WITHOUT any assignment
+        - Calculate participation rate
+        """
+        hubs = context_graph.get('hubs', [])
+        relationships = context_graph.get('relationships', [])
+        
+        # Get primary employee table for total headcount
+        primary_table = None
+        total_employees = 0
+        emp_col = None
+        
+        for et in employee_tables:
+            tn = et.get('table_name', '').lower()
+            if 'personal' in tn:
+                primary_table = et
+                break
+        
+        if not primary_table and employee_tables:
+            primary_table = employee_tables[0]
+        
+        if primary_table:
+            emp_col = primary_table['employee_column']
+            status_col = primary_table.get('status_column')
+            table_name = primary_table['table_name']
+            
+            try:
+                active_filter = f"WHERE \"{status_col}\" = 'A'" if status_col else ""
+                sql = f'SELECT COUNT(DISTINCT "{emp_col}") FROM "{table_name}" {active_filter}'
+                result = self.handler.conn.execute(sql).fetchone()
+                total_employees = result[0] if result else 0
+            except Exception as e:
+                logger.warning(f"[METRICS] Could not get total employees: {e}")
+                return
+        
+        if total_employees == 0:
+            return
+        
+        # For each hub type, compute participation
+        hub_types_processed = set()
+        
+        for rel in relationships:
+            hub_type = rel.get('semantic_type', '')
+            spoke_table = rel.get('spoke_table', '')
+            spoke_column = rel.get('spoke_column', '')
+            truth_type = rel.get('truth_type', '')
+            
+            if truth_type != 'reality' or hub_type in hub_types_processed:
+                continue
+            
+            hub_types_processed.add(hub_type)
+            
+            try:
+                # Find employee column in this spoke table
+                spoke_emp_col = None
+                for et in employee_tables:
+                    if et['table_name'] == spoke_table:
+                        spoke_emp_col = et.get('employee_column')
+                        break
+                
+                if not spoke_emp_col:
+                    continue
+                
+                # Count distinct employees with this assignment type
+                # Apply active filter if available
+                active_filter = ""
+                for et in employee_tables:
+                    if et['table_name'] == spoke_table:
+                        cols = [c.lower() for c in et.get('columns', [])]
+                        if 'active' in cols:
+                            active_filter = "WHERE active = 'Y'"
+                        elif 'benefit_status_code' in cols:
+                            active_filter = "WHERE benefit_status_code = 'A'"
+                        break
+                
+                sql = f'''
+                    SELECT COUNT(DISTINCT "{spoke_emp_col}")
+                    FROM "{spoke_table}"
+                    {active_filter}
+                '''
+                result = self.handler.conn.execute(sql).fetchone()
+                employees_with = result[0] if result else 0
+                
+                participation_rate = (employees_with / total_employees * 100) if total_employees > 0 else 0
+                
+                self.metrics.append(OrganizationalMetric(
+                    id=f"{self.project}_participation_{hub_type}",
+                    category=MetricCategory.BENEFITS if 'deduction' in hub_type.lower() or 'benefit' in hub_type.lower() else MetricCategory.WORKFORCE,
+                    metric_name=f"{hub_type}_participation",
+                    value=participation_rate,
+                    value_formatted=f"{employees_with:,} of {total_employees:,} ({participation_rate:.1f}%)",
+                    numerator=employees_with,
+                    denominator=total_employees,
+                    source_table=spoke_table,
+                    source_query=sql
+                ))
+                
+                logger.debug(f"[METRICS] {hub_type} participation: {employees_with}/{total_employees} ({participation_rate:.1f}%)")
+                
+            except Exception as e:
+                logger.warning(f"[METRICS] Failed to compute participation for {hub_type}: {e}")
+    
+    # =========================================================================
     # TASK GENERATION
     # =========================================================================
     
@@ -1847,6 +2398,20 @@ class ProjectIntelligenceService:
         if lookup_type:
             return [l for l in self.lookups if l.lookup_type == lookup_type]
         return self.lookups
+    
+    def get_organizational_metrics(self, category: str = None) -> List[OrganizationalMetric]:
+        """
+        Get organizational metrics, optionally filtered by category.
+        
+        Categories: workforce, compensation, benefits, demographics, configuration, dimensional
+        """
+        if category:
+            try:
+                cat_enum = MetricCategory(category)
+                return [m for m in self.metrics if m.category == cat_enum]
+            except ValueError:
+                return [m for m in self.metrics if m.category.value == category]
+        return self.metrics
     
     def decode_value(self, table_name: str, column_name: str, code: str) -> str:
         """Decode a code value using detected lookups."""
@@ -2012,6 +2577,21 @@ class ProjectIntelligenceService:
                     self.project, rel.from_table, rel.from_column,
                     rel.to_table, rel.to_column, rel.relationship_type,
                     rel.confidence, rel.orphan_count, rel.orphan_percentage
+                ])
+            
+            # NEW: Store organizational metrics
+            for metric in self.metrics:
+                self.handler.conn.execute("""
+                    INSERT OR REPLACE INTO _organizational_metrics
+                    (id, project_name, category, metric_name, value, value_formatted,
+                     dimension, dimension_value, numerator, denominator,
+                     source_table, source_query, computed_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    metric.id, self.project, metric.category.value, metric.metric_name,
+                    metric.value, metric.value_formatted, metric.dimension,
+                    metric.dimension_value, metric.numerator, metric.denominator,
+                    metric.source_table, metric.source_query, metric.computed_at.isoformat()
                 ])
             
             # NEW: Store table classifications
@@ -2187,6 +2767,25 @@ class ProjectIntelligenceService:
                 classified_at VARCHAR
             )
         """)
+        
+        # NEW: Organizational metrics table
+        self.handler.conn.execute("""
+            CREATE TABLE IF NOT EXISTS _organizational_metrics (
+                id VARCHAR PRIMARY KEY,
+                project_name VARCHAR NOT NULL,
+                category VARCHAR NOT NULL,
+                metric_name VARCHAR NOT NULL,
+                value DOUBLE,
+                value_formatted VARCHAR,
+                dimension VARCHAR,
+                dimension_value VARCHAR,
+                numerator INTEGER,
+                denominator INTEGER,
+                source_table VARCHAR,
+                source_query TEXT,
+                computed_at VARCHAR
+            )
+        """)
     
     def _persist_work_trail_entry(self, entry: WorkTrailEntry) -> None:
         """Persist a single work trail entry."""
@@ -2301,13 +2900,37 @@ class ProjectIntelligenceService:
                     orphan_percentage=row[9] or 0
                 ))
             
+            # NEW: Load organizational metrics
+            try:
+                metrics_result = self.handler.conn.execute("""
+                    SELECT * FROM _organizational_metrics WHERE project_name = ?
+                """, [self.project]).fetchall()
+                
+                for row in metrics_result:
+                    self.metrics.append(OrganizationalMetric(
+                        id=row[0],
+                        category=MetricCategory(row[2]),
+                        metric_name=row[3],
+                        value=row[4] or 0,
+                        value_formatted=row[5] or "",
+                        dimension=row[6],
+                        dimension_value=row[7],
+                        numerator=row[8],
+                        denominator=row[9],
+                        source_table=row[10],
+                        source_query=row[11],
+                        computed_at=datetime.fromisoformat(row[12]) if row[12] else datetime.now()
+                    ))
+            except Exception as e:
+                logger.debug(f"[INTELLIGENCE] No organizational metrics to load: {e}")
+            
             # NEW: Load table classifications
             self._load_classifications()
             
             self.tier1_complete = True
             self.tier2_complete = True
             
-            logger.info(f"[INTELLIGENCE] Loaded from database: {len(self.findings)} findings, {len(self.tasks)} tasks, {len(self.tables)} classifications")
+            logger.info(f"[INTELLIGENCE] Loaded from database: {len(self.findings)} findings, {len(self.tasks)} tasks, {len(self.tables)} classifications, {len(self.metrics)} metrics")
             return True
             
         except Exception as e:
@@ -2364,6 +2987,16 @@ class ProjectIntelligenceService:
             
             # Lookups
             'lookups': [l.to_dict() for l in self.lookups],
+            
+            # NEW: Organizational Metrics
+            'organizational_metrics': {
+                'total': len(self.metrics),
+                'by_category': {
+                    cat.value: len([m for m in self.metrics if m.category == cat])
+                    for cat in MetricCategory
+                },
+                'items': [m.to_dict() for m in self.metrics]
+            },
             
             # Domain Knowledge (from Domain Decoder)
             'domain_knowledge': domain_knowledge,
