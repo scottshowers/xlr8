@@ -2186,31 +2186,76 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Compute hub/spoke relationships for the context graph.
         
-        DATA-DRIVEN APPROACH (v3.0):
-        ============================
-        Changes from v2.0:
-        - MIN_HUB_CARDINALITY: 3 → 1 (small config tables are valid hubs)
-        - Smarter key column selection: prefer column matching entity_type
-        - Better scoring: boost when key column matches entity name
+        SCHEMA-FIRST APPROACH (v4.0):
+        =============================
+        v4.0 CHANGE: Use BRIT/schema reference FIRST, inference SECOND.
         
         Algorithm:
-        1. Identify hub candidates from DATA PATTERNS (not vocabulary)
-        2. Find spokes by VALUE MATCHING across all columns
-        3. Apply vocabulary labels (auto-add if not found)
+        1. Load known FK patterns from ukg_schema_reference.json
+        2. Identify hub candidates from DATA PATTERNS
+        3. Find spokes by SCHEMA MATCHING (known FKs) - 100% confidence
+        4. Find additional spokes by VALUE MATCHING (inference) - lower confidence
+        5. Apply vocabulary labels
         
         Returns:
             Dict with stats about the computed graph
         """
-        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-DRIVEN v3.0)")
+        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (SCHEMA-FIRST v4.0)")
         
         # Configurable thresholds
         HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
-        MIN_COVERAGE_PCT = 20             # Minimum overlap for relationship  
+        MIN_COVERAGE_PCT = 20             # Minimum overlap for inferred relationships  
         MIN_HUB_CARDINALITY = 1           # v3.0: Allow single-row config tables
         MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
         
         try:
             from collections import defaultdict
+            import json
+            import os
+            
+            # =================================================================
+            # STEP 0: Load known FK patterns from schema reference
+            # This is the BRIT - we KNOW these relationships
+            # =================================================================
+            known_spoke_patterns = {}  # column_name_normalized -> hub_type
+            known_hubs = {}  # hub_type -> {key_column, semantic_type, ...}
+            
+            schema_paths = [
+                '/app/config/ukg_schema_reference.json',
+                'config/ukg_schema_reference.json',
+                os.path.join(os.path.dirname(__file__), '..', 'config', 'ukg_schema_reference.json'),
+            ]
+            
+            for schema_path in schema_paths:
+                if os.path.exists(schema_path):
+                    try:
+                        with open(schema_path, 'r') as f:
+                            schema_ref = json.load(f)
+                        
+                        # Load spoke patterns: column_name -> hub_type
+                        for col_pattern, mappings in schema_ref.get('spoke_patterns', {}).items():
+                            col_normalized = col_pattern.lower().replace('_', '').replace(' ', '')
+                            for mapping in mappings:
+                                hub_type = mapping.get('hub', '')
+                                if hub_type:
+                                    known_spoke_patterns[col_normalized] = hub_type
+                        
+                        # Load hub definitions
+                        for hub_type, hub_def in schema_ref.get('hubs', {}).items():
+                            known_hubs[hub_type] = {
+                                'key_column': hub_def.get('key_column', ''),
+                                'semantic_type': hub_def.get('semantic_type', f'{hub_type}_code'),
+                                'entity_name': hub_def.get('entity_name', hub_type),
+                                'is_required': hub_def.get('is_required', False)
+                            }
+                        
+                        logger.warning(f"[CONTEXT-GRAPH] Loaded schema: {len(known_spoke_patterns)} FK patterns, {len(known_hubs)} hub definitions")
+                        break
+                    except Exception as e:
+                        logger.debug(f"[CONTEXT-GRAPH] Failed to load {schema_path}: {e}")
+            
+            if not known_spoke_patterns:
+                logger.warning("[CONTEXT-GRAPH] No schema reference loaded - falling back to inference only")
             
             # =================================================================
             # STEP 1: Get all tables and their metadata for this project
@@ -2498,7 +2543,96 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             logger.info(f"[CONTEXT-GRAPH] {len(final_hubs)} unique hubs after deduplication")
             
             # =================================================================
-            # STEP 6: Find spokes by value matching
+            # STEP 6A: Find spokes by SCHEMA MATCHING (known FKs)
+            # These are 100% confidence - we KNOW the relationship from BRIT
+            # =================================================================
+            relationships = []
+            schema_matched_columns = set()  # Track columns already matched by schema
+            
+            if known_spoke_patterns:
+                # Get ALL columns from all tables (not just cached values)
+                all_table_columns = self.conn.execute("""
+                    SELECT 
+                        s.table_name,
+                        s.file_name,
+                        s.entity_type,
+                        s.category,
+                        COALESCE(s.truth_type, 'unknown') as truth_type
+                    FROM _schema_metadata s
+                    WHERE s.project = ? 
+                      AND s.is_current = TRUE
+                      AND s.table_name NOT LIKE '\\_%' ESCAPE '\\'
+                """, [project]).fetchall()
+                
+                for table_name, file_name, entity_type, category, truth_type in all_table_columns:
+                    try:
+                        # Get columns for this table
+                        columns = self.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                        
+                        for col_info in columns:
+                            col_name = col_info[1]
+                            if not col_name or col_name.startswith('_'):
+                                continue
+                            
+                            # Normalize column name for matching
+                            col_normalized = col_name.lower().replace('_', '').replace(' ', '')
+                            
+                            # Check if this column matches a known FK pattern
+                            if col_normalized in known_spoke_patterns:
+                                target_hub_type = known_spoke_patterns[col_normalized]
+                                
+                                # Find the matching hub in our final_hubs
+                                matching_hub = None
+                                for hub in final_hubs:
+                                    hub_semantic = hub.get('semantic_type', '').lower()
+                                    hub_entity = hub.get('entity_type', '').lower().replace('_', '').replace(' ', '')
+                                    
+                                    # Match by semantic type or entity type
+                                    if (target_hub_type in hub_semantic or 
+                                        target_hub_type == hub_entity or
+                                        f"{target_hub_type}_code" == hub_semantic or
+                                        target_hub_type.replace('_', '') in hub_semantic.replace('_', '')):
+                                        matching_hub = hub
+                                        break
+                                
+                                if matching_hub:
+                                    # Skip if this is the hub itself
+                                    if table_name == matching_hub['table_name'] and col_name == matching_hub['key_column']:
+                                        continue
+                                    
+                                    # Get cardinality for this spoke column
+                                    try:
+                                        card_result = self.conn.execute(f"""
+                                            SELECT COUNT(DISTINCT "{col_name}") 
+                                            FROM "{table_name}" 
+                                            WHERE "{col_name}" IS NOT NULL
+                                        """).fetchone()
+                                        spoke_cardinality = card_result[0] if card_result else 0
+                                    except:
+                                        spoke_cardinality = 0
+                                    
+                                    relationships.append({
+                                        'hub': matching_hub,
+                                        'spoke_table': table_name,
+                                        'spoke_column': col_name,
+                                        'spoke_cardinality': spoke_cardinality,
+                                        'coverage_pct': 100.0,  # Schema-defined = 100% confidence
+                                        'is_subset': True,
+                                        'truth_type': truth_type,
+                                        'entity_type': entity_type,
+                                        'file_name': file_name,
+                                        'match_source': 'schema'  # Mark as schema-matched
+                                    })
+                                    schema_matched_columns.add((table_name, col_name))
+                                    logger.debug(f"[CONTEXT-GRAPH] SCHEMA MATCH: {table_name}.{col_name} → {matching_hub['semantic_type']}")
+                    except Exception as col_err:
+                        logger.debug(f"[CONTEXT-GRAPH] Error checking columns for {table_name}: {col_err}")
+                
+                logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships)} relationships")
+            
+            # =================================================================
+            # STEP 6B: Find additional spokes by VALUE MATCHING (inference)
+            # Only for columns NOT already matched by schema
             # =================================================================
             # Get all columns from all tables (from _column_profiles for efficiency)
             # REQUIRE schema metadata to avoid orphaned data showing as "Unknown Source"
@@ -2537,8 +2671,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'file_name': file_name
                         }
             
-            # For each hub, find matching spokes
-            relationships = []
+            # For each hub, find matching spokes (value-based inference)
+            inferred_count = 0
             
             for hub in final_hubs:
                 hub_values = hub['values']
@@ -2549,6 +2683,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 
                 # Check every column for value overlap
                 for (table_name, col_name), col_info in column_values_cache.items():
+                    # Skip if already matched by schema
+                    if (table_name, col_name) in schema_matched_columns:
+                        continue
+                    
                     # Skip the hub itself
                     if table_name == hub['table_name'] and col_name == hub['key_column']:
                         continue
@@ -2576,10 +2714,12 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'is_subset': is_subset,
                             'truth_type': col_info['truth_type'],
                             'entity_type': col_info['entity_type'],
-                            'file_name': col_info['file_name']
+                            'file_name': col_info['file_name'],
+                            'match_source': 'inferred'  # Mark as value-inferred
                         })
+                        inferred_count += 1
             
-            logger.info(f"[CONTEXT-GRAPH] Found {len(relationships)} spoke relationships")
+            logger.warning(f"[CONTEXT-GRAPH] Total relationships: {len(relationships)} ({len(relationships) - inferred_count} schema, {inferred_count} inferred)")
             
             # =================================================================
             # STEP 7: Update _column_mappings with hub/spoke data
