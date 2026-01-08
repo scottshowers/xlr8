@@ -1037,13 +1037,13 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
         
         # ==============================================================
         # STEP 1: Try local models for synthesis
-        # mistral:7b is best for natural language synthesis
-        # qwen2.5-coder is for structured/JSON output, NOT synthesis
-        # deepseek-r1 outputs <think> tags that need stripping
+        # v3.2: Qwen 14B is excellent for synthesis - follows instructions,
+        # uses provided data, doesn't hallucinate. Mistral 7b as fallback.
         # ==============================================================
         if self.ollama_url:
             models_to_try = [
-                'mistral:7b',
+                'qwen2.5-coder:14b',  # Primary: Best at following instructions, uses actual data
+                'mistral:7b',          # Fallback: Faster but may ignore data
             ]
             
             for model in models_to_try:
