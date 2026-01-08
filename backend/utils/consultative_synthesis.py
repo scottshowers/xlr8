@@ -178,12 +178,15 @@ class ConsultativeSynthesizer:
         conflicts: List[Any] = None,
         insights: List[Any] = None,
         structured_data: Dict = None,
-        context_graph: Dict = None  # v3.0: Context Graph for relationship context
+        context_graph: Dict = None,  # v3.0: Context Graph for relationship context
+        context: Dict = None,  # v4.5: Additional context including organizational_metrics
+        **kwargs  # Accept additional kwargs for forward compatibility
     ) -> ConsultativeAnswer:
         """
         Main entry point - synthesize all truths into a consultative answer.
         
         v3.0: Now accepts context_graph for relationship awareness.
+        v4.5: Now accepts context with organizational_metrics for instant insights.
         
         Args:
             question: The user's question
@@ -197,11 +200,19 @@ class ConsultativeSynthesizer:
             insights: Pre-generated insights
             structured_data: Raw query results (rows, columns, sql)
             context_graph: Hub/spoke relationships and coverage info
+            context: Additional context including organizational_metrics
             
         Returns:
             ConsultativeAnswer with synthesized response
         """
         logger.warning(f"[SYNTHESIS] Starting synthesis for: {question[:80]}...")
+        
+        # v4.5: Extract organizational metrics from context
+        organizational_metrics = []
+        if context and isinstance(context, dict):
+            organizational_metrics = context.get('organizational_metrics', [])
+            if organizational_metrics:
+                logger.warning(f"[SYNTHESIS] Received {len(organizational_metrics)} organizational metrics")
         
         # =====================================================================
         # v4.0: DETECT QUESTION TYPE AND GET RESPONSE PATTERN
@@ -227,6 +238,12 @@ class ConsultativeSynthesizer:
             graph_summary = self._summarize_context_graph(context_graph)
             if graph_summary:
                 summaries.append(graph_summary)
+        
+        # v4.5: Add organizational metrics to summaries if available
+        if organizational_metrics:
+            metrics_summary = self._summarize_organizational_metrics(organizational_metrics)
+            if metrics_summary:
+                summaries.append(metrics_summary)
         
         # Step 2: Triangulate - find alignments, conflicts, gaps
         triangulation = self._triangulate(summaries, conflicts or [])
@@ -371,6 +388,71 @@ class ConsultativeSynthesizer:
             key_facts=key_facts,
             confidence=0.95,
             sources=['context_graph']
+        )
+    
+    def _summarize_organizational_metrics(self, metrics: List) -> Optional[TruthSummary]:
+        """
+        Summarize organizational metrics for LLM context.
+        
+        v4.5: Provides pre-computed metrics so the LLM can give
+        immediate, accurate answers about headcount, coverage, etc.
+        """
+        if not metrics:
+            return None
+        
+        key_facts = []
+        
+        # Group metrics by category
+        by_category = {}
+        for m in metrics:
+            cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
+            if cat not in by_category:
+                by_category[cat] = []
+            by_category[cat].append(m)
+        
+        # Workforce metrics (headcount, etc.)
+        if 'workforce' in by_category:
+            key_facts.append("**Workforce Metrics:**")
+            for m in by_category['workforce'][:5]:
+                key_facts.append(f"  - {m.metric_name}: {m.value_formatted}")
+        
+        # Dimensional breakdowns (by company, location)
+        if 'dimensional' in by_category:
+            key_facts.append("\n**Breakdowns:**")
+            # Group by metric_name
+            by_metric = {}
+            for m in by_category['dimensional']:
+                if m.metric_name not in by_metric:
+                    by_metric[m.metric_name] = []
+                by_metric[m.metric_name].append(m)
+            
+            for metric_name, items in list(by_metric.items())[:3]:  # Top 3 dimensions
+                key_facts.append(f"  {metric_name}:")
+                for m in items[:5]:  # Top 5 values per dimension
+                    key_facts.append(f"    - {m.dimension_value}: {m.value_formatted}")
+        
+        # Configuration metrics (hub usage)
+        if 'configuration' in by_category:
+            key_facts.append("\n**Configuration Usage:**")
+            for m in by_category['configuration'][:5]:
+                key_facts.append(f"  - {m.metric_name}: {m.value_formatted}")
+        
+        # Benefits metrics
+        if 'benefits' in by_category:
+            key_facts.append("\n**Benefits Participation:**")
+            for m in by_category['benefits'][:5]:
+                key_facts.append(f"  - {m.metric_name}: {m.value_formatted}")
+        
+        if not key_facts:
+            return None
+        
+        return TruthSummary(
+            source_type='organizational_metrics',
+            has_data=True,
+            summary=f"Organizational Intelligence: {len(metrics)} pre-computed metrics",
+            key_facts=key_facts,
+            confidence=0.98,  # High confidence - these are computed from actual data
+            sources=['project_intelligence']
         )
     
     def _summarize_reality(self, reality: List[Any], structured_data: Dict = None) -> TruthSummary:
