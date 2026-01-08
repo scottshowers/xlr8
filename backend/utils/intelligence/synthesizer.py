@@ -100,6 +100,170 @@ class Synthesizer:
         
         # Track last executed SQL for provenance
         self.last_executed_sql: Optional[str] = None
+        
+        # v4.2: Store context_graph for entity context
+        self._context_graph: Dict = None
+    
+    def _get_entity_context(self, table_name: str, columns: List[str]) -> str:
+        """
+        v4.2: Build rich entity context from available metadata.
+        
+        This is what makes the LLM smart - understanding:
+        - What TYPE of entity this is (earnings, deductions, etc.)
+        - What columns are EXPECTED vs what's present
+        - Column semantics (which column is the code, which is description)
+        - What's NORMAL for this entity type
+        
+        Returns context string for LLM prompt.
+        """
+        context_parts = []
+        
+        # Find table in schema
+        table_info = None
+        for t in self.schema.get('tables', []):
+            if t.get('table_name', '').lower() == table_name.lower():
+                table_info = t
+                break
+        
+        if not table_info:
+            return ""
+        
+        # 1. Entity type and display name
+        display_name = table_info.get('display_name', '')
+        truth_type = table_info.get('truth_type', 'unknown')
+        
+        if display_name:
+            context_parts.append(f"Entity: {display_name}")
+        context_parts.append(f"Data type: {truth_type.upper() if truth_type else 'Configuration'} table")
+        
+        # 2. Infer entity type from table name
+        table_lower = table_name.lower()
+        entity_semantics = self._infer_entity_semantics(table_lower, columns)
+        if entity_semantics:
+            context_parts.append(f"\n{entity_semantics}")
+        
+        # 3. Column profiles - what columns mean
+        column_profiles = table_info.get('column_profiles', {})
+        if column_profiles:
+            context_parts.append("\nColumn semantics:")
+            for col_name, profile in list(column_profiles.items())[:10]:
+                col_type = profile.get('inferred_type', 'unknown')
+                distinct = profile.get('distinct_count', '?')
+                is_cat = profile.get('is_categorical', False)
+                filter_cat = profile.get('filter_category', '')
+                
+                desc = f"  • {col_name}: {col_type}"
+                if is_cat:
+                    desc += f" (categorical, {distinct} values)"
+                if filter_cat:
+                    desc += f" [filter: {filter_cat}]"
+                context_parts.append(desc)
+        
+        # 4. Context graph - hub/spoke role
+        if self._context_graph:
+            hubs = self._context_graph.get('hubs', [])
+            for hub in hubs:
+                if hub.get('table', '').lower() == table_lower:
+                    sem_type = hub.get('semantic_type', '')
+                    has_spokes = hub.get('has_reality_spokes', False)
+                    context_parts.append(f"\nData model role: This is the MASTER {sem_type} table (hub)")
+                    if has_spokes:
+                        context_parts.append("  → Has transactional data referencing these codes")
+                    break
+        
+        return "\n".join(context_parts)
+    
+    def _infer_entity_semantics(self, table_name: str, columns: List[str]) -> str:
+        """
+        Infer what this entity IS and what columns MEAN based on domain knowledge.
+        
+        This encodes consultant knowledge about HCM data structures.
+        """
+        cols_lower = [c.lower() for c in columns]
+        
+        # Earnings tables
+        if 'earning' in table_name:
+            semantics = ["EARNINGS TABLE - defines pay codes employees can receive"]
+            semantics.append("Key columns typically include:")
+            semantics.append("  • earnings_code/earning_code: Unique identifier for the earning type")
+            semantics.append("  • description/earning: Display name for the earning")
+            semantics.append("  • regular_pay: FLAG (boolean) - only ONE earning per group can be marked as regular pay. NULLs are normal.")
+            semantics.append("  • earnings_group: Logical grouping of related earnings")
+            if 'waiting_period' in cols_lower:
+                semantics.append("  • waiting_period: Days before earning takes effect")
+            if 'auto_add' in cols_lower:
+                semantics.append("  • auto_add: Whether earning is automatically assigned to new hires")
+            return "\n".join(semantics)
+        
+        # Deductions tables
+        if 'deduction' in table_name or 'benefit' in table_name:
+            semantics = ["DEDUCTIONS/BENEFITS TABLE - defines withholdings from employee pay"]
+            semantics.append("Key columns typically include:")
+            semantics.append("  • deduction_code: Unique identifier")
+            semantics.append("  • plan_type: Category (medical, dental, 401k, etc.)")
+            semantics.append("  • employee_contribution: Amount/rate deducted from employee")
+            semantics.append("  • employer_contribution: Amount/rate paid by employer")
+            return "\n".join(semantics)
+        
+        # Tax tables
+        if 'tax' in table_name or 'fit' in table_name or 'sit' in table_name:
+            semantics = ["TAX TABLE - tax jurisdiction and withholding configuration"]
+            semantics.append("Common tax types: FIT (Federal), SIT (State), LIT (Local)")
+            return "\n".join(semantics)
+        
+        # Workers comp
+        if 'worker' in table_name and 'comp' in table_name:
+            semantics = ["WORKERS COMPENSATION TABLE - WC class codes and rates"]
+            semantics.append("Key columns:")
+            semantics.append("  • wc_code/class_code: State-assigned classification code")
+            semantics.append("  • employer_rate: Rate paid by employer per $100 of payroll")
+            semantics.append("  • employee_rate: Rate (if any) deducted from employee - often 0")
+            return "\n".join(semantics)
+        
+        # Locations
+        if 'location' in table_name:
+            semantics = ["LOCATIONS TABLE - work locations and addresses"]
+            return "\n".join(semantics)
+        
+        # Jobs/positions  
+        if 'job' in table_name or 'position' in table_name:
+            semantics = ["JOBS TABLE - job codes and position definitions"]
+            return "\n".join(semantics)
+        
+        return ""
+    
+    def _get_domain_rules(self, table_name: str) -> str:
+        """
+        v4.3: Generate domain-specific rules to prevent LLM hallucination.
+        
+        These rules are added directly to the prompt to stop the LLM from
+        flagging normal configuration as problems.
+        """
+        table_lower = table_name.lower()
+        
+        if 'earning' in table_lower:
+            return """
+EARNINGS-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
+• regular_pay NULL/empty is CORRECT - only 1 earning per group should have this set
+• waiting_period = 0 is VALID - means no waiting period required  
+• auto_add empty is VALID - means manual assignment
+• Different codes with similar names (HSA2E vs HSAER) often serve different purposes
+• DO NOT report these as "findings" or "issues" - they are NORMAL"""
+        
+        if 'deduction' in table_lower or 'benefit' in table_lower:
+            return """
+DEDUCTIONS-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
+• Empty contribution fields may be valid (employer-only or employee-only plans)
+• Multiple plans with similar names often serve different employee groups
+• DO NOT report empty optional fields as problems"""
+        
+        if 'tax' in table_lower:
+            return """
+TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
+• Tax configurations vary by jurisdiction - empty fields may be valid
+• Not all tax types apply to all employees"""
+        
+        return ""
     
     def synthesize(
         self,
@@ -296,7 +460,8 @@ class Synthesizer:
             'result_rows': [],
             'result_columns': [],
             'data_context': [],
-            'structured_output': None
+            'structured_output': None,
+            'table_name': None  # v4.2: Track source table
         }
         
         if not reality:
@@ -307,9 +472,11 @@ class Synthesizer:
                 rows = truth.content['rows']
                 cols = truth.content['columns']
                 query_type = truth.content.get('query_type', 'list')
+                table_name = truth.content.get('table', '')  # v4.2
                 
                 info['query_type'] = query_type
                 info['result_columns'] = cols
+                info['table_name'] = table_name  # v4.2
                 
                 if query_type == 'count' and rows:
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
@@ -443,7 +610,9 @@ class Synthesizer:
         # =====================================================================
         if self.llm_synthesizer and result_rows:
             try:
-                logger.warning("[SYNTHESIZE] v4.0 Hybrid: Adding consultant overlay...")
+                logger.warning(f"[SYNTHESIZE] v4.0 Hybrid: Adding consultant overlay...")
+                logger.warning(f"[SYNTHESIZE] data_info keys: {list(data_info.keys())}")
+                logger.warning(f"[SYNTHESIZE] data_info table_name: '{data_info.get('table_name', 'MISSING')}'")
                 
                 enhanced_response = self._add_consultant_overlay(
                     question=question,
@@ -509,9 +678,31 @@ class Synthesizer:
         # =====================================================================
         context_parts = []
         
+        # v4.2: Add entity context FIRST - this tells LLM what this data IS
+        table_name = data_info.get('table_name', '')
+        result_columns = data_info.get('result_columns', [])
+        domain_rules = ""  # v4.3: Domain-specific anti-hallucination rules
+        
+        logger.warning(f"[SYNTHESIZE] Entity context check: table_name='{table_name}', columns={len(result_columns)}")
+        
+        if table_name:
+            entity_context = self._get_entity_context(table_name, result_columns)
+            if entity_context:
+                context_parts.append("=== ENTITY CONTEXT (what this data means) ===")
+                context_parts.append(entity_context)
+                logger.warning(f"[SYNTHESIZE] Added entity context for {table_name}")
+            else:
+                logger.warning(f"[SYNTHESIZE] No entity context generated for {table_name}")
+            
+            # v4.3: Generate domain-specific anti-hallucination rules
+            domain_rules = self._get_domain_rules(table_name)
+            if domain_rules:
+                logger.warning(f"[SYNTHESIZE] Added domain rules for {table_name[:30]}")
+        else:
+            logger.warning("[SYNTHESIZE] No table_name in data_info - cannot add entity context")
+        
         # CRITICAL: Include actual data rows so LLM can analyze real values
         result_rows = data_info.get('result_rows', [])
-        result_columns = data_info.get('result_columns', [])
         if result_rows:
             context_parts.append("=== ACTUAL DATA FROM DATABASE ===")
             context_parts.append(f"Columns: {', '.join(result_columns)}")
@@ -574,30 +765,35 @@ UNDERSTAND THE QUESTION:
 
 ACTUAL DATA TO ANALYZE:
 {context}
+{domain_rules}
 
-HUNT FOR THESE PROBLEMS (only mention if you find evidence):
+HUNT FOR THESE PROBLEMS (only mention if you find CLEAR evidence):
 {hunt_for_list}
+
+CRITICAL RULES - READ CAREFULLY:
+1. READ THE "ENTITY CONTEXT" SECTION FIRST - it explains what columns mean
+2. NULL/empty fields are often CORRECT BY DESIGN - NOT automatic problems
+3. Only report something as a "finding" if it's ACTUALLY wrong, not just empty
+4. Duplicate codes with same description MAY be valid (different purposes)
+5. If configuration looks normal, SAY SO - don't invent problems
 
 OUTPUT FORMAT - Bullets only, no paragraphs:
 
 **🔍 Consultant Analysis**
 
 **What I Found:**
-• [Cite specific codes/values - e.g., "TCAN is the only Ontario earning, may need REG, OT, etc."]
-• [Another finding with evidence]
+• [Only cite ACTUAL problems with specific evidence]
+• [If nothing wrong: "Configuration appears complete with X earnings across Y groups"]
 
 **Recommendations:**
-• [Specific action based on findings]
+• [Only if there are real issues to address]
 
 **Next Steps:**
 {proactive_list}
 • {pattern.hcmpact_hook}
 
-RULES:
-• Cite specific codes/values from the data
-• If no issues found, say "Configuration looks complete for [X] earnings"
-• No paragraphs - bullets only
-• Skip sections with no findings"""
+REMEMBER: An experienced consultant knows that empty fields are often intentional.
+Do NOT flag normal configuration as problems."""
 
         else:
             # Fallback generic prompt
@@ -607,25 +803,29 @@ The client asked: "{question}"
 
 ACTUAL DATA TO ANALYZE:
 {context}
+{domain_rules}
+
+CRITICAL RULES:
+1. READ THE "ENTITY CONTEXT" SECTION FIRST - it explains what columns mean
+2. NULL/empty fields are often CORRECT BY DESIGN - NOT problems
+3. Only report ACTUAL issues with specific evidence
+4. If configuration looks normal, say so - don't invent problems
 
 OUTPUT FORMAT - Bullets only, no paragraphs:
 
 **🔍 Consultant Analysis**
 
 **What I Found:**
-• [Cite specific codes/values from the data]
+• [Only cite ACTUAL problems with evidence, or say "Configuration looks complete"]
 
 **Recommendations:**
-• [Specific action based on findings]
+• [Only if there are real issues]
 
 **Next Steps:**
-• [Proactive offers]
+• [Proactive offers based on data type]
 • Need help with implementation? HCMPACT can assist.
 
-RULES:
-• Cite specific codes/values from the data
-• If no issues found, say "Configuration looks complete"
-• No paragraphs - bullets only"""
+REMEMBER: Empty fields are often intentional. Don't flag normal config as problems."""
 
         try:
             # Use the LLM synthesizer's orchestrator directly
