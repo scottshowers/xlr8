@@ -122,28 +122,36 @@ class Synthesizer:
         reasoning = []
         
         # =====================================================================
-        # v3.1: Smart Data Source Selection
-        # For config listing questions (list earnings, show deductions, etc.),
-        # use Configuration data, not Reality (which may have employee data)
+        # v3.2: Smart Data Source Selection
+        # Priority: DuckDB Reality (if has data rows) > ChromaDB Config docs
+        # DuckDB config tables ARE in Reality, not Configuration (ChromaDB)
         # =====================================================================
         is_config = self._context.get('is_config', False)
         is_config_listing = self._is_config_listing_question(question.lower())
         
+        # Extract Reality data first to check if it has actual rows
+        reality_info = self._extract_data_info(reality) if reality else {'result_rows': []}
+        reality_has_data = len(reality_info.get('result_rows', [])) > 0
+        
         logger.warning(f"[SYNTHESIZE] Data source selection: is_config={is_config}, "
                       f"is_config_listing={is_config_listing}, "
-                      f"config_truths={len(configuration)}, reality_truths={len(reality)}")
+                      f"reality_rows={len(reality_info.get('result_rows', []))}, "
+                      f"config_truths={len(configuration)}")
         
         # Decide primary data source
-        if is_config_listing and configuration:
-            # For config listings, use Configuration as primary
-            logger.warning("[SYNTHESIZE] Config listing detected - using Configuration as primary data source")
+        # PRIORITY: Reality data (DuckDB) over Configuration docs (ChromaDB)
+        if reality_has_data:
+            # Reality has actual data rows - use it
+            data_info = reality_info
+            reasoning.append(f"Found {len(reality)} data results with {len(data_info.get('result_rows', []))} rows")
+        elif is_config_listing and configuration:
+            # No Reality data, try Configuration docs (ChromaDB)
+            logger.warning("[SYNTHESIZE] No Reality data - using Configuration docs")
             data_info = self._extract_data_info(configuration)
-            logger.warning(f"[SYNTHESIZE] Config data_info: rows={len(data_info.get('result_rows', []))}, "
-                          f"columns={data_info.get('result_columns', [])[:5]}")
-            reasoning.append(f"Config listing: Using {len(configuration)} configuration results")
+            reasoning.append(f"Config listing: Using {len(configuration)} configuration documents")
         else:
-            # Default: use Reality
-            data_info = self._extract_data_info(reality)
+            # Default fallback
+            data_info = reality_info
             reasoning.append(f"Found {len(reality)} data results (Reality)")
         
         # Extract document context
@@ -325,17 +333,39 @@ class Synthesizer:
         """
         Generate the response text.
         
-        PRIORITY: LLM Synthesis FIRST (consultative), Template FALLBACK.
+        ROUTING STRATEGY (v3.2):
+        - INVENTORY/LIST questions → Template (LLM hallucinates data values)
+        - ANALYSIS/VALIDATION questions → LLM (actual reasoning needed)
         
-        This is what makes XLR8 consultative - we use LLM to reason across
-        the Five Truths and provide the "so-what" context, not just data dumps.
+        This ensures data accuracy while preserving consultative analysis.
         """
         q_lower = question.lower()
         
         logger.warning(f"[SYNTHESIZE] _generate_response called, question: {question[:50]}")
         
         # =====================================================================
-        # ALWAYS TRY LLM SYNTHESIS FIRST - This is the consultative path
+        # v3.2: SMART ROUTING - Template for data listing, LLM for analysis
+        # LLM hallucinates when asked to list data values (makes up codes)
+        # Template is reliable for "list all X" - just format the actual data
+        # =====================================================================
+        is_inventory_question = any(trigger in q_lower for trigger in [
+            'list all', 'show all', 'what are my', 'what do i have',
+            'give me all', 'show me all', "what's configured", 'what is setup',
+            'list the', 'show the'
+        ])
+        
+        result_rows = data_info.get('result_rows', [])
+        
+        # For inventory questions WITH data, use template (no hallucination risk)
+        if is_inventory_question and result_rows:
+            logger.warning(f"[SYNTHESIZE] Inventory question with {len(result_rows)} rows - using template (no LLM)")
+            return self._generate_template_response(
+                question, data_info, doc_context, reflib_context,
+                insights, conflicts, compliance_check
+            )
+        
+        # =====================================================================
+        # For analysis/validation questions, try LLM synthesis
         # =====================================================================
         if self.llm_synthesizer:
             try:
