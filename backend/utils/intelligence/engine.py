@@ -457,7 +457,7 @@ class IntelligenceEngineV2:
                         answer=scope_analysis.suggested_question,
                         confidence=0.95,
                         structured_output={
-                            'type': 'scope_clarification',
+                            'type': 'clarification_needed',  # Use same type as status clarification
                             'questions': [{
                                 'id': 'scope',
                                 'question': f"Which {scope_analysis.segments[0].dimension.replace('_code', '').replace('_', ' ')} should I focus on?",
