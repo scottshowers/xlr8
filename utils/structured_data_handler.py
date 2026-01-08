@@ -2578,20 +2578,46 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             col_normalized = col_name.lower().replace('_', '').replace(' ', '')
                             
                             # Check if this column matches a known FK pattern
+                            # EXACT match first, then FUZZY match (pattern contained in column)
+                            target_hub_type = None
+                            
                             if col_normalized in known_spoke_patterns:
+                                # Exact match
                                 target_hub_type = known_spoke_patterns[col_normalized]
-                                
+                            else:
+                                # Fuzzy match - check if any pattern is contained in column name
+                                # e.g., 'earncode' in 'earningscode' → match
+                                for pattern, hub_type in known_spoke_patterns.items():
+                                    # Pattern must be substantial (>4 chars) to avoid false positives
+                                    if len(pattern) > 4 and pattern in col_normalized:
+                                        target_hub_type = hub_type
+                                        logger.debug(f"[CONTEXT-GRAPH] Fuzzy match: {col_normalized} contains {pattern}")
+                                        break
+                                    # Also check reverse: column pattern in schema pattern (handles srcXXX cases)
+                                    if len(col_normalized) > 4 and col_normalized in pattern:
+                                        target_hub_type = hub_type
+                                        break
+                            
+                            if target_hub_type:
                                 # Find the matching hub in our final_hubs
                                 matching_hub = None
                                 for hub in final_hubs:
                                     hub_semantic = hub.get('semantic_type', '').lower()
                                     hub_entity = hub.get('entity_type', '').lower().replace('_', '').replace(' ', '')
                                     
-                                    # Match by semantic type or entity type
+                                    # Match by semantic type or entity type (with plural/singular flexibility)
+                                    target_normalized = target_hub_type.replace('_', '')
+                                    hub_semantic_normalized = hub_semantic.replace('_', '')
+                                    
                                     if (target_hub_type in hub_semantic or 
                                         target_hub_type == hub_entity or
                                         f"{target_hub_type}_code" == hub_semantic or
-                                        target_hub_type.replace('_', '') in hub_semantic.replace('_', '')):
+                                        target_normalized in hub_semantic_normalized or
+                                        hub_semantic_normalized in target_normalized or
+                                        # Handle singular/plural: earning vs earnings
+                                        target_normalized + 's' == hub_semantic_normalized or
+                                        target_normalized == hub_semantic_normalized + 's' or
+                                        target_normalized.rstrip('s') == hub_semantic_normalized.rstrip('s')):
                                         matching_hub = hub
                                         break
                                 
