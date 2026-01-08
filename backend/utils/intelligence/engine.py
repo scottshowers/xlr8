@@ -266,7 +266,8 @@ class IntelligenceEngineV2:
             llm_synthesizer=self._llm_synthesizer,
             confirmed_facts=self.confirmed_facts,
             filter_candidates=self.filter_candidates,
-            schema=self.schema
+            schema=self.schema,
+            structured_handler=structured_handler  # v4.4: For hub usage analysis
         )
         
         self.reality_gatherer = RealityGatherer(
@@ -602,6 +603,7 @@ class IntelligenceEngineV2:
         synth_context['is_validation'] = analysis.get('is_validation', False)
         synth_context['is_employee_question'] = analysis.get('is_employee_question', False)
         synth_context['entity_gaps'] = entity_gaps  # v3.2: Pass gaps for synthesis
+        synth_context['project'] = self.project  # v4.4: Pass project for usage analysis
         
         # Synthesize answer
         answer = self.synthesizer.synthesize(
