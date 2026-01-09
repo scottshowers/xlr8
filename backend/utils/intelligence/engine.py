@@ -664,11 +664,16 @@ class IntelligenceEngineV2:
             return export_result
         
         # =====================================================================
-        # TRY QUERY RESOLVER FIRST - Skip all complex logic for simple queries
+        # TRY QUERY RESOLVER FIRST - Get deterministic table/column resolution
+        # This doesn't short-circuit - it provides context for the full pipeline
         # =====================================================================
-        resolver_result = self._try_query_resolver(question)
-        if resolver_result:
-            return resolver_result
+        resolver_context = self._try_query_resolver(question)
+        if resolver_context:
+            # Store in context for gatherers to use
+            context['resolver'] = resolver_context
+            # Skip clarification prompts - we already know what table to use
+            context['skip_clarification'] = True
+            logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
         
         # Analyze question
         mode = mode or self._detect_mode(q_lower)
@@ -683,7 +688,8 @@ class IntelligenceEngineV2:
             logger.warning("[ENGINE-V2] Config domain detected - skipping employee clarification")
         
         # Handle filter clarification for employee questions
-        if is_employee_question:
+        # Skip if QueryResolver already resolved the query
+        if is_employee_question and not context.get('skip_clarification'):
             clarification = self._check_clarification_needed(question, q_lower)
             if clarification:
                 return clarification
@@ -693,6 +699,7 @@ class IntelligenceEngineV2:
         # =====================================================================
         # v4.0: INTELLIGENT SCOPING - The Consultant's First Move
         # Before answering, understand the data landscape
+        # Skip if QueryResolver already resolved the query
         # =====================================================================
         scope_filter = None
         
@@ -708,8 +715,8 @@ class IntelligenceEngineV2:
                     scope_filter = {'dimension': dim, 'value': val}
                     logger.warning(f"[ENGINE-V2] Applying scope filter: {scope_filter}")
         
-        # Only ask for scoping if not already answered
-        elif SCOPING_AVAILABLE and self.structured_handler:
+        # Only ask for scoping if not already answered AND not resolved by QueryResolver
+        elif SCOPING_AVAILABLE and self.structured_handler and not context.get('skip_clarification'):
             # Check if this is a scope-sensitive question
             scope_sensitive = any([
                 'list' in q_lower, 'show' in q_lower, 'all' in q_lower,
@@ -785,7 +792,10 @@ class IntelligenceEngineV2:
             'is_config': is_config,
             'question': question,
             'q_lower': q_lower,
-            'scope_filter': scope_filter  # v4.0: Pass scope filter for SQL generation
+            'scope_filter': scope_filter,  # v4.0: Pass scope filter for SQL generation
+            'resolver': context.get('resolver'),  # QueryResolver context if available
+            'project': self.project,
+            'project_name': self.project
         }
         
         # v3.0: Detect entity scoping from Context Graph
@@ -1079,15 +1089,17 @@ class IntelligenceEngineV2:
     # QUERY RESOLVER - Deterministic fast path for common queries
     # =========================================================================
     
-    def _try_query_resolver(self, question: str) -> Optional[SynthesizedAnswer]:
+    def _try_query_resolver(self, question: str) -> Optional[Dict]:
         """
         Try to resolve the query deterministically using QueryResolver.
         
-        This bypasses all complex scoping/clarification logic for simple queries
-        like "what's the headcount?" that can be answered with direct metadata lookups.
+        This does NOT short-circuit the pipeline. Instead, it returns
+        resolution context that gets passed into the full gather flow,
+        ensuring RealityGatherer uses the right table while still
+        allowing Config/Reference/Regulatory gathering and triangulation.
         
         Returns:
-            SynthesizedAnswer if resolved, None to fall through to normal flow
+            Dict with resolution context if resolved, None otherwise
         """
         if not self.structured_handler:
             return None
@@ -1104,62 +1116,16 @@ class IntelligenceEngineV2:
                 logger.warning(f"[ENGINE-V2] Resolution path: {resolved.resolution_path}")
                 logger.warning(f"[ENGINE-V2] SQL: {resolved.sql}")
                 
-                # Execute the SQL
-                try:
-                    rows = self.structured_handler.query(resolved.sql)
-                    
-                    if rows:
-                        # Build a simple response
-                        if 'COUNT' in resolved.sql.upper():
-                            # Count query - extract the number
-                            count_val = rows[0].get('count', rows[0].get('headcount', list(rows[0].values())[0]))
-                            
-                            # Format response
-                            answer = f"**Reality:** Found **{count_val:,}** matching records\n\n"
-                            if resolved.filter_column and resolved.filter_values:
-                                answer += f"Filtered by {resolved.filter_column} = '{resolved.filter_values[0]}'\n"
-                            
-                            logger.warning(f"[ENGINE-V2] QueryResolver count result: {count_val}")
-                            
-                            return SynthesizedAnswer(
-                                question=question,
-                                answer=answer,
-                                confidence=0.95,
-                                structured_output={
-                                    'type': 'count',
-                                    'query_type': 'count',
-                                    'result_value': count_val,
-                                    'result_rows': rows,
-                                    'table_name': resolved.table_name,
-                                    'sql': resolved.sql,
-                                    'source': 'resolver',
-                                    'resolution_path': resolved.resolution_path
-                                }
-                            )
-                        else:
-                            # List query
-                            logger.warning(f"[ENGINE-V2] QueryResolver list result: {len(rows)} rows")
-                            
-                            return SynthesizedAnswer(
-                                question=question,
-                                answer=f"**Reality:** Found **{len(rows)}** matching records",
-                                confidence=0.95,
-                                structured_output={
-                                    'type': 'list',
-                                    'query_type': 'list',
-                                    'result_rows': rows,
-                                    'result_columns': list(rows[0].keys()) if rows else [],
-                                    'table_name': resolved.table_name,
-                                    'sql': resolved.sql,
-                                    'source': 'resolver',
-                                    'resolution_path': resolved.resolution_path
-                                }
-                            )
-                            
-                except Exception as e:
-                    logger.warning(f"[ENGINE-V2] QueryResolver SQL execution failed: {e}")
-                    # Fall through to normal flow
-                    
+                # Return context for the full pipeline - don't short-circuit
+                return {
+                    'resolved': True,
+                    'table_name': resolved.table_name,
+                    'filter_column': resolved.filter_column,
+                    'filter_values': resolved.filter_values,
+                    'sql': resolved.sql,
+                    'explanation': resolved.explanation,
+                    'resolution_path': resolved.resolution_path
+                }
             else:
                 logger.warning(f"[ENGINE-V2] QueryResolver no match: {resolved.explanation or 'unknown'}")
                 
