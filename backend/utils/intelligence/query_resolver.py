@@ -591,6 +591,17 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         dimensions = []
         seen_semantic_types = set()
         
+        # EXPLICIT BLOCKLIST - semantic types that are NOT useful segmentation axes
+        # These clutter the response with meaningless breakdowns
+        BLOCKED_SEMANTIC_TYPES = {
+            'summary_employee_count', 'county_code', 'earnings_group_code',
+            'check_number_print_options_code', 'deductionbenefit_group_code',
+            'loa_reason_code', 'last_check_no_code', 'instruction_required',
+            'web_status_code', 'account_tax_jurisdiction_state', 'return_branch_number',
+            'print_options', 'preprinted_checks_format', 'expressions',
+            'address', 'phone', 'email', 'ssn', 'bank', 'routing',
+        }
+        
         try:
             # LOOKUP: Get Context Graph
             if not hasattr(self.handler, 'get_context_graph'):
@@ -602,21 +613,34 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             
             logger.info(f"[RESOLVER] Context Graph has {len(relationships)} relationships")
             
-            # STEP 1: Find ALL reality tables (tables with employee identifiers)
-            # These are tables with truth_type='reality' or have employee columns
+            # STEP 1: Find ALL reality tables
+            # Strategy: Start with primary table, then find ALL tables that share employee relationships
             reality_tables = set()
             reality_tables.add(table_name.lower())  # Always include primary table
             
             # Find other reality tables from relationships
-            for rel in relationships:
-                truth_type = rel.get('truth_type', '')
-                spoke_table = rel.get('spoke_table', '')
-                
-                # Reality tables are spokes that reference config hubs
-                if truth_type == 'reality':
-                    reality_tables.add(spoke_table.lower())
+            # A reality table is any spoke that ISN'T a config hub
+            hubs = set(h.get('table', '').lower() for h in graph.get('hubs', []))
             
-            logger.info(f"[RESOLVER] Found {len(reality_tables)} reality tables: {list(reality_tables)[:5]}")
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '').lower()
+                truth_type = rel.get('truth_type', '')
+                
+                # Skip if this spoke IS a hub (config table referencing another config)
+                if spoke_table in hubs:
+                    continue
+                
+                # Add if explicitly marked as reality
+                if truth_type == 'reality':
+                    reality_tables.add(spoke_table)
+                    continue
+                
+                # Also add if it looks like an employee table (has employee patterns in name)
+                employee_patterns = ['personal', 'company', 'job', 'employee', 'worker', 'payroll', 'compensation']
+                if any(p in spoke_table for p in employee_patterns):
+                    reality_tables.add(spoke_table)
+            
+            logger.warning(f"[RESOLVER] Found {len(reality_tables)} reality tables: {list(reality_tables)[:8]}")
             
             # STEP 2: Get dimensional columns from ALL reality tables
             # ONLY include known segmentation dimensions, not every spoke
@@ -628,6 +652,11 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 
                 # Only include dimensions from reality tables
                 if spoke_table.lower() not in reality_tables:
+                    continue
+                
+                # BLOCKLIST CHECK - skip known garbage semantic types
+                if semantic_type.lower() in BLOCKED_SEMANTIC_TYPES:
+                    logger.debug(f"[RESOLVER] Blocked garbage semantic type: {semantic_type}")
                     continue
                 
                 # CRITICAL: Only include KNOWN segmentation dimensions
@@ -684,12 +713,13 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             # Sort by priority
             dimensions.sort(key=lambda x: x.get('priority', 50))
             
-            logger.warning(f"[RESOLVER] Found {len(dimensions)} dimensional columns from {len(reality_tables)} reality tables: "
-                          f"{[d['semantic_type'] for d in dimensions[:10]]}")
-            
-            # Log which tables contributed
-            tables_with_dims = set(d['source_table'] for d in dimensions)
-            logger.info(f"[RESOLVER] Dimensions from tables: {tables_with_dims}")
+            # Log what we found
+            if dimensions:
+                logger.warning(f"[RESOLVER] Found {len(dimensions)} segmentation dimensions from {len(reality_tables)} reality tables")
+                logger.warning(f"[RESOLVER] Dimensions: {[d['semantic_type'] for d in dimensions]}")
+                logger.warning(f"[RESOLVER] From tables: {set(d['source_table'][:40] for d in dimensions)}")
+            else:
+                logger.warning(f"[RESOLVER] NO segmentation dimensions found! Reality tables: {list(reality_tables)[:5]}")
             
             return dimensions
             
