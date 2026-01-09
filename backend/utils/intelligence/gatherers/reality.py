@@ -135,7 +135,32 @@ class RealityGatherer(DuckDBGatherer):
                     'query_type': cached.get('query_type', 'list')
                 }
         
-        # Generate via SQL generator
+        # TRY QUERY RESOLVER FIRST (deterministic lookups)
+        try:
+            from backend.utils.intelligence.query_resolver import QueryResolver
+            
+            project = context.get('project') or context.get('project_name')
+            if project and self.handler:
+                resolver = QueryResolver(self.handler)
+                resolved = resolver.resolve(question, project)
+                
+                if resolved.success and resolved.sql:
+                    logger.info(f"[GATHER-REALITY] QueryResolver SUCCESS: {resolved.explanation}")
+                    logger.info(f"[GATHER-REALITY] Resolution path: {resolved.resolution_path}")
+                    return {
+                        'sql': resolved.sql,
+                        'source': 'resolver',
+                        'query_type': 'count' if 'COUNT' in resolved.sql.upper() else 'list',
+                        'table': resolved.table_name,
+                        'explanation': resolved.explanation,
+                        'resolution_path': resolved.resolution_path
+                    }
+                else:
+                    logger.info(f"[GATHER-REALITY] QueryResolver fallback: {resolved.explanation or 'No match'}")
+        except Exception as e:
+            logger.warning(f"[GATHER-REALITY] QueryResolver error (falling back): {e}")
+        
+        # FALLBACK: Generate via SQL generator (LLM + TableSelector)
         if self.sql_generator:
             result = self.sql_generator.generate(question, context)
             if result:
