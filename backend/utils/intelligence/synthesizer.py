@@ -1120,19 +1120,25 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             if len(result_rows) > 30:
                 context_parts.append(f"  ... and {len(result_rows) - 30} more rows")
         
-        # Add document context
-        if doc_context:
+        # v5.1: Only add doc/reference context if relevant to the query type
+        # For simple count queries, reference library about GL Rules is noise
+        query_type = data_info.get('query_type', 'list')
+        is_simple_count = query_type == 'count'
+        
+        # Add document context (customer SOWs, etc.) - always potentially relevant
+        if doc_context and not is_simple_count:
             context_parts.append("\n=== CUSTOMER DOCUMENTS ===")
             for doc in doc_context[:3]:
                 context_parts.append(doc[:400])
         
-        if reflib_context:
+        # Add reference library - skip for simple count queries (causes hallucinations)
+        if reflib_context and not is_simple_count:
             context_parts.append("\n=== REFERENCE LIBRARY ===")
             for doc in reflib_context[:3]:
                 context_parts.append(doc[:400])
         
-        # Add insights
-        if insights:
+        # Skip insights for count queries unless they're about the count itself
+        if insights and not is_simple_count:
             context_parts.append("\n=== SYSTEM DETECTED INSIGHTS ===")
             for insight in insights[:5]:
                 context_parts.append(f"• [{insight.severity.upper()}] {insight.title}: {insight.description}")
@@ -1153,10 +1159,58 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         context = "\n".join(context_parts)
         
         # =====================================================================
-        # v4.1: Build pattern-guided overlay prompt with STRICT formatting
+        # v5.1: Build focused overlay prompt based on query type
         # =====================================================================
-        if pattern:
-            # Use pattern-specific guidance
+        query_type = data_info.get('query_type', 'list')
+        reality_context = data_info.get('reality_context')
+        
+        if query_type == 'count' and reality_context:
+            # COUNT-SPECIFIC PROMPT - focused on breakdowns
+            breakdowns = reality_context.get('breakdowns', {})
+            answer = reality_context.get('answer', 0)
+            total = reality_context.get('total_in_table', 0)
+            
+            # Build breakdown summary for prompt
+            breakdown_text = []
+            for name, data in breakdowns.items():
+                if data:
+                    sorted_items = sorted(data.items(), key=lambda x: -x[1])[:5]
+                    items_str = ", ".join(f"{k}={v:,}" for k, v in sorted_items)
+                    breakdown_text.append(f"  {name}: {items_str}")
+            
+            overlay_prompt = f"""You are a senior HCM implementation consultant analyzing headcount data.
+
+The client asked: "{question}"
+
+VERIFIED DATA:
+• Answer: {answer:,} active employees
+• Total in system: {total:,}
+• Breakdowns:
+{chr(10).join(breakdown_text)}
+
+YOUR TASK:
+1. Report the numbers clearly
+2. Identify interesting patterns (e.g., high termination count often means conversion data with historical records)
+3. Note anything that might need attention
+4. Suggest relevant follow-up questions based on available dimensions
+
+REMEMBER: Status codes (A, L, T) are just codes - don't expand them unless you're certain of meaning.
+
+OUTPUT FORMAT:
+
+**What I Found:**
+• [Key insight from the numbers]
+• [Pattern or observation worth noting]
+
+**Recommendations:**
+• [Only if data suggests a specific action]
+
+**Next Steps:**
+• Would you like to see breakdown by [dimension]?
+• Should I compare to a different time period?"""
+
+        elif pattern:
+            # Use pattern-specific guidance for non-count queries
             hunt_for_list = "\n".join(f"  • {item}" for item in pattern.hunt_for)
             proactive_list = "\n".join(f"• {offer}" for offer in pattern.proactive_offers)
             
@@ -1169,12 +1223,6 @@ UNDERSTAND THE QUESTION:
 • Real question: {pattern.real_question}  
 • Hidden worry: {pattern.hidden_worry}
 
-CRITICAL - DATA PRIORITY:
-If "VERIFIED FACTS ABOUT THIS CLIENT" appears in the context below, those numbers
-are MORE ACCURATE than the raw query results. For questions about headcount or
-employee counts, USE THE VERIFIED FACTS (e.g., "active_headcount: 3,976").
-The raw query may have hit a partial table.
-
 ACTUAL DATA TO ANALYZE:
 {context}
 {domain_rules}
@@ -1183,20 +1231,17 @@ HUNT FOR THESE PROBLEMS (only mention if you find CLEAR evidence):
 {hunt_for_list}
 
 CRITICAL RULES - READ CAREFULLY:
-1. READ THE "VERIFIED FACTS" SECTION FIRST if present - use those numbers
-2. READ THE "ENTITY CONTEXT" SECTION - it explains what columns mean
-3. NULL/empty fields are often CORRECT BY DESIGN - NOT automatic problems
-4. Only report something as a "finding" if it's ACTUALLY wrong, not just empty
-5. Duplicate codes with same description MAY be valid (different purposes)
-6. If configuration looks normal, SAY SO - don't invent problems
+1. Only report something as a "finding" if it's ACTUALLY in the data
+2. NULL/empty fields are often CORRECT BY DESIGN - NOT automatic problems
+3. If configuration looks normal, SAY SO - don't invent problems
+4. Do NOT mention unrelated data (GL Rules when asked about headcount, etc.)
 
 OUTPUT FORMAT - Bullets only, no paragraphs:
 
 **🔍 Consultant Analysis**
 
 **What I Found:**
-• [Only cite ACTUAL problems with specific evidence]
-• [If nothing wrong: "Configuration appears complete with X earnings across Y groups"]
+• [Only cite ACTUAL findings with specific evidence from the data]
 
 **Recommendations:**
 • [Only if there are real issues to address]
@@ -1205,8 +1250,7 @@ OUTPUT FORMAT - Bullets only, no paragraphs:
 {proactive_list}
 • {pattern.hcmpact_hook}
 
-REMEMBER: An experienced consultant knows that empty fields are often intentional.
-Do NOT flag normal configuration as problems."""
+REMEMBER: Only discuss what's actually in the data provided."""
 
         else:
             # Fallback generic prompt
