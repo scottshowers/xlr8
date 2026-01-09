@@ -262,8 +262,9 @@ export default function ProjectsPage() {
     try {
       const response = await api.post(`/intelligence/${projectName}/analyze`);
       const data = response.data;
-      const metricsCount = data?.metrics?.total || 0;
-      const findingsCount = data?.findings?.length || 0;
+      const analysis = data?.analysis || {};
+      const metricsCount = analysis?.organizational_metrics?.total || 0;
+      const findingsCount = analysis?.findings?.length || 0;
       alert(`✅ Analysis complete for ${projectName}\n\n• ${metricsCount} metrics computed\n• ${findingsCount} findings detected`);
     } catch (err) {
       console.error('Failed to refresh analysis:', err);
