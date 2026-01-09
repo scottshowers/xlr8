@@ -663,6 +663,13 @@ class IntelligenceEngineV2:
         if export_result:
             return export_result
         
+        # =====================================================================
+        # TRY QUERY RESOLVER FIRST - Skip all complex logic for simple queries
+        # =====================================================================
+        resolver_result = self._try_query_resolver(question)
+        if resolver_result:
+            return resolver_result
+        
         # Analyze question
         mode = mode or self._detect_mode(q_lower)
         is_employee_question = self._is_employee_question(q_lower)
@@ -1065,6 +1072,105 @@ class IntelligenceEngineV2:
                     
         except Exception as e:
             logger.debug(f"[ENGINE-V2] Entity scope detection failed: {e}")
+        
+        return None
+    
+    # =========================================================================
+    # QUERY RESOLVER - Deterministic fast path for common queries
+    # =========================================================================
+    
+    def _try_query_resolver(self, question: str) -> Optional[SynthesizedAnswer]:
+        """
+        Try to resolve the query deterministically using QueryResolver.
+        
+        This bypasses all complex scoping/clarification logic for simple queries
+        like "what's the headcount?" that can be answered with direct metadata lookups.
+        
+        Returns:
+            SynthesizedAnswer if resolved, None to fall through to normal flow
+        """
+        if not self.structured_handler:
+            return None
+        
+        try:
+            from .query_resolver import QueryResolver
+            
+            logger.warning(f"[ENGINE-V2] Trying QueryResolver for: {question[:50]}...")
+            resolver = QueryResolver(self.structured_handler)
+            resolved = resolver.resolve(question, self.project)
+            
+            if resolved.success and resolved.sql:
+                logger.warning(f"[ENGINE-V2] QueryResolver SUCCESS: {resolved.explanation}")
+                logger.warning(f"[ENGINE-V2] Resolution path: {resolved.resolution_path}")
+                logger.warning(f"[ENGINE-V2] SQL: {resolved.sql}")
+                
+                # Execute the SQL
+                try:
+                    rows = self.structured_handler.query(resolved.sql)
+                    
+                    if rows:
+                        # Build a simple response
+                        if 'COUNT' in resolved.sql.upper():
+                            # Count query - extract the number
+                            count_val = rows[0].get('count', rows[0].get('headcount', list(rows[0].values())[0]))
+                            
+                            # Format response
+                            answer = f"**Reality:** Found **{count_val:,}** matching records\n\n"
+                            if resolved.filter_column and resolved.filter_values:
+                                answer += f"Filtered by {resolved.filter_column} = '{resolved.filter_values[0]}'\n"
+                            
+                            logger.warning(f"[ENGINE-V2] QueryResolver count result: {count_val}")
+                            
+                            return SynthesizedAnswer(
+                                question=question,
+                                answer=answer,
+                                confidence=0.95,
+                                structured_output={
+                                    'type': 'count',
+                                    'query_type': 'count',
+                                    'result_value': count_val,
+                                    'result_rows': rows,
+                                    'table_name': resolved.table_name,
+                                    'sql': resolved.sql,
+                                    'source': 'resolver',
+                                    'resolution_path': resolved.resolution_path
+                                },
+                                truths=[],
+                                sources=[]
+                            )
+                        else:
+                            # List query
+                            logger.warning(f"[ENGINE-V2] QueryResolver list result: {len(rows)} rows")
+                            
+                            return SynthesizedAnswer(
+                                question=question,
+                                answer=f"**Reality:** Found **{len(rows)}** matching records",
+                                confidence=0.95,
+                                structured_output={
+                                    'type': 'list',
+                                    'query_type': 'list',
+                                    'result_rows': rows,
+                                    'result_columns': list(rows[0].keys()) if rows else [],
+                                    'table_name': resolved.table_name,
+                                    'sql': resolved.sql,
+                                    'source': 'resolver',
+                                    'resolution_path': resolved.resolution_path
+                                },
+                                truths=[],
+                                sources=[]
+                            )
+                            
+                except Exception as e:
+                    logger.warning(f"[ENGINE-V2] QueryResolver SQL execution failed: {e}")
+                    # Fall through to normal flow
+                    
+            else:
+                logger.warning(f"[ENGINE-V2] QueryResolver no match: {resolved.explanation or 'unknown'}")
+                
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] QueryResolver error: {e}")
+            import traceback
+            logger.warning(f"[ENGINE-V2] Traceback: {traceback.format_exc()}")
         
         return None
     
