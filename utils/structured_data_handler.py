@@ -2543,6 +2543,45 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             logger.info(f"[CONTEXT-GRAPH] {len(final_hubs)} unique hubs after deduplication")
             
             # =================================================================
+            # STEP 5B: Add VIRTUAL HUBS from schema reference
+            # These are hubs that exist in BRIT but may not have dedicated config tables
+            # Example: org_level_1, org_level_2 (values stored in Sub-Org Levels)
+            # =================================================================
+            existing_semantic_types = {h['semantic_type'] for h in final_hubs}
+            virtual_hubs_added = 0
+            
+            for hub_type, hub_def in known_hubs.items():
+                semantic_type = hub_def.get('semantic_type', f'{hub_type}_code')
+                
+                # Skip if we already have a hub for this semantic type
+                if semantic_type in existing_semantic_types:
+                    continue
+                
+                # Check if any spoke pattern points to this hub
+                hub_has_spokes = any(h == hub_type for h in known_spoke_patterns.values())
+                if not hub_has_spokes:
+                    continue
+                
+                # Add as virtual hub (no actual table, but enables spoke matching)
+                virtual_hub = {
+                    'table_name': f'_virtual_{hub_type}',  # Marker for virtual
+                    'key_column': hub_def.get('key_column', 'code'),
+                    'semantic_type': semantic_type,
+                    'entity_type': hub_def.get('entity_name', hub_type),
+                    'cardinality': 0,  # Unknown
+                    'values': set(),   # Empty - virtual hub
+                    'file_name': '_schema_reference',
+                    'is_discovered': False,
+                    'is_virtual': True,  # Mark as virtual
+                }
+                final_hubs.append(virtual_hub)
+                existing_semantic_types.add(semantic_type)
+                virtual_hubs_added += 1
+            
+            if virtual_hubs_added > 0:
+                logger.warning(f"[CONTEXT-GRAPH] Added {virtual_hubs_added} virtual hubs from schema reference")
+            
+            # =================================================================
             # STEP 6A: Find spokes by SCHEMA MATCHING (known FKs)
             # These are 100% confidence - we KNOW the relationship from BRIT
             # =================================================================
