@@ -57,10 +57,22 @@ class ConfigurationGatherer(DuckDBGatherer):
     ]
     
     # Employee/transactional table indicators - EXCLUDE these from config
-    EMPLOYEE_INDICATORS = [
-        'employee', 'worker', 'person', 'staff', 'payroll_run',
-        'transaction', 'history', 'assignment', 'enrollment',
-        'timesheet', 'attendance', 'leave', 'pto_balance'
+    # NOTE: 'employee' alone is NOT an indicator because config tables like
+    # 'employee_types' and 'employee_status_codes' are valid config tables.
+    # We check for PATTERNS that indicate transactional data, not just keywords.
+    EMPLOYEE_TABLE_PATTERNS = [
+        'employee_personal', 'employee_data', 'employee_history',
+        'worker_data', 'person_data', 'staff_data',
+        'payroll_run', 'payroll_history', 'pay_history',
+        'transaction', 'enrollment', 'assignment',
+        'timesheet', 'attendance', 'leave_balance', 'pto_balance'
+    ]
+    
+    # Config table indicators that OVERRIDE employee exclusion
+    # If table has these + 'employee', it's still a config table
+    CONFIG_OVERRIDE_PATTERNS = [
+        '_types', '_codes', '_status', '_configuration', '_validation',
+        '_mapping', '_rules', '_setup', '_config'
     ]
     
     def __init__(self, project_name: str, project_id: str = None,
@@ -147,11 +159,15 @@ class ConfigurationGatherer(DuckDBGatherer):
         for table_info in selected:
             table_name = table_info.get('table_name', '').lower()
             
-            # v3.1: EXCLUDE employee/transactional tables from config
-            # These have employee_number, name columns and are NOT code tables
-            is_employee_table = any(ind in table_name for ind in self.EMPLOYEE_INDICATORS)
-            if is_employee_table:
-                logger.debug(f"[GATHER-CONFIG] Excluding employee table by name: {table_name[:50]}")
+            # v5.0: Smarter exclusion logic
+            # Check if it's clearly a transactional employee data table
+            is_employee_data = any(pattern in table_name for pattern in self.EMPLOYEE_TABLE_PATTERNS)
+            
+            # But override if it has config indicators (employee_types is a CONFIG table)
+            has_config_override = any(pattern in table_name for pattern in self.CONFIG_OVERRIDE_PATTERNS)
+            
+            if is_employee_data and not has_config_override:
+                logger.debug(f"[GATHER-CONFIG] Excluding employee data table: {table_name[:50]}")
                 continue
             
             # v3.2: Also check COLUMNS for employee data indicators
