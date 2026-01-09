@@ -1041,6 +1041,55 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         # =====================================================================
         context_parts = []
         
+        # =====================================================================
+        # v4.8: GROUNDING FACTS FIRST - organizational metrics from context
+        # These are pre-computed verified facts that OVERRIDE raw query results
+        # =====================================================================
+        org_metrics = self._context.get('organizational_metrics', [])
+        if org_metrics:
+            context_parts.append("=" * 60)
+            context_parts.append("VERIFIED FACTS ABOUT THIS CLIENT (USE THESE - THEY ARE ACCURATE)")
+            context_parts.append("=" * 60)
+            context_parts.append("These metrics are computed from COMPLETE data analysis.")
+            context_parts.append("They are MORE ACCURATE than the raw query results below.")
+            context_parts.append("")
+            
+            # Group and display key metrics
+            by_category = {}
+            for m in org_metrics:
+                cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
+                if cat not in by_category:
+                    by_category[cat] = []
+                by_category[cat].append(m)
+            
+            # Show workforce metrics first (headcount)
+            if 'workforce' in by_category:
+                context_parts.append("**Workforce:**")
+                for m in by_category['workforce'][:5]:
+                    context_parts.append(f"  ★ {m.metric_name}: {m.value_formatted}")
+            
+            # Show dimensional breakdowns
+            if 'dimensional' in by_category:
+                context_parts.append("**Breakdowns:**")
+                by_metric = {}
+                for m in by_category['dimensional']:
+                    if m.metric_name not in by_metric:
+                        by_metric[m.metric_name] = []
+                    by_metric[m.metric_name].append(m)
+                for metric_name, items in list(by_metric.items())[:3]:
+                    context_parts.append(f"  {metric_name}:")
+                    for m in items[:5]:
+                        context_parts.append(f"    - {m.dimension_value}: {m.value_formatted}")
+            
+            context_parts.append("")
+            context_parts.append("=" * 60)
+            context_parts.append("For headcount/employee count questions, USE THE VERIFIED FACTS ABOVE.")
+            context_parts.append("The raw query below may hit a partial/wrong table.")
+            context_parts.append("=" * 60)
+            context_parts.append("")
+            
+            logger.warning(f"[SYNTHESIZE] Added {len(org_metrics)} organizational metrics as grounding facts")
+        
         # v4.2: Add entity context FIRST - this tells LLM what this data IS
         table_name = data_info.get('table_name', '')
         result_columns = data_info.get('result_columns', [])
@@ -1126,6 +1175,12 @@ UNDERSTAND THE QUESTION:
 • Real question: {pattern.real_question}  
 • Hidden worry: {pattern.hidden_worry}
 
+CRITICAL - DATA PRIORITY:
+If "VERIFIED FACTS ABOUT THIS CLIENT" appears in the context below, those numbers
+are MORE ACCURATE than the raw query results. For questions about headcount or
+employee counts, USE THE VERIFIED FACTS (e.g., "active_headcount: 3,976").
+The raw query may have hit a partial table.
+
 ACTUAL DATA TO ANALYZE:
 {context}
 {domain_rules}
@@ -1134,11 +1189,12 @@ HUNT FOR THESE PROBLEMS (only mention if you find CLEAR evidence):
 {hunt_for_list}
 
 CRITICAL RULES - READ CAREFULLY:
-1. READ THE "ENTITY CONTEXT" SECTION FIRST - it explains what columns mean
-2. NULL/empty fields are often CORRECT BY DESIGN - NOT automatic problems
-3. Only report something as a "finding" if it's ACTUALLY wrong, not just empty
-4. Duplicate codes with same description MAY be valid (different purposes)
-5. If configuration looks normal, SAY SO - don't invent problems
+1. READ THE "VERIFIED FACTS" SECTION FIRST if present - use those numbers
+2. READ THE "ENTITY CONTEXT" SECTION - it explains what columns mean
+3. NULL/empty fields are often CORRECT BY DESIGN - NOT automatic problems
+4. Only report something as a "finding" if it's ACTUALLY wrong, not just empty
+5. Duplicate codes with same description MAY be valid (different purposes)
+6. If configuration looks normal, SAY SO - don't invent problems
 
 OUTPUT FORMAT - Bullets only, no paragraphs:
 
@@ -1164,15 +1220,22 @@ Do NOT flag normal configuration as problems."""
 
 The client asked: "{question}"
 
+CRITICAL - DATA PRIORITY:
+If "VERIFIED FACTS ABOUT THIS CLIENT" appears in the context below, those numbers
+are MORE ACCURATE than the raw query results. For questions about headcount or
+employee counts, USE THE VERIFIED FACTS (e.g., "active_headcount: 3,976").
+The raw query may have hit a partial table.
+
 ACTUAL DATA TO ANALYZE:
 {context}
 {domain_rules}
 
 CRITICAL RULES:
-1. READ THE "ENTITY CONTEXT" SECTION FIRST - it explains what columns mean
-2. NULL/empty fields are often CORRECT BY DESIGN - NOT problems
-3. Only report ACTUAL issues with specific evidence
-4. If configuration looks normal, say so - don't invent problems
+1. READ THE "VERIFIED FACTS" SECTION FIRST if present - use those numbers
+2. READ THE "ENTITY CONTEXT" SECTION - it explains what columns mean
+3. NULL/empty fields are often CORRECT BY DESIGN - NOT problems
+4. Only report ACTUAL issues with specific evidence
+5. If configuration looks normal, say so - don't invent problems
 
 OUTPUT FORMAT - Bullets only, no paragraphs:
 
