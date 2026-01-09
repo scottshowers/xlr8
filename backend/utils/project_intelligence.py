@@ -2874,6 +2874,12 @@ class ProjectIntelligenceService:
                 ])
             
             # NEW: Store organizational metrics
+            # CRITICAL: Delete old metrics first to avoid stale data accumulation
+            self.handler.conn.execute("""
+                DELETE FROM _organizational_metrics WHERE project_name = ?
+            """, [self.project])
+            logger.warning(f"[INTELLIGENCE] Cleared old metrics for {self.project}")
+            
             for metric in self.metrics:
                 self.handler.conn.execute("""
                     INSERT OR REPLACE INTO _organizational_metrics
