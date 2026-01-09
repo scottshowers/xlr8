@@ -631,20 +631,25 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     continue
                 
                 # CRITICAL: Only include KNOWN segmentation dimensions
-                # If semantic_type isn't in our priority list, it's not a useful breakdown
+                # Check semantic_type first (most reliable)
                 priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), None)
+                
+                # If semantic_type doesn't match, check column name for EXACT matches only
                 if priority is None:
-                    # Also check column name patterns as fallback
                     col_lower = spoke_column.lower()
-                    matched_priority = None
+                    # Only allow exact pattern matches, not substring matches
+                    # e.g., "home_company_code" matches "home_company_code" pattern
+                    # but "summary_employee_count" does NOT match "employee_type"
                     for pattern, p in SEGMENTATION_PRIORITY.items():
-                        if pattern in col_lower:
-                            matched_priority = p
+                        # Exact match or column ends with pattern (e.g., "employment_status_code" ends with "status")
+                        if col_lower == pattern or col_lower.endswith(f"_{pattern}") or col_lower.endswith(f"_{pattern}_code"):
+                            priority = p
                             break
-                    if matched_priority is None:
+                    
+                    if priority is None:
                         # Not a segmentation dimension - skip
+                        logger.debug(f"[RESOLVER] Skipping non-segmentation column: {spoke_column} (semantic: {semantic_type})")
                         continue
-                    priority = matched_priority
                 
                 # Skip if already have this semantic type
                 if semantic_type.lower() in seen_semantic_types:
