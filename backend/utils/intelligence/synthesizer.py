@@ -1165,49 +1165,76 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         reality_context = data_info.get('reality_context')
         
         if query_type == 'count' and reality_context:
-            # COUNT-SPECIFIC PROMPT - focused on breakdowns
+            # COUNT-SPECIFIC PROMPT - SHOW all data, don't offer
             breakdowns = reality_context.get('breakdowns', {})
             answer = reality_context.get('answer', 0)
             total = reality_context.get('total_in_table', 0)
             
-            # Build breakdown summary for prompt
+            # Build breakdown text - SHOW ALL of them
             breakdown_text = []
             for name, data in breakdowns.items():
                 if data:
-                    sorted_items = sorted(data.items(), key=lambda x: -x[1])[:5]
-                    items_str = ", ".join(f"{k}={v:,}" for k, v in sorted_items)
-                    breakdown_text.append(f"  {name}: {items_str}")
+                    sorted_items = sorted(data.items(), key=lambda x: -x[1])[:10]
+                    items_str = ", ".join(f"{k}: {v:,}" for k, v in sorted_items)
+                    clean_name = name.replace('by_', '').replace('_', ' ').title()
+                    breakdown_text.append(f"**{clean_name}:** {items_str}")
             
-            overlay_prompt = f"""You are a senior HCM implementation consultant analyzing headcount data.
+            # v6.0: Extract gap analysis from configuration truths
+            gap_text = []
+            if self._last_configuration:
+                for truth in self._last_configuration:
+                    if isinstance(truth.content, dict):
+                        gap = truth.content.get('gap_analysis', {})
+                        if gap and gap.get('unused_count', 0) > 0:
+                            semantic_type = truth.content.get('semantic_type', truth.source_name)
+                            clean_name = semantic_type.replace('_', ' ').title()
+                            configured = gap.get('configured_count', 0)
+                            in_use = gap.get('in_use_count', 0)
+                            unused = gap.get('unused_count', 0)
+                            gap_text.append(f"• **{clean_name}:** {configured} configured, {in_use} in use ({unused} unused)")
+            
+            # Build the overlay prompt
+            breakdown_section = chr(10).join(breakdown_text) if breakdown_text else "No dimensional breakdowns available"
+            gap_section = chr(10).join(gap_text) if gap_text else "No configuration gaps detected"
+            
+            overlay_prompt = f"""You are presenting a headcount analysis. Your job is to FORMAT the data clearly, not ask questions.
 
 The client asked: "{question}"
 
-VERIFIED DATA:
-• Answer: {answer:,} active employees
-• Total in system: {total:,}
-• Breakdowns:
-{chr(10).join(breakdown_text)}
+ANSWER: {answer:,} active employees (out of {total:,} total records)
 
-YOUR TASK:
-1. Report the numbers clearly
-2. Identify interesting patterns (e.g., high termination count often means conversion data with historical records)
-3. Note anything that might need attention
-4. Suggest relevant follow-up questions based on available dimensions
+BREAKDOWNS (SHOW ALL OF THESE):
+{breakdown_section}
 
-REMEMBER: Status codes (A, L, T) are just codes - don't expand them unless you're certain of meaning.
+CONFIGURATION GAPS (SHOW ALL OF THESE):
+{gap_section}
+
+YOUR TASK - FORMAT THIS DATA:
+1. State the answer clearly (the {answer:,} number)
+2. SHOW every breakdown listed above in a clear format
+3. SHOW every gap listed above  
+4. Note if the terminated count seems high (often means historical/conversion data)
+5. End with 2-3 specific insights or observations
+
+DO NOT:
+- Ask "would you like to see X?" - SHOW X instead
+- Offer to do things - just do them
+- Add disclaimers about data accuracy
 
 OUTPUT FORMAT:
 
-**What I Found:**
-• [Key insight from the numbers]
-• [Pattern or observation worth noting]
+**{answer:,} active employees**
 
-**Recommendations:**
-• [Only if data suggests a specific action]
+**By [Dimension]:** [Show the breakdown data]
+**By [Dimension]:** [Show the breakdown data]
+...
 
-**Next Steps:**
-• Would you like to see breakdown by [dimension]?
-• Should I compare to a different time period?"""
+**Configuration Gaps:**
+[Show each gap with configured vs in-use counts]
+
+**Key Observations:**
+• [Specific insight from the data]
+• [Another observation]"""
 
         elif pattern:
             # Use pattern-specific guidance for non-count queries
