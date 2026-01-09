@@ -2654,95 +2654,12 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships)} relationships")
             
             # =================================================================
-            # STEP 6B: Find additional spokes by VALUE MATCHING (inference)
-            # Only for columns NOT already matched by schema
+            # STEP 6B: REMOVED - No more value-based inference
+            # Schema matching is the ONLY source of truth now.
+            # The BRIT tells us exactly what columns map to what hubs.
+            # Inference was polluting the graph with bad guesses.
             # =================================================================
-            # Get all columns from all tables (from _column_profiles for efficiency)
-            # REQUIRE schema metadata to avoid orphaned data showing as "Unknown Source"
-            all_columns = self.conn.execute("""
-                SELECT 
-                    p.table_name,
-                    p.column_name,
-                    p.distinct_count,
-                    p.distinct_values,
-                    COALESCE(s.truth_type, 'unknown') as truth_type,
-                    s.entity_type,
-                    s.category,
-                    s.file_name
-                FROM _column_profiles p
-                INNER JOIN _schema_metadata s 
-                    ON p.project = s.project AND p.table_name = s.table_name
-                WHERE p.project = ?
-                  AND p.distinct_count > 0
-                  AND p.distinct_count < 5000
-                  AND s.file_name IS NOT NULL
-                  AND s.is_current = TRUE
-            """, [project]).fetchall()
-            
-            # Build lookup of column values (only for columns with cached values)
-            column_values_cache = {}
-            for table_name, col_name, distinct_count, distinct_values, truth_type, entity_type, category, file_name in all_columns:
-                if distinct_values:
-                    values = self._parse_distinct_values(distinct_values)
-                    if values:
-                        column_values_cache[(table_name, col_name)] = {
-                            'values': values,
-                            'cardinality': distinct_count or len(values),
-                            'truth_type': truth_type,
-                            'entity_type': entity_type,
-                            'category': category,
-                            'file_name': file_name
-                        }
-            
-            # For each hub, find matching spokes (value-based inference)
-            inferred_count = 0
-            
-            for hub in final_hubs:
-                hub_values = hub['values']
-                hub_cardinality = len(hub_values)
-                
-                if not hub_values:
-                    continue
-                
-                # Check every column for value overlap
-                for (table_name, col_name), col_info in column_values_cache.items():
-                    # Skip if already matched by schema
-                    if (table_name, col_name) in schema_matched_columns:
-                        continue
-                    
-                    # Skip the hub itself
-                    if table_name == hub['table_name'] and col_name == hub['key_column']:
-                        continue
-                    
-                    spoke_values = col_info['values']
-                    if not spoke_values:
-                        continue
-                    
-                    # Calculate overlap
-                    overlap = len(spoke_values & hub_values)
-                    if overlap == 0:
-                        continue
-                    
-                    coverage_pct = (overlap / hub_cardinality * 100) if hub_cardinality > 0 else 0
-                    is_subset = spoke_values.issubset(hub_values)
-                    
-                    # Check thresholds
-                    if coverage_pct >= MIN_COVERAGE_PCT or is_subset:
-                        relationships.append({
-                            'hub': hub,
-                            'spoke_table': table_name,
-                            'spoke_column': col_name,
-                            'spoke_cardinality': col_info['cardinality'],
-                            'coverage_pct': round(coverage_pct, 2),
-                            'is_subset': is_subset,
-                            'truth_type': col_info['truth_type'],
-                            'entity_type': col_info['entity_type'],
-                            'file_name': col_info['file_name'],
-                            'match_source': 'inferred'  # Mark as value-inferred
-                        })
-                        inferred_count += 1
-            
-            logger.warning(f"[CONTEXT-GRAPH] Total relationships: {len(relationships)} ({len(relationships) - inferred_count} schema, {inferred_count} inferred)")
+            logger.warning(f"[CONTEXT-GRAPH] Total relationships: {len(relationships)} (schema-only, no inference)")
             
             # =================================================================
             # STEP 7: Update _column_mappings with hub/spoke data
