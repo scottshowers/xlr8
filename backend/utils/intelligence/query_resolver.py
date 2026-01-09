@@ -229,6 +229,22 @@ class ResolvedQuery:
     # For debugging
     resolution_path: List[str] = field(default_factory=list)
     
+    # v2: Reality Context - breakdowns for consultative response
+    # These are populated automatically for employee count queries
+    reality_context: Optional[Dict] = None
+    # Structure:
+    # {
+    #   'answer': 3976,
+    #   'answer_label': 'Active employees',
+    #   'breakdowns': {
+    #     'by_status': {'A': 3976, 'L': 36, 'T': 10462},
+    #     'by_company': {'TISI': 3200, 'TCAN': 776},
+    #     'by_employee_type': {'FT': 3100, 'PT': 876},
+    #     'by_location': {'PA': 500, 'NY': 450, ...}  # top 10
+    #   },
+    #   'total_in_table': 14474
+    # }
+    
 
 class QueryResolver:
     """
@@ -372,7 +388,227 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             result.explanation = f"Counting all rows in {table_name} (could not determine active status values)"
         
         result.success = True
+        
+        # v2: Gather Reality Context - breakdowns for consultative response
+        result.reality_context = self._gather_reality_context(
+            project=project,
+            table_name=table_name,
+            status_column=status_column['column_name'] if status_column else None,
+            active_values=active_values
+        )
+        result.resolution_path.append(f"CONTEXT: Gathered {len(result.reality_context.get('breakdowns', {}))} breakdowns")
+        
         return result
+    
+    # =========================================================================
+    # REALITY CONTEXT - Proactive breakdowns for consultative response
+    # =========================================================================
+    
+    def _gather_reality_context(
+        self, 
+        project: str, 
+        table_name: str, 
+        status_column: Optional[str],
+        active_values: List[str]
+    ) -> Dict:
+        """
+        Gather comprehensive Reality context for consultative response.
+        
+        This is what separates a $5/hr data dump from a $500/hr consultant.
+        We don't just answer the question - we provide the context needed
+        to understand what the answer MEANS.
+        
+        Runs 4-5 fast queries to get:
+        1. The answer (active count)
+        2. Status breakdown (all statuses, not just active)
+        3. Company breakdown  
+        4. Location breakdown (top 10)
+        5. Employee type breakdown
+        
+        Args:
+            project: Project name
+            table_name: The employee table
+            status_column: Status column name (if found)
+            active_values: Values that mean "active"
+            
+        Returns:
+            Dict with answer, breakdowns, and total
+        """
+        context = {
+            'answer': None,
+            'answer_label': 'Active employees' if active_values else 'Total employees',
+            'breakdowns': {},
+            'total_in_table': None
+        }
+        
+        try:
+            # Find dimensional columns for this table
+            dimensional_columns = self._lookup_dimensional_columns(project, table_name)
+            logger.warning(f"[RESOLVER] Found {len(dimensional_columns)} dimensional columns for breakdowns")
+            
+            # Query 1: Get the answer (active count or total)
+            if status_column and active_values:
+                values_sql = ', '.join(f"'{v}'" for v in active_values)
+                answer_sql = f'SELECT COUNT(*) as cnt FROM "{table_name}" WHERE "{status_column}" IN ({values_sql})'
+            else:
+                answer_sql = f'SELECT COUNT(*) as cnt FROM "{table_name}"'
+            
+            result = self.conn.execute(answer_sql).fetchone()
+            context['answer'] = result[0] if result else 0
+            
+            # Query 2: Get total in table (for context)
+            total_sql = f'SELECT COUNT(*) as cnt FROM "{table_name}"'
+            result = self.conn.execute(total_sql).fetchone()
+            context['total_in_table'] = result[0] if result else 0
+            
+            # Query 3: Status breakdown (ALL statuses, not just active)
+            if status_column:
+                breakdown = self._run_breakdown_query(table_name, status_column)
+                if breakdown:
+                    context['breakdowns']['by_status'] = breakdown
+            
+            # Query 4+: Dimensional breakdowns
+            for dim_col in dimensional_columns:
+                col_name = dim_col['column_name']
+                category = dim_col.get('filter_category', 'general')
+                distinct_count = dim_col.get('distinct_count', 0)
+                
+                # Skip status column (already handled above)
+                if col_name == status_column:
+                    continue
+                
+                # Skip high-cardinality columns (> 20 distinct values for now, except location)
+                if distinct_count > 20 and category != 'location':
+                    continue
+                
+                # Determine breakdown key name
+                if category == 'company':
+                    key = 'by_company'
+                elif category == 'location':
+                    key = 'by_location'
+                elif 'type' in col_name.lower():
+                    key = 'by_employee_type'
+                elif 'fullpart' in col_name.lower() or 'ft_pt' in col_name.lower():
+                    key = 'by_fullpart_time'
+                else:
+                    key = f'by_{col_name}'
+                
+                # Skip if we already have this breakdown type
+                if key in context['breakdowns']:
+                    continue
+                
+                # Run the breakdown query (with active filter if available)
+                breakdown = self._run_breakdown_query(
+                    table_name, 
+                    col_name, 
+                    filter_column=status_column,
+                    filter_values=active_values,
+                    limit=10 if category == 'location' else None
+                )
+                
+                if breakdown:
+                    context['breakdowns'][key] = breakdown
+                    
+        except Exception as e:
+            logger.error(f"[RESOLVER] Error gathering reality context: {e}")
+        
+        return context
+    
+    def _lookup_dimensional_columns(self, project: str, table_name: str) -> List[Dict]:
+        """
+        Find columns suitable for dimensional breakdowns.
+        
+        Looks for columns with filter_category in (company, location, general)
+        and reasonable cardinality (distinct_count <= 100).
+        """
+        try:
+            results = self.conn.execute("""
+                SELECT column_name, filter_category, distinct_count, inferred_type
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                  AND LOWER(table_name) = LOWER(?)
+                  AND filter_category IN ('company', 'location', 'general', 'status')
+                  AND distinct_count > 1
+                  AND distinct_count <= 100
+                ORDER BY 
+                    CASE filter_category 
+                        WHEN 'status' THEN 1
+                        WHEN 'company' THEN 2 
+                        WHEN 'location' THEN 3
+                        ELSE 4 
+                    END,
+                    distinct_count ASC
+            """, [project, table_name]).fetchall()
+            
+            return [
+                {
+                    'column_name': r[0],
+                    'filter_category': r[1],
+                    'distinct_count': r[2],
+                    'inferred_type': r[3]
+                }
+                for r in results
+            ]
+        except Exception as e:
+            logger.error(f"[RESOLVER] Error looking up dimensional columns: {e}")
+            return []
+    
+    def _run_breakdown_query(
+        self, 
+        table_name: str, 
+        group_column: str,
+        filter_column: Optional[str] = None,
+        filter_values: Optional[List[str]] = None,
+        limit: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Run a GROUP BY query to get breakdown counts.
+        
+        Args:
+            table_name: Table to query
+            group_column: Column to group by
+            filter_column: Optional column to filter on (e.g., status)
+            filter_values: Optional values to filter for (e.g., ['A'])
+            limit: Optional limit on results (for high-cardinality dimensions)
+            
+        Returns:
+            Dict mapping dimension values to counts, e.g., {'A': 3976, 'T': 10462}
+        """
+        try:
+            # Build query
+            if filter_column and filter_values:
+                values_sql = ', '.join(f"'{v}'" for v in filter_values)
+                sql = f'''
+                    SELECT "{group_column}", COUNT(*) as cnt 
+                    FROM "{table_name}" 
+                    WHERE "{filter_column}" IN ({values_sql})
+                    GROUP BY "{group_column}"
+                    ORDER BY cnt DESC
+                '''
+            else:
+                sql = f'''
+                    SELECT "{group_column}", COUNT(*) as cnt 
+                    FROM "{table_name}" 
+                    GROUP BY "{group_column}"
+                    ORDER BY cnt DESC
+                '''
+            
+            if limit:
+                sql += f' LIMIT {limit}'
+            
+            results = self.conn.execute(sql).fetchall()
+            
+            # Convert to dict
+            breakdown = {}
+            for row in results:
+                key = str(row[0]) if row[0] is not None else '(null)'
+                breakdown[key] = row[1]
+            
+            return breakdown if breakdown else None
+            
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Breakdown query failed for {group_column}: {e}")
+            return None
     
     # =========================================================================
     # LOOKUP METHODS - These query our pre-computed intelligence
