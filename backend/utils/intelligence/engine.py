@@ -1478,13 +1478,28 @@ class IntelligenceEngineV2:
         """
         conflicts = []
         
+        def get_content_str(content) -> str:
+            """Safely extract string content from Truth.content (may be str or dict)."""
+            if isinstance(content, str):
+                return content.lower()
+            elif isinstance(content, dict):
+                # For Reality truths, content is a dict with 'rows', 'columns', etc.
+                # Use summary or data_context if available
+                parts = []
+                if content.get('sql'):
+                    parts.append(str(content['sql']))
+                if content.get('query_type'):
+                    parts.append(str(content['query_type']))
+                return ' '.join(parts).lower()
+            return ""
+        
         try:
             # Reality vs Regulatory conflicts
             for reg_truth in regulatory:
                 for real_truth in reality:
                     # Check if regulatory requirement mentions something reality contradicts
-                    reg_content = reg_truth.content.lower() if reg_truth.content else ""
-                    real_content = real_truth.content.lower() if real_truth.content else ""
+                    reg_content = get_content_str(reg_truth.content)
+                    real_content = get_content_str(real_truth.content)
                     
                     # Look for value mismatches (e.g., "rate must be X" vs "rate is Y")
                     if any(kw in reg_content for kw in ['must be', 'required', 'shall not exceed', 'minimum']):
@@ -1500,8 +1515,8 @@ class IntelligenceEngineV2:
             # Configuration vs Reference conflicts  
             for ref_truth in reference:
                 for config_truth in configuration:
-                    ref_content = ref_truth.content.lower() if ref_truth.content else ""
-                    config_content = config_truth.content.lower() if config_truth.content else ""
+                    ref_content = get_content_str(ref_truth.content)
+                    config_content = get_content_str(config_truth.content)
                     
                     # Look for setup that doesn't match best practice
                     if any(kw in ref_content for kw in ['best practice', 'recommended', 'should be configured']):
@@ -1517,8 +1532,8 @@ class IntelligenceEngineV2:
             # Intent vs Reality conflicts
             for intent_truth in intent:
                 for real_truth in reality:
-                    intent_content = intent_truth.content.lower() if intent_truth.content else ""
-                    real_content = real_truth.content.lower() if real_truth.content else ""
+                    intent_content = get_content_str(intent_truth.content)
+                    real_content = get_content_str(real_truth.content)
                     
                     # Look for gaps between what they want and what they have
                     if any(kw in intent_content for kw in ['want', 'need', 'require', 'goal']):
