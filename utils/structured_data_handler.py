@@ -2663,7 +2663,18 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             
             # =================================================================
             # STEP 7: Update _column_mappings with hub/spoke data
+            # CLEAR OLD SPOKE MAPPINGS FIRST - ensures clean slate
             # =================================================================
+            # Clear all existing spoke mappings for this project
+            # This removes stale inference-based mappings
+            self.conn.execute("""
+                UPDATE _column_mappings 
+                SET hub_table = NULL, hub_column = NULL, hub_cardinality = NULL,
+                    spoke_cardinality = NULL, coverage_pct = NULL, is_subset = NULL,
+                    is_hub = FALSE
+                WHERE project = ? AND is_hub = FALSE
+            """, [project])
+            logger.info(f"[CONTEXT-GRAPH] Cleared old spoke mappings for {project}")
             hub_count = 0
             spoke_count = 0
             
