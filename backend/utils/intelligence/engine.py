@@ -1134,9 +1134,7 @@ class IntelligenceEngineV2:
                                     'sql': resolved.sql,
                                     'source': 'resolver',
                                     'resolution_path': resolved.resolution_path
-                                },
-                                truths=[],
-                                sources=[]
+                                }
                             )
                         else:
                             # List query
@@ -1155,9 +1153,7 @@ class IntelligenceEngineV2:
                                     'sql': resolved.sql,
                                     'source': 'resolver',
                                     'resolution_path': resolved.resolution_path
-                                },
-                                truths=[],
-                                sources=[]
+                                }
                             )
                             
                 except Exception as e:
