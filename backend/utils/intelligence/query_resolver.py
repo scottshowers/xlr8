@@ -467,8 +467,14 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 if breakdown:
                     context['breakdowns']['by_status'] = breakdown
             
-            # Query 4+: Dimensional breakdowns
+            # Query 4+: Dimensional breakdowns (limit to 4 most useful)
+            MAX_BREAKDOWNS = 4  # Status + 3 others
+            
             for dim_col in dimensional_columns:
+                # Stop if we have enough breakdowns
+                if len(context['breakdowns']) >= MAX_BREAKDOWNS:
+                    break
+                    
                 col_name = dim_col['column_name']
                 category = dim_col.get('filter_category', 'general')
                 distinct_count = dim_col.get('distinct_count', 0)
@@ -491,7 +497,9 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 elif 'fullpart' in col_name.lower() or 'ft_pt' in col_name.lower():
                     key = 'by_fullpart_time'
                 else:
-                    key = f'by_{col_name}'
+                    # Skip generic columns we don't recognize
+                    # Only include specifically useful dimensions
+                    continue
                 
                 # Skip if we already have this breakdown type
                 if key in context['breakdowns']:
@@ -520,7 +528,16 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         
         Looks for columns with filter_category in (company, location, general)
         and reasonable cardinality (distinct_count <= 100).
+        
+        EXCLUDES sensitive demographic columns (race, ethnicity, gender, etc.)
+        that shouldn't be surfaced unless specifically requested.
         """
+        # Columns to exclude from automatic breakdowns (sensitive demographics)
+        EXCLUDED_PATTERNS = [
+            'ethnic', 'ethnicity', 'race', 'gender', 'sex', 'religion',
+            'disability', 'veteran', 'marital', 'nationality'
+        ]
+        
         try:
             results = self.conn.execute("""
                 SELECT column_name, filter_category, distinct_count, inferred_type
@@ -540,15 +557,21 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     distinct_count ASC
             """, [project, table_name]).fetchall()
             
-            return [
-                {
+            # Filter out sensitive columns
+            filtered = []
+            for r in results:
+                col_name_lower = r[0].lower()
+                if any(pattern in col_name_lower for pattern in EXCLUDED_PATTERNS):
+                    logger.info(f"[RESOLVER] Excluding sensitive column from breakdowns: {r[0]}")
+                    continue
+                filtered.append({
                     'column_name': r[0],
                     'filter_category': r[1],
                     'distinct_count': r[2],
                     'inferred_type': r[3]
-                }
-                for r in results
-            ]
+                })
+            
+            return filtered
         except Exception as e:
             logger.error(f"[RESOLVER] Error looking up dimensional columns: {e}")
             return []
