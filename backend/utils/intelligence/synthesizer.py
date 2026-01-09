@@ -820,6 +820,7 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                 if query_type == 'count' and rows:
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
                     info['data_context'].append(f"COUNT RESULT: {info['result_value']}")
+                    info['result_rows'] = rows  # Include the count row so overlay runs
                 elif query_type in ['sum', 'average'] and rows:
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
                     info['data_context'].append(f"{query_type.upper()} RESULT: {info['result_value']}")
