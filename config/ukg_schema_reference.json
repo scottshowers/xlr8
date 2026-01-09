@@ -1443,6 +1443,62 @@
       "expected_in_data": [
         "Review History"
       ]
+    },
+    "org_level_1": {
+      "brit_tab": "7",
+      "brit_sheet": "7. BRIT Sub-Org Levels (Level 1)",
+      "entity_name": "Org Level 1",
+      "source_type": "BRIT",
+      "is_required": false,
+      "key_column": "Org Code",
+      "description_column": "Org Description",
+      "semantic_type": "org_level_1_code",
+      "column_patterns": [],
+      "expected_in_data": [
+        "Employee"
+      ]
+    },
+    "org_level_2": {
+      "brit_tab": "7",
+      "brit_sheet": "7. BRIT Sub-Org Levels (Level 2)",
+      "entity_name": "Org Level 2",
+      "source_type": "BRIT",
+      "is_required": false,
+      "key_column": "Org Code",
+      "description_column": "Org Description",
+      "semantic_type": "org_level_2_code",
+      "column_patterns": [],
+      "expected_in_data": [
+        "Employee"
+      ]
+    },
+    "org_level_3": {
+      "brit_tab": "7",
+      "brit_sheet": "7. BRIT Sub-Org Levels (Level 3)",
+      "entity_name": "Org Level 3",
+      "source_type": "BRIT",
+      "is_required": false,
+      "key_column": "Org Code",
+      "description_column": "Org Description",
+      "semantic_type": "org_level_3_code",
+      "column_patterns": [],
+      "expected_in_data": [
+        "Employee"
+      ]
+    },
+    "org_level_4": {
+      "brit_tab": "7",
+      "brit_sheet": "7. BRIT Sub-Org Levels (Level 4)",
+      "entity_name": "Org Level 4",
+      "source_type": "BRIT",
+      "is_required": false,
+      "key_column": "Org Code",
+      "description_column": "Org Description",
+      "semantic_type": "org_level_4_code",
+      "column_patterns": [],
+      "expected_in_data": [
+        "Employee"
+      ]
     }
   },
   "spoke_patterns": {
@@ -2241,6 +2297,251 @@
         "hub": "deduction_code",
         "entity": "Employee Data",
         "original_column": "deductions_code"
+      }
+    ],
+    "orglevel1": [
+      {
+        "hub": "org_level_1",
+        "entity": "Employee",
+        "original_column": "Org Level 1"
+      }
+    ],
+    "orglevel1code": [
+      {
+        "hub": "org_level_1",
+        "entity": "Employee",
+        "original_column": "Org Level 1 Code"
+      }
+    ],
+    "org_level_1": [
+      {
+        "hub": "org_level_1",
+        "entity": "Employee",
+        "original_column": "Org Level 1"
+      }
+    ],
+    "org_level_1_code": [
+      {
+        "hub": "org_level_1",
+        "entity": "Employee",
+        "original_column": "Org Level 1 Code"
+      }
+    ],
+    "orglevel2": [
+      {
+        "hub": "org_level_2",
+        "entity": "Employee",
+        "original_column": "Org Level 2"
+      }
+    ],
+    "orglevel2code": [
+      {
+        "hub": "org_level_2",
+        "entity": "Employee",
+        "original_column": "Org Level 2 Code"
+      }
+    ],
+    "org_level_2": [
+      {
+        "hub": "org_level_2",
+        "entity": "Employee",
+        "original_column": "Org Level 2"
+      }
+    ],
+    "org_level_2_code": [
+      {
+        "hub": "org_level_2",
+        "entity": "Employee",
+        "original_column": "Org Level 2 Code"
+      }
+    ],
+    "orglevel3": [
+      {
+        "hub": "org_level_3",
+        "entity": "Employee",
+        "original_column": "Org Level 3"
+      }
+    ],
+    "orglevel3code": [
+      {
+        "hub": "org_level_3",
+        "entity": "Employee",
+        "original_column": "Org Level 3 Code"
+      }
+    ],
+    "org_level_3": [
+      {
+        "hub": "org_level_3",
+        "entity": "Employee",
+        "original_column": "Org Level 3"
+      }
+    ],
+    "org_level_3_code": [
+      {
+        "hub": "org_level_3",
+        "entity": "Employee",
+        "original_column": "Org Level 3 Code"
+      }
+    ],
+    "orglevel4": [
+      {
+        "hub": "org_level_4",
+        "entity": "Employee",
+        "original_column": "Org Level 4"
+      }
+    ],
+    "orglevel4code": [
+      {
+        "hub": "org_level_4",
+        "entity": "Employee",
+        "original_column": "Org Level 4 Code"
+      }
+    ],
+    "org_level_4": [
+      {
+        "hub": "org_level_4",
+        "entity": "Employee",
+        "original_column": "Org Level 4"
+      }
+    ],
+    "org_level_4_code": [
+      {
+        "hub": "org_level_4",
+        "entity": "Employee",
+        "original_column": "Org Level 4 Code"
+      }
+    ],
+    "primaryworklocation": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Primary Work Location"
+      }
+    ],
+    "primaryworklocationcode": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Primary Work Location Code"
+      }
+    ],
+    "primary_work_location": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Primary Work Location"
+      }
+    ],
+    "primary_work_location_code": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Primary Work Location Code"
+      }
+    ],
+    "worklocation": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Work Location"
+      }
+    ],
+    "worklocationcode": [
+      {
+        "hub": "location",
+        "entity": "Employee",
+        "original_column": "Work Location Code"
+      }
+    ],
+    "homecompany": [
+      {
+        "hub": "component_company",
+        "entity": "Employee",
+        "original_column": "Home Company"
+      }
+    ],
+    "homecompanycode": [
+      {
+        "hub": "component_company",
+        "entity": "Employee",
+        "original_column": "Home Company Code"
+      }
+    ],
+    "home_company": [
+      {
+        "hub": "component_company",
+        "entity": "Employee",
+        "original_column": "Home Company"
+      }
+    ],
+    "home_company_code": [
+      {
+        "hub": "component_company",
+        "entity": "Employee",
+        "original_column": "Home Company Code"
+      }
+    ],
+    "employeetypecode": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Employee Type Code"
+      }
+    ],
+    "employee_type_code": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Employee Type Code"
+      }
+    ],
+    "fulltimeorparttime": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Full Time or Part Time"
+      }
+    ],
+    "full_time_or_part_time": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Full Time or Part Time"
+      }
+    ],
+    "ftpt": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "FT/PT"
+      }
+    ],
+    "hourlyorsalaried": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Hourly or Salaried"
+      }
+    ],
+    "hourly_or_salaried": [
+      {
+        "hub": "employee_type",
+        "entity": "Employee",
+        "original_column": "Hourly or Salaried"
+      }
+    ],
+    "paygroupcode": [
+      {
+        "hub": "pay_group",
+        "entity": "Employee",
+        "original_column": "Pay Group Code"
+      }
+    ],
+    "pay_group_code": [
+      {
+        "hub": "pay_group",
+        "entity": "Employee",
+        "original_column": "Pay Group Code"
       }
     ]
   },
