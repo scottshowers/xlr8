@@ -1554,9 +1554,9 @@ DOCUMENTS:
                 prompt=f"{system_prompt}\n\n{prompt}"
             )
             
-            if result.get('success') and result.get('json'):
+            if result.get('success') and isinstance(result.get('response'), dict):
                 # Already parsed - jump to entity processing
-                entities = result['json']
+                entities = result['response']
                 logger.info(f"[PLAYBOOKS] Entity detection via {result.get('model_used', 'unknown')}")
                 
                 us_entities = entities.get("us", [])
@@ -1588,7 +1588,7 @@ DOCUMENTS:
                     "primary_entity": primary,
                     "warnings": warnings
                 }
-            elif result.get('response'):
+            elif result.get('response') and isinstance(result['response'], str):
                 response_text = result['response'].strip()
         
         # Fallback to parsing text response
