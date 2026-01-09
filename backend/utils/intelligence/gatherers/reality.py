@@ -139,13 +139,21 @@ class RealityGatherer(DuckDBGatherer):
         resolver = context.get('resolver')
         if resolver and resolver.get('resolved') and resolver.get('sql'):
             logger.warning(f"[GATHER-REALITY] Using QueryResolver context: {resolver.get('explanation')}")
+            
+            # Log reality context if present
+            reality_ctx = resolver.get('reality_context')
+            if reality_ctx:
+                breakdowns = reality_ctx.get('breakdowns', {})
+                logger.warning(f"[GATHER-REALITY] Reality context has {len(breakdowns)} breakdowns")
+            
             return {
                 'sql': resolver['sql'],
                 'source': 'resolver',
                 'query_type': 'count' if 'COUNT' in resolver['sql'].upper() else 'list',
                 'table': resolver.get('table_name'),
                 'explanation': resolver.get('explanation'),
-                'resolution_path': resolver.get('resolution_path')
+                'resolution_path': resolver.get('resolution_path'),
+                'reality_context': resolver.get('reality_context')  # v2: Include breakdowns
             }
         
         # TRY QUERY RESOLVER (if not already tried at engine level)
@@ -218,12 +226,20 @@ class RealityGatherer(DuckDBGatherer):
         columns = list(rows[0].keys()) if rows else []
         table_name = sql_info.get('table', 'query')
         query_type = sql_info.get('query_type', 'list')
+        reality_context = sql_info.get('reality_context')
         
         # Get display name from schema
         display_name = self._get_display_name(table_name)
         
-        logger.warning(f"[GATHER-REALITY] Creating Truth: "
-                      f"query_type={query_type}, rows={len(rows)}")
+        # Log what we're creating
+        if reality_context:
+            breakdowns = reality_context.get('breakdowns', {})
+            logger.warning(f"[GATHER-REALITY] Creating Truth: "
+                          f"query_type={query_type}, rows={len(rows)}, "
+                          f"breakdowns={list(breakdowns.keys())}")
+        else:
+            logger.warning(f"[GATHER-REALITY] Creating Truth: "
+                          f"query_type={query_type}, rows={len(rows)}")
         
         return self.create_truth(
             source_name=display_name,
@@ -235,7 +251,8 @@ class RealityGatherer(DuckDBGatherer):
                 'query_type': query_type,
                 'table': table_name,
                 'display_name': display_name,
-                'is_targeted_query': True
+                'is_targeted_query': True,
+                'reality_context': reality_context  # v2: Include breakdowns for synthesis
             },
             location=f"Query: {sql}",
             confidence=0.98,
