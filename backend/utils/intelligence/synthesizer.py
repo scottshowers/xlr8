@@ -1052,10 +1052,9 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             context_parts.append("VERIFIED FACTS ABOUT THIS CLIENT (USE THESE - THEY ARE ACCURATE)")
             context_parts.append("=" * 60)
             context_parts.append("These metrics are computed from COMPLETE data analysis.")
-            context_parts.append("They are MORE ACCURATE than the raw query results below.")
             context_parts.append("")
             
-            # Group and display key metrics
+            # Group by category
             by_category = {}
             for m in org_metrics:
                 cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
@@ -1063,17 +1062,25 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                     by_category[cat] = []
                 by_category[cat].append(m)
             
+            # For simple count queries, only show workforce metrics (not dimensional breakdowns)
+            query_type = data_info.get('query_type', '')
+            is_simple_count = query_type == 'count'
+            
             # Show workforce metrics first (headcount)
             if 'workforce' in by_category:
-                context_parts.append("**Workforce:**")
+                context_parts.append("**Workforce Summary:**")
                 for m in by_category['workforce'][:5]:
                     context_parts.append(f"  ★ {m.metric_name}: {m.value_formatted}")
             
-            # Show dimensional breakdowns
-            if 'dimensional' in by_category:
+            # Only show dimensional breakdowns for non-count queries
+            # Count queries don't need to see "Bush, David: 14,468" type data
+            if not is_simple_count and 'dimensional' in by_category:
                 context_parts.append("**Breakdowns:**")
                 by_metric = {}
                 for m in by_category['dimensional']:
+                    # Skip metrics that look like employee names (have comma in dimension_value)
+                    if m.dimension_value and ',' in str(m.dimension_value):
+                        continue
                     if m.metric_name not in by_metric:
                         by_metric[m.metric_name] = []
                     by_metric[m.metric_name].append(m)
@@ -1084,12 +1091,10 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             
             context_parts.append("")
             context_parts.append("=" * 60)
-            context_parts.append("For headcount/employee count questions, USE THE VERIFIED FACTS ABOVE.")
-            context_parts.append("The raw query below may hit a partial/wrong table.")
-            context_parts.append("=" * 60)
             context_parts.append("")
             
-            logger.warning(f"[SYNTHESIZE] Added {len(org_metrics)} organizational metrics as grounding facts")
+            metrics_shown = len(by_category.get('workforce', []))
+            logger.warning(f"[SYNTHESIZE] Added {metrics_shown} workforce metrics as grounding facts (filtered from {len(org_metrics)} total)")
         
         # v4.2: Add entity context FIRST - this tells LLM what this data IS
         table_name = data_info.get('table_name', '')
