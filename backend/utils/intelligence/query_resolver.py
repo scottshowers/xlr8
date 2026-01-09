@@ -619,6 +619,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             logger.info(f"[RESOLVER] Found {len(reality_tables)} reality tables: {list(reality_tables)[:5]}")
             
             # STEP 2: Get dimensional columns from ALL reality tables
+            # ONLY include known segmentation dimensions, not every spoke
             for rel in relationships:
                 spoke_table = rel.get('spoke_table', '')
                 spoke_column = rel.get('spoke_column', '')
@@ -628,6 +629,22 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 # Only include dimensions from reality tables
                 if spoke_table.lower() not in reality_tables:
                     continue
+                
+                # CRITICAL: Only include KNOWN segmentation dimensions
+                # If semantic_type isn't in our priority list, it's not a useful breakdown
+                priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), None)
+                if priority is None:
+                    # Also check column name patterns as fallback
+                    col_lower = spoke_column.lower()
+                    matched_priority = None
+                    for pattern, p in SEGMENTATION_PRIORITY.items():
+                        if pattern in col_lower:
+                            matched_priority = p
+                            break
+                    if matched_priority is None:
+                        # Not a segmentation dimension - skip
+                        continue
+                    priority = matched_priority
                 
                 # Skip if already have this semantic type
                 if semantic_type.lower() in seen_semantic_types:
@@ -646,9 +663,6 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     continue
                 
                 seen_semantic_types.add(semantic_type.lower())
-                
-                # Get priority for sorting
-                priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), 50)
                 
                 dimensions.append({
                     'column_name': spoke_column,
