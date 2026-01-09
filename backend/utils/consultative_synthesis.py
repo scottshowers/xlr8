@@ -873,16 +873,26 @@ class ConsultativeSynthesizer:
         context_parts = []
         
         if grounding_facts:
-            context_parts.append("=== WHAT YOU KNOW ABOUT THIS CLIENT (VERIFIED FACTS) ===")
-            context_parts.append("Use these facts to inform your analysis. These are computed from actual data.")
+            context_parts.append("=" * 60)
+            context_parts.append("WHAT YOU KNOW ABOUT THIS CLIENT (VERIFIED FACTS - USE THESE)")
+            context_parts.append("=" * 60)
+            context_parts.append("These metrics are computed from COMPLETE data analysis.")
+            context_parts.append("They are MORE ACCURATE than raw query results below.")
+            context_parts.append("")
             for fact in grounding_facts:
-                context_parts.append(f"  {fact}")
+                context_parts.append(f"  ★ {fact}")
+            context_parts.append("")
+            context_parts.append("=" * 60)
             context_parts.append("")  # Blank line separator
         
         # Then add other data sources
         for summary in other_summaries:
             if summary.has_data:
-                context_parts.append(f"=== {summary.source_type.upper()} ===")
+                # Label Reality as potentially partial
+                if summary.source_type == 'reality':
+                    context_parts.append(f"=== {summary.source_type.upper()} (RAW QUERY - MAY BE PARTIAL) ===")
+                else:
+                    context_parts.append(f"=== {summary.source_type.upper()} ===")
                 context_parts.append(summary.summary)
                 for fact in summary.key_facts:
                     context_parts.append(f"  {fact}")
@@ -912,17 +922,22 @@ class ConsultativeSynthesizer:
             if grounding_facts:
                 expert_prompt = """You are a senior HCM implementation consultant who KNOWS this client well.
 
-YOU ALREADY KNOW key facts about this organization (headcount, configuration usage, etc.) - 
-these are listed at the top of the context as "WHAT YOU KNOW ABOUT THIS CLIENT".
-Use these facts naturally in your response as a consultant who is familiar with their setup.
+CRITICAL - DATA PRIORITY:
+The "WHAT YOU KNOW ABOUT THIS CLIENT" section contains VERIFIED FACTS computed from complete data analysis.
+These are MORE ACCURATE than raw query results shown in the REALITY section.
+
+For questions about headcount, employee counts, or organizational metrics:
+→ USE the verified facts (e.g., "active_headcount: 3,976") 
+→ IGNORE conflicting numbers from raw REALITY queries (which may be from partial/wrong tables)
 
 RESPONSE APPROACH:
-1. Answer the question directly, referencing specific facts you know about their organization
-2. Provide context using your knowledge of their size, structure, and configuration
-3. Identify any issues or opportunities based on what you see
-4. Recommend concrete next steps
+1. Answer using the VERIFIED FACTS first - these are authoritative
+2. If REALITY data adds useful detail (names, specifics), incorporate it
+3. If numbers conflict, trust the verified facts and note any discrepancy
+4. Be consultative - you're a trusted advisor who knows their business
 
-Be consultative, not robotic. You're a trusted advisor who knows their business."""
+Example: If verified facts show "active_headcount: 3,976" but a REALITY query shows 458 rows,
+the correct answer is 3,976 employees (the query hit the wrong table)."""
             else:
                 expert_prompt = """You are a senior HCM implementation consultant. Analyze the data and provide a professional, actionable response.
 
