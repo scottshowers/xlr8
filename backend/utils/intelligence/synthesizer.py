@@ -1424,6 +1424,62 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
                     parts.append(f"📊 **Reality:** Your data shows **{count:,} terminated employees**.")
                 else:
                     parts.append(f"📊 **Reality:** Found **{count:,}** matching records.")
+                
+                # v6.0: ADD BREAKDOWNS FROM REALITY CONTEXT
+                # These were gathered by QueryResolver - show them!
+                reality_context = data_info.get('reality_context', {})
+                breakdowns = reality_context.get('breakdowns', {})
+                total_in_table = reality_context.get('total_in_table', 0)
+                
+                if breakdowns:
+                    parts.append("")  # blank line
+                    
+                    for breakdown_name, breakdown_data in breakdowns.items():
+                        if breakdown_data and len(breakdown_data) > 0:
+                            # Clean up the name: by_status -> Status, by_home_company_code -> Home Company Code
+                            clean_name = breakdown_name.replace('by_', '').replace('_', ' ').title()
+                            
+                            # Sort by count descending
+                            sorted_items = sorted(breakdown_data.items(), key=lambda x: -x[1])
+                            
+                            # Format: **Status:** A: 3,976 (27%), T: 10,462 (72%), L: 36 (0.2%)
+                            items_formatted = []
+                            for value, cnt in sorted_items[:8]:  # Top 8
+                                if total_in_table > 0:
+                                    pct = (cnt / total_in_table) * 100
+                                    items_formatted.append(f"{value}: {cnt:,} ({pct:.1f}%)")
+                                else:
+                                    items_formatted.append(f"{value}: {cnt:,}")
+                            
+                            if len(sorted_items) > 8:
+                                items_formatted.append(f"... +{len(sorted_items) - 8} more")
+                            
+                            parts.append(f"**{clean_name}:** {', '.join(items_formatted)}")
+                    
+                    # Add total context
+                    if total_in_table > 0 and total_in_table != count:
+                        parts.append("")
+                        parts.append(f"*Total records in table: {total_in_table:,} (showing {count:,} active)*")
+                
+                # v6.0: ADD GAP ANALYSIS FROM CONFIG TRUTHS
+                if self._last_configuration:
+                    gaps = []
+                    for truth in self._last_configuration:
+                        if isinstance(truth.content, dict):
+                            gap = truth.content.get('gap_analysis', {})
+                            if gap and gap.get('unused_count', 0) > 0:
+                                semantic_type = truth.content.get('semantic_type', truth.source_name)
+                                clean_name = semantic_type.replace('_', ' ').title()
+                                configured = gap.get('configured_count', 0)
+                                in_use = gap.get('in_use_count', 0)
+                                gaps.append(f"{clean_name}: {configured} configured, {in_use} in use")
+                    
+                    if gaps:
+                        parts.append("")
+                        parts.append("**Configuration Gaps:**")
+                        for gap_text in gaps[:5]:  # Top 5 gaps
+                            parts.append(f"• {gap_text}")
+                    
             except (ValueError, TypeError):
                 parts.append(f"📊 **Reality:** Count = **{result_value}**")
         
