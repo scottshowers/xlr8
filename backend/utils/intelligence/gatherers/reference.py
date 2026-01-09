@@ -62,7 +62,7 @@ class ReferenceGatherer(ChromaDBGatherer):
         
         Args:
             question: User's question
-            context: Analysis context (may contain 'system' override)
+            context: Analysis context (may contain 'system' override and 'resolver' domain info)
             
         Returns:
             List of Truth objects from reference documentation
@@ -77,6 +77,31 @@ class ReferenceGatherer(ChromaDBGatherer):
         
         # Get system from context if not set at init
         system = context.get('system', self.system)
+        
+        # v5.1: Get domain from resolver to make search more relevant
+        # Without this, "what's the headcount?" might return GL Rules docs
+        resolver = context.get('resolver', {})
+        search_query = question
+        
+        if resolver.get('resolved'):
+            # We know what domain this is - enhance the search query
+            domain_hints = {
+                'demographics': 'employee headcount workforce',
+                'personal': 'employee headcount workforce',  # personal tables are demographics
+                'earnings': 'compensation pay earnings',
+                'deductions': 'benefits deductions',
+                'taxes': 'tax withholding',
+                'locations': 'work locations sites',
+                'jobs': 'job positions titles',
+            }
+            
+            # Get table name to infer domain
+            table_name = resolver.get('table_name', '').lower()
+            for domain, hints in domain_hints.items():
+                if domain in table_name:
+                    search_query = f"{hints} {question}"
+                    logger.warning(f"[GATHER-REFERENCE] Domain-enhanced query: {search_query[:60]}...")
+                    break
         
         try:
             # Build where clause - Reference is GLOBAL (no project_id)
@@ -99,7 +124,7 @@ class ReferenceGatherer(ChromaDBGatherer):
             
             results = self.rag_handler.search(
                 collection_name="documents",
-                query=question,
+                query=search_query,  # v5.1: Use domain-enhanced query
                 n_results=5,
                 where=where_clause
             )
