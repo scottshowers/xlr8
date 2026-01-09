@@ -558,12 +558,15 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             'company_code': 2,
             'home_company': 2,
             'home_company_code': 2,
+            'component_company': 2,
+            'component_company_code': 2,
             'country': 3,
             'country_code': 3,
             'location': 4,
             'location_code': 4,
             'work_location': 4,
             'primary_work_location': 4,
+            'primary_work_location_code': 4,
             'org_level_1': 5,
             'org_level_1_code': 5,
             'org_level_2': 6,
@@ -572,6 +575,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             'org_level_3_code': 7,
             'org_level_4': 8,
             'org_level_4_code': 8,
+            'suborg_levels': 5,
+            'suborg_levels_code': 5,
             'pay_group': 9,
             'pay_group_code': 9,
             'employee_type': 10,
@@ -590,17 +595,6 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         
         dimensions = []
         seen_semantic_types = set()
-        
-        # EXPLICIT BLOCKLIST - semantic types that are NOT useful segmentation axes
-        # These clutter the response with meaningless breakdowns
-        BLOCKED_SEMANTIC_TYPES = {
-            'summary_employee_count', 'county_code', 'earnings_group_code',
-            'check_number_print_options_code', 'deductionbenefit_group_code',
-            'loa_reason_code', 'last_check_no_code', 'instruction_required',
-            'web_status_code', 'account_tax_jurisdiction_state', 'return_branch_number',
-            'print_options', 'preprinted_checks_format', 'expressions',
-            'address', 'phone', 'email', 'ssn', 'bank', 'routing',
-        }
         
         try:
             # LOOKUP: Get Context Graph
@@ -643,7 +637,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             logger.warning(f"[RESOLVER] Found {len(reality_tables)} reality tables: {list(reality_tables)[:8]}")
             
             # STEP 2: Get dimensional columns from ALL reality tables
-            # ONLY include known segmentation dimensions, not every spoke
+            # WHITELIST ONLY - semantic_type MUST be in SEGMENTATION_PRIORITY
+            # No fallbacks, no guessing, no garbage
             for rel in relationships:
                 spoke_table = rel.get('spoke_table', '')
                 spoke_column = rel.get('spoke_column', '')
@@ -654,31 +649,11 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 if spoke_table.lower() not in reality_tables:
                     continue
                 
-                # BLOCKLIST CHECK - skip known garbage semantic types
-                if semantic_type.lower() in BLOCKED_SEMANTIC_TYPES:
-                    logger.debug(f"[RESOLVER] Blocked garbage semantic type: {semantic_type}")
-                    continue
-                
-                # CRITICAL: Only include KNOWN segmentation dimensions
-                # Check semantic_type first (most reliable)
+                # WHITELIST ONLY - semantic_type must be in priority list
+                # No column name fallback - that lets garbage through
                 priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), None)
-                
-                # If semantic_type doesn't match, check column name for EXACT matches only
                 if priority is None:
-                    col_lower = spoke_column.lower()
-                    # Only allow exact pattern matches, not substring matches
-                    # e.g., "home_company_code" matches "home_company_code" pattern
-                    # but "summary_employee_count" does NOT match "employee_type"
-                    for pattern, p in SEGMENTATION_PRIORITY.items():
-                        # Exact match or column ends with pattern (e.g., "employment_status_code" ends with "status")
-                        if col_lower == pattern or col_lower.endswith(f"_{pattern}") or col_lower.endswith(f"_{pattern}_code"):
-                            priority = p
-                            break
-                    
-                    if priority is None:
-                        # Not a segmentation dimension - skip
-                        logger.debug(f"[RESOLVER] Skipping non-segmentation column: {spoke_column} (semantic: {semantic_type})")
-                        continue
+                    continue  # Not a known segmentation axis - skip
                 
                 # Skip if already have this semantic type
                 if semantic_type.lower() in seen_semantic_types:
