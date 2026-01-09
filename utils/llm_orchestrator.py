@@ -1060,8 +1060,14 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
                         return result
                     else:
                         logger.warning(f"[SYNTHESIS] {model} returned garbage, trying next")
+                        logger.warning(f"[SYNTHESIS] Garbage response preview: {response[:200]}...")
                 else:
-                    logger.warning(f"[SYNTHESIS] {model} failed or empty response")
+                    if not success:
+                        logger.warning(f"[SYNTHESIS] {model} call failed")
+                    elif not response:
+                        logger.warning(f"[SYNTHESIS] {model} returned empty response")
+                    else:
+                        logger.warning(f"[SYNTHESIS] {model} response too short ({len(response.strip())} chars): {response[:100]}")
         else:
             logger.warning("[SYNTHESIS] Ollama not configured, skipping local models")
         
@@ -1097,6 +1103,7 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
         
         # Too short
         if len(response.strip()) < 50:
+            logger.warning(f"[SYNTHESIS] Garbage: too short ({len(response.strip())} chars)")
             return True
         
         # Refusal patterns
@@ -1113,12 +1120,15 @@ Analyze the data and provide a clear, direct answer. Focus on the key insight fi
             "could you clarify",
         ]
         
-        if any(pattern in response_lower for pattern in refusal_patterns):
-            return True
+        for pattern in refusal_patterns:
+            if pattern in response_lower:
+                logger.warning(f"[SYNTHESIS] Garbage: refusal pattern '{pattern}'")
+                return True
         
         # Mostly punctuation or repeated characters
         alpha_ratio = sum(c.isalpha() for c in response) / max(len(response), 1)
         if alpha_ratio < 0.5:
+            logger.warning(f"[SYNTHESIS] Garbage: low alpha ratio ({alpha_ratio:.2f})")
             return True
         
         return False
