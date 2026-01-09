@@ -1047,54 +1047,14 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         # These are pre-computed verified facts that OVERRIDE raw query results
         # =====================================================================
         org_metrics = self._context.get('organizational_metrics', [])
+        # v4.5: Organizational metrics DISABLED
+        # These were pre-computing stats to ground LLM, but they contain bad data
+        # (e.g., "364% participation") that causes hallucinations.
+        # QueryResolver now gets accurate answers directly - we don't need these.
+        # TODO: Fix org metrics computation or remove entirely
+        org_metrics = context.get('organizational_metrics', [])
         if org_metrics:
-            context_parts.append("=" * 60)
-            context_parts.append("VERIFIED FACTS ABOUT THIS CLIENT (USE THESE - THEY ARE ACCURATE)")
-            context_parts.append("=" * 60)
-            context_parts.append("These metrics are computed from COMPLETE data analysis.")
-            context_parts.append("")
-            
-            # Group by category
-            by_category = {}
-            for m in org_metrics:
-                cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
-                if cat not in by_category:
-                    by_category[cat] = []
-                by_category[cat].append(m)
-            
-            # For simple count queries, only show workforce metrics (not dimensional breakdowns)
-            query_type = data_info.get('query_type', '')
-            is_simple_count = query_type == 'count'
-            
-            # Show workforce metrics first (headcount)
-            if 'workforce' in by_category:
-                context_parts.append("**Workforce Summary:**")
-                for m in by_category['workforce'][:5]:
-                    context_parts.append(f"  ★ {m.metric_name}: {m.value_formatted}")
-            
-            # Only show dimensional breakdowns for non-count queries
-            # Count queries don't need to see "Bush, David: 14,468" type data
-            if not is_simple_count and 'dimensional' in by_category:
-                context_parts.append("**Breakdowns:**")
-                by_metric = {}
-                for m in by_category['dimensional']:
-                    # Skip metrics that look like employee names (have comma in dimension_value)
-                    if m.dimension_value and ',' in str(m.dimension_value):
-                        continue
-                    if m.metric_name not in by_metric:
-                        by_metric[m.metric_name] = []
-                    by_metric[m.metric_name].append(m)
-                for metric_name, items in list(by_metric.items())[:3]:
-                    context_parts.append(f"  {metric_name}:")
-                    for m in items[:5]:
-                        context_parts.append(f"    - {m.dimension_value}: {m.value_formatted}")
-            
-            context_parts.append("")
-            context_parts.append("=" * 60)
-            context_parts.append("")
-            
-            metrics_shown = len(by_category.get('workforce', []))
-            logger.warning(f"[SYNTHESIZE] Added {metrics_shown} workforce metrics as grounding facts (filtered from {len(org_metrics)} total)")
+            logger.warning(f"[SYNTHESIZE] Skipping {len(org_metrics)} org metrics (disabled - caused hallucinations)")
         
         # v4.2: Add entity context FIRST - this tells LLM what this data IS
         table_name = data_info.get('table_name', '')
