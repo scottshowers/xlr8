@@ -474,7 +474,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     context['breakdowns']['by_status'] = breakdown
             
             # Query 4+: Dimensional breakdowns from Context Graph
-            # v2.0: Use semantic_type for key naming, include ALL segmentation axes
+            # v3.0: Query the SOURCE TABLE for each dimension (not just primary table)
             MAX_BREAKDOWNS = 12  # All segmentation axes: status, company, location, org_levels, pay_group, etc.
             
             for dim_col in dimensional_columns:
@@ -485,11 +485,12 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 col_name = dim_col['column_name']
                 semantic_type = dim_col.get('semantic_type', 'general')
                 distinct_count = dim_col.get('distinct_count', 0)
+                source_table = dim_col.get('source_table', table_name)  # Use source table, fallback to primary
                 hub_table = dim_col.get('hub_table')
                 hub_column = dim_col.get('hub_column')
                 
-                # Skip status column (already handled above)
-                if col_name == status_column:
+                # Skip status column if it's from the primary table (already handled above)
+                if col_name == status_column and source_table.lower() == table_name.lower():
                     continue
                 
                 # Skip if cardinality too high (except location which we limit)
@@ -498,25 +499,27 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     continue
                 
                 # Build breakdown key from semantic_type
-                # e.g., 'company_code' -> 'by_company_code', 'org_level_1' -> 'by_org_level_1'
                 key = f"by_{semantic_type.lower()}"
                 
                 # Skip if we already have this breakdown type
                 if key in context['breakdowns']:
                     continue
                 
-                # Run the breakdown query (with active filter if available)
-                breakdown = self._run_breakdown_query(
-                    table_name, 
-                    col_name, 
-                    filter_column=status_column,
-                    filter_values=active_values,
+                # Run the breakdown query AGAINST THE SOURCE TABLE
+                # For dimensions from other tables (like Company), we still want active employees
+                # so we need to join back or query with employee filter
+                breakdown = self._run_breakdown_query_cross_table(
+                    primary_table=table_name,
+                    dimension_table=source_table,
+                    dimension_column=col_name,
+                    status_column=status_column,
+                    active_values=active_values,
                     limit=10 if is_location else None
                 )
                 
                 if breakdown:
                     context['breakdowns'][key] = breakdown
-                    logger.info(f"[RESOLVER] Added breakdown: {key} with {len(breakdown)} values")
+                    logger.info(f"[RESOLVER] Added breakdown: {key} from {source_table[:40]} with {len(breakdown)} values")
                     
         except Exception as e:
             logger.error(f"[RESOLVER] Error gathering reality context: {e}")
@@ -527,10 +530,10 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         """
         Find columns suitable for dimensional breakdowns via Context Graph LOOKUP.
         
-        v2.0 REWRITE: Uses Context Graph relationships instead of filter_category.
+        v3.0 REWRITE: Finds dimensions from ALL reality tables, not just primary.
         
-        The Context Graph tells us which columns in this table reference which hubs.
-        Those hubs ARE the segmentation dimensions (company, location, org_levels, etc.)
+        The personal table has status/company, but Company table has org_levels,
+        location, etc. We need to merge dimensions across all related employee tables.
         
         This captures ALL 8-12 segmentation axes:
         - Company, Country, Location
@@ -554,113 +557,120 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             'company': 2,
             'company_code': 2,
             'home_company': 2,
+            'home_company_code': 2,
             'country': 3,
             'country_code': 3,
             'location': 4,
             'location_code': 4,
             'work_location': 4,
+            'primary_work_location': 4,
             'org_level_1': 5,
+            'org_level_1_code': 5,
             'org_level_2': 6,
+            'org_level_2_code': 6,
             'org_level_3': 7,
+            'org_level_3_code': 7,
             'org_level_4': 8,
+            'org_level_4_code': 8,
             'pay_group': 9,
             'pay_group_code': 9,
             'employee_type': 10,
+            'employee_type_code': 10,
             'emp_type': 10,
             'hourly_salary': 11,
+            'hourly_or_salaried': 11,
             'flsa_status': 11,
             'exempt_status': 11,
             'full_part_time': 12,
+            'full_time_or_part_time': 12,
             'ft_pt': 12,
             'union': 13,
             'union_code': 13,
         }
         
         dimensions = []
+        seen_semantic_types = set()
         
         try:
             # LOOKUP: Get Context Graph
-            if hasattr(self.handler, 'get_context_graph'):
-                graph = self.handler.get_context_graph(project)
-                relationships = graph.get('relationships', [])
-                
-                logger.info(f"[RESOLVER] Context Graph has {len(relationships)} relationships for dimensional lookup")
-                
-                seen_semantic_types = set()
-                
-                for rel in relationships:
-                    spoke_table = rel.get('spoke_table', '')
-                    
-                    # Match: This is OUR table as a spoke
-                    if spoke_table.lower() == table_name.lower():
-                        semantic_type = rel.get('semantic_type', '')
-                        spoke_column = rel.get('spoke_column', '')
-                        spoke_cardinality = rel.get('spoke_cardinality', 0)
-                        
-                        # Skip if already have this semantic type
-                        if semantic_type.lower() in seen_semantic_types:
-                            continue
-                        
-                        # Skip sensitive columns
-                        if any(pattern in spoke_column.lower() for pattern in EXCLUDED_PATTERNS):
-                            logger.info(f"[RESOLVER] Excluding sensitive column: {spoke_column}")
-                            continue
-                        
-                        # Skip very high cardinality (> 100 means it's not a useful breakdown)
-                        if spoke_cardinality > 100:
-                            continue
-                        
-                        # Skip cardinality of 1 (useless breakdown)
-                        if spoke_cardinality <= 1:
-                            continue
-                        
-                        seen_semantic_types.add(semantic_type.lower())
-                        
-                        # Get priority for sorting
-                        priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), 50)
-                        
-                        dimensions.append({
-                            'column_name': spoke_column,
-                            'semantic_type': semantic_type,
-                            'hub_table': rel.get('hub_table'),
-                            'hub_column': rel.get('hub_column'),
-                            'distinct_count': spoke_cardinality,
-                            'priority': priority,
-                            # Include hub info for description lookups
-                            'hub_cardinality': rel.get('hub_cardinality', 0),
-                            'coverage_pct': rel.get('coverage_pct', 0),
-                        })
-                
-                # Sort by priority
-                dimensions.sort(key=lambda x: x.get('priority', 50))
-                
-                logger.warning(f"[RESOLVER] Found {len(dimensions)} dimensional columns from Context Graph: "
-                              f"{[d['semantic_type'] for d in dimensions[:8]]}")
+            if not hasattr(self.handler, 'get_context_graph'):
+                logger.warning("[RESOLVER] Handler missing get_context_graph")
+                return []
             
-            # FALLBACK: If no Context Graph relationships, use legacy filter_category lookup
-            if not dimensions:
-                logger.warning("[RESOLVER] No Context Graph dimensions, falling back to filter_category")
-                results = self.conn.execute("""
-                    SELECT column_name, filter_category, distinct_count, inferred_type
-                    FROM _column_profiles
-                    WHERE LOWER(project) = LOWER(?)
-                      AND LOWER(table_name) = LOWER(?)
-                      AND filter_category IN ('company', 'location', 'general', 'status')
-                      AND distinct_count > 1
-                      AND distinct_count <= 100
-                    ORDER BY distinct_count ASC
-                """, [project, table_name]).fetchall()
+            graph = self.handler.get_context_graph(project)
+            relationships = graph.get('relationships', [])
+            
+            logger.info(f"[RESOLVER] Context Graph has {len(relationships)} relationships")
+            
+            # STEP 1: Find ALL reality tables (tables with employee identifiers)
+            # These are tables with truth_type='reality' or have employee columns
+            reality_tables = set()
+            reality_tables.add(table_name.lower())  # Always include primary table
+            
+            # Find other reality tables from relationships
+            for rel in relationships:
+                truth_type = rel.get('truth_type', '')
+                spoke_table = rel.get('spoke_table', '')
                 
-                for r in results:
-                    col_name_lower = r[0].lower()
-                    if any(pattern in col_name_lower for pattern in EXCLUDED_PATTERNS):
-                        continue
-                    dimensions.append({
-                        'column_name': r[0],
-                        'semantic_type': r[1],  # Use filter_category as semantic_type
-                        'distinct_count': r[2],
-                        'priority': SEGMENTATION_PRIORITY.get(r[1], 50)
-                    })
+                # Reality tables are spokes that reference config hubs
+                if truth_type == 'reality':
+                    reality_tables.add(spoke_table.lower())
+            
+            logger.info(f"[RESOLVER] Found {len(reality_tables)} reality tables: {list(reality_tables)[:5]}")
+            
+            # STEP 2: Get dimensional columns from ALL reality tables
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '')
+                spoke_column = rel.get('spoke_column', '')
+                semantic_type = rel.get('semantic_type', '')
+                spoke_cardinality = rel.get('spoke_cardinality', 0)
+                
+                # Only include dimensions from reality tables
+                if spoke_table.lower() not in reality_tables:
+                    continue
+                
+                # Skip if already have this semantic type
+                if semantic_type.lower() in seen_semantic_types:
+                    continue
+                
+                # Skip sensitive columns
+                if any(pattern in spoke_column.lower() for pattern in EXCLUDED_PATTERNS):
+                    continue
+                
+                # Skip very high cardinality (> 100 means it's not a useful breakdown)
+                if spoke_cardinality > 100:
+                    continue
+                
+                # Skip cardinality of 1 (useless breakdown)
+                if spoke_cardinality <= 1:
+                    continue
+                
+                seen_semantic_types.add(semantic_type.lower())
+                
+                # Get priority for sorting
+                priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), 50)
+                
+                dimensions.append({
+                    'column_name': spoke_column,
+                    'semantic_type': semantic_type,
+                    'source_table': spoke_table,  # Track which table this comes from
+                    'hub_table': rel.get('hub_table'),
+                    'hub_column': rel.get('hub_column'),
+                    'distinct_count': spoke_cardinality,
+                    'priority': priority,
+                    'hub_cardinality': rel.get('hub_cardinality', 0),
+                    'coverage_pct': rel.get('coverage_pct', 0),
+                })
+            
+            # Sort by priority
+            dimensions.sort(key=lambda x: x.get('priority', 50))
+            
+            logger.warning(f"[RESOLVER] Found {len(dimensions)} dimensional columns from {len(reality_tables)} reality tables: "
+                          f"{[d['semantic_type'] for d in dimensions[:10]]}")
+            
+            # Log which tables contributed
+            tables_with_dims = set(d['source_table'] for d in dimensions)
+            logger.info(f"[RESOLVER] Dimensions from tables: {tables_with_dims}")
             
             return dimensions
             
@@ -726,6 +736,128 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         except Exception as e:
             logger.warning(f"[RESOLVER] Breakdown query failed for {group_column}: {e}")
             return None
+    
+    def _run_breakdown_query_cross_table(
+        self,
+        primary_table: str,
+        dimension_table: str,
+        dimension_column: str,
+        status_column: Optional[str],
+        active_values: Optional[List[str]],
+        limit: Optional[int] = None
+    ) -> Optional[Dict]:
+        """
+        Run breakdown query that may span multiple tables.
+        
+        v3.0: Handles dimensions in related employee tables (e.g., Company table
+        has org_levels while Personal table has status).
+        
+        Strategy:
+        1. If dimension_table == primary_table, simple query
+        2. If different tables, find common employee column and JOIN
+        3. Apply active filter from primary table
+        
+        Args:
+            primary_table: The main employee table (has status column)
+            dimension_table: Table containing the dimension column
+            dimension_column: Column to group by
+            status_column: Status column in primary table (for filtering)
+            active_values: Active status values
+            limit: Max results
+        """
+        try:
+            # Same table - simple query
+            if dimension_table.lower() == primary_table.lower():
+                return self._run_breakdown_query(
+                    primary_table, 
+                    dimension_column,
+                    filter_column=status_column,
+                    filter_values=active_values,
+                    limit=limit
+                )
+            
+            # Different tables - need to JOIN
+            # Find common employee identifier column
+            emp_col_patterns = ['employee_number', 'employee_id', 'emp_id', 'emp_no', 'worker_id']
+            
+            # Get columns from both tables
+            primary_cols = self._get_table_columns(primary_table)
+            dimension_cols = self._get_table_columns(dimension_table)
+            
+            # Find matching employee column
+            primary_emp_col = None
+            dimension_emp_col = None
+            
+            for pattern in emp_col_patterns:
+                for col in primary_cols:
+                    if pattern in col.lower():
+                        primary_emp_col = col
+                        break
+                if primary_emp_col:
+                    break
+            
+            for pattern in emp_col_patterns:
+                for col in dimension_cols:
+                    if pattern in col.lower():
+                        dimension_emp_col = col
+                        break
+                if dimension_emp_col:
+                    break
+            
+            if not primary_emp_col or not dimension_emp_col:
+                logger.warning(f"[RESOLVER] Cannot find join column between {primary_table[:30]} and {dimension_table[:30]}")
+                # Fallback: query dimension table without filter
+                return self._run_breakdown_query(dimension_table, dimension_column, limit=limit)
+            
+            # Build JOIN query with active filter
+            if status_column and active_values:
+                values_sql = ', '.join(f"'{v}'" for v in active_values)
+                sql = f'''
+                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{primary_emp_col}") as cnt
+                    FROM "{primary_table}" p
+                    JOIN "{dimension_table}" d ON p."{primary_emp_col}" = d."{dimension_emp_col}"
+                    WHERE p."{status_column}" IN ({values_sql})
+                    GROUP BY d."{dimension_column}"
+                    ORDER BY cnt DESC
+                '''
+            else:
+                sql = f'''
+                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{primary_emp_col}") as cnt
+                    FROM "{primary_table}" p
+                    JOIN "{dimension_table}" d ON p."{primary_emp_col}" = d."{dimension_emp_col}"
+                    GROUP BY d."{dimension_column}"
+                    ORDER BY cnt DESC
+                '''
+            
+            if limit:
+                sql += f' LIMIT {limit}'
+            
+            logger.info(f"[RESOLVER] Cross-table breakdown: {dimension_column} from {dimension_table[:30]}")
+            
+            results = self.conn.execute(sql).fetchall()
+            
+            # Convert to dict
+            breakdown = {}
+            for row in results:
+                key = str(row[0]) if row[0] is not None else '(null)'
+                breakdown[key] = row[1]
+            
+            return breakdown if breakdown else None
+            
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Cross-table breakdown failed for {dimension_column}: {e}")
+            # Fallback: simple query on dimension table
+            return self._run_breakdown_query(dimension_table, dimension_column, limit=limit)
+    
+    def _get_table_columns(self, table_name: str) -> List[str]:
+        """Get column names for a table."""
+        try:
+            result = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1').fetchone()
+            if result:
+                return list(result.keys()) if hasattr(result, 'keys') else []
+            return []
+        except:
+            return []
     
     # =========================================================================
     # LOOKUP METHODS - These query our pre-computed intelligence
