@@ -1333,8 +1333,8 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
                     
                     # Validate the analysis is meaningful
                     if len(analysis) > 50 and '**' in analysis:
-                        # CONCATENATE: Template data + separator + LLM analysis
-                        combined_response = f"{template_response}\n\n---\n\n{analysis}"
+                        # v6.0: Return ONLY LLM analysis (it already has all the data)
+                        # Don't combine with template - that causes duplication
                         
                         # Store metadata for later retrieval
                         self._last_consultative_answer = type('ConsultativeAnswer', (), {
@@ -1351,7 +1351,7 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
                         })()
                         
                         logger.warning(f"[SYNTHESIZE] Overlay success via {result.get('model_used')}, pattern={pattern.question_type if pattern else 'none'}")
-                        return combined_response
+                        return analysis  # Return ONLY the LLM analysis
                     else:
                         logger.warning(f"[SYNTHESIZE] LLM analysis too short or malformed ({len(analysis)} chars), using template only")
                         
