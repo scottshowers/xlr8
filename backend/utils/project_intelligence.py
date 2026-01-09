@@ -1859,7 +1859,8 @@ class ProjectIntelligenceService:
         
         All computed DYNAMICALLY from the data - not hardcoded.
         """
-        logger.info("[INTELLIGENCE] Computing organizational metrics...")
+        logger.warning(f"[INTELLIGENCE] Computing organizational metrics for {self.project}...")
+        logger.warning(f"[INTELLIGENCE] Handler present: {self.handler is not None}, tables param: {len(tables) if tables else 0}")
         
         if not self.handler:
             logger.warning("[INTELLIGENCE] No handler for metrics computation")
@@ -1868,18 +1869,22 @@ class ProjectIntelligenceService:
         try:
             # Step 1: Get Context Graph
             context_graph = None
+            logger.warning(f"[INTELLIGENCE] Handler has get_context_graph: {hasattr(self.handler, 'get_context_graph')}")
             if hasattr(self.handler, 'get_context_graph'):
                 context_graph = self.handler.get_context_graph(self.project)
+                logger.warning(f"[INTELLIGENCE] Context graph retrieved: {context_graph is not None}")
             
             if not context_graph:
-                logger.warning("[INTELLIGENCE] No context graph available for metrics")
+                logger.warning("[INTELLIGENCE] No context graph available for metrics - skipping metric computation")
                 return
             
             hubs = context_graph.get('hubs', [])
             relationships = context_graph.get('relationships', [])
             
+            logger.warning(f"[INTELLIGENCE] Context graph has {len(hubs)} hubs, {len(relationships)} relationships")
+            
             if not hubs and not relationships:
-                logger.info("[INTELLIGENCE] No hubs or relationships in context graph")
+                logger.warning("[INTELLIGENCE] No hubs or relationships in context graph - skipping metric computation")
                 return
             
             # Step 2: Discover status columns and active values from lookups
@@ -1888,12 +1893,16 @@ class ProjectIntelligenceService:
             # Step 3: Find employee identifier column and reality tables  
             employee_tables = self._find_employee_tables(tables, context_graph)
             
+            logger.warning(f"[INTELLIGENCE] Found {len(employee_tables)} employee tables for metrics")
+            
             if not employee_tables:
-                logger.info("[INTELLIGENCE] No employee/reality tables found")
+                logger.warning("[INTELLIGENCE] No employee/reality tables found - skipping metric computation")
                 return
             
             # Step 4: Compute workforce metrics (headcount, demographics)
+            logger.warning(f"[INTELLIGENCE] Computing workforce metrics with {len(employee_tables)} tables...")
             self._compute_workforce_metrics(employee_tables, status_info)
+            logger.warning(f"[INTELLIGENCE] After workforce metrics: {len(self.metrics)} metrics")
             
             # Step 5: Compute hub usage metrics (configured vs in use)
             self._compute_hub_usage_metrics(context_graph, status_info, employee_tables)
@@ -1906,12 +1915,12 @@ class ProjectIntelligenceService:
             for m in self.metrics:
                 cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
                 by_category[cat] = by_category.get(cat, 0) + 1
-            logger.info(f"[INTELLIGENCE] Computed {len(self.metrics)} organizational metrics: {by_category}")
+            logger.warning(f"[INTELLIGENCE] Computed {len(self.metrics)} organizational metrics: {by_category}")
             
         except Exception as e:
-            logger.warning(f"[INTELLIGENCE] Metrics computation failed: {e}")
+            logger.error(f"[INTELLIGENCE] Metrics computation failed: {e}")
             import traceback
-            logger.debug(traceback.format_exc())
+            logger.error(traceback.format_exc())
     
     def _discover_status_columns(self) -> Dict:
         """
@@ -2162,7 +2171,7 @@ class ProjectIntelligenceService:
                 source_table=table_name,
                 source_query=sql
             ))
-            logger.info(f"[METRICS] Total headcount: {total_count}")
+            logger.warning(f"[METRICS] Total headcount: {total_count}")
         except Exception as e:
             logger.warning(f"[METRICS] Failed to compute total headcount: {e}")
         
@@ -2179,7 +2188,7 @@ class ProjectIntelligenceService:
                         'dim_info': dim_info
                     }
         
-        logger.info(f"[METRICS] Computing breakdowns for {len(all_dimensions)} dimensions: {list(all_dimensions.keys())}")
+        logger.warning(f"[METRICS] Computing breakdowns for {len(all_dimensions)} dimensions: {list(all_dimensions.keys())}")
         
         # =====================================================================
         # DATA-DRIVEN DIMENSION SCORING
@@ -2256,13 +2265,13 @@ class ProjectIntelligenceService:
                 logger.debug(f"[METRICS] Scored {dim_name}: score={score}, cardinality={cardinality}, coverage={coverage_pct:.1f}%, hub={is_hub}")
                 
             except Exception as e:
-                logger.debug(f"[METRICS] Could not score dimension {dim_name}: {e}")
+                logger.warning(f"[METRICS] Could not score dimension {dim_name}: {e}")
         
         # Sort by score descending, take top N
         scored_dimensions.sort(key=lambda x: x['score'], reverse=True)
         top_dimensions = scored_dimensions[:MAX_DIMENSIONS]
         
-        logger.info(f"[METRICS] Selected top {len(top_dimensions)} dimensions: {[d['dim_name'] for d in top_dimensions]}")
+        logger.warning(f"[METRICS] Scored {len(scored_dimensions)} dimensions, selected top {len(top_dimensions)}: {[d['dim_name'] for d in top_dimensions]}")
         
         # 3. Headcount by each TOP dimension (limited values)
         for dim_entry in top_dimensions:
