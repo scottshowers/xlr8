@@ -61,7 +61,7 @@ class RegulatoryGatherer(ChromaDBGatherer):
         
         Args:
             question: User's question
-            context: Analysis context
+            context: Analysis context (may contain 'resolver' domain info)
             
         Returns:
             List of Truth objects from regulatory documents
@@ -74,12 +74,33 @@ class RegulatoryGatherer(ChromaDBGatherer):
         
         truths = []
         
+        # v5.1: Get domain from resolver to make search more relevant
+        resolver = context.get('resolver', {})
+        search_query = question
+        
+        if resolver.get('resolved'):
+            # We know what domain this is - enhance the search query
+            domain_hints = {
+                'demographics': 'employee workforce FMLA ACA compliance',
+                'personal': 'employee workforce FMLA ACA compliance',
+                'earnings': 'compensation FLSA overtime wage',
+                'deductions': 'benefits ERISA 401k HSA',
+                'taxes': 'tax withholding IRS W-4',
+            }
+            
+            table_name = resolver.get('table_name', '').lower()
+            for domain, hints in domain_hints.items():
+                if domain in table_name:
+                    search_query = f"{hints} {question}"
+                    logger.warning(f"[GATHER-REGULATORY] Domain-enhanced query: {search_query[:60]}...")
+                    break
+        
         try:
             # Search GLOBAL regulatory documents (NO project_id filter)
-            logger.warning(f"[GATHER-REGULATORY] Searching ChromaDB for: {question[:50]}...")
+            logger.warning(f"[GATHER-REGULATORY] Searching ChromaDB for: {search_query[:50]}...")
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
-                query=question,
+                query=search_query,  # v5.1: Use domain-enhanced query
                 n_results=5,
                 where={"truth_type": "regulatory"}  # Global - no project_id!
             )
