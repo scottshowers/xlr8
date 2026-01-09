@@ -135,33 +135,47 @@ class RealityGatherer(DuckDBGatherer):
                     'query_type': cached.get('query_type', 'list')
                 }
         
-        # TRY QUERY RESOLVER FIRST (deterministic lookups)
-        try:
-            from ..query_resolver import QueryResolver
-            
-            project = context.get('project') or context.get('project_name')
-            if project and self.handler:
-                logger.warning(f"[GATHER-REALITY] Trying QueryResolver for project={project}")
-                resolver = QueryResolver(self.handler)
-                resolved = resolver.resolve(question, project)
+        # CHECK IF QUERY RESOLVER ALREADY PROVIDED CONTEXT
+        resolver = context.get('resolver')
+        if resolver and resolver.get('resolved') and resolver.get('sql'):
+            logger.warning(f"[GATHER-REALITY] Using QueryResolver context: {resolver.get('explanation')}")
+            return {
+                'sql': resolver['sql'],
+                'source': 'resolver',
+                'query_type': 'count' if 'COUNT' in resolver['sql'].upper() else 'list',
+                'table': resolver.get('table_name'),
+                'explanation': resolver.get('explanation'),
+                'resolution_path': resolver.get('resolution_path')
+            }
+        
+        # TRY QUERY RESOLVER (if not already tried at engine level)
+        if not resolver:
+            try:
+                from ..query_resolver import QueryResolver
                 
-                if resolved.success and resolved.sql:
-                    logger.warning(f"[GATHER-REALITY] QueryResolver SUCCESS: {resolved.explanation}")
-                    logger.warning(f"[GATHER-REALITY] Resolution path: {resolved.resolution_path}")
-                    return {
-                        'sql': resolved.sql,
-                        'source': 'resolver',
-                        'query_type': 'count' if 'COUNT' in resolved.sql.upper() else 'list',
-                        'table': resolved.table_name,
-                        'explanation': resolved.explanation,
-                        'resolution_path': resolved.resolution_path
-                    }
-                else:
-                    logger.warning(f"[GATHER-REALITY] QueryResolver fallback: {resolved.explanation or 'No match'}")
-        except Exception as e:
-            logger.warning(f"[GATHER-REALITY] QueryResolver error (falling back): {e}")
-            import traceback
-            logger.warning(f"[GATHER-REALITY] Traceback: {traceback.format_exc()}")
+                project = context.get('project') or context.get('project_name')
+                if project and self.handler:
+                    logger.warning(f"[GATHER-REALITY] Trying QueryResolver for project={project}")
+                    qr = QueryResolver(self.handler)
+                    resolved = qr.resolve(question, project)
+                    
+                    if resolved.success and resolved.sql:
+                        logger.warning(f"[GATHER-REALITY] QueryResolver SUCCESS: {resolved.explanation}")
+                        logger.warning(f"[GATHER-REALITY] Resolution path: {resolved.resolution_path}")
+                        return {
+                            'sql': resolved.sql,
+                            'source': 'resolver',
+                            'query_type': 'count' if 'COUNT' in resolved.sql.upper() else 'list',
+                            'table': resolved.table_name,
+                            'explanation': resolved.explanation,
+                            'resolution_path': resolved.resolution_path
+                        }
+                    else:
+                        logger.warning(f"[GATHER-REALITY] QueryResolver fallback: {resolved.explanation or 'No match'}")
+            except Exception as e:
+                logger.warning(f"[GATHER-REALITY] QueryResolver error (falling back): {e}")
+                import traceback
+                logger.warning(f"[GATHER-REALITY] Traceback: {traceback.format_exc()}")
         
         # FALLBACK: Generate via SQL generator (LLM + TableSelector)
         if self.sql_generator:
