@@ -800,7 +800,8 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
             'result_columns': [],
             'data_context': [],
             'structured_output': None,
-            'table_name': None  # v4.2: Track source table
+            'table_name': None,  # v4.2: Track source table
+            'reality_context': None  # v5: Breakdowns for consultative response
         }
         
         if not reality:
@@ -812,10 +813,12 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                 cols = truth.content['columns']
                 query_type = truth.content.get('query_type', 'list')
                 table_name = truth.content.get('table', '')  # v4.2
+                reality_context = truth.content.get('reality_context')  # v5
                 
                 info['query_type'] = query_type
                 info['result_columns'] = cols
                 info['table_name'] = table_name  # v4.2
+                info['reality_context'] = reality_context  # v5
                 
                 if query_type == 'count' and rows:
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
@@ -1043,18 +1046,43 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         context_parts = []
         
         # =====================================================================
-        # v4.8: GROUNDING FACTS FIRST - organizational metrics from context
-        # These are pre-computed verified facts that OVERRIDE raw query results
+        # v5.0: REALITY CONTEXT - Fresh breakdowns from QueryResolver
+        # These are REAL data from direct queries, not pre-computed garbage
         # =====================================================================
-        org_metrics = self._context.get('organizational_metrics', [])
-        # v4.5: Organizational metrics DISABLED
-        # These were pre-computing stats to ground LLM, but they contain bad data
-        # (e.g., "364% participation") that causes hallucinations.
-        # QueryResolver now gets accurate answers directly - we don't need these.
-        # TODO: Fix org metrics computation or remove entirely
-        org_metrics = context.get('organizational_metrics', [])
-        if org_metrics:
-            logger.warning(f"[SYNTHESIZE] Skipping {len(org_metrics)} org metrics (disabled - caused hallucinations)")
+        reality_context = data_info.get('reality_context')
+        if reality_context:
+            breakdowns = reality_context.get('breakdowns', {})
+            total_in_table = reality_context.get('total_in_table', 0)
+            answer = reality_context.get('answer', 0)
+            answer_label = reality_context.get('answer_label', 'Result')
+            
+            context_parts.append("=" * 60)
+            context_parts.append("VERIFIED DATA BREAKDOWNS (from direct queries)")
+            context_parts.append("=" * 60)
+            context_parts.append(f"Answer: {answer_label} = {answer:,}")
+            context_parts.append(f"Total records in table: {total_in_table:,}")
+            context_parts.append("")
+            
+            for breakdown_name, breakdown_data in breakdowns.items():
+                if breakdown_data:
+                    context_parts.append(f"**{breakdown_name.replace('by_', '').replace('_', ' ').title()}:**")
+                    # Sort by count descending
+                    sorted_items = sorted(breakdown_data.items(), key=lambda x: -x[1])
+                    for value, count in sorted_items[:10]:  # Top 10
+                        pct = (count / total_in_table * 100) if total_in_table > 0 else 0
+                        context_parts.append(f"  • {value}: {count:,} ({pct:.1f}%)")
+                    if len(sorted_items) > 10:
+                        context_parts.append(f"  ... and {len(sorted_items) - 10} more")
+                    context_parts.append("")
+            
+            context_parts.append("=" * 60)
+            context_parts.append("USE THESE BREAKDOWNS to provide consultative insight.")
+            context_parts.append("=" * 60)
+            context_parts.append("")
+            
+            logger.warning(f"[SYNTHESIZE] Added reality context: {list(breakdowns.keys())}")
+        else:
+            logger.warning("[SYNTHESIZE] No reality_context available for breakdowns")
         
         # v4.2: Add entity context FIRST - this tells LLM what this data IS
         table_name = data_info.get('table_name', '')
