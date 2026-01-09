@@ -13,7 +13,7 @@ import React, { useState, useEffect } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { getCustomerColorPalette } from '../utils/customerColors';
-import { FolderOpen, Plus, Edit2, Trash2, Check, X, Server, Briefcase, Layers, ChevronDown, ChevronRight, Home } from 'lucide-react';
+import { FolderOpen, Plus, Edit2, Trash2, Check, X, Server, Briefcase, Layers, ChevronDown, ChevronRight, Home, RefreshCw } from 'lucide-react';
 import { Tooltip } from '../components/ui';
 import api from '../services/api';
 
@@ -253,6 +253,25 @@ export default function ProjectsPage() {
   const [allFunctionalAreas, setAllFunctionalAreas] = useState([]);
   const [engagementTypes, setEngagementTypes] = useState([]);
   const [loadingRef, setLoadingRef] = useState(false);
+  const [refreshingProject, setRefreshingProject] = useState(null);
+  
+  // Refresh analysis for a project
+  const handleRefreshAnalysis = async (project) => {
+    const projectName = project.name;
+    setRefreshingProject(projectName);
+    try {
+      const response = await api.post(`/intelligence/${projectName}/analyze`);
+      const data = response.data;
+      const metricsCount = data?.metrics?.total || 0;
+      const findingsCount = data?.findings?.length || 0;
+      alert(`✅ Analysis complete for ${projectName}\n\n• ${metricsCount} metrics computed\n• ${findingsCount} findings detected`);
+    } catch (err) {
+      console.error('Failed to refresh analysis:', err);
+      alert(`❌ Failed to refresh analysis: ${err.message}`);
+    } finally {
+      setRefreshingProject(null);
+    }
+  };
   
   // Reset form when navigating to this page (clicking Projects in nav)
   useEffect(() => {
@@ -1006,6 +1025,25 @@ export default function ProjectsPage() {
                         }}
                       >
                         <Edit2 size={12} />
+                      </button>
+                    </Tooltip>
+                    <Tooltip title="Refresh Analysis" detail="Re-run intelligence analysis to recompute metrics, detect issues, and update organizational insights." position="left">
+                      <button
+                        onClick={() => handleRefreshAnalysis(project)}
+                        disabled={refreshingProject === project.name}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          background: 'transparent',
+                          border: `1px solid ${colors.primary}`,
+                          borderRadius: 4,
+                          color: colors.primary,
+                          cursor: refreshingProject === project.name ? 'wait' : 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          opacity: refreshingProject === project.name ? 0.6 : 1,
+                        }}
+                      >
+                        <RefreshCw size={12} style={{ animation: refreshingProject === project.name ? 'xlr8-spin 1s linear infinite' : 'none' }} />
                       </button>
                     </Tooltip>
                     <Tooltip title="Delete Project" detail="Permanently remove this project and all associated data. This action cannot be undone." position="left">
