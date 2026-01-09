@@ -1116,6 +1116,11 @@ class IntelligenceEngineV2:
                 logger.warning(f"[ENGINE-V2] Resolution path: {resolved.resolution_path}")
                 logger.warning(f"[ENGINE-V2] SQL: {resolved.sql}")
                 
+                # Log reality context if present
+                if resolved.reality_context:
+                    breakdowns = resolved.reality_context.get('breakdowns', {})
+                    logger.warning(f"[ENGINE-V2] Reality context: {len(breakdowns)} breakdowns gathered")
+                
                 # Return context for the full pipeline - don't short-circuit
                 return {
                     'resolved': True,
@@ -1124,7 +1129,8 @@ class IntelligenceEngineV2:
                     'filter_values': resolved.filter_values,
                     'sql': resolved.sql,
                     'explanation': resolved.explanation,
-                    'resolution_path': resolved.resolution_path
+                    'resolution_path': resolved.resolution_path,
+                    'reality_context': resolved.reality_context  # v2: Include breakdowns
                 }
             else:
                 logger.warning(f"[ENGINE-V2] QueryResolver no match: {resolved.explanation or 'unknown'}")
