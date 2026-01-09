@@ -1901,7 +1901,12 @@ class ProjectIntelligenceService:
             # Step 6: Compute coverage/gap metrics
             self._compute_coverage_metrics(context_graph, status_info, employee_tables)
             
-            logger.info(f"[INTELLIGENCE] Computed {len(self.metrics)} organizational metrics")
+            # Log summary with breakdown by category
+            by_category = {}
+            for m in self.metrics:
+                cat = m.category.value if hasattr(m.category, 'value') else str(m.category)
+                by_category[cat] = by_category.get(cat, 0) + 1
+            logger.info(f"[INTELLIGENCE] Computed {len(self.metrics)} organizational metrics: {by_category}")
             
         except Exception as e:
             logger.warning(f"[INTELLIGENCE] Metrics computation failed: {e}")
@@ -2176,8 +2181,94 @@ class ProjectIntelligenceService:
         
         logger.info(f"[METRICS] Computing breakdowns for {len(all_dimensions)} dimensions: {list(all_dimensions.keys())}")
         
-        # 3. Headcount by each dimension
+        # =====================================================================
+        # DATA-DRIVEN DIMENSION SCORING
+        # Score each dimension by: cardinality (prefer 3-50), coverage, hub status
+        # Only compute breakdowns for TOP dimensions
+        # =====================================================================
+        MAX_DIMENSIONS = 6  # Only compute breakdowns for top N dimensions
+        MAX_VALUES_PER_DIMENSION = 10  # Only store top M values per dimension
+        
+        scored_dimensions = []
+        
         for dim_name, dim_data in all_dimensions.items():
+            try:
+                source_table = dim_data['table_name']
+                dim_info = dim_data['dim_info']
+                
+                # Handle new structure
+                if isinstance(dim_info, dict):
+                    dim_col = dim_info.get('column')
+                    is_hub = dim_info.get('hub_table') is not None
+                else:
+                    dim_col = dim_info
+                    is_hub = False
+                
+                if not dim_col:
+                    continue
+                
+                # Get cardinality and coverage
+                cardinality_sql = f'SELECT COUNT(DISTINCT "{dim_col}") FROM "{source_table}" WHERE "{dim_col}" IS NOT NULL'
+                cardinality = self.handler.conn.execute(cardinality_sql).fetchone()[0] or 0
+                
+                coverage_sql = f'SELECT COUNT(*) FROM "{source_table}" WHERE "{dim_col}" IS NOT NULL'
+                total_sql = f'SELECT COUNT(*) FROM "{source_table}"'
+                non_null = self.handler.conn.execute(coverage_sql).fetchone()[0] or 0
+                total = self.handler.conn.execute(total_sql).fetchone()[0] or 1
+                coverage_pct = (non_null / total) * 100 if total > 0 else 0
+                
+                # SCORE THE DIMENSION (data-driven, no hardcoding)
+                score = 0
+                
+                # Cardinality score: prefer 3-50 values
+                if 3 <= cardinality <= 50:
+                    score += 3  # Sweet spot
+                elif cardinality == 1:
+                    score -= 5  # Useless - only one value
+                elif cardinality == 2:
+                    score += 1  # Binary - somewhat useful
+                elif 50 < cardinality <= 100:
+                    score += 1  # Getting granular
+                elif cardinality > 100:
+                    score -= 2  # Too granular for summary metrics
+                
+                # Coverage score: prefer high coverage
+                if coverage_pct >= 90:
+                    score += 2
+                elif coverage_pct >= 50:
+                    score += 1
+                elif coverage_pct < 10:
+                    score -= 2  # Mostly empty
+                
+                # Hub score: Context Graph hubs are more meaningful
+                if is_hub:
+                    score += 2
+                
+                scored_dimensions.append({
+                    'dim_name': dim_name,
+                    'dim_data': dim_data,
+                    'score': score,
+                    'cardinality': cardinality,
+                    'coverage_pct': coverage_pct,
+                    'is_hub': is_hub
+                })
+                
+                logger.debug(f"[METRICS] Scored {dim_name}: score={score}, cardinality={cardinality}, coverage={coverage_pct:.1f}%, hub={is_hub}")
+                
+            except Exception as e:
+                logger.debug(f"[METRICS] Could not score dimension {dim_name}: {e}")
+        
+        # Sort by score descending, take top N
+        scored_dimensions.sort(key=lambda x: x['score'], reverse=True)
+        top_dimensions = scored_dimensions[:MAX_DIMENSIONS]
+        
+        logger.info(f"[METRICS] Selected top {len(top_dimensions)} dimensions: {[d['dim_name'] for d in top_dimensions]}")
+        
+        # 3. Headcount by each TOP dimension (limited values)
+        for dim_entry in top_dimensions:
+            dim_name = dim_entry['dim_name']
+            dim_data = dim_entry['dim_data']
+            
             try:
                 source_table = dim_data['table_name']
                 source_emp_col = dim_data['employee_column']
@@ -2209,6 +2300,9 @@ class ProjectIntelligenceService:
                         source_filter = f'WHERE "{source_status_col}" = \'A\''
                 
                 # Try to get description from hub table via JOIN
+                # LIMIT to top values only
+                limit_clause = f"LIMIT {MAX_VALUES_PER_DIMENSION}"
+                
                 if hub_table and hub_column:
                     # Find description column in hub table (usually ends with _name or description)
                     desc_col = self._find_description_column_in_hub(hub_table, hub_column)
@@ -2221,6 +2315,7 @@ class ProjectIntelligenceService:
                             {source_filter}
                             GROUP BY e."{dim_col}", h."{desc_col}"
                             ORDER BY cnt DESC
+                            {limit_clause}
                         '''
                     else:
                         sql = f'''
@@ -2229,6 +2324,7 @@ class ProjectIntelligenceService:
                             {source_filter}
                             GROUP BY "{dim_col}"
                             ORDER BY cnt DESC
+                            {limit_clause}
                         '''
                 else:
                     # No hub - look for description column in same table
@@ -2248,6 +2344,7 @@ class ProjectIntelligenceService:
                             {source_filter}
                             GROUP BY "{dim_col}", "{desc_col}"
                             ORDER BY cnt DESC
+                            {limit_clause}
                         '''
                     else:
                         sql = f'''
@@ -2256,6 +2353,7 @@ class ProjectIntelligenceService:
                             {source_filter}
                             GROUP BY "{dim_col}"
                             ORDER BY cnt DESC
+                            {limit_clause}
                         '''
                 
                 results = self.handler.conn.execute(sql).fetchall()
@@ -2318,8 +2416,17 @@ class ProjectIntelligenceService:
         hubs = context_graph.get('hubs', [])
         relationships = context_graph.get('relationships', [])
         
+        # Limit to avoid metric explosion
+        MAX_HUB_USAGE_METRICS = 15
+        hub_usage_count = 0
+        
         # Find hubs that have reality spokes
         for hub in hubs:
+            # Stop if we've hit the limit
+            if hub_usage_count >= MAX_HUB_USAGE_METRICS:
+                logger.debug(f"[METRICS] Stopping hub usage metrics at {MAX_HUB_USAGE_METRICS}")
+                break
+                
             hub_type = hub.get('semantic_type', '')
             hub_table = hub.get('table', '')
             hub_column = hub.get('column', '')
@@ -2383,6 +2490,7 @@ class ProjectIntelligenceService:
                     source_query=sql
                 ))
                 
+                hub_usage_count += 1
                 logger.debug(f"[METRICS] Hub usage {hub_type}: {in_use_count}/{hub_cardinality} ({coverage:.1f}%)")
                 
             except Exception as e:
@@ -2433,6 +2541,8 @@ class ProjectIntelligenceService:
             return
         
         # For each hub type, compute participation
+        # Limit to avoid metric explosion
+        MAX_HUB_COVERAGE_METRICS = 15
         hub_types_processed = set()
         
         for rel in relationships:
@@ -2443,6 +2553,11 @@ class ProjectIntelligenceService:
             
             if truth_type != 'reality' or hub_type in hub_types_processed:
                 continue
+            
+            # Stop if we've hit the limit
+            if len(hub_types_processed) >= MAX_HUB_COVERAGE_METRICS:
+                logger.debug(f"[METRICS] Stopping coverage metrics at {MAX_HUB_COVERAGE_METRICS} hub types")
+                break
             
             hub_types_processed.add(hub_type)
             
