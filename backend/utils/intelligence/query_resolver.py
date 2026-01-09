@@ -414,16 +414,22 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         """
         Gather comprehensive Reality context for consultative response.
         
+        v2.0: Uses Context Graph for ALL segmentation axes (8-12 dimensions).
+        
         This is what separates a $5/hr data dump from a $500/hr consultant.
         We don't just answer the question - we provide the context needed
         to understand what the answer MEANS.
         
-        Runs 4-5 fast queries to get:
-        1. The answer (active count)
-        2. Status breakdown (all statuses, not just active)
-        3. Company breakdown  
+        Runs queries to get breakdowns for ALL organizational dimensions:
+        1. Status breakdown (A/L/T)
+        2. Company breakdown
+        3. Country/Region breakdown  
         4. Location breakdown (top 10)
-        5. Employee type breakdown
+        5. Org Level 1-4 breakdowns
+        6. Pay Group breakdown
+        7. Employee Type breakdown (FT/PT)
+        8. Hourly/Salary breakdown
+        9. Union breakdown (if applicable)
         
         Args:
             project: Project name
@@ -432,7 +438,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             active_values: Values that mean "active"
             
         Returns:
-            Dict with answer, breakdowns, and total
+            Dict with answer, breakdowns (all dimensions), and total
         """
         context = {
             'answer': None,
@@ -467,8 +473,9 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 if breakdown:
                     context['breakdowns']['by_status'] = breakdown
             
-            # Query 4+: Dimensional breakdowns (limit to 4 most useful)
-            MAX_BREAKDOWNS = 4  # Status + 3 others
+            # Query 4+: Dimensional breakdowns from Context Graph
+            # v2.0: Use semantic_type for key naming, include ALL segmentation axes
+            MAX_BREAKDOWNS = 12  # All segmentation axes: status, company, location, org_levels, pay_group, etc.
             
             for dim_col in dimensional_columns:
                 # Stop if we have enough breakdowns
@@ -476,30 +483,23 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     break
                     
                 col_name = dim_col['column_name']
-                category = dim_col.get('filter_category', 'general')
+                semantic_type = dim_col.get('semantic_type', 'general')
                 distinct_count = dim_col.get('distinct_count', 0)
+                hub_table = dim_col.get('hub_table')
+                hub_column = dim_col.get('hub_column')
                 
                 # Skip status column (already handled above)
                 if col_name == status_column:
                     continue
                 
-                # Skip high-cardinality columns (> 20 distinct values for now, except location)
-                if distinct_count > 20 and category != 'location':
+                # Skip if cardinality too high (except location which we limit)
+                is_location = 'location' in semantic_type.lower()
+                if distinct_count > 50 and not is_location:
                     continue
                 
-                # Determine breakdown key name
-                if category == 'company':
-                    key = 'by_company'
-                elif category == 'location':
-                    key = 'by_location'
-                elif 'type' in col_name.lower():
-                    key = 'by_employee_type'
-                elif 'fullpart' in col_name.lower() or 'ft_pt' in col_name.lower():
-                    key = 'by_fullpart_time'
-                else:
-                    # Skip generic columns we don't recognize
-                    # Only include specifically useful dimensions
-                    continue
+                # Build breakdown key from semantic_type
+                # e.g., 'company_code' -> 'by_company_code', 'org_level_1' -> 'by_org_level_1'
+                key = f"by_{semantic_type.lower()}"
                 
                 # Skip if we already have this breakdown type
                 if key in context['breakdowns']:
@@ -511,11 +511,12 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     col_name, 
                     filter_column=status_column,
                     filter_values=active_values,
-                    limit=10 if category == 'location' else None
+                    limit=10 if is_location else None
                 )
                 
                 if breakdown:
                     context['breakdowns'][key] = breakdown
+                    logger.info(f"[RESOLVER] Added breakdown: {key} with {len(breakdown)} values")
                     
         except Exception as e:
             logger.error(f"[RESOLVER] Error gathering reality context: {e}")
@@ -524,13 +525,20 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
     
     def _lookup_dimensional_columns(self, project: str, table_name: str) -> List[Dict]:
         """
-        Find columns suitable for dimensional breakdowns.
+        Find columns suitable for dimensional breakdowns via Context Graph LOOKUP.
         
-        Looks for columns with filter_category in (company, location, general)
-        and reasonable cardinality (distinct_count <= 100).
+        v2.0 REWRITE: Uses Context Graph relationships instead of filter_category.
+        
+        The Context Graph tells us which columns in this table reference which hubs.
+        Those hubs ARE the segmentation dimensions (company, location, org_levels, etc.)
+        
+        This captures ALL 8-12 segmentation axes:
+        - Company, Country, Location
+        - Org Level 1-4
+        - Pay Group, Employee Type, Hourly/Salary
+        - Status, Union (if applicable)
         
         EXCLUDES sensitive demographic columns (race, ethnicity, gender, etc.)
-        that shouldn't be surfaced unless specifically requested.
         """
         # Columns to exclude from automatic breakdowns (sensitive demographics)
         EXCLUDED_PATTERNS = [
@@ -538,42 +546,128 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             'disability', 'veteran', 'marital', 'nationality'
         ]
         
+        # Segmentation dimension priority (determines order of breakdowns)
+        SEGMENTATION_PRIORITY = {
+            'employee_status': 1,
+            'employment_status': 1,
+            'status': 1,
+            'company': 2,
+            'company_code': 2,
+            'home_company': 2,
+            'country': 3,
+            'country_code': 3,
+            'location': 4,
+            'location_code': 4,
+            'work_location': 4,
+            'org_level_1': 5,
+            'org_level_2': 6,
+            'org_level_3': 7,
+            'org_level_4': 8,
+            'pay_group': 9,
+            'pay_group_code': 9,
+            'employee_type': 10,
+            'emp_type': 10,
+            'hourly_salary': 11,
+            'flsa_status': 11,
+            'exempt_status': 11,
+            'full_part_time': 12,
+            'ft_pt': 12,
+            'union': 13,
+            'union_code': 13,
+        }
+        
+        dimensions = []
+        
         try:
-            results = self.conn.execute("""
-                SELECT column_name, filter_category, distinct_count, inferred_type
-                FROM _column_profiles
-                WHERE LOWER(project) = LOWER(?)
-                  AND LOWER(table_name) = LOWER(?)
-                  AND filter_category IN ('company', 'location', 'general', 'status')
-                  AND distinct_count > 1
-                  AND distinct_count <= 100
-                ORDER BY 
-                    CASE filter_category 
-                        WHEN 'status' THEN 1
-                        WHEN 'company' THEN 2 
-                        WHEN 'location' THEN 3
-                        ELSE 4 
-                    END,
-                    distinct_count ASC
-            """, [project, table_name]).fetchall()
+            # LOOKUP: Get Context Graph
+            if hasattr(self.handler, 'get_context_graph'):
+                graph = self.handler.get_context_graph(project)
+                relationships = graph.get('relationships', [])
+                
+                logger.info(f"[RESOLVER] Context Graph has {len(relationships)} relationships for dimensional lookup")
+                
+                seen_semantic_types = set()
+                
+                for rel in relationships:
+                    spoke_table = rel.get('spoke_table', '')
+                    
+                    # Match: This is OUR table as a spoke
+                    if spoke_table.lower() == table_name.lower():
+                        semantic_type = rel.get('semantic_type', '')
+                        spoke_column = rel.get('spoke_column', '')
+                        spoke_cardinality = rel.get('spoke_cardinality', 0)
+                        
+                        # Skip if already have this semantic type
+                        if semantic_type.lower() in seen_semantic_types:
+                            continue
+                        
+                        # Skip sensitive columns
+                        if any(pattern in spoke_column.lower() for pattern in EXCLUDED_PATTERNS):
+                            logger.info(f"[RESOLVER] Excluding sensitive column: {spoke_column}")
+                            continue
+                        
+                        # Skip very high cardinality (> 100 means it's not a useful breakdown)
+                        if spoke_cardinality > 100:
+                            continue
+                        
+                        # Skip cardinality of 1 (useless breakdown)
+                        if spoke_cardinality <= 1:
+                            continue
+                        
+                        seen_semantic_types.add(semantic_type.lower())
+                        
+                        # Get priority for sorting
+                        priority = SEGMENTATION_PRIORITY.get(semantic_type.lower(), 50)
+                        
+                        dimensions.append({
+                            'column_name': spoke_column,
+                            'semantic_type': semantic_type,
+                            'hub_table': rel.get('hub_table'),
+                            'hub_column': rel.get('hub_column'),
+                            'distinct_count': spoke_cardinality,
+                            'priority': priority,
+                            # Include hub info for description lookups
+                            'hub_cardinality': rel.get('hub_cardinality', 0),
+                            'coverage_pct': rel.get('coverage_pct', 0),
+                        })
+                
+                # Sort by priority
+                dimensions.sort(key=lambda x: x.get('priority', 50))
+                
+                logger.warning(f"[RESOLVER] Found {len(dimensions)} dimensional columns from Context Graph: "
+                              f"{[d['semantic_type'] for d in dimensions[:8]]}")
             
-            # Filter out sensitive columns
-            filtered = []
-            for r in results:
-                col_name_lower = r[0].lower()
-                if any(pattern in col_name_lower for pattern in EXCLUDED_PATTERNS):
-                    logger.info(f"[RESOLVER] Excluding sensitive column from breakdowns: {r[0]}")
-                    continue
-                filtered.append({
-                    'column_name': r[0],
-                    'filter_category': r[1],
-                    'distinct_count': r[2],
-                    'inferred_type': r[3]
-                })
+            # FALLBACK: If no Context Graph relationships, use legacy filter_category lookup
+            if not dimensions:
+                logger.warning("[RESOLVER] No Context Graph dimensions, falling back to filter_category")
+                results = self.conn.execute("""
+                    SELECT column_name, filter_category, distinct_count, inferred_type
+                    FROM _column_profiles
+                    WHERE LOWER(project) = LOWER(?)
+                      AND LOWER(table_name) = LOWER(?)
+                      AND filter_category IN ('company', 'location', 'general', 'status')
+                      AND distinct_count > 1
+                      AND distinct_count <= 100
+                    ORDER BY distinct_count ASC
+                """, [project, table_name]).fetchall()
+                
+                for r in results:
+                    col_name_lower = r[0].lower()
+                    if any(pattern in col_name_lower for pattern in EXCLUDED_PATTERNS):
+                        continue
+                    dimensions.append({
+                        'column_name': r[0],
+                        'semantic_type': r[1],  # Use filter_category as semantic_type
+                        'distinct_count': r[2],
+                        'priority': SEGMENTATION_PRIORITY.get(r[1], 50)
+                    })
             
-            return filtered
+            return dimensions
+            
         except Exception as e:
             logger.error(f"[RESOLVER] Error looking up dimensional columns: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return []
     
     def _run_breakdown_query(
