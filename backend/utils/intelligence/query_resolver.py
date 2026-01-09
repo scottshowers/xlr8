@@ -664,11 +664,13 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     continue
                 
                 # Skip very high cardinality (> 100 means it's not a useful breakdown)
+                # But allow 0 (schema-matched, cardinality unknown)
                 if spoke_cardinality > 100:
                     continue
                 
-                # Skip cardinality of 1 (useless breakdown)
-                if spoke_cardinality <= 1:
+                # Skip cardinality of exactly 1 (useless breakdown - only one value)
+                # But allow 0 (schema-matched, cardinality unknown - we'll query it)
+                if spoke_cardinality == 1:
                     continue
                 
                 seen_semantic_types.add(semantic_type.lower())
