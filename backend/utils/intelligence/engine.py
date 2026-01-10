@@ -1130,7 +1130,8 @@ class IntelligenceEngineV2:
                     'sql': resolved.sql,
                     'explanation': resolved.explanation,
                     'resolution_path': resolved.resolution_path,
-                    'reality_context': resolved.reality_context  # v2: Include breakdowns
+                    'reality_context': resolved.reality_context,  # v2: Include breakdowns
+                    'structured_output': resolved.structured_output  # v3: Workforce snapshot etc.
                 }
             else:
                 logger.warning(f"[ENGINE-V2] QueryResolver no match: {resolved.explanation or 'unknown'}")
