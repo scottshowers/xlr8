@@ -509,6 +509,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 # For dimensions from other tables (like Company), we still want active employees
                 # so we need to join back or query with employee filter
                 breakdown = self._run_breakdown_query_cross_table(
+                    project=project,
                     primary_table=table_name,
                     dimension_table=source_table,
                     dimension_column=col_name,
@@ -765,6 +766,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
     
     def _run_breakdown_query_cross_table(
         self,
+        project: str,
         primary_table: str,
         dimension_table: str,
         dimension_column: str,
@@ -780,7 +782,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         
         Strategy:
         1. If dimension_table == primary_table, simple query
-        2. If different tables, find common employee column and JOIN
+        2. If different tables, find shared hubs from Context Graph → join keys
         3. Apply active filter from primary table
         
         Args:
@@ -802,55 +804,40 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     limit=limit
                 )
             
-            # Different tables - need to JOIN
-            # Find common employee identifier column
-            emp_col_patterns = ['employee_number', 'employee_id', 'emp_id', 'emp_no', 'worker_id']
+            # Different tables - find join keys from Context Graph
+            join_keys = self._get_join_keys_from_context_graph(project, primary_table, dimension_table)
             
-            # Get columns from both tables
-            primary_cols = self._get_table_columns(primary_table)
-            dimension_cols = self._get_table_columns(dimension_table)
-            
-            # Find matching employee column
-            primary_emp_col = None
-            dimension_emp_col = None
-            
-            for pattern in emp_col_patterns:
-                for col in primary_cols:
-                    if pattern in col.lower():
-                        primary_emp_col = col
-                        break
-                if primary_emp_col:
-                    break
-            
-            for pattern in emp_col_patterns:
-                for col in dimension_cols:
-                    if pattern in col.lower():
-                        dimension_emp_col = col
-                        break
-                if dimension_emp_col:
-                    break
-            
-            if not primary_emp_col or not dimension_emp_col:
-                logger.warning(f"[RESOLVER] Cannot find join column between {primary_table[:30]} and {dimension_table[:30]}")
+            if not join_keys:
+                logger.warning(f"[RESOLVER] No shared hubs between {primary_table[:30]} and {dimension_table[:30]}")
                 # Fallback: query dimension table without filter
                 return self._run_breakdown_query(dimension_table, dimension_column, limit=limit)
+            
+            # Build JOIN clause for all shared hub columns
+            join_conditions = []
+            for primary_col, dimension_col in join_keys:
+                join_conditions.append(f'p."{primary_col}" = d."{dimension_col}"')
+            
+            join_clause = ' AND '.join(join_conditions)
+            
+            # Use first join key for COUNT DISTINCT (usually employee_number)
+            count_column = join_keys[0][0]
             
             # Build JOIN query with active filter
             if status_column and active_values:
                 values_sql = ', '.join(f"'{v}'" for v in active_values)
                 sql = f'''
-                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{primary_emp_col}") as cnt
+                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{count_column}") as cnt
                     FROM "{primary_table}" p
-                    JOIN "{dimension_table}" d ON p."{primary_emp_col}" = d."{dimension_emp_col}"
+                    JOIN "{dimension_table}" d ON {join_clause}
                     WHERE p."{status_column}" IN ({values_sql})
                     GROUP BY d."{dimension_column}"
                     ORDER BY cnt DESC
                 '''
             else:
                 sql = f'''
-                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{primary_emp_col}") as cnt
+                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{count_column}") as cnt
                     FROM "{primary_table}" p
-                    JOIN "{dimension_table}" d ON p."{primary_emp_col}" = d."{dimension_emp_col}"
+                    JOIN "{dimension_table}" d ON {join_clause}
                     GROUP BY d."{dimension_column}"
                     ORDER BY cnt DESC
                 '''
@@ -883,6 +870,93 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 return list(result.keys()) if hasattr(result, 'keys') else []
             return []
         except:
+            return []
+    
+    def _get_join_keys_from_context_graph(self, project: str, table_a: str, table_b: str) -> List[Tuple[str, str]]:
+        """
+        Find join keys between two tables by looking for shared hubs in Context Graph.
+        
+        If both tables have spokes to the same hub (e.g., both have employee_number 
+        pointing to Personal hub), those columns are join keys.
+        
+        Returns:
+            List of (table_a_column, table_b_column) tuples for join conditions.
+            Ordered with identity columns (employee_number) first, then FK columns.
+        """
+        try:
+            if not hasattr(self.handler, 'get_context_graph'):
+                return []
+            
+            graph = self.handler.get_context_graph(project)
+            relationships = graph.get('relationships', [])
+            
+            # Build lookup: table -> {semantic_type: column_name}
+            table_a_lower = table_a.lower()
+            table_b_lower = table_b.lower()
+            
+            table_a_spokes = {}  # semantic_type -> column_name
+            table_b_spokes = {}
+            
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '').lower()
+                spoke_column = rel.get('spoke_column', '')
+                semantic_type = rel.get('semantic_type', '').lower()
+                
+                if spoke_table == table_a_lower:
+                    table_a_spokes[semantic_type] = spoke_column
+                elif spoke_table == table_b_lower:
+                    table_b_spokes[semantic_type] = spoke_column
+            
+            # Also check if either table IS a hub (for identity hubs)
+            for hub in graph.get('hubs', []):
+                hub_table = hub.get('table', '').lower()
+                hub_column = hub.get('column', '')
+                semantic_type = hub.get('semantic_type', '').lower()
+                
+                if hub_table == table_a_lower:
+                    table_a_spokes[semantic_type] = hub_column
+                elif hub_table == table_b_lower:
+                    table_b_spokes[semantic_type] = hub_column
+            
+            # Find shared semantic types
+            shared_types = set(table_a_spokes.keys()) & set(table_b_spokes.keys())
+            
+            if not shared_types:
+                logger.debug(f"[RESOLVER] No shared hubs between {table_a[:30]} and {table_b[:30]}")
+                return []
+            
+            # Build join key pairs, prioritizing identity columns
+            join_keys = []
+            identity_patterns = ['employee_number', 'employee_id', 'emp_id', 'worker_id', 'person_id']
+            
+            # First pass: identity columns
+            for sem_type in shared_types:
+                col_a = table_a_spokes[sem_type]
+                col_b = table_b_spokes[sem_type]
+                
+                # Check if this is an identity column
+                is_identity = any(p in sem_type or p in col_a.lower() for p in identity_patterns)
+                if is_identity:
+                    join_keys.append((col_a, col_b))
+            
+            # Second pass: FK columns (company_code, etc.)
+            for sem_type in shared_types:
+                col_a = table_a_spokes[sem_type]
+                col_b = table_b_spokes[sem_type]
+                
+                # Skip if already added as identity
+                if (col_a, col_b) in join_keys:
+                    continue
+                    
+                join_keys.append((col_a, col_b))
+            
+            if join_keys:
+                logger.info(f"[RESOLVER] Join keys from Context Graph: {table_a[:25]} <-> {table_b[:25]}: {join_keys}")
+            
+            return join_keys
+            
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Failed to get join keys from Context Graph: {e}")
             return []
     
     # =========================================================================
