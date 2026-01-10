@@ -883,7 +883,7 @@ WHERE {where_sql}'''
                 desc_column = 'description'
                 logger.info(f"[RESOLVER] Using org_level filtered lookup: level={org_level_num}")
             elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
-                desc_column = self._find_description_column(hub_table)
+                desc_column = self._find_description_column(hub_table, hub_column)
                 if desc_column:
                     # TRIM both sides - UKG data often has padded codes
                     hub_join = f'LEFT JOIN "{hub_table}" h ON TRIM(t."{group_column}") = TRIM(h."{hub_column}")'
@@ -1048,7 +1048,7 @@ WHERE {where_sql}'''
                 desc_column = 'description'
                 logger.info(f"[RESOLVER] Using org_level filtered lookup: level={org_level_num}")
             elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
-                desc_column = self._find_description_column(hub_table)
+                desc_column = self._find_description_column(hub_table, hub_column)
                 if desc_column:
                     # TRIM both sides - UKG data often has padded codes
                     hub_join = f'LEFT JOIN "{hub_table}" h ON TRIM(d."{dimension_column}") = TRIM(h."{hub_column}")'
@@ -1121,11 +1121,13 @@ WHERE {where_sql}'''
         except:
             return []
     
-    def _find_description_column(self, table_name: str) -> Optional[str]:
+    def _find_description_column(self, table_name: str, key_column: Optional[str] = None) -> Optional[str]:
         """
         Find a description/name column in a hub table.
         
         Common patterns: description, name, desc, label, title
+        Also: if key_column is 'pay_group_code', look for 'pay_group'
+        
         Returns the column name if found, None otherwise.
         """
         try:
@@ -1144,12 +1146,25 @@ WHERE {where_sql}'''
             
             cols_lower = {c.lower(): c for c in columns}
             
-            # First pass: exact match
+            # First: check for key_column without '_code' suffix
+            # e.g., pay_group_code -> pay_group
+            if key_column:
+                key_lower = key_column.lower()
+                if key_lower.endswith('_code'):
+                    base_name = key_lower[:-5]  # Remove '_code'
+                    if base_name in cols_lower:
+                        return cols_lower[base_name]
+                elif key_lower.endswith('_id'):
+                    base_name = key_lower[:-3]  # Remove '_id'
+                    if base_name in cols_lower:
+                        return cols_lower[base_name]
+            
+            # Second: exact match on common patterns
             for pattern in desc_patterns:
                 if pattern in cols_lower:
                     return cols_lower[pattern]
             
-            # Second pass: contains pattern (e.g., job_description, location_name)
+            # Third: contains pattern (e.g., job_description, location_name)
             for pattern in desc_patterns:
                 for col_lower, col_original in cols_lower.items():
                     if pattern in col_lower and col_lower not in ['id', 'code']:
@@ -1257,7 +1272,7 @@ WHERE {where_sql}'''
                     continue
                 
                 # Find description column
-                desc_column = self._find_description_column(hub_table)
+                desc_column = self._find_description_column(hub_table, hub_column)
                 if not desc_column:
                     continue
                 
