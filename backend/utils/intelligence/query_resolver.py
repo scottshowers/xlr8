@@ -2451,7 +2451,12 @@ WHERE {where_sql}'''
             logger.warning(f"[SNAPSHOT] Status mapping: active={active_vals}, term={term_vals}, loa={loa_vals}")
             
             # Find term date column for filtering recent terms
-            term_date_col = self._find_date_column(table_name, ['term', 'termination', 'end', 'separation'])
+            # Try multiple column hints
+            term_date_col = None
+            for hint in ['termination_date', 'term_date', 'end_date', 'separation_date']:
+                term_date_col = self._find_date_column(project, table_name, hint)
+                if term_date_col:
+                    break
             logger.warning(f"[SNAPSHOT] Term date column: {term_date_col}")
             
             # Build the snapshot
@@ -2559,23 +2564,6 @@ GROUP BY "{status_col}"'''
             logger.warning(f"[SNAPSHOT] Generation failed: {e}")
             import traceback
             traceback.print_exc()
-            return None
-    
-    def _find_date_column(self, table_name: str, keywords: List[str]) -> Optional[str]:
-        """Find a date column matching keywords (e.g., term_date, termination_date)."""
-        try:
-            columns = self._get_table_columns(table_name)
-            if not columns:
-                return None
-            
-            for col in columns:
-                col_lower = col.lower()
-                for keyword in keywords:
-                    if keyword in col_lower and ('date' in col_lower or 'dt' in col_lower):
-                        return col
-            
-            return None
-        except:
             return None
     
     def _resolve_generic_count(self, project: str, parsed: ParsedIntent,
