@@ -1124,11 +1124,12 @@ WHERE {where_sql}'''
     def _get_table_columns(self, table_name: str) -> List[str]:
         """Get column names for a table."""
         try:
-            result = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1').fetchone()
-            if result:
-                cols = list(result.keys()) if hasattr(result, 'keys') else []
+            # Use description to get column names (works with DuckDB)
+            cursor = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1')
+            if cursor.description:
+                cols = [desc[0] for desc in cursor.description]
                 return cols
-            logger.warning(f"[RESOLVER] _get_table_columns: no rows in {table_name[-30:]}")
+            logger.warning(f"[RESOLVER] _get_table_columns: no description for {table_name[-30:]}")
             return []
         except Exception as e:
             logger.warning(f"[RESOLVER] _get_table_columns FAILED for {table_name[-30:]}: {e}")
