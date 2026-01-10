@@ -320,11 +320,11 @@ Work completed that wasn't in the original plan but was necessary:
 
 ---
 
-## A.5 QUERY ENGINE - CRITICAL PATH (Jan 10, 2026)
+## A.5 QUERY ENGINE - CRITICAL PATH (Jan 10, 2026) ✅ COMPLETE
 
-**Status:** 🔴 BLOCKING - Nothing else matters until this works.
+**Status:** ✅ ALL CRITERIA MET - Query engine fully operational.
 
-Everything flows through the same pipe: Chat, Playbooks, BI Builder, Exports. If the query engine is broken, everything is broken.
+Everything flows through the same pipe: Chat, Playbooks, BI Builder, Exports. Query engine now handles geographic filtering, SUM/LIST patterns, cross-table JOINs, and synthesis that uses actual results.
 
 ### A.5.1 Current State Assessment
 
@@ -468,14 +468,15 @@ Do NOT repeat the data summary. Provide consultant-level analysis only.
 | Fuzzy dimension resolution | 4h | P0 | ✅ DONE (Jan 10) |
 | Query pattern expansion (SUM, LIST) | 4h | P0 | ✅ DONE (Jan 10) |
 | JOIN strategy (INNER vs LEFT) | 1h | P1 | ✅ DONE (Jan 10) |
-| Consultant synthesis fix | 4h | P0 | ⬜ TODO |
-| **Total** | **13h** | | **9h done** |
+| Consultant synthesis fix | 4h | P0 | ✅ DONE (Jan 10) |
+| **Total** | **13h** | | **COMPLETE** |
 
 **Jan 10 Implementation Notes:**
 - Geographic fallback: `normalize_geographic_term()` + `_try_direct_geographic_filter()` for state/province columns not in context graph
 - SUM: Domain priority fix (earnings > employees), `_find_sum_column()` skips _code/_id columns, cross-table JOIN support
 - LIST: Added status filter, geographic fallback, key column selection (not SELECT *)
 - All JOINs use INNER for filters (already correct, made explicit)
+- Synthesis: Fixed to use actual SQL result (`data_info['result_value']`) instead of pre-computed total (`reality_context['answer']`)
 
 ### A.5.5 Success Criteria
 
@@ -487,28 +488,21 @@ All of these must work before moving on:
 ✅ "Total earnings for TNC employees" → $15,360.44 (JOIN earnings→company)
 ✅ "List employees in Pasadena" → Returns 20 employees
 ✅ "Employees hired in 2024" → 428 (date filter works)
-⬜ Response includes insights, not just data formatting
+✅ Response includes insights, not just data formatting
 ```
 
-### A.5.6 Cleanup Tasks (After Query Engine Works) ✅ COMPLETE (Jan 10, 2026)
+**ALL CRITERIA MET - Jan 10, 2026**
+
+### A.5.6 Cleanup Tasks (After Query Engine Works)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Remove relationship detector | `backend/utils/relationship_detector.py` - KEPT as thin wrapper | ✅ Kept (harmless) |
-| Clean up dead imports | `project_intelligence.py`, `semantic_vocabulary.py` | ✅ Done |
-| Remove relationship UI | `DataExplorer.jsx` - removed DataModelPanel, RelationshipEditor | ✅ Done |
-| Simplify DataModelPage | Keep Data Integrity, redirect to Context Graph | ✅ Done |
+| Remove relationship detector | `backend/utils/relationship_detector.py` - no longer needed | ⬜ TODO |
+| Remove relationship API | `backend/routers/relationships.py` - if exists | ⬜ TODO |
+| Remove relationship UI | Frontend relationship components | ⬜ TODO |
+| Clean up dead relationship code | Any pairwise relationship logic | ⬜ TODO |
 
-**Files Changed:**
-- `backend/utils/project_intelligence.py` - Removed dead relationship_detector import
-- `backend/utils/semantic_vocabulary.py` - Removed docstring reference
-- `frontend/src/pages/DataExplorer.jsx` - Removed ~1100 lines (statusConfig, DataModelPanel, RelationshipEditor, relationships tab)
-- `frontend/src/pages/DataModelPage.jsx` - Simplified from 598 to 347 lines
-
-**Result:** 
-- DataExplorer: 2226 → 1129 lines (~50% reduction)
-- DataModelPage: 598 → 347 lines (~42% reduction)
-- Context Graph is now the single source of truth for table relationships
+**Why:** We moved to Context Graph (hub/spoke). The old pairwise relationship system is dead code.
 
 ---
 
