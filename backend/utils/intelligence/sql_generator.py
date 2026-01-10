@@ -113,6 +113,7 @@ class SQLGenerator:
         self._table_aliases: Dict[str, str] = {}
         self._column_mappings: Dict[str, str] = {}
         self._orchestrator = None
+        self._filter_translations: List[Dict] = []  # v5.0: Semantic value translations
     
     def _needs_join(self, question: str, tables: List[Dict]) -> bool:
         """
@@ -575,17 +576,22 @@ class SQLGenerator:
                 val = f.get('value', '')
                 filter_hints += f"- Column '{col}' contains value '{val}' - consider filtering on this\n"
         
+        # =====================================================================
+        # v5.0: SEMANTIC TRANSLATIONS - tell LLM what terms mean
+        # =====================================================================
+        translation_hints = self._build_translation_hints(question)
+        
         prompt = f"""### Task
 Generate a SQL query to answer: {question}
 
 ### Database Schema
 {schema_str}
-{filter_hints}
+{filter_hints}{translation_hints}
 ### Rules
 - Use ONLY columns from the schema above
 - Table name: {short_alias}
 - For text search, use ILIKE '%term%'
-- If the question asks about specific values (like SUI, FED, etc.), ADD a WHERE clause
+- Use the FILTER TRANSLATIONS below to convert user terms to correct column values
 - Return relevant columns, not SELECT *
 - Add LIMIT 100
 
@@ -860,7 +866,12 @@ SQL:"""
     
     def _build_create_table_schema(self, table_name: str, 
                                    alias: str) -> Tuple[str, Set[str]]:
-        """Build CREATE TABLE schema from DuckDB."""
+        """
+        Build CREATE TABLE schema from DuckDB WITH intelligence.
+        
+        v5.0: Now includes filter categories, valid values, and descriptions
+        from _column_profiles and _intelligence_lookups.
+        """
         try:
             col_info = self.handler.conn.execute(
                 f'PRAGMA table_info("{table_name}")'
@@ -869,8 +880,52 @@ SQL:"""
             if not col_info:
                 return "", set()
             
+            # ================================================================
+            # STEP 1: Get column intelligence from _column_profiles
+            # ================================================================
+            column_intelligence = {}
+            try:
+                profiles = self.handler.conn.execute("""
+                    SELECT column_name, filter_category, distinct_count, 
+                           distinct_values, inferred_type
+                    FROM _column_profiles
+                    WHERE LOWER(table_name) = LOWER(?)
+                """, [table_name]).fetchall()
+                
+                for col_name, filter_cat, distinct_count, distinct_vals, inferred_type in profiles:
+                    column_intelligence[col_name] = {
+                        'filter_category': filter_cat,
+                        'distinct_count': distinct_count,
+                        'distinct_values': distinct_vals,
+                        'inferred_type': inferred_type
+                    }
+            except Exception as e:
+                logger.debug(f"[SQL-GEN] Column profiles query failed: {e}")
+            
+            # ================================================================
+            # STEP 2: Get value descriptions from _intelligence_lookups
+            # ================================================================
+            value_descriptions = {}
+            try:
+                lookups = self.handler.conn.execute("""
+                    SELECT hub_column, lookup_data
+                    FROM _intelligence_lookups
+                    WHERE LOWER(table_name) = LOWER(?)
+                """, [table_name]).fetchall()
+                
+                for hub_col, lookup_json in lookups:
+                    if lookup_json:
+                        import json
+                        try:
+                            value_descriptions[hub_col] = json.loads(lookup_json)
+                        except:
+                            pass
+            except Exception as e:
+                logger.debug(f"[SQL-GEN] Intelligence lookups query failed: {e}")
+            
             columns = []
             valid_cols = set()
+            filter_translations = []  # Build translation hints
             
             for row in col_info:
                 col_name = row[1]
@@ -894,13 +949,72 @@ SQL:"""
                 elif 'DATE' in simple_type or 'TIME' in simple_type:
                     simple_type = 'DATE'
                 
-                columns.append(f"    {col_name} {simple_type}")
+                # ============================================================
+                # STEP 3: Add intelligence as column comments
+                # ============================================================
+                comment_parts = []
+                intel = column_intelligence.get(col_name, {})
+                
+                # Filter category
+                filter_cat = intel.get('filter_category')
+                if filter_cat:
+                    comment_parts.append(f"Filter:{filter_cat}")
+                
+                # Distinct values (if reasonable count)
+                distinct_count = intel.get('distinct_count', 0)
+                if distinct_count and distinct_count <= 20:
+                    try:
+                        import json
+                        vals_json = intel.get('distinct_values', '[]')
+                        if vals_json:
+                            vals = json.loads(vals_json) if isinstance(vals_json, str) else vals_json
+                            # Extract just values if they're dicts
+                            val_list = []
+                            for v in vals[:10]:
+                                if isinstance(v, dict):
+                                    val_list.append(str(v.get('value', v)))
+                                else:
+                                    val_list.append(str(v))
+                            if val_list:
+                                comment_parts.append(f"Values:[{','.join(val_list)}]")
+                                
+                                # Add descriptions if available
+                                descs = value_descriptions.get(col_name, {})
+                                if descs and filter_cat:
+                                    desc_hints = []
+                                    for val in val_list[:5]:
+                                        desc = descs.get(val)
+                                        if desc:
+                                            desc_hints.append(f"{val}={desc}")
+                                            # Build filter translation
+                                            filter_translations.append({
+                                                'category': filter_cat,
+                                                'column': col_name,
+                                                'value': val,
+                                                'meaning': desc.lower()
+                                            })
+                                    if desc_hints:
+                                        comment_parts.append(' | '.join(desc_hints[:3]))
+                    except:
+                        pass
+                
+                # Build column definition with comment
+                if comment_parts:
+                    columns.append(f"    {col_name} {simple_type},  -- {' | '.join(comment_parts)}")
+                else:
+                    columns.append(f"    {col_name} {simple_type}")
             
-            schema = f"CREATE TABLE {alias} (\n" + ",\n".join(columns) + "\n);"
+            schema = f"CREATE TABLE {alias} (\n" + "\n".join(columns) + "\n);"
+            
+            # Store filter translations for use in prompt
+            self._filter_translations = filter_translations
+            
             return schema, valid_cols
             
         except Exception as e:
             logger.error(f"[SQL-GEN] Error building schema: {e}")
+            import traceback
+            traceback.print_exc()
             return "", set()
     
     def _get_sample_str(self, table_name: str) -> str:
@@ -918,6 +1032,102 @@ SQL:"""
                     return "\n  Sample:\n" + "\n".join(samples[:4])
         except Exception:
             pass
+        return ""
+    
+    def _build_translation_hints(self, question: str) -> str:
+        """
+        Build semantic translation hints for the LLM.
+        
+        v5.0: Uses _filter_translations built during schema creation,
+        plus common semantic mappings for status, location, etc.
+        
+        Returns a prompt section like:
+        ### FILTER TRANSLATIONS (use these exact values)
+        - "active" → employment_status_code = 'A'
+        - "texas" → state_province_code = 'TX'
+        """
+        hints = []
+        q_lower = question.lower()
+        
+        # ================================================================
+        # 1. Use translations from schema building
+        # ================================================================
+        translations = getattr(self, '_filter_translations', [])
+        for t in translations:
+            meaning = t.get('meaning', '')
+            if meaning and meaning in q_lower:
+                col = t.get('column', '')
+                val = t.get('value', '')
+                hints.append(f'- "{meaning}" → {col} = \'{val}\'')
+        
+        # ================================================================
+        # 2. Common status translations (fallback patterns)
+        # ================================================================
+        status_mappings = {
+            'active': ['A', 'Active', 'ACT'],
+            'terminated': ['T', 'Terminated', 'TERM', 'Inactive'],
+            'leave': ['L', 'LOA', 'Leave'],
+            'full time': ['FT', 'F', 'Full'],
+            'part time': ['PT', 'P', 'Part'],
+        }
+        
+        for term, vals in status_mappings.items():
+            if term in q_lower:
+                # Find status column from filter_candidates
+                status_col = None
+                if self.filter_candidates and 'status' in self.filter_candidates:
+                    for cand in self.filter_candidates['status']:
+                        status_col = cand.get('column_name', cand.get('column', ''))
+                        break
+                
+                if status_col:
+                    hints.append(f'- "{term}" → {status_col} = \'{vals[0]}\' (or one of: {vals})')
+        
+        # ================================================================
+        # 3. Geographic translations (US states)
+        # ================================================================
+        state_mappings = {
+            'texas': 'TX', 'california': 'CA', 'new york': 'NY', 'florida': 'FL',
+            'illinois': 'IL', 'pennsylvania': 'PA', 'ohio': 'OH', 'georgia': 'GA',
+            'north carolina': 'NC', 'michigan': 'MI', 'new jersey': 'NJ',
+            'virginia': 'VA', 'washington': 'WA', 'arizona': 'AZ', 'massachusetts': 'MA',
+            'tennessee': 'TN', 'indiana': 'IN', 'missouri': 'MO', 'maryland': 'MD',
+            'wisconsin': 'WI', 'colorado': 'CO', 'minnesota': 'MN', 'alabama': 'AL',
+            'south carolina': 'SC', 'louisiana': 'LA', 'kentucky': 'KY', 'oregon': 'OR',
+            'oklahoma': 'OK', 'connecticut': 'CT', 'iowa': 'IA', 'nevada': 'NV',
+            'arkansas': 'AR', 'utah': 'UT', 'mississippi': 'MS', 'kansas': 'KS',
+            'new mexico': 'NM', 'nebraska': 'NE', 'idaho': 'ID', 'hawaii': 'HI',
+            'maine': 'ME', 'montana': 'MT', 'delaware': 'DE', 'south dakota': 'SD',
+            'north dakota': 'ND', 'alaska': 'AK', 'vermont': 'VT', 'wyoming': 'WY',
+            'west virginia': 'WV', 'rhode island': 'RI', 'new hampshire': 'NH',
+            # Canadian provinces
+            'ontario': 'ON', 'quebec': 'QC', 'british columbia': 'BC', 'alberta': 'AB',
+            'manitoba': 'MB', 'saskatchewan': 'SK', 'nova scotia': 'NS',
+            'new brunswick': 'NB', 'newfoundland': 'NL', 'prince edward island': 'PE',
+        }
+        
+        for state, code in state_mappings.items():
+            if state in q_lower:
+                # Find location column
+                loc_col = None
+                if self.filter_candidates and 'location' in self.filter_candidates:
+                    for cand in self.filter_candidates['location']:
+                        col = cand.get('column_name', cand.get('column', ''))
+                        if 'state' in col.lower() or 'province' in col.lower():
+                            loc_col = col
+                            break
+                
+                if loc_col:
+                    hints.append(f'- "{state}" → {loc_col} = \'{code}\'')
+                else:
+                    hints.append(f'- "{state}" → state/province column = \'{code}\'')
+        
+        # ================================================================
+        # Build the hints section
+        # ================================================================
+        if hints:
+            return "\n### FILTER TRANSLATIONS (use these exact values)\n" + "\n".join(hints) + "\n"
+        
         return ""
     
     def _build_semantic_hints(self, tables: List[Dict], primary_table: str,
