@@ -574,6 +574,8 @@ class QueryResolver:
             
             for hint in parsed.filter_hints:
                 resolved = self._resolve_dimension_filter(project, hint)
+                filter_added = False
+                
                 if resolved:
                     # Find which column in employee data matches this semantic type
                     column_info = self._find_employee_column_for_dimension(
@@ -592,9 +594,17 @@ class QueryResolver:
                         result.resolution_path.append(
                             f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
                         )
-                else:
-                    # FALLBACK: Try direct column search for geographic terms
-                    # This handles cases where state/province columns exist but aren't in context graph
+                        filter_added = True
+                    else:
+                        result.resolution_path.append(
+                            f"HUB FOUND but no employee column for {resolved['semantic_type']}"
+                        )
+                
+                # FALLBACK: Try direct column search for geographic terms
+                # This handles cases where:
+                # 1. Hub resolution failed entirely (resolved is None)
+                # 2. Hub found but no matching column in employee table (column_info is None)
+                if not filter_added:
                     geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
                     if geo_filter:
                         dimension_filters.append(geo_filter)
