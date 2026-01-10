@@ -202,10 +202,33 @@ def parse_intent(question: str) -> ParsedIntent:
         intent_confidence = 1.0
         domain_confidence = 1.0
     
+    # Extract filter hints (phrases like "in Texas", "in Pasadena", "at location X")
+    filter_hints = []
+    
+    # Pattern: "in <location/org>" 
+    import re
+    in_patterns = re.findall(r'\b(?:in|at|for|from)\s+([A-Za-z][A-Za-z0-9\s\-]+?)(?:\s+(?:division|department|location|team|region|org|area)|[,\.\?]|$)', q_lower)
+    filter_hints.extend([p.strip() for p in in_patterns if len(p.strip()) > 2])
+    
+    # Pattern: "who are <status>" or "who is <status>"
+    status_patterns = re.findall(r'\bwho\s+(?:are|is)\s+(\w+)', q_lower)
+    filter_hints.extend([p.strip() for p in status_patterns])
+    
+    # Pattern: standalone proper nouns that might be org/location names
+    # Only if we haven't found filters yet
+    if not filter_hints:
+        # Look for capitalized words in original question that aren't common words
+        common_words = {'how', 'many', 'employees', 'are', 'there', 'in', 'the', 'what', 'is', 'count', 'total', 'number', 'of'}
+        words = question.split()
+        for word in words:
+            if word[0].isupper() and word.lower() not in common_words and len(word) > 2:
+                filter_hints.append(word.lower())
+    
     return ParsedIntent(
         intent=intent,
         domain=domain,
         raw_question=question,
+        filter_hints=filter_hints,
         intent_confidence=intent_confidence,
         domain_confidence=domain_confidence
     )
@@ -375,17 +398,114 @@ class QueryResolver:
         result.filter_values = active_values
         result.resolution_path.append(f"LOOKUP 4: Active values = {active_values}")
         
+        # LOOKUP 5: Resolve dimension filters from parsed hints
+        dimension_filters = []
+        if parsed.filter_hints:
+            result.resolution_path.append(f"FILTER HINTS: {parsed.filter_hints}")
+            
+            for hint in parsed.filter_hints:
+                resolved = self._resolve_dimension_filter(project, hint)
+                if resolved:
+                    # Find which column in employee data matches this semantic type
+                    column_info = self._find_employee_column_for_dimension(
+                        project, table_name, resolved['semantic_type']
+                    )
+                    if column_info:
+                        dimension_filters.append({
+                            'column': column_info['column'],
+                            'table': column_info['table'],
+                            'same_table': column_info['same_table'],
+                            'codes': resolved['codes'],
+                            'hint': hint,
+                            'semantic_type': resolved['semantic_type'],
+                            'descriptions': resolved.get('matched_descriptions', [])
+                        })
+                        result.resolution_path.append(
+                            f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
+                        )
+        
+        # Check if we need cross-table JOINs
+        needs_join = any(not f['same_table'] for f in dimension_filters)
+        join_tables = set(f['table'] for f in dimension_filters if not f['same_table'])
+        
         # GENERATE SQL
-        if active_values:
-            values_sql = ', '.join(f"'{v}'" for v in active_values)
-            result.sql = f'''SELECT COUNT(*) as headcount 
-FROM "{table_name}" 
-WHERE "{status_column['column_name']}" IN ({values_sql})'''
-            result.explanation = f"Counting active employees where {status_column['column_name']} in {active_values}"
+        if needs_join and join_tables:
+            # Need to JOIN to filter tables
+            # Get join keys from Context Graph
+            join_parts = []
+            from_tables = [f'"{table_name}" p']
+            
+            for i, join_table in enumerate(join_tables):
+                alias = f'd{i}'
+                join_keys = self._get_join_keys_from_context_graph(project, table_name, join_table)
+                
+                if join_keys:
+                    join_conditions = []
+                    for p_col, d_col in join_keys:
+                        join_conditions.append(f'TRIM(p."{p_col}") = TRIM({alias}."{d_col}")')
+                    join_clause = ' AND '.join(join_conditions)
+                    from_tables.append(f'JOIN "{join_table}" {alias} ON {join_clause}')
+            
+            from_sql = '\n'.join(from_tables)
+            
+            where_clauses = []
+            
+            # Status filter (always on primary table)
+            if active_values:
+                values_sql = ', '.join(f"'{v}'" for v in active_values)
+                where_clauses.append(f'p."{status_column["column_name"]}" IN ({values_sql})')
+            
+            # Dimension filters
+            for dim_filter in dimension_filters:
+                codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
+                if dim_filter['same_table']:
+                    where_clauses.append(f'TRIM(p."{dim_filter["column"]}") IN ({codes_sql})')
+                else:
+                    # Find the alias for this table
+                    alias_idx = list(join_tables).index(dim_filter['table'])
+                    alias = f'd{alias_idx}'
+                    where_clauses.append(f'TRIM({alias}."{dim_filter["column"]}") IN ({codes_sql})')
+            
+            where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
+            
+            result.sql = f'''SELECT COUNT(DISTINCT p."employee_number") as headcount 
+FROM {from_sql}
+WHERE {where_sql}'''
+            
         else:
-            # Can't determine active values - count all
-            result.sql = f'SELECT COUNT(*) as headcount FROM "{table_name}"'
-            result.explanation = f"Counting all rows in {table_name} (could not determine active status values)"
+            # Simple case - all filters in same table
+            where_clauses = []
+            
+            # Status filter
+            if active_values:
+                values_sql = ', '.join(f"'{v}'" for v in active_values)
+                where_clauses.append(f'"{status_column["column_name"]}" IN ({values_sql})')
+            
+            # Dimension filters
+            for dim_filter in dimension_filters:
+                codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
+                where_clauses.append(f'TRIM("{dim_filter["column"]}") IN ({codes_sql})')
+            
+            if where_clauses:
+                where_sql = ' AND '.join(where_clauses)
+                result.sql = f'''SELECT COUNT(*) as headcount 
+FROM "{table_name}" 
+WHERE {where_sql}'''
+            else:
+                result.sql = f'SELECT COUNT(*) as headcount FROM "{table_name}"'
+        
+        # Build explanation
+        explanation_parts = []
+        if active_values:
+            explanation_parts.append(f"{status_column['column_name']} in {active_values}")
+        for dim_filter in dimension_filters:
+            desc_preview = dim_filter['descriptions'][0] if dim_filter['descriptions'] else dim_filter['codes'][0]
+            explanation_parts.append(f"{dim_filter['hint']} ({desc_preview})")
+        
+        if explanation_parts:
+            result.explanation = f"Counting active employees where {' and '.join(explanation_parts)}"
+        else:
+            result.explanation = f"Counting all rows in {table_name}"
         
         result.success = True
         
@@ -1101,6 +1221,207 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             logger.debug(f"[RESOLVER] Error finding org_level table: {e}")
         
         return None
+    
+    def _resolve_dimension_filter(self, project: str, filter_hint: str) -> Optional[Dict]:
+        """
+        Resolve a filter hint (e.g., "Texas", "Pasadena") to dimension column + codes.
+        
+        Searches hub tables for matching descriptions and returns the codes to filter by.
+        
+        Args:
+            project: Project name
+            filter_hint: User's filter phrase (e.g., "texas", "pasadena", "engineering")
+            
+        Returns:
+            Dict with 'column', 'codes', 'hub_table', 'matched_descriptions' if found, None otherwise.
+        """
+        try:
+            if not hasattr(self.handler, 'get_context_graph'):
+                return None
+            
+            graph = self.handler.get_context_graph(project)
+            hubs = graph.get('hubs', [])
+            
+            hint_lower = filter_hint.lower().strip()
+            best_match = None
+            best_match_count = 0
+            
+            # Search each hub table for matching descriptions
+            for hub in hubs:
+                hub_table = hub.get('table', '')
+                hub_column = hub.get('column', '')
+                semantic_type = hub.get('semantic_type', '')
+                
+                # Skip virtual hubs
+                if hub_table.startswith('_virtual_'):
+                    continue
+                
+                # Find description column
+                desc_column = self._find_description_column(hub_table)
+                if not desc_column:
+                    continue
+                
+                # Search for matching descriptions
+                try:
+                    # Use LIKE for partial matching
+                    results = self.conn.execute(f'''
+                        SELECT TRIM("{hub_column}") as code, "{desc_column}" as description
+                        FROM "{hub_table}"
+                        WHERE LOWER("{desc_column}") LIKE ?
+                           OR LOWER(TRIM("{hub_column}")) LIKE ?
+                    ''', [f'%{hint_lower}%', f'%{hint_lower}%']).fetchall()
+                    
+                    if results:
+                        codes = [str(r[0]) for r in results if r[0]]
+                        descriptions = [str(r[1]) for r in results if r[1]]
+                        
+                        # Prefer matches with more results (more specific)
+                        # But also prefer exact matches
+                        match_quality = len(results)
+                        
+                        # Boost for exact description match
+                        for desc in descriptions:
+                            if hint_lower == desc.lower().strip():
+                                match_quality += 100
+                            elif hint_lower in desc.lower():
+                                match_quality += 10
+                        
+                        if match_quality > best_match_count:
+                            best_match_count = match_quality
+                            best_match = {
+                                'hub_table': hub_table,
+                                'hub_column': hub_column,
+                                'semantic_type': semantic_type,
+                                'codes': codes,
+                                'matched_descriptions': descriptions[:5],  # Limit for logging
+                            }
+                            
+                except Exception as e:
+                    logger.debug(f"[RESOLVER] Error searching hub {hub_table}: {e}")
+                    continue
+            
+            # Also check org_level table specially (filtered by level)
+            org_table = None
+            try:
+                result = self.conn.execute("""
+                    SELECT table_name 
+                    FROM _schema_metadata 
+                    WHERE project = ? 
+                      AND is_current = TRUE
+                      AND LOWER(table_name) LIKE '%organization%'
+                      AND LOWER(table_name) NOT LIKE '%virtual%'
+                    LIMIT 1
+                """, [project]).fetchone()
+                if result:
+                    org_table = result[0]
+            except:
+                pass
+            
+            if org_table:
+                try:
+                    # Search across all org levels
+                    results = self.conn.execute(f'''
+                        SELECT level, TRIM(code) as code, description
+                        FROM "{org_table}"
+                        WHERE LOWER(description) LIKE ?
+                           OR LOWER(TRIM(code)) LIKE ?
+                    ''', [f'%{hint_lower}%', f'%{hint_lower}%']).fetchall()
+                    
+                    if results:
+                        # Group by level
+                        by_level = {}
+                        for level, code, desc in results:
+                            if level not in by_level:
+                                by_level[level] = {'codes': [], 'descriptions': []}
+                            by_level[level]['codes'].append(str(code))
+                            by_level[level]['descriptions'].append(str(desc))
+                        
+                        # Take the level with most matches
+                        best_level = max(by_level.keys(), key=lambda l: len(by_level[l]['codes']))
+                        level_data = by_level[best_level]
+                        
+                        match_quality = len(level_data['codes']) + 50  # Boost org matches
+                        
+                        if match_quality > best_match_count:
+                            best_match = {
+                                'hub_table': org_table,
+                                'hub_column': 'code',
+                                'semantic_type': f'org_level_{best_level}_code',
+                                'org_level': best_level,
+                                'codes': level_data['codes'],
+                                'matched_descriptions': level_data['descriptions'][:5],
+                            }
+                            
+                except Exception as e:
+                    logger.debug(f"[RESOLVER] Error searching org table: {e}")
+            
+            if best_match:
+                logger.info(f"[RESOLVER] Resolved '{filter_hint}' -> {best_match['semantic_type']}: {best_match['codes'][:3]}...")
+                
+            return best_match
+            
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Error resolving dimension filter '{filter_hint}': {e}")
+            return None
+    
+    def _find_employee_column_for_dimension(self, project: str, employee_table: str, semantic_type: str) -> Optional[Dict]:
+        """
+        Find which column in the employee table (or related tables) matches a semantic type.
+        
+        Uses Context Graph relationships to find the spoke column.
+        
+        Args:
+            project: Project name
+            employee_table: Primary employee table name
+            semantic_type: The semantic type to find (e.g., 'org_level_1_code', 'location_code')
+            
+        Returns:
+            Dict with 'column' and 'table' if found, None otherwise.
+            If 'table' differs from employee_table, a JOIN is needed.
+        """
+        try:
+            if not hasattr(self.handler, 'get_context_graph'):
+                return None
+            
+            graph = self.handler.get_context_graph(project)
+            relationships = graph.get('relationships', [])
+            
+            employee_table_lower = employee_table.lower()
+            semantic_type_lower = semantic_type.lower()
+            
+            # First: look for exact table match
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '').lower()
+                spoke_column = rel.get('spoke_column', '')
+                rel_semantic = rel.get('semantic_type', '').lower()
+                
+                if spoke_table == employee_table_lower and rel_semantic == semantic_type_lower:
+                    logger.debug(f"[RESOLVER] Found dimension column in primary table: {spoke_column}")
+                    return {'column': spoke_column, 'table': employee_table, 'same_table': True}
+            
+            # Second: look in any employee-related table (Personal, Company, etc.)
+            employee_patterns = ['personal', 'company', 'employee', 'worker', 'job', 'conversion']
+            
+            for rel in relationships:
+                spoke_table = rel.get('spoke_table', '')
+                spoke_column = rel.get('spoke_column', '')
+                rel_semantic = rel.get('semantic_type', '').lower()
+                
+                if rel_semantic == semantic_type_lower:
+                    # Check if this is an employee-related table
+                    if any(p in spoke_table.lower() for p in employee_patterns):
+                        logger.debug(f"[RESOLVER] Found dimension in related table: {spoke_table}.{spoke_column}")
+                        return {
+                            'column': spoke_column, 
+                            'table': spoke_table,
+                            'same_table': spoke_table.lower() == employee_table_lower
+                        }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Error finding employee column for {semantic_type}: {e}")
+            return None
     
     def _get_join_keys_from_context_graph(self, project: str, table_a: str, table_b: str) -> List[Tuple[str, str]]:
         """
