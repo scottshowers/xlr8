@@ -127,6 +127,94 @@ DOMAIN_KEYWORDS = {
 }
 
 
+# =============================================================================
+# GEOGRAPHIC NORMALIZATION - US States, Canadian Provinces, Countries
+# =============================================================================
+# This is NOT hardcoding customer data - it's universal geographic knowledge
+# that applies to all HCM systems worldwide.
+
+US_STATE_CODES = {
+    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+    'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+    'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+    'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+    'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+    'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+    'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+    'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+    'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+    'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+    'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+    'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+    'wisconsin': 'WI', 'wyoming': 'WY', 'district of columbia': 'DC',
+    # Common abbreviations
+    'calif': 'CA', 'penn': 'PA', 'wash': 'WA',
+}
+
+CA_PROVINCE_CODES = {
+    'alberta': 'AB', 'british columbia': 'BC', 'manitoba': 'MB',
+    'new brunswick': 'NB', 'newfoundland': 'NL', 'newfoundland and labrador': 'NL',
+    'northwest territories': 'NT', 'nova scotia': 'NS', 'nunavut': 'NU',
+    'ontario': 'ON', 'prince edward island': 'PE', 'quebec': 'QC',
+    'saskatchewan': 'SK', 'yukon': 'YT',
+}
+
+COUNTRY_CODES = {
+    'united states': 'US', 'usa': 'US', 'u.s.': 'US', 'america': 'US',
+    'canada': 'CA', 'mexico': 'MX', 'united kingdom': 'GB', 'uk': 'GB',
+    'germany': 'DE', 'france': 'FR', 'spain': 'ES', 'italy': 'IT',
+    'australia': 'AU', 'japan': 'JP', 'china': 'CN', 'india': 'IN',
+    'brazil': 'BR', 'netherlands': 'NL', 'belgium': 'BE', 'switzerland': 'CH',
+    'ireland': 'IE', 'singapore': 'SG', 'puerto rico': 'PR',
+}
+
+# Reverse lookup: code → name (for logging/display)
+STATE_CODE_TO_NAME = {v: k.title() for k, v in US_STATE_CODES.items() if len(k) > 2}
+PROVINCE_CODE_TO_NAME = {v: k.title() for k, v in CA_PROVINCE_CODES.items()}
+
+
+def normalize_geographic_term(term: str) -> Optional[Dict]:
+    """
+    Normalize a geographic term to its standard code.
+    
+    Examples:
+        "Texas" → {'code': 'TX', 'type': 'state', 'name': 'Texas'}
+        "Ontario" → {'code': 'ON', 'type': 'province', 'name': 'Ontario'}
+        "United States" → {'code': 'US', 'type': 'country', 'name': 'United States'}
+        "New York" → {'code': 'NY', 'type': 'state', 'name': 'New York'}
+        "XYZ" → None
+    
+    Returns:
+        Dict with code, type, name if recognized; None otherwise.
+    """
+    term_lower = term.lower().strip()
+    
+    # Check US states first (most common in HCM)
+    if term_lower in US_STATE_CODES:
+        code = US_STATE_CODES[term_lower]
+        return {'code': code, 'type': 'state', 'name': STATE_CODE_TO_NAME.get(code, term.title())}
+    
+    # Check Canadian provinces
+    if term_lower in CA_PROVINCE_CODES:
+        code = CA_PROVINCE_CODES[term_lower]
+        return {'code': code, 'type': 'province', 'name': PROVINCE_CODE_TO_NAME.get(code, term.title())}
+    
+    # Check countries
+    if term_lower in COUNTRY_CODES:
+        code = COUNTRY_CODES[term_lower]
+        return {'code': code, 'type': 'country', 'name': term.title()}
+    
+    # Check if it's already a valid state/province code (2 letters, all caps)
+    if len(term) == 2 and term.upper() == term:
+        term_upper = term.upper()
+        if term_upper in STATE_CODE_TO_NAME:
+            return {'code': term_upper, 'type': 'state', 'name': STATE_CODE_TO_NAME[term_upper]}
+        if term_upper in PROVINCE_CODE_TO_NAME:
+            return {'code': term_upper, 'type': 'province', 'name': PROVINCE_CODE_TO_NAME[term_upper]}
+    
+    return None
+
+
 @dataclass
 class ParsedIntent:
     """Result of parsing user's question."""
@@ -137,6 +225,9 @@ class ParsedIntent:
     # Extracted specifics
     count_what: Optional[str] = None       # "active employees", "terminated"
     filter_hints: List[str] = field(default_factory=list)  # "in texas", "last year"
+    
+    # Date filtering
+    date_filter: Optional[Dict] = None     # {'column_hint': 'hired', 'year': 2024, 'operator': '='}
     
     # Confidence
     intent_confidence: float = 0.0
@@ -234,11 +325,76 @@ def parse_intent(question: str) -> ParsedIntent:
             if len(word) > 2 and word[0].isupper() and word.lower() not in common_words:
                 filter_hints.append(word.lower())
     
+    # ==========================================================================
+    # DATE FILTER DETECTION
+    # ==========================================================================
+    # Patterns: "hired in 2024", "terminated last year", "started this year"
+    date_filter = None
+    
+    # Pattern: "hired/terminated/started in YYYY"
+    date_action_match = re.search(r'\b(hired|terminated|started|joined|left|began|ended|separated)\s+(?:in\s+)?(\d{4})\b', q_lower)
+    if date_action_match:
+        action = date_action_match.group(1)
+        year = int(date_action_match.group(2))
+        
+        # Map action to likely date column
+        column_hints = {
+            'hired': 'hire_date',
+            'started': 'hire_date',
+            'joined': 'hire_date',
+            'began': 'hire_date',
+            'terminated': 'termination_date',
+            'left': 'termination_date',
+            'ended': 'termination_date',
+            'separated': 'separation_date',
+        }
+        
+        date_filter = {
+            'column_hint': column_hints.get(action, 'date'),
+            'year': year,
+            'operator': 'year_equals',
+            'action': action,
+        }
+    
+    # Pattern: "last year", "this year"
+    if not date_filter:
+        from datetime import datetime
+        current_year = datetime.now().year
+        
+        if 'last year' in q_lower:
+            # Find action word before "last year"
+            last_year_match = re.search(r'\b(hired|terminated|started|joined|left)\s+last\s+year\b', q_lower)
+            action = last_year_match.group(1) if last_year_match else 'hired'
+            
+            column_hints = {'hired': 'hire_date', 'started': 'hire_date', 'joined': 'hire_date',
+                           'terminated': 'termination_date', 'left': 'termination_date'}
+            
+            date_filter = {
+                'column_hint': column_hints.get(action, 'hire_date'),
+                'year': current_year - 1,
+                'operator': 'year_equals',
+                'action': action,
+            }
+        elif 'this year' in q_lower:
+            this_year_match = re.search(r'\b(hired|terminated|started|joined|left)\s+this\s+year\b', q_lower)
+            action = this_year_match.group(1) if this_year_match else 'hired'
+            
+            column_hints = {'hired': 'hire_date', 'started': 'hire_date', 'joined': 'hire_date',
+                           'terminated': 'termination_date', 'left': 'termination_date'}
+            
+            date_filter = {
+                'column_hint': column_hints.get(action, 'hire_date'),
+                'year': current_year,
+                'operator': 'year_equals',
+                'action': action,
+            }
+    
     return ParsedIntent(
         intent=intent,
         domain=domain,
         raw_question=question,
         filter_hints=filter_hints,
+        date_filter=date_filter,
         intent_confidence=intent_confidence,
         domain_confidence=domain_confidence
     )
@@ -335,6 +491,9 @@ class QueryResolver:
         
         elif parsed.intent == QueryIntent.COUNT:
             return self._resolve_generic_count(project, parsed, result)
+        
+        elif parsed.intent == QueryIntent.SUM:
+            return self._resolve_sum(project, parsed, result)
         
         elif parsed.intent == QueryIntent.LIST:
             return self._resolve_list(project, parsed, result)
@@ -434,6 +593,18 @@ class QueryResolver:
                             f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
                         )
         
+        # LOOKUP 6: Resolve date filter if present
+        date_filter_clause = None
+        if parsed.date_filter:
+            date_col = self._find_date_column(project, table_name, parsed.date_filter['column_hint'])
+            if date_col:
+                year = parsed.date_filter['year']
+                # Use EXTRACT for year comparison (DuckDB compatible)
+                date_filter_clause = f'EXTRACT(YEAR FROM TRY_CAST("{date_col}" AS DATE)) = {year}'
+                result.resolution_path.append(f"DATE FILTER: {date_col} year = {year}")
+            else:
+                result.resolution_path.append(f"DATE FILTER: Could not find date column for '{parsed.date_filter['column_hint']}'")
+        
         # Check if we need cross-table JOINs
         needs_join = any(not f['same_table'] for f in dimension_filters)
         join_tables = set(f['table'] for f in dimension_filters if not f['same_table'])
@@ -476,6 +647,11 @@ class QueryResolver:
                     alias = f'd{alias_idx}'
                     where_clauses.append(f'TRIM({alias}."{dim_filter["column"]}") IN ({codes_sql})')
             
+            # Date filter (on primary table)
+            if date_filter_clause:
+                # Adjust for table alias
+                where_clauses.append(date_filter_clause.replace('"', 'p."', 1))
+            
             where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
             
             result.sql = f'''SELECT COUNT(DISTINCT p."employee_number") as headcount 
@@ -495,6 +671,10 @@ WHERE {where_sql}'''
             for dim_filter in dimension_filters:
                 codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
                 where_clauses.append(f'TRIM("{dim_filter["column"]}") IN ({codes_sql})')
+            
+            # Date filter
+            if date_filter_clause:
+                where_clauses.append(date_filter_clause)
             
             if where_clauses:
                 where_sql = ' AND '.join(where_clauses)
@@ -1402,6 +1582,133 @@ WHERE {where_sql}'''
                 except Exception as e:
                     logger.debug(f"[RESOLVER] Error searching org table: {e}")
             
+            # =================================================================
+            # FALLBACK 1: Geographic normalization (Texas → TX)
+            # =================================================================
+            if not best_match:
+                geo_info = normalize_geographic_term(filter_hint)
+                if geo_info:
+                    geo_code = geo_info['code']
+                    geo_type = geo_info['type']
+                    logger.warning(f"[RESOLVER] Geographic normalization: '{filter_hint}' → {geo_code} ({geo_type})")
+                    
+                    # Search for codes that START WITH the geographic code
+                    # e.g., "TX" matches "TX - Houston", "TX01", etc.
+                    for hub in hubs:
+                        hub_table = hub.get('table', '')
+                        hub_column = hub.get('column', '')
+                        semantic_type = hub.get('semantic_type', '')
+                        
+                        # Skip virtual hubs
+                        if hub_table.startswith('_virtual_'):
+                            continue
+                        
+                        # Only check location-related hubs for geographic terms
+                        location_indicators = ['location', 'state', 'province', 'region', 'country', 'address', 'site']
+                        is_location_hub = any(ind in semantic_type.lower() or ind in hub_table.lower() for ind in location_indicators)
+                        
+                        if not is_location_hub:
+                            continue
+                        
+                        desc_column = self._find_description_column(hub_table, hub_column)
+                        if not desc_column:
+                            continue
+                        
+                        try:
+                            # Search for codes/descriptions that start with the geo code
+                            # Pattern: "TX", "TX -", "TX01", "TX-", etc.
+                            results = self.conn.execute(f'''
+                                SELECT TRIM("{hub_column}") as code, "{desc_column}" as description
+                                FROM "{hub_table}"
+                                WHERE UPPER(TRIM("{hub_column}")) LIKE ?
+                                   OR UPPER("{desc_column}") LIKE ?
+                                   OR UPPER(TRIM("{hub_column}")) = ?
+                            ''', [f'{geo_code}%', f'{geo_code} %', geo_code]).fetchall()
+                            
+                            if results:
+                                codes = [str(r[0]) for r in results if r[0]]
+                                descriptions = [str(r[1]) for r in results if r[1]]
+                                
+                                logger.warning(f"[RESOLVER] Geographic prefix match: {geo_code} found {len(results)} in {hub_table[-30:]}: {codes[:3]}")
+                                
+                                # This is a strong match (geographic normalization worked)
+                                match_quality = len(results) + 200  # High priority for geo matches
+                                
+                                if match_quality > best_match_count:
+                                    best_match_count = match_quality
+                                    best_match = {
+                                        'hub_table': hub_table,
+                                        'hub_column': hub_column,
+                                        'semantic_type': semantic_type,
+                                        'codes': codes,
+                                        'matched_descriptions': descriptions[:5],
+                                        'geo_normalized': True,
+                                        'geo_code': geo_code,
+                                        'geo_type': geo_type,
+                                    }
+                                    break  # Stop after first location hub match
+                                    
+                        except Exception as e:
+                            logger.debug(f"[RESOLVER] Error in geo prefix search: {e}")
+                            continue
+            
+            # =================================================================
+            # FALLBACK 2: Prefix matching on ALL hubs (for partial codes)
+            # =================================================================
+            # If still no match and hint is 2-4 chars, try prefix match
+            if not best_match and 2 <= len(filter_hint) <= 4:
+                hint_upper = filter_hint.upper()
+                logger.warning(f"[RESOLVER] Trying prefix match for '{hint_upper}'")
+                
+                for hub in hubs:
+                    hub_table = hub.get('table', '')
+                    hub_column = hub.get('column', '')
+                    semantic_type = hub.get('semantic_type', '')
+                    
+                    if hub_table.startswith('_virtual_'):
+                        continue
+                    
+                    desc_column = self._find_description_column(hub_table, hub_column)
+                    
+                    try:
+                        # Search for codes that start with the hint
+                        if desc_column:
+                            results = self.conn.execute(f'''
+                                SELECT TRIM("{hub_column}") as code, "{desc_column}" as description
+                                FROM "{hub_table}"
+                                WHERE UPPER(TRIM("{hub_column}")) LIKE ?
+                            ''', [f'{hint_upper}%']).fetchall()
+                        else:
+                            results = self.conn.execute(f'''
+                                SELECT TRIM("{hub_column}") as code, NULL as description
+                                FROM "{hub_table}"
+                                WHERE UPPER(TRIM("{hub_column}")) LIKE ?
+                            ''', [f'{hint_upper}%']).fetchall()
+                        
+                        if results:
+                            codes = [str(r[0]) for r in results if r[0]]
+                            descriptions = [str(r[1]) for r in results if r[1]] if desc_column else []
+                            
+                            logger.warning(f"[RESOLVER] Prefix match: '{hint_upper}' found {len(results)} in {hub_table[-30:]}: {codes[:3]}")
+                            
+                            match_quality = len(results) + 50
+                            
+                            if match_quality > best_match_count:
+                                best_match_count = match_quality
+                                best_match = {
+                                    'hub_table': hub_table,
+                                    'hub_column': hub_column,
+                                    'semantic_type': semantic_type,
+                                    'codes': codes,
+                                    'matched_descriptions': descriptions[:5] if descriptions else [],
+                                    'prefix_matched': True,
+                                }
+                                break  # Take first match
+                                
+                    except Exception as e:
+                        logger.debug(f"[RESOLVER] Error in prefix search: {e}")
+                        continue
+            
             if best_match:
                 logger.info(f"[RESOLVER] Resolved '{filter_hint}' -> {best_match['semantic_type']}: {best_match['codes'][:3]}...")
             else:
@@ -1862,12 +2169,72 @@ WHERE {where_sql}'''
     def _resolve_list(self, project: str, parsed: ParsedIntent,
                       result: ResolvedQuery) -> ResolvedQuery:
         """
-        Resolve a LIST query.
+        Resolve a LIST query with dimension filtering.
+        
+        Enhanced to apply filter_hints as WHERE clauses.
+        e.g., "List employees in Pasadena" → SELECT * FROM employees WHERE location_code IN ('PSA01', 'PSA02')
         """
         domain = parsed.domain.value
         
         # LOOKUP table for this domain
-        table = self._lookup_table(project, domain, 'config')
+        if domain == 'demographics':
+            table = self._lookup_table(project, domain, 'master')
+        else:
+            table = self._lookup_table(project, domain, 'config')
+            if not table:
+                table = self._lookup_table(project, domain, 'master')
+        
+        if not table:
+            result.explanation = f"Could not find table for domain '{domain}'"
+            return result
+        
+        table_name = table['table_name']
+        result.table_name = table_name
+        
+        # Process filter hints to build WHERE clause
+        where_clauses = []
+        
+        if parsed.filter_hints:
+            result.resolution_path.append(f"LIST FILTER HINTS: {parsed.filter_hints}")
+            
+            for hint in parsed.filter_hints:
+                resolved = self._resolve_dimension_filter(project, hint)
+                if resolved:
+                    # Find which column in this table matches the semantic type
+                    column_info = self._find_employee_column_for_dimension(
+                        project, table_name, resolved['semantic_type']
+                    )
+                    if column_info and column_info['same_table']:
+                        codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
+                        where_clauses.append(f'TRIM("{column_info["column"]}") IN ({codes_sql})')
+                        result.resolution_path.append(
+                            f"RESOLVED: '{hint}' -> {column_info['column']} IN {resolved['codes'][:3]}..."
+                        )
+        
+        # Build SQL
+        if where_clauses:
+            where_sql = ' AND '.join(where_clauses)
+            result.sql = f'SELECT * FROM "{table_name}" WHERE {where_sql} LIMIT 100'
+            result.explanation = f"Listing rows from {table_name} where {' and '.join(parsed.filter_hints)}"
+        else:
+            result.sql = f'SELECT * FROM "{table_name}" LIMIT 100'
+            result.explanation = f"Listing rows from {table_name}"
+        
+        result.success = True
+        return result
+    
+    def _resolve_sum(self, project: str, parsed: ParsedIntent,
+                     result: ResolvedQuery) -> ResolvedQuery:
+        """
+        Resolve a SUM query (e.g., "total earnings", "sum of pay").
+        
+        Detects the numeric column to sum from the domain and question keywords.
+        For earnings domain: sums amount, gross, or rate columns.
+        """
+        domain = parsed.domain.value
+        
+        # LOOKUP table for this domain
+        table = self._lookup_table(project, domain, 'transaction')
         if not table:
             table = self._lookup_table(project, domain, 'master')
         
@@ -1877,10 +2244,174 @@ WHERE {where_sql}'''
         
         table_name = table['table_name']
         result.table_name = table_name
-        result.sql = f'SELECT * FROM "{table_name}" LIMIT 100'
-        result.explanation = f"Listing rows from {table_name}"
+        
+        # Find summable column (numeric column with amount/rate/total in name)
+        sum_column = self._find_sum_column(project, table_name, parsed.raw_question)
+        
+        if not sum_column:
+            result.explanation = f"Could not find numeric column to sum in {table_name}"
+            return result
+        
+        result.resolution_path.append(f"SUM column: {sum_column}")
+        
+        # Process filter hints
+        where_clauses = []
+        
+        if parsed.filter_hints:
+            for hint in parsed.filter_hints:
+                resolved = self._resolve_dimension_filter(project, hint)
+                if resolved:
+                    column_info = self._find_employee_column_for_dimension(
+                        project, table_name, resolved['semantic_type']
+                    )
+                    if column_info and column_info['same_table']:
+                        codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
+                        where_clauses.append(f'TRIM("{column_info["column"]}") IN ({codes_sql})')
+        
+        # Build SQL
+        if where_clauses:
+            where_sql = ' AND '.join(where_clauses)
+            result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}" WHERE {where_sql}'
+            result.explanation = f"Sum of {sum_column} from {table_name} where {' and '.join(parsed.filter_hints)}"
+        else:
+            result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}"'
+            result.explanation = f"Sum of {sum_column} from {table_name}"
+        
         result.success = True
         return result
+    
+    def _find_sum_column(self, project: str, table_name: str, question: str) -> Optional[str]:
+        """
+        Find the best column to SUM based on question context.
+        
+        Priority:
+        1. Column mentioned in question (e.g., "total earnings" → earnings column)
+        2. Column with 'amount', 'total', 'sum' in name
+        3. Column with 'rate', 'gross', 'net' in name
+        4. Any numeric column with high values
+        """
+        try:
+            # Get column profiles for this table
+            results = self.conn.execute("""
+                SELECT column_name, inferred_type, distinct_count
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                  AND LOWER(table_name) = LOWER(?)
+            """, [project, table_name]).fetchall()
+            
+            if not results:
+                return None
+            
+            q_lower = question.lower()
+            
+            # Priority 1: Column name mentioned in question
+            sum_keywords = ['amount', 'total', 'sum', 'earnings', 'pay', 'gross', 'net', 'rate', 'wage', 'salary']
+            
+            for col_name, inferred_type, distinct_count in results:
+                col_lower = col_name.lower()
+                
+                # Check if column name appears in question
+                for kw in sum_keywords:
+                    if kw in q_lower and kw in col_lower:
+                        logger.info(f"[RESOLVER] Found SUM column by question match: {col_name}")
+                        return col_name
+            
+            # Priority 2: Column with amount/total in name
+            for col_name, inferred_type, distinct_count in results:
+                col_lower = col_name.lower()
+                if any(kw in col_lower for kw in ['amount', 'total', 'sum']):
+                    logger.info(f"[RESOLVER] Found SUM column by name pattern: {col_name}")
+                    return col_name
+            
+            # Priority 3: Column with rate/gross/net
+            for col_name, inferred_type, distinct_count in results:
+                col_lower = col_name.lower()
+                if any(kw in col_lower for kw in ['rate', 'gross', 'net', 'hours']):
+                    logger.info(f"[RESOLVER] Found SUM column by rate pattern: {col_name}")
+                    return col_name
+            
+            # Priority 4: Any numeric-looking column (high cardinality)
+            for col_name, inferred_type, distinct_count in results:
+                if inferred_type in ['numeric', 'decimal', 'float', 'integer'] or distinct_count > 100:
+                    col_lower = col_name.lower()
+                    # Skip ID columns
+                    if not any(skip in col_lower for skip in ['_id', 'code', 'number', 'date', 'status']):
+                        logger.info(f"[RESOLVER] Found SUM column by numeric inference: {col_name}")
+                        return col_name
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"[RESOLVER] Error finding SUM column: {e}")
+            return None
+    
+    def _find_date_column(self, project: str, table_name: str, column_hint: str) -> Optional[str]:
+        """
+        Find a date column matching the hint.
+        
+        Args:
+            project: Project name
+            table_name: Table to search
+            column_hint: Hint like 'hire_date', 'termination_date', etc.
+            
+        Returns:
+            Actual column name if found, None otherwise.
+        """
+        try:
+            # Get columns for this table
+            results = self.conn.execute("""
+                SELECT column_name
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                  AND LOWER(table_name) = LOWER(?)
+            """, [project, table_name]).fetchall()
+            
+            if not results:
+                # Fallback: query table directly
+                try:
+                    cursor = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1')
+                    if cursor.description:
+                        results = [(desc[0],) for desc in cursor.description]
+                except:
+                    return None
+            
+            columns = [r[0] for r in results]
+            hint_parts = column_hint.lower().replace('_', ' ').split()
+            
+            # Priority 1: Exact match (hire_date matches hire_date)
+            for col in columns:
+                if col.lower() == column_hint.lower():
+                    logger.info(f"[RESOLVER] Found date column exact match: {col}")
+                    return col
+            
+            # Priority 2: Contains all hint parts (hire_date matches original_hire_date)
+            for col in columns:
+                col_lower = col.lower().replace('_', ' ')
+                if all(part in col_lower for part in hint_parts):
+                    logger.info(f"[RESOLVER] Found date column by parts: {col}")
+                    return col
+            
+            # Priority 3: Contains main keyword (hire matches any_hire_something_date)
+            main_keyword = hint_parts[0] if hint_parts else column_hint
+            for col in columns:
+                col_lower = col.lower()
+                if main_keyword in col_lower and 'date' in col_lower:
+                    logger.info(f"[RESOLVER] Found date column by keyword: {col}")
+                    return col
+            
+            # Priority 4: Any date column as fallback
+            for col in columns:
+                col_lower = col.lower()
+                if 'date' in col_lower and 'update' not in col_lower and 'create' not in col_lower:
+                    logger.info(f"[RESOLVER] Found date column fallback: {col}")
+                    return col
+            
+            logger.warning(f"[RESOLVER] No date column found for hint '{column_hint}' in {table_name}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"[RESOLVER] Error finding date column: {e}")
+            return None
 
 
 # =============================================================================
