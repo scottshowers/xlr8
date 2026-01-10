@@ -286,6 +286,17 @@ def parse_intent(question: str) -> ParsedIntent:
         domain = domain_matches[0][0]
         domain_confidence = 1.0
     
+    # Special case: SUM/total queries should prioritize numeric domains over EMPLOYEES
+    # "total earnings for employees" should be EARNINGS, not EMPLOYEES
+    numeric_domains = {EntityDomain.EARNINGS, EntityDomain.DEDUCTIONS, EntityDomain.TAXES, EntityDomain.TIME}
+    if intent == QueryIntent.SUM and domain == EntityDomain.EMPLOYEES:
+        # Check if any numeric domain also matched
+        for dom, _ in domain_matches:
+            if dom in numeric_domains:
+                domain = dom
+                logger.debug(f"[PARSER] SUM query: overriding EMPLOYEES with {dom.value}")
+                break
+    
     # Special case: "headcount" implies EMPLOYEES + COUNT
     if 'headcount' in q_lower or 'head count' in q_lower:
         intent = QueryIntent.COUNT
@@ -2010,6 +2021,9 @@ WHERE {where_sql}'''
         
         For domain='demographics', table_type='master':
         → Find reality table with entity_type containing 'personal'
+        
+        For domain='earnings', table_type='transaction':
+        → Find reality table with entity_type containing 'earnings' and has 'amount' column
         """
         try:
             # Check cache first
@@ -2042,6 +2056,40 @@ WHERE {where_sql}'''
                     self._table_classifications_cache[cache_key] = table_info
                     logger.info(f"[RESOLVER] LOOKUP table: domain={domain} → {result[0]} (entity_type={result[1]})")
                     return table_info
+            
+            # Earnings domain - find table with employee data AND numeric columns
+            if domain == 'earnings' and table_type in ('transaction', 'master'):
+                # Look for earnings table with employee_number (transactional data)
+                # Prefer larger tables (more transaction data)
+                result = self.conn.execute("""
+                    SELECT sm.table_name, sm.entity_type, sm.row_count, sm.column_count, sm.display_name
+                    FROM _schema_metadata sm
+                    WHERE LOWER(sm.project) = LOWER(?)
+                      AND sm.truth_type = 'reality'
+                      AND sm.is_current = TRUE
+                      AND (LOWER(sm.entity_type) LIKE '%earning%' OR LOWER(sm.table_name) LIKE '%earning%')
+                      AND sm.row_count > 100
+                    ORDER BY sm.row_count DESC
+                    LIMIT 1
+                """, [project]).fetchone()
+                
+                if result:
+                    # Verify this table has employee_number and a numeric column
+                    columns = self._get_table_columns(result[0])
+                    has_employee = any('employee' in c.lower() for c in columns)
+                    has_amount = any(kw in c.lower() for c in columns for kw in ['amount', 'total', 'rate', 'gross', 'net'])
+                    
+                    if has_employee or has_amount:
+                        table_info = {
+                            'table_name': result[0],
+                            'entity_type': result[1],
+                            'row_count': result[2],
+                            'column_count': result[3],
+                            'display_name': result[4] or result[0]
+                        }
+                        self._table_classifications_cache[cache_key] = table_info
+                        logger.info(f"[RESOLVER] LOOKUP earnings table: {result[0]} (rows={result[2]}, has_amount={has_amount})")
+                        return table_info
             
             # Try _table_classifications if it exists (for other domains)
             try:
@@ -2299,8 +2347,13 @@ WHERE {where_sql}'''
         """
         Resolve a LIST query with dimension filtering.
         
-        Enhanced to apply filter_hints as WHERE clauses.
-        e.g., "List employees in Pasadena" → SELECT * FROM employees WHERE location_code IN ('PSA01', 'PSA02')
+        Enhanced with:
+        - Geographic fallback (Texas → TX in stateprovince column)
+        - Status filtering for employee tables (active only by default)
+        - Proper column selection (key columns, not SELECT *)
+        
+        e.g., "List employees in Texas" → SELECT employee_number, name, ... 
+              FROM employees WHERE stateprovince = 'TX' AND status = 'A' LIMIT 100
         """
         domain = parsed.domain.value
         
@@ -2318,38 +2371,103 @@ WHERE {where_sql}'''
         
         table_name = table['table_name']
         result.table_name = table_name
+        result.resolution_path.append(f"LOOKUP: Found table '{table_name}' for domain '{domain}'")
         
         # Process filter hints to build WHERE clause
         where_clauses = []
+        is_employee_table = domain == 'demographics' or 'employee' in table_name.lower() or 'personal' in table_name.lower()
         
+        # Add status filter for employee tables
+        if is_employee_table:
+            status_column = self._lookup_status_column(project, table_name)
+            if status_column:
+                active_values = self._infer_active_status_values(status_column.get('distinct_values', []))
+                if active_values:
+                    values_sql = ', '.join(f"'{v}'" for v in active_values)
+                    where_clauses.append(f'"{status_column["column_name"]}" IN ({values_sql})')
+                    result.resolution_path.append(f"STATUS: Active filter {status_column['column_name']} IN {active_values}")
+        
+        # Process dimension filter hints (with geographic fallback)
         if parsed.filter_hints:
-            result.resolution_path.append(f"LIST FILTER HINTS: {parsed.filter_hints}")
+            result.resolution_path.append(f"FILTER HINTS: {parsed.filter_hints}")
             
             for hint in parsed.filter_hints:
-                resolved = self._resolve_dimension_filter(project, hint)
-                if resolved:
-                    # Find which column in this table matches the semantic type
-                    column_info = self._find_employee_column_for_dimension(
-                        project, table_name, resolved['semantic_type']
-                    )
-                    if column_info and column_info['same_table']:
-                        codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
-                        where_clauses.append(f'TRIM("{column_info["column"]}") IN ({codes_sql})')
+                filter_added = False
+                
+                # PRIORITY 1: Geographic terms get direct column search first
+                geo_info = normalize_geographic_term(hint)
+                if geo_info and geo_info.get('type') in ('state', 'province', 'country'):
+                    geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
+                    if geo_filter:
+                        codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
+                        where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
                         result.resolution_path.append(
-                            f"RESOLVED: '{hint}' -> {column_info['column']} IN {resolved['codes'][:3]}..."
+                            f"DIRECT GEO: '{hint}' -> {geo_filter['column']} IN {geo_filter['codes']}"
+                        )
+                        filter_added = True
+                
+                # PRIORITY 2: Hub resolution
+                if not filter_added:
+                    resolved = self._resolve_dimension_filter(project, hint)
+                    if resolved:
+                        column_info = self._find_employee_column_for_dimension(
+                            project, table_name, resolved['semantic_type']
+                        )
+                        if column_info and column_info['same_table']:
+                            codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
+                            where_clauses.append(f'TRIM("{column_info["column"]}") IN ({codes_sql})')
+                            result.resolution_path.append(
+                                f"RESOLVED: '{hint}' -> {column_info['column']} IN {resolved['codes'][:3]}..."
+                            )
+                            filter_added = True
+                
+                # FALLBACK: Try direct geo filter if nothing else worked
+                if not filter_added:
+                    geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
+                    if geo_filter:
+                        codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
+                        where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
+                        result.resolution_path.append(
+                            f"DIRECT GEO (fallback): '{hint}' -> {geo_filter['column']} IN {geo_filter['codes']}"
                         )
         
-        # Build SQL
+        # Build SQL - select key columns, not SELECT *
+        key_columns = self._get_list_columns(project, table_name, is_employee_table)
+        columns_sql = ', '.join(f'"{c}"' for c in key_columns) if key_columns else '*'
+        
         if where_clauses:
             where_sql = ' AND '.join(where_clauses)
-            result.sql = f'SELECT * FROM "{table_name}" WHERE {where_sql} LIMIT 100'
-            result.explanation = f"Listing rows from {table_name} where {' and '.join(parsed.filter_hints)}"
+            result.sql = f'SELECT {columns_sql} FROM "{table_name}" WHERE {where_sql} LIMIT 100'
+            result.explanation = f"Listing {domain} from {table_name} with filters applied"
         else:
-            result.sql = f'SELECT * FROM "{table_name}" LIMIT 100'
-            result.explanation = f"Listing rows from {table_name}"
+            result.sql = f'SELECT {columns_sql} FROM "{table_name}" LIMIT 100'
+            result.explanation = f"Listing {domain} from {table_name}"
         
         result.success = True
         return result
+    
+    def _get_list_columns(self, project: str, table_name: str, is_employee: bool) -> List[str]:
+        """Get appropriate columns for a LIST query (avoid SELECT *)."""
+        try:
+            columns = self._get_table_columns(table_name)
+            if not columns:
+                return []
+            
+            if is_employee:
+                # For employee tables, prioritize key identifying columns
+                priority = ['employee_number', 'name', 'first_name', 'last_name', 
+                           'home_company_code', 'job_code', 'job_title', 'department',
+                           'location', 'location_code', 'stateprovince', 'city',
+                           'employment_status_code', 'employee_type_code']
+                selected = [c for c in priority if c in [col.lower() for col in columns]]
+                # Map back to original case
+                cols_map = {c.lower(): c for c in columns}
+                return [cols_map[c] for c in selected if c in cols_map][:12]
+            else:
+                # For config tables, return first 10 columns
+                return columns[:10]
+        except:
+            return []
     
     def _resolve_sum(self, project: str, parsed: ParsedIntent,
                      result: ResolvedQuery) -> ResolvedQuery:
