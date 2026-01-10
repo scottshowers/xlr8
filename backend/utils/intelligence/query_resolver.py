@@ -754,9 +754,10 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             
             if org_level_info:
                 # Use org_level filtered lookup
+                # NOTE: TRIM needed because employee data often has padded org codes
                 org_table = org_level_info['table']
                 org_level_num = org_level_info['level']
-                hub_join = f'LEFT JOIN "{org_table}" h ON t."{group_column}" = h."code" AND h."level" = \'{org_level_num}\''
+                hub_join = f'LEFT JOIN "{org_table}" h ON TRIM(t."{group_column}") = TRIM(h."code") AND h."level" = \'{org_level_num}\''
                 hub_select = ', h."description" as description'
                 hub_group = ', h."description"'
                 desc_column = 'description'
@@ -764,7 +765,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
                 desc_column = self._find_description_column(hub_table)
                 if desc_column:
-                    hub_join = f'LEFT JOIN "{hub_table}" h ON t."{group_column}" = h."{hub_column}"'
+                    # TRIM both sides - UKG data often has padded codes
+                    hub_join = f'LEFT JOIN "{hub_table}" h ON TRIM(t."{group_column}") = TRIM(h."{hub_column}")'
                     hub_select = f', h."{desc_column}" as description'
                     hub_group = f', h."{desc_column}"'
             
@@ -896,9 +898,10 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                 return self._run_breakdown_query(dimension_table, dimension_column, hub_table=hub_table, hub_column=hub_column, project=project, limit=limit)
             
             # Build JOIN clause for all shared hub columns
+            # TRIM both sides - UKG data often has padded codes/numbers
             join_conditions = []
             for primary_col, dimension_col in join_keys:
-                join_conditions.append(f'p."{primary_col}" = d."{dimension_col}"')
+                join_conditions.append(f'TRIM(p."{primary_col}") = TRIM(d."{dimension_col}")')
             
             join_clause = ' AND '.join(join_conditions)
             
@@ -916,9 +919,10 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             
             if org_level_info:
                 # Use org_level filtered lookup
+                # NOTE: TRIM needed because employee data often has padded org codes
                 org_table = org_level_info['table']
                 org_level_num = org_level_info['level']
-                hub_join = f'LEFT JOIN "{org_table}" h ON d."{dimension_column}" = h."code" AND h."level" = \'{org_level_num}\''
+                hub_join = f'LEFT JOIN "{org_table}" h ON TRIM(d."{dimension_column}") = TRIM(h."code") AND h."level" = \'{org_level_num}\''
                 hub_select = ', h."description" as description'
                 hub_group = ', h."description"'
                 desc_column = 'description'
@@ -926,7 +930,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
                 desc_column = self._find_description_column(hub_table)
                 if desc_column:
-                    hub_join = f'LEFT JOIN "{hub_table}" h ON d."{dimension_column}" = h."{hub_column}"'
+                    # TRIM both sides - UKG data often has padded codes
+                    hub_join = f'LEFT JOIN "{hub_table}" h ON TRIM(d."{dimension_column}") = TRIM(h."{hub_column}")'
                     hub_select = f', h."{desc_column}" as description'
                     hub_group = f', h."{desc_column}"'
             
