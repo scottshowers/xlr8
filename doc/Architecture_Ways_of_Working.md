@@ -490,16 +490,25 @@ All of these must work before moving on:
 ⬜ Response includes insights, not just data formatting
 ```
 
-### A.5.6 Cleanup Tasks (After Query Engine Works)
+### A.5.6 Cleanup Tasks (After Query Engine Works) ✅ COMPLETE (Jan 10, 2026)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| Remove relationship detector | `backend/utils/relationship_detector.py` - no longer needed | ⬜ TODO |
-| Remove relationship API | `backend/routers/relationships.py` - if exists | ⬜ TODO |
-| Remove relationship UI | Frontend relationship components | ⬜ TODO |
-| Clean up dead relationship code | Any pairwise relationship logic | ⬜ TODO |
+| Remove relationship detector | `backend/utils/relationship_detector.py` - KEPT as thin wrapper | ✅ Kept (harmless) |
+| Clean up dead imports | `project_intelligence.py`, `semantic_vocabulary.py` | ✅ Done |
+| Remove relationship UI | `DataExplorer.jsx` - removed DataModelPanel, RelationshipEditor | ✅ Done |
+| Simplify DataModelPage | Keep Data Integrity, redirect to Context Graph | ✅ Done |
 
-**Why:** We moved to Context Graph (hub/spoke). The old pairwise relationship system is dead code.
+**Files Changed:**
+- `backend/utils/project_intelligence.py` - Removed dead relationship_detector import
+- `backend/utils/semantic_vocabulary.py` - Removed docstring reference
+- `frontend/src/pages/DataExplorer.jsx` - Removed ~1100 lines (statusConfig, DataModelPanel, RelationshipEditor, relationships tab)
+- `frontend/src/pages/DataModelPage.jsx` - Simplified from 598 to 347 lines
+
+**Result:** 
+- DataExplorer: 2226 → 1129 lines (~50% reduction)
+- DataModelPage: 598 → 347 lines (~42% reduction)
+- Context Graph is now the single source of truth for table relationships
 
 ---
 
