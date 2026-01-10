@@ -1165,9 +1165,18 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         reality_context = data_info.get('reality_context')
         
         if query_type == 'count' and reality_context:
-            # COUNT-SPECIFIC PROMPT - SHOW all data, don't offer
+            # COUNT-SPECIFIC PROMPT - Use actual SQL result, not pre-computed total
             breakdowns = reality_context.get('breakdowns', {})
-            answer = reality_context.get('answer', 0)
+            
+            # CRITICAL: Use the actual SQL result, not the pre-computed context total
+            # data_info['result_value'] is from the SQL query (e.g., 1,636 for Texas)
+            # reality_context['answer'] is the pre-computed total (e.g., 3,976 all active)
+            actual_result = data_info.get('result_value', reality_context.get('answer', 0))
+            try:
+                actual_result = int(actual_result) if actual_result else 0
+            except (ValueError, TypeError):
+                actual_result = 0
+            
             total = reality_context.get('total_in_table', 0)
             
             # Build breakdown text - SHOW ALL of them
@@ -1201,40 +1210,34 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
 
 The client asked: "{question}"
 
-ANSWER: {answer:,} active employees (out of {total:,} total records)
+ANSWER: {actual_result:,} employees match the query (out of {total:,} total records)
 
-BREAKDOWNS (SHOW ALL OF THESE):
+BREAKDOWNS (reference only - these are for ALL employees, not filtered):
 {breakdown_section}
 
-CONFIGURATION GAPS (SHOW ALL OF THESE):
+CONFIGURATION GAPS:
 {gap_section}
 
-YOUR TASK - FORMAT THIS DATA:
-1. State the answer clearly (the {answer:,} number)
-2. SHOW every breakdown listed above in a clear format
-3. SHOW every gap listed above  
-4. Note if the terminated count seems high (often means historical/conversion data)
-5. End with 2-3 specific insights or observations
+YOUR TASK - Present the answer clearly:
+1. State the answer: {actual_result:,} employees
+2. If a filter was applied (Texas, TNC, etc.), acknowledge it
+3. Provide 2-3 relevant observations from the breakdowns
+4. Only mention configuration gaps if relevant to the question
 
 DO NOT:
-- Ask "would you like to see X?" - SHOW X instead
-- Offer to do things - just do them
+- Say "3,976" or any number other than {actual_result:,} as the main answer
+- Ask "would you like to see X?" - just provide the insight
 - Add disclaimers about data accuracy
 
 OUTPUT FORMAT:
 
-**{answer:,} active employees**
+**{actual_result:,} employees** [matching the filter if any]
 
-**By [Dimension]:** [Show the breakdown data]
-**By [Dimension]:** [Show the breakdown data]
-...
+**Key Context:**
+• [Relevant insight from breakdowns]
+• [Another observation]
 
-**Configuration Gaps:**
-[Show each gap with configured vs in-use counts]
-
-**Key Observations:**
-• [Specific insight from the data]
-• [Another observation]"""
+**Configuration Notes:** [Only if gaps are relevant]"""
 
         elif pattern:
             # Use pattern-specific guidance for non-count queries
