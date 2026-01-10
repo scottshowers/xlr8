@@ -592,6 +592,15 @@ class QueryResolver:
                         result.resolution_path.append(
                             f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
                         )
+                else:
+                    # FALLBACK: Try direct column search for geographic terms
+                    # This handles cases where state/province columns exist but aren't in context graph
+                    geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
+                    if geo_filter:
+                        dimension_filters.append(geo_filter)
+                        result.resolution_path.append(
+                            f"DIRECT GEO: '{hint}' -> {geo_filter['table']}.{geo_filter['column']} IN {geo_filter['codes']}"
+                        )
         
         # LOOKUP 6: Resolve date filter if present
         date_filter_clause = None
@@ -1780,6 +1789,103 @@ WHERE {where_sql}'''
             
         except Exception as e:
             logger.warning(f"[RESOLVER] Error finding employee column for {semantic_type}: {e}")
+            return None
+    
+    def _try_direct_geographic_filter(self, project: str, employee_table: str, hint: str) -> Optional[Dict]:
+        """
+        Fallback: Try to find a direct state/province column in the employee table
+        when hub resolution fails.
+        
+        This handles cases where:
+        - Employee table has a 'stateprovince', 'state', or 'work_state' column
+        - But there's no hub/spoke relationship in the context graph
+        - The user asks "employees in Texas" and we need to filter on 'TX'
+        
+        Args:
+            project: Project name
+            employee_table: The employee table being queried
+            hint: The filter hint (e.g., "texas", "california")
+            
+        Returns:
+            Dict with filter info if found, None otherwise
+        """
+        try:
+            # First, check if this is a geographic term
+            geo_info = normalize_geographic_term(hint)
+            if not geo_info:
+                return None
+            
+            geo_code = geo_info['code']
+            geo_type = geo_info['type']
+            
+            logger.warning(f"[RESOLVER] Trying direct geo filter: '{hint}' -> {geo_code} ({geo_type})")
+            
+            # Get columns from the employee table
+            columns = self._get_table_columns(employee_table)
+            if not columns:
+                return None
+            
+            cols_lower = {c.lower(): c for c in columns}
+            
+            # Look for state/province columns (common patterns)
+            state_column_patterns = [
+                'stateprovince', 'state_province', 'state',
+                'work_state', 'workstate', 'home_state',
+                'province', 'region', 'state_code', 'province_code'
+            ]
+            
+            matched_column = None
+            for pattern in state_column_patterns:
+                if pattern in cols_lower:
+                    matched_column = cols_lower[pattern]
+                    break
+            
+            if not matched_column:
+                # Also try partial matches
+                for col_lower, col_original in cols_lower.items():
+                    if 'state' in col_lower or 'province' in col_lower:
+                        # Skip columns that are clearly IDs or codes for other things
+                        if not any(skip in col_lower for skip in ['_id', 'status', 'tax_state']):
+                            matched_column = col_original
+                            break
+            
+            if not matched_column:
+                logger.warning(f"[RESOLVER] No state/province column found in {employee_table[-30:]}")
+                return None
+            
+            logger.warning(f"[RESOLVER] Found state column: {matched_column}")
+            
+            # Verify the geo_code exists in this column
+            try:
+                result = self.conn.execute(f'''
+                    SELECT COUNT(*) FROM "{employee_table}"
+                    WHERE UPPER(TRIM("{matched_column}")) = ?
+                ''', [geo_code]).fetchone()
+                
+                count = result[0] if result else 0
+                if count == 0:
+                    logger.warning(f"[RESOLVER] No rows found with {matched_column}='{geo_code}'")
+                    return None
+                    
+                logger.warning(f"[RESOLVER] Direct geo match: {count} rows with {matched_column}='{geo_code}'")
+                
+                return {
+                    'column': matched_column,
+                    'table': employee_table,
+                    'same_table': True,
+                    'codes': [geo_code],
+                    'hint': hint,
+                    'semantic_type': f'{geo_type}_code',
+                    'descriptions': [geo_info['name']],
+                    'direct_geo_match': True
+                }
+                
+            except Exception as e:
+                logger.warning(f"[RESOLVER] Error verifying geo code: {e}")
+                return None
+                
+        except Exception as e:
+            logger.warning(f"[RESOLVER] Error in direct geographic filter: {e}")
             return None
     
     def _get_join_keys_from_context_graph(self, project: str, table_a: str, table_b: str) -> List[Tuple[str, str]]:
