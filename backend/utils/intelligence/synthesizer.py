@@ -948,6 +948,16 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         logger.warning(f"[SYNTHESIZE] _generate_response called, question: {question[:50]}")
         
         # =====================================================================
+        # v6: WORKFORCE SNAPSHOT - Return early, no LLM overlay needed
+        # =====================================================================
+        query_type = data_info.get('query_type', 'list')
+        if query_type == 'workforce_snapshot':
+            structured = data_info.get('structured_output', {})
+            if structured and structured.get('type') == 'workforce_snapshot':
+                logger.warning("[SYNTHESIZE] Workforce snapshot - returning formatted table")
+                return self._format_workforce_snapshot(structured)
+        
+        # =====================================================================
         # STEP 1: Generate Template Response (accurate data listing)
         # =====================================================================
         template_response = self._generate_template_response(
