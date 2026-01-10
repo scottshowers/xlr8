@@ -1,19 +1,17 @@
 /**
- * DataModelPage - Data Integrity + Relationship Review
+ * DataModelPage - Data Integrity
  * 
- * TWO SECTIONS:
- * 1. DATA INTEGRITY (top) - Shows table health, flags bad columns, header issues
- * 2. RELATIONSHIPS (bottom) - Only meaningful after data is clean
+ * Shows table health, flags bad columns, header issues.
+ * Relationship analysis has moved to Context Graph in Data Explorer.
  * 
- * Deploy to: frontend/src/components/DataModelPage.jsx
+ * Updated: January 10, 2026
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { 
-  CheckCircle, AlertTriangle, RefreshCw, Zap, ChevronDown, ChevronRight,
-  Database, Link2, Eye, EyeOff, X, Check, HelpCircle, AlertCircle,
-  Table2, Columns, FileWarning, CheckCircle2, XCircle, Loader2
+  RefreshCw, ChevronDown, ChevronRight, Database, Link2,
+  AlertCircle, Table2, FileWarning, CheckCircle2, Loader2
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -27,29 +25,11 @@ export default function DataModelPage({ embedded = false }) {
   const [expandedTables, setExpandedTables] = useState(new Set());
   const [tableProfiles, setTableProfiles] = useState({});
   const [loadingProfiles, setLoadingProfiles] = useState(new Set());
-  
-  // Relationships state
-  const [relLoading, setRelLoading] = useState(false);
-  const [analyzed, setAnalyzed] = useState(false);
-  const [relationships, setRelationships] = useState([]);
-  const [semanticTypes, setSemanticTypes] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [error, setError] = useState(null);
-  const [warnings, setWarnings] = useState([]);
-  
-  // UI state
-  const [showHighConfidence, setShowHighConfidence] = useState(false);
-  const [showNeedsReview, setShowNeedsReview] = useState(false);
 
-  // Separate relationships
-  const needsReview = relationships.filter(r => r.needs_review && !r.confirmed);
-  const autoMatched = relationships.filter(r => !r.needs_review || r.confirmed);
-
-  // Load both integrity and relationships on mount
+  // Load data integrity on mount
   useEffect(() => {
     if (activeProject?.name) {
       loadDataIntegrity();
-      loadExistingRelationships();
     }
   }, [activeProject?.name]);
 
@@ -112,96 +92,6 @@ export default function DataModelPage({ embedded = false }) {
     setExpandedTables(newSet);
   };
 
-  // ==================== RELATIONSHIPS ====================
-  const loadExistingRelationships = async () => {
-    if (!activeProject?.name) return;
-    
-    setRelLoading(true);
-    setError(null);
-    
-    try {
-      const res = await fetch(`${API_BASE}/api/data-model/relationships/${encodeURIComponent(activeProject.name)}`);
-      
-      if (!res.ok) throw new Error(`Failed to load: ${res.status}`);
-      
-      const data = await res.json();
-      
-      if (data.relationships && data.relationships.length > 0) {
-        setRelationships(data.relationships);
-        setSemanticTypes(data.semantic_types || []);
-        setStats(data.stats || null);
-        setWarnings(data.warnings || []);
-        setAnalyzed(true);
-      } else {
-        setStats(data.stats || null);
-        setWarnings(data.warnings || []);
-      }
-      
-    } catch (err) {
-      console.warn('No existing relationships:', err.message);
-    } finally {
-      setRelLoading(false);
-    }
-  };
-
-  const analyzeProject = async () => {
-    if (!activeProject?.name) return;
-    
-    setRelLoading(true);
-    setError(null);
-    
-    try {
-      const res = await fetch(`${API_BASE}/api/data-model/analyze/${encodeURIComponent(activeProject.name)}`, {
-        method: 'POST'
-      });
-      
-      if (!res.ok) throw new Error(`Analysis failed: ${res.status}`);
-      
-      const data = await res.json();
-      setRelationships(data.relationships || []);
-      setSemanticTypes(data.semantic_types || []);
-      setStats(data.stats || null);
-      setWarnings(data.warnings || []);
-      setAnalyzed(true);
-      
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setRelLoading(false);
-    }
-  };
-
-  const confirmRelationship = async (rel, confirmed) => {
-    try {
-      const res = await fetch(`${API_BASE}/api/data-model/relationships/${encodeURIComponent(activeProject.name)}/confirm`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          source_table: rel.source_table,
-          source_column: rel.source_column,
-          target_table: rel.target_table,
-          target_column: rel.target_column,
-          confirmed,
-          semantic_type: rel.semantic_type
-        })
-      });
-      
-      if (res.ok) {
-        setRelationships(prev => prev.map(r => {
-          if (r.source_table === rel.source_table && r.source_column === rel.source_column &&
-              r.target_table === rel.target_table && r.target_column === rel.target_column) {
-            return confirmed 
-              ? { ...r, confirmed: true, needs_review: false }
-              : null;
-          }
-          return r;
-        }).filter(Boolean));
-      }
-    } catch (err) {
-      console.error('Failed to confirm:', err);
-    }
-  };
-
   // ==================== RENDER ====================
   if (!activeProject) {
     return (
@@ -220,19 +110,19 @@ export default function DataModelPage({ embedded = false }) {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-gray-800">Data Model</h1>
-          <p className="text-sm text-gray-500">{activeProject.name} • Data integrity + relationships</p>
+          <p className="text-sm text-gray-500">{activeProject.name} • Data Integrity</p>
         </div>
         <button
-          onClick={() => { loadDataIntegrity(); analyzeProject(); }}
-          disabled={relLoading || integrityLoading}
+          onClick={() => loadDataIntegrity()}
+          disabled={integrityLoading}
           className="flex items-center gap-2 px-4 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 disabled:opacity-50"
         >
-          {(relLoading || integrityLoading) ? (
+          {integrityLoading ? (
             <Loader2 className="w-4 h-4 animate-spin" />
           ) : (
-            <Zap className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" />
           )}
-          Re-analyze
+          Refresh
         </button>
       </div>
 
@@ -243,7 +133,7 @@ export default function DataModelPage({ embedded = false }) {
             <Database className="w-5 h-5 text-blue-500" />
             <div>
               <h2 className="font-semibold text-gray-800">Data Integrity</h2>
-              <p className="text-xs text-gray-500">Verify tables loaded correctly before analyzing relationships</p>
+              <p className="text-xs text-gray-500">Verify tables loaded correctly</p>
             </div>
           </div>
           {integrityData && (
@@ -396,179 +286,32 @@ export default function DataModelPage({ embedded = false }) {
         </div>
       </div>
 
-      {/* ==================== RELATIONSHIPS SECTION ==================== */}
+      {/* ==================== CONTEXT GRAPH NOTICE ==================== */}
       <div className="bg-white rounded-xl border overflow-hidden">
         <div className="px-6 py-4 border-b bg-gray-50 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Link2 className="w-5 h-5 text-purple-500" />
             <div>
               <h2 className="font-semibold text-gray-800">Table Relationships</h2>
-              <p className="text-xs text-gray-500">Auto-detected JOIN keys between tables</p>
+              <p className="text-xs text-gray-500">Hub/spoke relationships for intelligent queries</p>
             </div>
-          </div>
-          <div className="text-sm text-gray-500">
-            {relationships.length} found
           </div>
         </div>
-
         <div className="p-6">
-          {hasIntegrityIssues && (
-            <div className="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
-              <AlertTriangle className="w-5 h-5 text-amber-500 mt-0.5" />
-              <div>
-                <div className="font-medium text-amber-700">Relationships may be unreliable</div>
-                <div className="text-sm text-amber-600">
-                  Data integrity issues detected. Fix header detection and re-upload files before trusting these relationships.
-                </div>
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 flex items-start gap-3">
+            <Database className="w-5 h-5 text-blue-500 mt-0.5" />
+            <div>
+              <div className="font-medium text-blue-700">View in Data Explorer</div>
+              <div className="text-sm text-blue-600 mt-1">
+                Table relationships are now shown in the <strong>Context Graph</strong> tab in Data Explorer.
+                The Context Graph shows hub/spoke relationships that power intelligent JOINs and queries.
               </div>
-            </div>
-          )}
-
-          <div className="grid grid-cols-4 gap-4 mb-6">
-            <div className="bg-gray-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-gray-800">{stats?.tables_analyzed || 0}</div>
-              <div className="text-sm text-gray-500">Tables</div>
-            </div>
-            <div className="bg-blue-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-blue-600">{relationships.length}</div>
-              <div className="text-sm text-blue-600">Relationships</div>
-            </div>
-            <div className="bg-green-50 rounded-lg p-4 text-center">
-              <div className="text-2xl font-bold text-green-600">{autoMatched.length}</div>
-              <div className="text-sm text-green-600">Auto-matched</div>
-            </div>
-            <div className={`rounded-lg p-4 text-center ${needsReview.length > 0 ? 'bg-amber-50' : 'bg-green-50'}`}>
-              <div className={`text-2xl font-bold ${needsReview.length > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                {needsReview.length}
-              </div>
-              <div className={`text-sm ${needsReview.length > 0 ? 'text-amber-600' : 'text-green-600'}`}>
-                Needs Review
-              </div>
-            </div>
-          </div>
-
-          <CollapsibleSection
-            title="High Confidence Matches"
-            count={autoMatched.length}
-            icon={<CheckCircle className="w-5 h-5 text-green-500" />}
-            expanded={showHighConfidence}
-            onToggle={() => setShowHighConfidence(!showHighConfidence)}
-          >
-            <div className="max-h-80 overflow-y-auto">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 sticky top-0">
-                  <tr>
-                    <th className="text-left px-4 py-2 font-medium text-gray-600">Source</th>
-                    <th className="px-4 py-2 w-10"></th>
-                    <th className="text-left px-4 py-2 font-medium text-gray-600">Target</th>
-                    <th className="text-right px-4 py-2 font-medium text-gray-600">Confidence</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y">
-                  {autoMatched.slice(0, 50).map((rel, i) => (
-                    <tr key={i} className="hover:bg-gray-50">
-                      <td className="px-4 py-2">
-                        <span className="text-gray-500">{rel.source_table}.</span>
-                        <span className="font-medium">{rel.source_column}</span>
-                      </td>
-                      <td className="px-4 py-2 text-center">
-                        <Link2 className="w-4 h-4 text-gray-300" />
-                      </td>
-                      <td className="px-4 py-2">
-                        <span className="text-gray-500">{rel.target_table}.</span>
-                        <span className="font-medium">{rel.target_column}</span>
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          rel.confidence >= 0.95 ? 'bg-green-100 text-green-700' :
-                          rel.confidence >= 0.85 ? 'bg-blue-100 text-blue-700' :
-                          'bg-gray-100 text-gray-700'
-                        }`}>
-                          {Math.round(rel.confidence * 100)}%
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                  {autoMatched.length > 50 && (
-                    <tr>
-                      <td colSpan={4} className="px-4 py-2 text-center text-gray-400 text-sm">
-                        +{autoMatched.length - 50} more matches
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </CollapsibleSection>
-
-          {needsReview.length > 0 && (
-            <CollapsibleSection
-              title="Needs Review"
-              count={needsReview.length}
-              icon={<AlertTriangle className="w-5 h-5 text-amber-500" />}
-              expanded={showNeedsReview}
-              onToggle={() => setShowNeedsReview(!showNeedsReview)}
-            >
-              <div className="max-h-80 overflow-y-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 sticky top-0">
-                    <tr>
-                      <th className="text-left px-4 py-2 font-medium text-gray-600">Source</th>
-                      <th className="px-4 py-2 w-10"></th>
-                      <th className="text-left px-4 py-2 font-medium text-gray-600">Target</th>
-                      <th className="text-right px-4 py-2 font-medium text-gray-600">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y">
-                    {needsReview.map((rel, i) => (
-                      <tr key={i} className="hover:bg-amber-50">
-                        <td className="px-4 py-2">
-                          <span className="text-gray-500">{rel.source_table}.</span>
-                          <span className="font-medium">{rel.source_column}</span>
-                        </td>
-                        <td className="px-4 py-2 text-center">
-                          <Link2 className="w-4 h-4 text-amber-300" />
-                        </td>
-                        <td className="px-4 py-2">
-                          <span className="text-gray-500">{rel.target_table}.</span>
-                          <span className="font-medium">{rel.target_column}</span>
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => confirmRelationship(rel, true)}
-                              className="p-1 rounded hover:bg-green-100 text-green-600"
-                              title="Confirm"
-                            >
-                              <Check className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={() => confirmRelationship(rel, false)}
-                              className="p-1 rounded hover:bg-red-100 text-red-600"
-                              title="Reject"
-                            >
-                              <X className="w-4 h-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </CollapsibleSection>
-          )}
-
-          <div className="mt-4 bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-blue-700">
-            <div className="flex items-start gap-2">
-              <HelpCircle className="w-4 h-4 mt-0.5" />
-              <div>
-                <strong>How relationships improve chat queries:</strong>
-                <p className="mt-1">
-                  When you ask questions like "Show employees hired in 2024 with earnings over $100K", 
-                  the system uses these relationships to JOIN data across your uploaded files automatically.
-                </p>
-              </div>
+              <a 
+                href="/data-explorer" 
+                className="inline-block mt-3 px-4 py-2 bg-blue-500 text-white rounded-lg text-sm hover:bg-blue-600"
+              >
+                Open Data Explorer →
+              </a>
             </div>
           </div>
         </div>
