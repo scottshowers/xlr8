@@ -445,6 +445,9 @@ class ResolvedQuery:
     #   'total_in_table': 14474
     # }
     
+    # v3: Structured output - workforce snapshot, etc.
+    structured_output: Optional[Dict] = None
+    
 
 class QueryResolver:
     """
