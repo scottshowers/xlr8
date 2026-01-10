@@ -2474,8 +2474,12 @@ WHERE {where_sql}'''
         """
         Resolve a SUM query (e.g., "total earnings", "sum of pay").
         
-        Detects the numeric column to sum from the domain and question keywords.
-        For earnings domain: sums amount, gross, or rate columns.
+        Enhanced with:
+        - Cross-table JOIN support for dimension filters (e.g., TNC employees)
+        - Proper column detection avoiding code/id columns
+        
+        For "total earnings for TNC employees":
+        → JOIN earnings to company on employee_number, filter by pay_group_code
         """
         domain = parsed.domain.value
         
@@ -2490,6 +2494,7 @@ WHERE {where_sql}'''
         
         table_name = table['table_name']
         result.table_name = table_name
+        result.resolution_path.append(f"LOOKUP: {domain} -> {table_name}")
         
         # Find summable column (numeric column with amount/rate/total in name)
         sum_column = self._find_sum_column(project, table_name, parsed.raw_question)
@@ -2500,28 +2505,76 @@ WHERE {where_sql}'''
         
         result.resolution_path.append(f"SUM column: {sum_column}")
         
-        # Process filter hints
+        # Process filter hints - may require JOINs
         where_clauses = []
+        join_clauses = []
+        needs_alias = False
         
         if parsed.filter_hints:
+            result.resolution_path.append(f"FILTER HINTS: {parsed.filter_hints}")
+            
             for hint in parsed.filter_hints:
                 resolved = self._resolve_dimension_filter(project, hint)
                 if resolved:
+                    # Find which column in this table matches the semantic type
                     column_info = self._find_employee_column_for_dimension(
                         project, table_name, resolved['semantic_type']
                     )
+                    
                     if column_info and column_info['same_table']:
+                        # Filter in same table - simple WHERE
                         codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
-                        where_clauses.append(f'TRIM("{column_info["column"]}") IN ({codes_sql})')
+                        prefix = 'e.' if needs_alias else ''
+                        where_clauses.append(f'TRIM({prefix}"{column_info["column"]}") IN ({codes_sql})')
+                        result.resolution_path.append(
+                            f"FILTER (same table): {column_info['column']} IN {resolved['codes'][:3]}..."
+                        )
+                    elif column_info and not column_info['same_table']:
+                        # Need to JOIN to dimension table
+                        dim_table = column_info['table']
+                        join_keys = self._get_join_keys_from_context_graph(project, table_name, dim_table)
+                        
+                        if join_keys:
+                            needs_alias = True
+                            # Build JOIN clause
+                            join_conditions = []
+                            for e_col, d_col in join_keys:
+                                join_conditions.append(f'TRIM(e."{e_col}") = TRIM(d."{d_col}")')
+                            join_clause = ' AND '.join(join_conditions)
+                            join_clauses.append(f'INNER JOIN "{dim_table}" d ON {join_clause}')
+                            
+                            # Add WHERE for dimension filter
+                            codes_sql = ', '.join(f"'{c}'" for c in resolved['codes'])
+                            where_clauses.append(f'TRIM(d."{column_info["column"]}") IN ({codes_sql})')
+                            result.resolution_path.append(
+                                f"FILTER (JOIN): {dim_table}.{column_info['column']} IN {resolved['codes'][:3]}..."
+                            )
         
         # Build SQL
-        if where_clauses:
-            where_sql = ' AND '.join(where_clauses)
-            result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}" WHERE {where_sql}'
-            result.explanation = f"Sum of {sum_column} from {table_name} where {' and '.join(parsed.filter_hints)}"
+        if join_clauses:
+            # Need JOINs - use aliased table names
+            joins_sql = '\n'.join(join_clauses)
+            if where_clauses:
+                where_sql = ' AND '.join(where_clauses)
+                result.sql = f'''SELECT SUM(TRY_CAST(e."{sum_column}" AS DECIMAL(18,2))) as total 
+FROM "{table_name}" e
+{joins_sql}
+WHERE {where_sql}'''
+            else:
+                result.sql = f'''SELECT SUM(TRY_CAST(e."{sum_column}" AS DECIMAL(18,2))) as total 
+FROM "{table_name}" e
+{joins_sql}'''
         else:
-            result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}"'
-            result.explanation = f"Sum of {sum_column} from {table_name}"
+            # Simple case - no JOINs needed
+            if where_clauses:
+                where_sql = ' AND '.join(where_clauses)
+                result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}" WHERE {where_sql}'
+            else:
+                result.sql = f'SELECT SUM(TRY_CAST("{sum_column}" AS DECIMAL(18,2))) as total FROM "{table_name}"'
+        
+        result.explanation = f"Sum of {sum_column} from {table_name}"
+        if parsed.filter_hints:
+            result.explanation += f" for {', '.join(parsed.filter_hints)}"
         
         result.success = True
         return result
@@ -2530,11 +2583,11 @@ WHERE {where_sql}'''
         """
         Find the best column to SUM based on question context.
         
-        Priority:
-        1. Column mentioned in question (e.g., "total earnings" → earnings column)
-        2. Column with 'amount', 'total', 'sum' in name
-        3. Column with 'rate', 'gross', 'net' in name
-        4. Any numeric column with high values
+        Priority (FIXED - amount columns always first):
+        1. Column with 'amount', 'total', 'sum' in name (always summable)
+        2. Column mentioned in question (but skip _code, _id columns)
+        3. Column with 'rate', 'gross', 'net', 'hours' in name
+        4. Any numeric column (skip ID/code/status columns)
         """
         try:
             # Get column profiles for this table
@@ -2546,44 +2599,58 @@ WHERE {where_sql}'''
             """, [project, table_name]).fetchall()
             
             if not results:
-                return None
+                # Fallback: query table directly for column names
+                try:
+                    cursor = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1')
+                    if cursor.description:
+                        results = [(desc[0], 'unknown', 0) for desc in cursor.description]
+                except:
+                    return None
             
             q_lower = question.lower()
             
-            # Priority 1: Column name mentioned in question
-            sum_keywords = ['amount', 'total', 'sum', 'earnings', 'pay', 'gross', 'net', 'rate', 'wage', 'salary']
+            # Columns to always skip (identifiers, not values)
+            skip_suffixes = ['_code', '_id', '_number', '_status', '_type', '_date', '_name']
             
+            def is_skippable(col: str) -> bool:
+                col_lower = col.lower()
+                return any(col_lower.endswith(s) for s in skip_suffixes)
+            
+            # Priority 1: Column with 'amount', 'total', 'sum' - these are ALWAYS summable
             for col_name, inferred_type, distinct_count in results:
                 col_lower = col_name.lower()
-                
-                # Check if column name appears in question
+                if any(kw in col_lower for kw in ['amount', 'total', 'sum']):
+                    if not is_skippable(col_name):
+                        logger.info(f"[RESOLVER] Found SUM column by amount pattern: {col_name}")
+                        return col_name
+            
+            # Priority 2: Column mentioned in question (but not code/id columns)
+            sum_keywords = ['earnings', 'pay', 'gross', 'net', 'rate', 'wage', 'salary', 'hours']
+            for col_name, inferred_type, distinct_count in results:
+                col_lower = col_name.lower()
+                if is_skippable(col_name):
+                    continue
                 for kw in sum_keywords:
                     if kw in q_lower and kw in col_lower:
                         logger.info(f"[RESOLVER] Found SUM column by question match: {col_name}")
                         return col_name
             
-            # Priority 2: Column with amount/total in name
+            # Priority 3: Column with rate/gross/net/hours
             for col_name, inferred_type, distinct_count in results:
                 col_lower = col_name.lower()
-                if any(kw in col_lower for kw in ['amount', 'total', 'sum']):
-                    logger.info(f"[RESOLVER] Found SUM column by name pattern: {col_name}")
-                    return col_name
-            
-            # Priority 3: Column with rate/gross/net
-            for col_name, inferred_type, distinct_count in results:
-                col_lower = col_name.lower()
+                if is_skippable(col_name):
+                    continue
                 if any(kw in col_lower for kw in ['rate', 'gross', 'net', 'hours']):
                     logger.info(f"[RESOLVER] Found SUM column by rate pattern: {col_name}")
                     return col_name
             
             # Priority 4: Any numeric-looking column (high cardinality)
             for col_name, inferred_type, distinct_count in results:
+                if is_skippable(col_name):
+                    continue
                 if inferred_type in ['numeric', 'decimal', 'float', 'integer'] or distinct_count > 100:
-                    col_lower = col_name.lower()
-                    # Skip ID columns
-                    if not any(skip in col_lower for skip in ['_id', 'code', 'number', 'date', 'status']):
-                        logger.info(f"[RESOLVER] Found SUM column by numeric inference: {col_name}")
-                        return col_name
+                    logger.info(f"[RESOLVER] Found SUM column by numeric inference: {col_name}")
+                    return col_name
             
             return None
             
