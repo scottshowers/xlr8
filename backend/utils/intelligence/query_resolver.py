@@ -205,23 +205,33 @@ def parse_intent(question: str) -> ParsedIntent:
     # Extract filter hints (phrases like "in Texas", "in Pasadena", "at location X")
     filter_hints = []
     
-    # Pattern: "in <location/org>" 
     import re
-    in_patterns = re.findall(r'\b(?:in|at|for|from)\s+([A-Za-z][A-Za-z0-9\s\-]+?)(?:\s+(?:division|department|location|team|region|org|area)|[,\.\?]|$)', q_lower)
-    filter_hints.extend([p.strip() for p in in_patterns if len(p.strip()) > 2])
     
-    # Pattern: "who are <status>" or "who is <status>"
+    # Pattern 1: "in/at/for/from <something>" - greedy match to end of phrase
+    # Handles: "in Pasadena", "in TNC", "at Hammond division"
+    in_matches = re.findall(r'\b(?:in|at|for|from)\s+([A-Za-z][A-Za-z0-9\s\-]*?)(?:\s+(?:division|department|location|team|region|org|area|pay\s*group)|[,\.\?]|$)', q_lower)
+    for match in in_matches:
+        cleaned = match.strip()
+        if len(cleaned) >= 2:  # Allow 2+ char codes like "IT"
+            filter_hints.append(cleaned)
+    
+    # Pattern 2: "who are <status>" or "who is <status>"
     status_patterns = re.findall(r'\bwho\s+(?:are|is)\s+(\w+)', q_lower)
     filter_hints.extend([p.strip() for p in status_patterns])
     
-    # Pattern: standalone proper nouns that might be org/location names
-    # Only if we haven't found filters yet
+    # Pattern 3: ALL CAPS codes that might be pay groups, company codes, etc.
+    # E.g., "TNC", "R2S", "USA"
+    caps_codes = re.findall(r'\b([A-Z][A-Z0-9]{1,5})\b', question)  # Original case
+    for code in caps_codes:
+        if code.lower() not in filter_hints and code.lower() not in {'how', 'the', 'and', 'for'}:
+            filter_hints.append(code.lower())
+    
+    # Pattern 4: Capitalized words (proper nouns) - fallback
     if not filter_hints:
-        # Look for capitalized words in original question that aren't common words
         common_words = {'how', 'many', 'employees', 'are', 'there', 'in', 'the', 'what', 'is', 'count', 'total', 'number', 'of'}
         words = question.split()
         for word in words:
-            if word[0].isupper() and word.lower() not in common_words and len(word) > 2:
+            if len(word) > 2 and word[0].isupper() and word.lower() not in common_words:
                 filter_hints.append(word.lower())
     
     return ParsedIntent(
