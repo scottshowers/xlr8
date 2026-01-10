@@ -673,12 +673,10 @@ SELECT"""
         # Check if JOIN is needed and include relationship hints
         needs_join = self._needs_join(question, tables)
         relationship_hints = ""
-        join_rules = ""
         
         if needs_join and len(tables) > 1:
             relationship_hints = self._build_relationship_hints(tables)
             if relationship_hints:
-                join_rules = "\n4. Use LEFT JOIN with relationships provided above"
                 logger.info("[SQL-GEN] Including relationship hints for JOIN query")
         
         # Build query hints
@@ -692,11 +690,20 @@ SELECT"""
         
         # Adjust rules based on whether JOIN is needed
         if needs_join and relationship_hints:
-            rules = """RULES:
+            # Determine JOIN strategy:
+            # - INNER JOIN when filtering by joined table (WHERE uses joined column)
+            # - LEFT JOIN when just enriching output (lookup descriptions)
+            join_instruction = """4. JOIN STRATEGY:
+   - Use INNER JOIN when filtering BY a related table (e.g., "employees in Texas" needs location table)
+   - Use LEFT JOIN when only enriching output with descriptions (e.g., adding location names to employee list)
+   - If WHERE clause references joined table → INNER JOIN
+   - If just adding columns for display → LEFT JOIN"""
+            
+            rules = f"""RULES:
 1. Use ONLY columns from SCHEMA - never invent columns
 2. DO NOT add WHERE for status/active/termed - filters injected automatically
 3. For "show X by Y" queries: SELECT Y, COUNT(*) FROM table GROUP BY Y
-4. Use LEFT JOIN with the relationships provided to combine tables
+{join_instruction}
 5. ILIKE for text matching"""
         else:
             rules = """RULES:
