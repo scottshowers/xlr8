@@ -2528,16 +2528,21 @@ WHERE {where_sql}'''
                             year_data['termed'] = safe_count(f'''
                                 SELECT COUNT(*) FROM "{table_name}" 
                                 WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
-                                AND "{term_date_col}" >= '{year_start}'
+                                AND TRY_CAST("{term_date_col}" AS DATE) >= '{year_start}'
                             ''')
                     else:
                         # Historical year - calculate point-in-time
                         # Active as of year-end: hired by year-end AND not termed by year-end
                         # This includes people who are CURRENTLY termed but weren't termed yet at year-end
+                        # Use TRY_CAST to handle various date formats (MM/DD/YYYY, YYYY-MM-DD, etc.)
                         active_at_year_end = safe_count(f'''
                             SELECT COUNT(*) FROM "{table_name}" 
-                            WHERE "{hire_date_col}" <= '{year_end}'
-                            AND ("{term_date_col}" IS NULL OR "{term_date_col}" > '{year_end}')
+                            WHERE TRY_CAST("{hire_date_col}" AS DATE) <= '{year_end}'
+                            AND (
+                                "{term_date_col}" IS NULL 
+                                OR TRIM("{term_date_col}") = ''
+                                OR TRY_CAST("{term_date_col}" AS DATE) > '{year_end}'
+                            )
                         ''')
                         year_data['active'] = active_at_year_end
                         
@@ -2549,8 +2554,8 @@ WHERE {where_sql}'''
                         if term_vals:
                             year_data['termed'] = safe_count(f'''
                                 SELECT COUNT(*) FROM "{table_name}" 
-                                WHERE "{term_date_col}" >= '{year_start}'
-                                AND "{term_date_col}" <= '{year_end}'
+                                WHERE TRY_CAST("{term_date_col}" AS DATE) >= '{year_start}'
+                                AND TRY_CAST("{term_date_col}" AS DATE) <= '{year_end}'
                             ''')
                 else:
                     # NO POINT-IN-TIME: Fall back to current state with term breakdowns
@@ -2562,8 +2567,8 @@ WHERE {where_sql}'''
                         year_data['termed'] = safe_count(f'''
                             SELECT COUNT(*) FROM "{table_name}" 
                             WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
-                            AND "{term_date_col}" >= '{year_start}'
-                            AND "{term_date_col}" < '{next_year_start}'
+                            AND TRY_CAST("{term_date_col}" AS DATE) >= '{year_start}'
+                            AND TRY_CAST("{term_date_col}" AS DATE) < '{next_year_start}'
                         ''')
                     else:
                         year_data['termed'] = 0
