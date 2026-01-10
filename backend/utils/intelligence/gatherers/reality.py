@@ -234,6 +234,8 @@ class RealityGatherer(DuckDBGatherer):
         query_type = sql_info.get('query_type', 'list')
         reality_context = sql_info.get('reality_context')
         structured_output = sql_info.get('structured_output')
+        resolution_path = sql_info.get('resolution_path', [])  # Provenance
+        explanation = sql_info.get('explanation', '')
         
         # Get display name from schema
         display_name = self._get_display_name(table_name)
@@ -262,7 +264,9 @@ class RealityGatherer(DuckDBGatherer):
                 'display_name': display_name,
                 'is_targeted_query': True,
                 'reality_context': reality_context,  # v2: Include breakdowns for synthesis
-                'structured_output': structured_output  # v3: Workforce snapshot etc.
+                'structured_output': structured_output,  # v3: Workforce snapshot etc.
+                'resolution_path': resolution_path,  # v4: Provenance - step by step lookups
+                'explanation': explanation  # v4: Human readable explanation
             },
             location=f"Query: {sql}",
             confidence=0.98,
