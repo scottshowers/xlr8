@@ -320,7 +320,184 @@ Work completed that wasn't in the original plan but was necessary:
 
 ---
 
-## A.5 Phase 9+: Future (Not Detailed Yet)
+## A.5 QUERY ENGINE - CRITICAL PATH (Jan 10, 2026)
+
+**Status:** 🔴 BLOCKING - Nothing else matters until this works.
+
+Everything flows through the same pipe: Chat, Playbooks, BI Builder, Exports. If the query engine is broken, everything is broken.
+
+### A.5.1 Current State Assessment
+
+| Component | Status | What Works | What's Broken |
+|-----------|--------|------------|---------------|
+| Dimension Resolution | 70% | Exact matches (TNC, Pasadena, manufacturing) | Fuzzy matching ("Texas" → TX codes) |
+| JOIN Strategy | 0% | Basic LEFT JOINs | Should be INNER for filters, LEFT for lookups |
+| Query Patterns | 20% | COUNT only | SUM, LIST, date filtering missing |
+| Consultant Synthesis | 0% | Template fallback | LLM returns garbage (data dumps, not insights) |
+
+### A.5.2 The Problem
+
+**Dimension Resolution:**
+- "How many employees in TNC" → ✅ Works (exact code match)
+- "How many employees in Pasadena" → ✅ Works (description contains "Pasadena")
+- "How many employees in Texas" → ❌ Returns ALL employees (no "Texas" in data, only "TX -")
+
+**Query Patterns:**
+- "How many employees" → ✅ COUNT works
+- "Total earnings by pay group" → ❌ SUM not implemented
+- "List employees in TNC" → ❌ LIST not implemented
+- "Employees hired last year" → ❌ Date filtering not implemented
+
+**Synthesis:**
+```
+WARNING:utils.llm_orchestrator:[SYNTHESIS] Garbage: low alpha ratio (0.38)
+WARNING:utils.llm_orchestrator:[SYNTHESIS] qwen2.5-coder:14b returned garbage
+```
+LLM regurgitates breakdown data instead of generating insights.
+
+### A.5.3 Solution Architecture
+
+**No Hardcoding.** All solutions must be data-driven and domain-agnostic.
+
+#### 1. Fuzzy Dimension Resolution (4h)
+
+**Current flow:**
+```
+"Texas" → search hub descriptions for "texas" → no match → no filter
+```
+
+**New flow:**
+```
+"Texas" → search hub descriptions for "texas" → no match
+       → extract state codes from descriptions ("TX - Houston" → "TX")
+       → map "Texas" → "TX" using state lookup
+       → filter by codes starting with "TX"
+```
+
+**Implementation:**
+- Add state/province/country normalization (built-in, not hardcoded per customer)
+- Add partial matching (contains, starts-with)
+- Add phonetic matching for typos
+- Score and rank matches
+
+**Files:** `backend/utils/intelligence/query_resolver.py`
+
+#### 2. Query Pattern Expansion (4h)
+
+**Current:** Only `QueryIntent.COUNT`
+
+**New intents:**
+```python
+class QueryIntent(Enum):
+    COUNT = "count"      # How many...
+    SUM = "sum"          # Total, sum of...
+    AVG = "average"      # Average...
+    LIST = "list"        # List, show me, who are...
+    BREAKDOWN = "breakdown"  # ...by department
+    TREND = "trend"      # ...over time
+```
+
+**SQL generation per intent:**
+- COUNT: `SELECT COUNT(DISTINCT employee_number)` ✅ exists
+- SUM: `SELECT SUM(column)` where column detected from question
+- LIST: `SELECT employee_number, name, ... LIMIT 100`
+- BREAKDOWN: `GROUP BY dimension` ✅ exists (in breakdowns)
+- TREND: `GROUP BY date_column ORDER BY date_column`
+
+**Files:** `backend/utils/intelligence/query_resolver.py`
+
+#### 3. JOIN Strategy (1h)
+
+**Current:** All LEFT JOINs
+
+**New:**
+- Filter JOINs (WHERE clause uses joined table) → INNER JOIN
+- Lookup JOINs (description enrichment only) → LEFT JOIN
+
+**Example:**
+```sql
+-- "employees in TNC" - INNER because filtering on pay_group
+SELECT COUNT(DISTINCT p.employee_number)
+FROM personal p
+INNER JOIN company c ON p.employee_number = c.employee_number
+WHERE c.pay_group_code = 'TNC'
+
+-- "employees by pay group" - LEFT because enriching output
+SELECT c.pay_group_code, pg.pay_group, COUNT(*)
+FROM personal p
+JOIN company c ON p.employee_number = c.employee_number
+LEFT JOIN pay_groups pg ON c.pay_group_code = pg.pay_group_code
+GROUP BY c.pay_group_code, pg.pay_group
+```
+
+**Files:** `backend/utils/intelligence/query_resolver.py`
+
+#### 4. Consultant Synthesis (4h)
+
+**Problem:** LLM is formatting data, not analyzing it.
+
+**Root cause:** Prompt tells LLM to "format the response" with the data we pass.
+
+**Solution:** Two-phase synthesis:
+1. **Data Summary** (deterministic) - Format numbers, percentages, breakdowns
+2. **Insight Generation** (LLM) - "Given this data, what would a consultant highlight?"
+
+**New prompt structure:**
+```
+You are a senior HCM consultant. The client asked: "{question}"
+
+DATA SUMMARY (do not repeat this):
+- Total: 3,254 active employees in TNC pay group
+- This is 82% of all active employees (3,976)
+- Top org levels: 1174 (654), 1110 (310), 1119 (261)
+
+GENERATE INSIGHTS:
+- What patterns are notable?
+- What risks or opportunities exist?
+- What questions should the client ask next?
+
+Do NOT repeat the data summary. Provide consultant-level analysis only.
+```
+
+**Files:** `backend/utils/intelligence/synthesizer.py`, `utils/llm_orchestrator.py`
+
+### A.5.4 Implementation Plan
+
+| Task | Est | Priority | Status |
+|------|-----|----------|--------|
+| Fuzzy dimension resolution | 4h | P0 | ⬜ TODO |
+| Query pattern expansion (SUM, LIST) | 4h | P0 | ⬜ TODO |
+| JOIN strategy (INNER vs LEFT) | 1h | P1 | ⬜ TODO |
+| Consultant synthesis fix | 4h | P0 | ⬜ TODO |
+| **Total** | **13h** | | |
+
+### A.5.5 Success Criteria
+
+All of these must work before moving on:
+
+```
+✅ "How many employees in Texas" → filters to TX location codes
+✅ "How many employees in TNC" → 3,254 (already works)
+✅ "Total earnings for TNC employees" → SUM query works
+✅ "List employees in Pasadena" → Returns employee list
+✅ "Employees hired in 2024" → Date filter works
+✅ Response includes insights, not just data formatting
+```
+
+### A.5.6 Cleanup Tasks (After Query Engine Works)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| Remove relationship detector | `backend/utils/relationship_detector.py` - no longer needed | ⬜ TODO |
+| Remove relationship API | `backend/routers/relationships.py` - if exists | ⬜ TODO |
+| Remove relationship UI | Frontend relationship components | ⬜ TODO |
+| Clean up dead relationship code | Any pairwise relationship logic | ⬜ TODO |
+
+**Why:** We moved to Context Graph (hub/spoke). The old pairwise relationship system is dead code.
+
+---
+
+## A.6 Phase 9+: Future (Not Detailed Yet)
 
 | Phase | Description | Estimate |
 |-------|-------------|----------|
