@@ -2582,6 +2582,147 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Added {virtual_hubs_added} virtual hubs from schema reference")
             
             # =================================================================
+            # STEP 5C: Detect IDENTITY HUBS within multi-sheet files
+            # If Personal and Company both have employee_number, and Personal has
+            # unique values while Company has repeats, Personal.employee_number is the hub.
+            # =================================================================
+            identity_hubs_added = 0
+            
+            # Group tables by file_name
+            tables_by_file = defaultdict(list)
+            for table_name, file_name, entity_type, category, row_count, truth_type in tables:
+                if file_name:
+                    tables_by_file[file_name].append({
+                        'table_name': table_name,
+                        'entity_type': entity_type,
+                        'row_count': row_count or 0,
+                        'truth_type': truth_type
+                    })
+            
+            # For each file with multiple tables, find identity columns
+            for file_name, file_tables in tables_by_file.items():
+                if len(file_tables) < 2:
+                    continue  # Need at least 2 tables to detect identity hubs
+                
+                # Get columns for each table in this file
+                table_columns = {}
+                for t in file_tables:
+                    try:
+                        cols = self.conn.execute(f"PRAGMA table_info('{t['table_name']}')").fetchall()
+                        table_columns[t['table_name']] = {
+                            'columns': [c[1].lower() for c in cols if c[1] and not c[1].startswith('_')],
+                            'entity_type': t['entity_type'],
+                            'row_count': t['row_count'],
+                            'truth_type': t['truth_type']
+                        }
+                    except Exception:
+                        continue
+                
+                if len(table_columns) < 2:
+                    continue
+                
+                # Find columns that appear in multiple tables
+                all_cols = defaultdict(list)  # col_name -> [table_names]
+                for tname, tinfo in table_columns.items():
+                    for col in tinfo['columns']:
+                        all_cols[col].append(tname)
+                
+                # Identity column patterns (likely to be join keys)
+                identity_patterns = ['employee_number', 'employee_id', 'emp_id', 'emp_no', 
+                                     'worker_id', 'person_id', 'ee_number', 'eeid']
+                
+                for col_name, col_tables in all_cols.items():
+                    if len(col_tables) < 2:
+                        continue
+                    
+                    # Check if this looks like an identity column
+                    col_lower = col_name.lower().replace('_', '')
+                    is_identity_col = any(p.replace('_', '') in col_lower for p in identity_patterns)
+                    if not is_identity_col:
+                        continue
+                    
+                    # Find the table where this column is unique (identity hub)
+                    hub_table = None
+                    hub_cardinality = 0
+                    spoke_tables = []
+                    
+                    for tname in col_tables:
+                        tinfo = table_columns[tname]
+                        try:
+                            # Get distinct count and check uniqueness
+                            result = self.conn.execute(f'''
+                                SELECT COUNT(DISTINCT "{col_name}"), COUNT(*)
+                                FROM "{tname}"
+                                WHERE "{col_name}" IS NOT NULL
+                            ''').fetchone()
+                            
+                            distinct_count = result[0] if result else 0
+                            total_count = result[1] if result else 0
+                            
+                            if total_count == 0:
+                                continue
+                            
+                            uniqueness = distinct_count / total_count
+                            
+                            # If uniqueness > 95%, this is likely the identity hub
+                            if uniqueness > 0.95 and distinct_count > hub_cardinality:
+                                # Check if existing hub_table should become spoke
+                                if hub_table:
+                                    spoke_tables.append(hub_table)
+                                hub_table = tname
+                                hub_cardinality = distinct_count
+                            else:
+                                spoke_tables.append(tname)
+                                
+                        except Exception as e:
+                            logger.debug(f"[CONTEXT-GRAPH] Error checking {tname}.{col_name}: {e}")
+                            continue
+                    
+                    if hub_table and spoke_tables and hub_cardinality >= MIN_HUB_CARDINALITY:
+                        # Derive semantic type for identity hub
+                        semantic_type = f"{col_name.lower().replace(' ', '_')}"
+                        if not semantic_type.endswith('_code') and not semantic_type.endswith('_id'):
+                            semantic_type = semantic_type
+                        
+                        # Check if we already have this semantic type
+                        if semantic_type in existing_semantic_types:
+                            continue
+                        
+                        # Get values for the hub
+                        try:
+                            values_result = self.conn.execute(f'''
+                                SELECT DISTINCT LOWER(TRIM(CAST("{col_name}" AS VARCHAR))) as val
+                                FROM "{hub_table}"
+                                WHERE "{col_name}" IS NOT NULL
+                                LIMIT 5000
+                            ''').fetchall()
+                            hub_values = {r[0] for r in values_result if r[0]}
+                        except Exception:
+                            hub_values = set()
+                        
+                        # Add as identity hub
+                        identity_hub = {
+                            'table_name': hub_table,
+                            'key_column': col_name,
+                            'semantic_type': semantic_type,
+                            'entity_type': table_columns[hub_table]['entity_type'],
+                            'cardinality': hub_cardinality,
+                            'values': hub_values,
+                            'file_name': file_name,
+                            'is_discovered': True,
+                            'is_identity_hub': True,
+                            'spoke_tables': spoke_tables,  # Track which tables should be spokes
+                        }
+                        final_hubs.append(identity_hub)
+                        existing_semantic_types.add(semantic_type)
+                        identity_hubs_added += 1
+                        
+                        logger.info(f"[CONTEXT-GRAPH] Identity hub: {hub_table}.{col_name} (card={hub_cardinality}, spokes={len(spoke_tables)})")
+            
+            if identity_hubs_added > 0:
+                logger.warning(f"[CONTEXT-GRAPH] Added {identity_hubs_added} identity hubs from multi-sheet files")
+            
+            # =================================================================
             # STEP 6A: Find spokes by SCHEMA MATCHING (known FKs)
             # These are 100% confidence - we KNOW the relationship from BRIT
             # =================================================================
@@ -2698,7 +2839,58 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # The BRIT tells us exactly what columns map to what hubs.
             # Inference was polluting the graph with bad guesses.
             # =================================================================
-            logger.warning(f"[CONTEXT-GRAPH] Total relationships: {len(relationships)} (schema-only, no inference)")
+            
+            # =================================================================
+            # STEP 6C: Create spokes for IDENTITY HUBS
+            # Identity hubs detected in Step 5C have spoke_tables already identified
+            # =================================================================
+            identity_spoke_count = 0
+            for hub in final_hubs:
+                if not hub.get('is_identity_hub'):
+                    continue
+                
+                spoke_tables = hub.get('spoke_tables', [])
+                key_column = hub['key_column']
+                
+                for spoke_table in spoke_tables:
+                    # Skip if already matched by schema
+                    if (spoke_table, key_column) in schema_matched_columns:
+                        continue
+                    
+                    # Get spoke table metadata
+                    spoke_meta = None
+                    for t in tables:
+                        if t[0] == spoke_table:
+                            spoke_meta = {
+                                'truth_type': t[5],
+                                'entity_type': t[2],
+                                'file_name': t[1]
+                            }
+                            break
+                    
+                    if not spoke_meta:
+                        continue
+                    
+                    relationships.append({
+                        'hub': hub,
+                        'spoke_table': spoke_table,
+                        'spoke_column': key_column,
+                        'spoke_cardinality': 0,  # Will query at runtime if needed
+                        'coverage_pct': 100.0,   # Same file = 100% confidence
+                        'is_subset': True,
+                        'truth_type': spoke_meta['truth_type'],
+                        'entity_type': spoke_meta['entity_type'],
+                        'file_name': spoke_meta['file_name'],
+                        'match_source': 'identity'
+                    })
+                    schema_matched_columns.add((spoke_table, key_column))
+                    identity_spoke_count += 1
+                    logger.debug(f"[CONTEXT-GRAPH] IDENTITY SPOKE: {spoke_table}.{key_column} → {hub['semantic_type']}")
+            
+            if identity_spoke_count > 0:
+                logger.warning(f"[CONTEXT-GRAPH] Identity hub spokes added: {identity_spoke_count}")
+            
+            logger.warning(f"[CONTEXT-GRAPH] Total relationships: {len(relationships)} (schema + identity)")
             
             # =================================================================
             # STEP 7: Update _column_mappings with hub/spoke data
