@@ -1741,6 +1741,8 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
         years_data = snapshot.get('years', {})
         summary = snapshot.get('summary', {})
         term_date_available = summary.get('term_date_available', False)
+        hire_date_available = summary.get('hire_date_available', False)
+        point_in_time = summary.get('point_in_time', False)
         
         if not years_data:
             return "**Workforce Overview:** No data available"
@@ -1753,6 +1755,7 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
         parts.append("|------|-------:|-------:|----:|------:|")
         
         # Sort years and output rows
+        current_year = max(years_data.keys()) if years_data else 2026
         for year in sorted(years_data.keys()):
             data = years_data[year]
             active = data.get('active', 0)
@@ -1760,24 +1763,44 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
             loa = data.get('loa', 0)
             total = data.get('total', active + termed + loa)
             
-            parts.append(f"| {year} | {active:,} | {termed:,} | {loa:,} | {total:,} |")
+            # Add note for current year
+            year_label = f"{year}" if year != current_year else f"{year} (YTD)"
+            parts.append(f"| {year_label} | {active:,} | {termed:,} | {loa:,} | {total:,} |")
         
-        # Footnotes
+        # Footnotes - explain methodology
         parts.append("")
-        if term_date_available:
-            base_year = min(years_data.keys()) if years_data else 2024
-            parts.append(f"*Terminations by year based on termination date.*")
+        if point_in_time:
+            parts.append("*Active counts are point-in-time (hired by year-end, not yet terminated). Termed counts are calendar year totals.*")
+        elif term_date_available:
+            parts.append("*Active = current state. Termed = by termination date. Hire date not available for historical active counts.*")
         else:
-            parts.append(f"*Current status counts shown. No termination date column detected for year-over-year breakdown.*")
+            parts.append("*Current status counts shown. Date columns not available for historical breakdown.*")
         
-        # Key insights
+        # Key insights - YoY change, not silly percentage
         current_active = summary.get('current_active', 0)
-        total_records = summary.get('total_records', 0)
         
-        if total_records > 0 and current_active > 0:
-            active_pct = (current_active / total_records) * 100
+        # Calculate YoY change from the data
+        sorted_years = sorted(years_data.keys())
+        if len(sorted_years) >= 2:
+            prev_year = sorted_years[-2]
+            curr_year = sorted_years[-1]
+            prev_active = years_data[prev_year].get('active', 0)
+            curr_active = years_data[curr_year].get('active', 0)
+            
+            if prev_active > 0:
+                change = curr_active - prev_active
+                if change > 0:
+                    change_str = f"up {change:,}"
+                elif change < 0:
+                    change_str = f"down {abs(change):,}"
+                else:
+                    change_str = "unchanged"
+                
+                parts.append("")
+                parts.append(f"**Current Active Headcount:** {current_active:,} ({change_str} from {prev_year})")
+        else:
             parts.append("")
-            parts.append(f"**Key Insight:** {active_pct:.1f}% active workforce ({current_active:,} of {total_records:,} total records)")
+            parts.append(f"**Current Active Headcount:** {current_active:,}")
         
         # Proactive offers
         parts.append("")
