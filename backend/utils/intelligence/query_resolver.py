@@ -1126,9 +1126,12 @@ WHERE {where_sql}'''
         try:
             result = self.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 1').fetchone()
             if result:
-                return list(result.keys()) if hasattr(result, 'keys') else []
+                cols = list(result.keys()) if hasattr(result, 'keys') else []
+                return cols
+            logger.warning(f"[RESOLVER] _get_table_columns: no rows in {table_name[-30:]}")
             return []
-        except:
+        except Exception as e:
+            logger.warning(f"[RESOLVER] _get_table_columns FAILED for {table_name[-30:]}: {e}")
             return []
     
     def _find_description_column(self, table_name: str, key_column: Optional[str] = None) -> Optional[str]:
@@ -1143,6 +1146,7 @@ WHERE {where_sql}'''
         try:
             columns = self._get_table_columns(table_name)
             if not columns:
+                logger.warning(f"[RESOLVER] _find_description_column: no columns for {table_name[-30:]}")
                 return None
             
             # Priority order for description columns
@@ -1273,6 +1277,11 @@ WHERE {where_sql}'''
             best_match_count = 0
             
             logger.warning(f"[RESOLVER] Searching {len(hubs)} hubs for '{hint_lower}'")
+            logger.warning(f"[RESOLVER] First 3 hubs: {[h.get('table', '')[-30:] for h in hubs[:3]]}")
+            
+            skipped_virtual = 0
+            skipped_no_desc = 0
+            checked = 0
             
             # Search each hub table for matching descriptions
             for hub in hubs:
@@ -1282,14 +1291,16 @@ WHERE {where_sql}'''
                 
                 # Skip virtual hubs
                 if hub_table.startswith('_virtual_'):
+                    skipped_virtual += 1
                     continue
                 
                 # Find description column
                 desc_column = self._find_description_column(hub_table, hub_column)
                 if not desc_column:
-                    logger.debug(f"[RESOLVER] No desc column found for {hub_table[-30:]}.{hub_column}")
+                    skipped_no_desc += 1
                     continue
                 
+                checked += 1
                 logger.warning(f"[RESOLVER] Checking hub {hub_table[-30:]}: key={hub_column}, desc={desc_column}")
                 
                 # Search for matching descriptions
@@ -1332,6 +1343,8 @@ WHERE {where_sql}'''
                 except Exception as e:
                     logger.warning(f"[RESOLVER] Error searching hub {hub_table}: {e}")
                     continue
+            
+            logger.warning(f"[RESOLVER] Hub scan: checked={checked}, skipped_virtual={skipped_virtual}, skipped_no_desc={skipped_no_desc}")
             
             # Also check org_level table specially (filtered by level)
             org_table = None
