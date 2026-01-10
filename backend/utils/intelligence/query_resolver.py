@@ -1272,7 +1272,7 @@ WHERE {where_sql}'''
             best_match = None
             best_match_count = 0
             
-            logger.info(f"[RESOLVER] Searching {len(hubs)} hubs for '{hint_lower}'")
+            logger.warning(f"[RESOLVER] Searching {len(hubs)} hubs for '{hint_lower}'")
             
             # Search each hub table for matching descriptions
             for hub in hubs:
@@ -1287,7 +1287,10 @@ WHERE {where_sql}'''
                 # Find description column
                 desc_column = self._find_description_column(hub_table, hub_column)
                 if not desc_column:
+                    logger.debug(f"[RESOLVER] No desc column found for {hub_table[-30:]}.{hub_column}")
                     continue
+                
+                logger.warning(f"[RESOLVER] Checking hub {hub_table[-30:]}: key={hub_column}, desc={desc_column}")
                 
                 # Search for matching descriptions
                 try:
@@ -1303,7 +1306,7 @@ WHERE {where_sql}'''
                         codes = [str(r[0]) for r in results if r[0]]
                         descriptions = [str(r[1]) for r in results if r[1]]
                         
-                        logger.info(f"[RESOLVER] Found {len(results)} matches for '{hint_lower}' in {hub_table[-30:]}: codes={codes[:3]}")
+                        logger.warning(f"[RESOLVER] Found {len(results)} matches for '{hint_lower}' in {hub_table[-30:]}: codes={codes[:3]}")
                         
                         # Prefer matches with more results (more specific)
                         # But also prefer exact matches
@@ -1421,7 +1424,7 @@ WHERE {where_sql}'''
             employee_table_lower = employee_table.lower()
             semantic_type_lower = semantic_type.lower()
             
-            logger.info(f"[RESOLVER] Looking for {semantic_type} column in/near {employee_table[-30:]}")
+            logger.warning(f"[RESOLVER] Looking for {semantic_type} column in/near {employee_table[-30:]}")
             
             # First: look for exact table match
             for rel in relationships:
@@ -1430,7 +1433,7 @@ WHERE {where_sql}'''
                 rel_semantic = rel.get('semantic_type', '').lower()
                 
                 if spoke_table == employee_table_lower and rel_semantic == semantic_type_lower:
-                    logger.info(f"[RESOLVER] Found dimension column in primary table: {spoke_column}")
+                    logger.warning(f"[RESOLVER] Found dimension column in primary table: {spoke_column}")
                     return {'column': spoke_column, 'table': employee_table, 'same_table': True}
             
             # Second: look in any employee-related table (Personal, Company, etc.)
@@ -1444,7 +1447,7 @@ WHERE {where_sql}'''
                 if rel_semantic == semantic_type_lower:
                     # Check if this is an employee-related table
                     if any(p in spoke_table.lower() for p in employee_patterns):
-                        logger.info(f"[RESOLVER] Found dimension in related table: {spoke_table[-30:]}.{spoke_column}")
+                        logger.warning(f"[RESOLVER] Found dimension in related table: {spoke_table[-30:]}.{spoke_column}")
                         return {
                             'column': spoke_column, 
                             'table': spoke_table,
