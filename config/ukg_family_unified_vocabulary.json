@@ -1,0 +1,2783 @@
+{
+  "version": "1.0",
+  "products": [
+    "ukg_pro",
+    "ukg_wfm",
+    "ukg_ready"
+  ],
+  "summary": {
+    "total_concepts": 303,
+    "all_three": 1,
+    "pro_wfm": 2,
+    "pro_ready": 5,
+    "wfm_ready": 8,
+    "pro_only": 95,
+    "wfm_only": 102,
+    "ready_only": 90
+  },
+  "vocabulary": {
+    "mastercompany": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "master_company_code"
+      },
+      "entity_name": "Master Company"
+    },
+    "componentcompany": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "component_company_code"
+      },
+      "entity_name": "Component Company"
+    },
+    "taxinfo": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "tax_info_code"
+      },
+      "entity_name": "Tax Info"
+    },
+    "location": {
+      "products": [
+        "ukg_pro",
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_pro": "location_code",
+        "ukg_wfm": "location_code"
+      },
+      "entity_name": "Location Codes"
+    },
+    "establishments": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "establishments_code"
+      },
+      "entity_name": "Establishments"
+    },
+    "organizationlevels": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "organization_levels_code"
+      },
+      "entity_name": "Organization Levels"
+    },
+    "suborglevels": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "suborg_levels_code"
+      },
+      "entity_name": "Sub-Org Levels"
+    },
+    "projects": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "projects_code"
+      },
+      "entity_name": "Projects"
+    },
+    "ppaca": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ppaca_code"
+      },
+      "entity_name": "PPACA"
+    },
+    "ppacameasuregroup": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ppaca_measuregroup_code"
+      },
+      "entity_name": "PPACA MeasureGroup"
+    },
+    "timeclockimport": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "timeclockimport_code"
+      },
+      "entity_name": "TimeClockImport"
+    },
+    "ppacadedbene": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ppaca_dedbene_code"
+      },
+      "entity_name": "PPACA DedBene"
+    },
+    "banks": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "banks_code"
+      },
+      "entity_name": "Banks"
+    },
+    "holidays": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "holidays_code"
+      },
+      "entity_name": "Holidays"
+    },
+    "paygroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "pay_groups_code"
+      },
+      "entity_name": "Pay Groups"
+    },
+    "payrollmodels": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "payroll_models_code"
+      },
+      "entity_name": "Payroll Models"
+    },
+    "taxgroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "tax_groups_code"
+      },
+      "entity_name": "Tax Groups"
+    },
+    "workpattern": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "work_pattern_code"
+      },
+      "entity_name": "Work Pattern"
+    },
+    "distributioncenter": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "distributioncenter_code"
+      },
+      "entity_name": "DistributionCenter"
+    },
+    "earning": {
+      "products": [
+        "ukg_pro",
+        "ukg_pro",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "earning_code_code",
+        "ukg_ready": "earning_code"
+      },
+      "entity_name": "Earning Codes"
+    },
+    "earningstaxcategories": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "earnings_tax_categories_code"
+      },
+      "entity_name": "Earnings Tax Categories"
+    },
+    "earngroup": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "earn_group_code"
+      },
+      "entity_name": "Earn Group"
+    },
+    "earngroupearns": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "earn_group_earns_code"
+      },
+      "entity_name": "Earn Group Earns"
+    },
+    "shifts": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "shifts_code"
+      },
+      "entity_name": "Shifts"
+    },
+    "shiftsgroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "shifts_groups_code"
+      },
+      "entity_name": "Shifts Groups"
+    },
+    "ded": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ded_code"
+      },
+      "entity_name": "Ded Codes"
+    },
+    "deductiontaxcategories": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "deductiontaxcategories_code"
+      },
+      "entity_name": "DeductionTaxCategories"
+    },
+    "optionratecodes": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "optionratecodes_code"
+      },
+      "entity_name": "OptionRateCodes"
+    },
+    "optionrates": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "option_rates_code"
+      },
+      "entity_name": "Option Rates"
+    },
+    "agegradedrates": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "agegradedrates_code"
+      },
+      "entity_name": "AgeGradedRates"
+    },
+    "dedgroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ded_groups_code"
+      },
+      "entity_name": "Ded Groups"
+    },
+    "dedgroupdeds": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ded_group_deds_code"
+      },
+      "entity_name": "Ded Group Deds"
+    },
+    "glbaseaccts": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "gl_base_accts_code"
+      },
+      "entity_name": "GL Base Accts"
+    },
+    "glrules": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "gl_rules_code"
+      },
+      "entity_name": "GL Rules"
+    },
+    "salarygrades": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "salary_grades_code"
+      },
+      "entity_name": "Salary Grades"
+    },
+    "slrydifferentialgroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "slrydifferentialgroups_code"
+      },
+      "entity_name": "SlryDifferentialGroups"
+    },
+    "wc": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "wc_code"
+      },
+      "entity_name": "WC Codes"
+    },
+    "wcriskrates": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "wc_risk_rates_code"
+      },
+      "entity_name": "WC Risk Rates"
+    },
+    "jobfamilies": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "jobfamilies_code"
+      },
+      "entity_name": "JobFamilies"
+    },
+    "job": {
+      "products": [
+        "ukg_pro",
+        "ukg_pro",
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_pro": "job_code_code",
+        "ukg_wfm": "job_code"
+      },
+      "entity_name": "Job Code"
+    },
+    "jobgroups": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "job_groups_code"
+      },
+      "entity_name": "Job Groups"
+    },
+    "jobgroupjobs": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "job_group_jobs_code"
+      },
+      "entity_name": "Job Group Jobs"
+    },
+    "ptobenefits": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "pto_benefits_code"
+      },
+      "entity_name": "PTO Benefits"
+    },
+    "laborunion": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "labor_union_code"
+      },
+      "entity_name": "Labor Union"
+    },
+    "eduleveldegs": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "eduleveldegs_code"
+      },
+      "entity_name": "EduLevelDegs"
+    },
+    "edumajors": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "edu_majors_code"
+      },
+      "entity_name": "Edu Majors"
+    },
+    "licensetype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "licensetype_code"
+      },
+      "entity_name": "LicenseType"
+    },
+    "liccerts": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "liccerts_code"
+      },
+      "entity_name": "Lic&Certs"
+    },
+    "provadminvendpayee": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "provadminvendpayee_code"
+      },
+      "entity_name": "ProvAdminVendPayee"
+    },
+    "ncuwebuserdefinedfields": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_web_user_defined_fields_code"
+      },
+      "entity_name": "NCU WEB User Defined Fields"
+    },
+    "ncubritemployeetype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_employee_type_code"
+      },
+      "entity_name": "NCU BRIT Employee Type Codes"
+    },
+    "ncubritjobchangereasons": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_job_change_reasons_code"
+      },
+      "entity_name": "NCU BRIT Job Change Reasons"
+    },
+    "ncubritleaveofabsencetype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_leave_of_absence_type_code"
+      },
+      "entity_name": "NCU BRIT Leave Of Absence Type"
+    },
+    "ncubritloareasons": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_loa_reasons_code"
+      },
+      "entity_name": "NCU BRIT LOA Reasons"
+    },
+    "ncubritterminationtypes": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_termination_types_code"
+      },
+      "entity_name": "NCU BRIT Termination Types"
+    },
+    "ncubritterminationreasons": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_termination_reasons_code"
+      },
+      "entity_name": "NCU BRIT Termination Reasons"
+    },
+    "ncubritbenefitchangereasons": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_benefit_change_reasons_code"
+      },
+      "entity_name": "NCU BRIT Benefit Change Reasons"
+    },
+    "ncubritdeclinereason": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_decline_reason_code"
+      },
+      "entity_name": "NCU BRIT Decline Reason"
+    },
+    "ncuwebrelationships": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_web_relationships_code"
+      },
+      "entity_name": "NCU WEB Relationships"
+    },
+    "ncuwebexpressions": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_web_expressions_code"
+      },
+      "entity_name": "NCU WEB Expressions"
+    },
+    "ncuwebvariablepayplan": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_web_variable_pay_plan_code"
+      },
+      "entity_name": "NCU WEB Variable Pay Plan"
+    },
+    "ncuwebvariablepaygroup": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_web_variable_pay_group_code"
+      },
+      "entity_name": "NCU WEB Variable Pay Group"
+    },
+    "ncubritawardtypes": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_award_types_code"
+      },
+      "entity_name": "NCU BRIT Award Types"
+    },
+    "ncubritawardsandrecognition": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_awards_and_recognition_code"
+      },
+      "entity_name": "NCU BRIT Awards and Recognition"
+    },
+    "ncubritbodyparts": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_body_parts_code"
+      },
+      "entity_name": "NCU BRIT Body Parts"
+    },
+    "ncubritcobrastatus": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_cobra_status_code"
+      },
+      "entity_name": "NCU BRIT COBRA Status"
+    },
+    "ncubritcompanyproperty": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_company_property_code"
+      },
+      "entity_name": "NCU BRIT Company Property"
+    },
+    "ncubrithiresource": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_hire_source_code"
+      },
+      "entity_name": "NCU BRIT Hire Source"
+    },
+    "ncubritschool": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_school_code"
+      },
+      "entity_name": "NCU BRIT School Codes"
+    },
+    "ncubritskill": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_skill_code"
+      },
+      "entity_name": "NCU BRIT Skill Codes"
+    },
+    "ncubritskillproficiencylevels": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_skillproficiencylevels_code"
+      },
+      "entity_name": "NCU BRIT SkillProficiencyLevels"
+    },
+    "ncubrittests": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_tests_code"
+      },
+      "entity_name": "NCU BRIT Tests"
+    },
+    "ncubritpayscales": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "ncu_brit_pay_scales_code"
+      },
+      "entity_name": "NCU BRIT Pay Scales"
+    },
+    "country": {
+      "products": [
+        "ukg_pro",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "country_code",
+        "ukg_ready": "country_code"
+      },
+      "entity_name": "Country"
+    },
+    "phonetype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "phone_type_code"
+      },
+      "entity_name": "Phone Type"
+    },
+    "deduction": {
+      "products": [
+        "ukg_pro",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "deduction_code_code",
+        "ukg_ready": "deduction_code"
+      },
+      "entity_name": "Deduction Code"
+    },
+    "jobchangereason": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "job_change_reason_code"
+      },
+      "entity_name": "Job Change Reason"
+    },
+    "leavereason": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "leave_reason_code"
+      },
+      "entity_name": "Leave Reason"
+    },
+    "earninggroup": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "earning_group_code"
+      },
+      "entity_name": "Earning Group"
+    },
+    "employeetype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "employee_type_code"
+      },
+      "entity_name": "Employee Type"
+    },
+    "paygroup": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "pay_group_code"
+      },
+      "entity_name": "Pay Group"
+    },
+    "shift": {
+      "products": [
+        "ukg_pro",
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "shift_code",
+        "ukg_wfm": "shift_code",
+        "ukg_ready": "shift_code"
+      },
+      "entity_name": "Shift"
+    },
+    "benefitoption": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "benefit_option_code"
+      },
+      "entity_name": "Benefit Option"
+    },
+    "tax": {
+      "products": [
+        "ukg_pro",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "tax_code",
+        "ukg_ready": "tax_code"
+      },
+      "entity_name": "Tax"
+    },
+    "award": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "award_code"
+      },
+      "entity_name": "Award"
+    },
+    "provider": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "provider_code"
+      },
+      "entity_name": "Provider"
+    },
+    "school": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "school_code"
+      },
+      "entity_name": "School"
+    },
+    "license": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "license_code"
+      },
+      "entity_name": "License"
+    },
+    "property": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "property_code"
+      },
+      "entity_name": "Property"
+    },
+    "skill": {
+      "products": [
+        "ukg_pro",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_pro": "skill_code",
+        "ukg_ready": "skill_code"
+      },
+      "entity_name": "Skill"
+    },
+    "test": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "test_code"
+      },
+      "entity_name": "Test"
+    },
+    "course": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "course_code"
+      },
+      "entity_name": "Course"
+    },
+    "militaryera": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "military_era_code"
+      },
+      "entity_name": "Military Era"
+    },
+    "militarybranch": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "military_branch_code"
+      },
+      "entity_name": "Military Branch"
+    },
+    "nationality": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "nationality_code"
+      },
+      "entity_name": "Nationality"
+    },
+    "employeestatus": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "employee_status_code"
+      },
+      "entity_name": "Employee Status"
+    },
+    "salarygrade": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "salary_grade_code"
+      },
+      "entity_name": "Salary Grade"
+    },
+    "rating": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "rating_code"
+      },
+      "entity_name": "Rating"
+    },
+    "reviewtype": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "review_type_code"
+      },
+      "entity_name": "Review Type"
+    },
+    "orglevel1": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "org_level_1_code"
+      },
+      "entity_name": "Org Level 1"
+    },
+    "orglevel2": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "org_level_2_code"
+      },
+      "entity_name": "Org Level 2"
+    },
+    "orglevel3": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "org_level_3_code"
+      },
+      "entity_name": "Org Level 3"
+    },
+    "orglevel4": {
+      "products": [
+        "ukg_pro"
+      ],
+      "semantic_types": {
+        "ukg_pro": "org_level_4_code"
+      },
+      "entity_name": "Org Level 4"
+    },
+    "activity": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_code"
+      },
+      "entity_name": "Activity"
+    },
+    "activityaction": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_action_code"
+      },
+      "entity_name": "Activity Action"
+    },
+    "activitycustomer": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_customer_code"
+      },
+      "entity_name": "Activity Customer"
+    },
+    "activityform": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_form_code"
+      },
+      "entity_name": "Activity Form"
+    },
+    "activityformprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_form_profile_code"
+      },
+      "entity_name": "Activity Form Profile"
+    },
+    "activityprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_profile_code"
+      },
+      "entity_name": "Activity Profile"
+    },
+    "activityquery": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_query_code"
+      },
+      "entity_name": "Activity Query"
+    },
+    "activityqueryprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_query_profile_code"
+      },
+      "entity_name": "Activity Query Profile"
+    },
+    "activityresource": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_resource_code"
+      },
+      "entity_name": "Activity Resource"
+    },
+    "activityresultstemplate": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_results_template_code"
+      },
+      "entity_name": "Activity Results Template"
+    },
+    "activitysetting": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_setting_code"
+      },
+      "entity_name": "Activity Setting"
+    },
+    "activityshift": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_shift_code"
+      },
+      "entity_name": "Activity Shift"
+    },
+    "activityteam": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_team_code"
+      },
+      "entity_name": "Activity Team"
+    },
+    "activityteamsegment": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "activity_team_segment_code"
+      },
+      "entity_name": "Activity Team Segment"
+    },
+    "fielddefinition": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "field_definition_code"
+      },
+      "entity_name": "Field Definition"
+    },
+    "result": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "result_code"
+      },
+      "entity_name": "Result Code"
+    },
+    "resultprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "result_code_profile_code"
+      },
+      "entity_name": "Result Code Profile"
+    },
+    "unitofmeasure": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "unit_of_measure_code"
+      },
+      "entity_name": "Unit of Measure"
+    },
+    "attendanceaction": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_action_code"
+      },
+      "entity_name": "Attendance Action"
+    },
+    "attendanceevent": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_event_code"
+      },
+      "entity_name": "Attendance Event"
+    },
+    "attendancepattern": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_pattern_code"
+      },
+      "entity_name": "Attendance Pattern"
+    },
+    "attendancepolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_policy_code"
+      },
+      "entity_name": "Attendance Policy"
+    },
+    "attendanceprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_profile_code"
+      },
+      "entity_name": "Attendance Profile"
+    },
+    "attendancebalancetype": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "attendance_balance_type_code"
+      },
+      "entity_name": "Balance Type"
+    },
+    "combinedevent": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "combined_event_code"
+      },
+      "entity_name": "Combined Event"
+    },
+    "disciplinelevel": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "discipline_level_code"
+      },
+      "entity_name": "Discipline Level"
+    },
+    "disciplinepolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "discipline_policy_code"
+      },
+      "entity_name": "Discipline Policy"
+    },
+    "formulapolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "formula_policy_code"
+      },
+      "entity_name": "Formula Policy"
+    },
+    "losttimeevent": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "lost_time_event_code"
+      },
+      "entity_name": "Lost Time Event"
+    },
+    "perfectattendancedef": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "perfect_attendance_def_code"
+      },
+      "entity_name": "Perfect Attendance Definition"
+    },
+    "perfectattendancepolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "perfect_attendance_policy_code"
+      },
+      "entity_name": "Perfect Attendance Policy"
+    },
+    "previousactionpolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "previous_action_policy_code"
+      },
+      "entity_name": "Previous Action Policy"
+    },
+    "totalbalancepolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "total_balance_policy_code"
+      },
+      "entity_name": "Total Balance Policy"
+    },
+    "trackingperiod": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "tracking_period_code"
+      },
+      "entity_name": "Tracking Period"
+    },
+    "accesscontrolpoint": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "access_control_point_code"
+      },
+      "entity_name": "Access Control Point"
+    },
+    "accessmethodprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "access_method_profile_code"
+      },
+      "entity_name": "Access Method Profile"
+    },
+    "costcenter": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "cost_center_code",
+        "ukg_ready": "cost_center_code"
+      },
+      "entity_name": "Cost Center"
+    },
+    "controlcenterprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "control_center_profile_code"
+      },
+      "entity_name": "Control Center Profile"
+    },
+    "delegateprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "delegate_profile_code"
+      },
+      "entity_name": "Delegate Profile"
+    },
+    "devicegroup": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "device_group_code"
+      },
+      "entity_name": "Device Group"
+    },
+    "displayprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "display_profile_code"
+      },
+      "entity_name": "Display Profile"
+    },
+    "employeegroup": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "employee_group_code"
+      },
+      "entity_name": "Employee Group"
+    },
+    "functionaccessprofile": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "function_access_profile_code",
+        "ukg_ready": "function_access_profile_code"
+      },
+      "entity_name": "Function Access Profile"
+    },
+    "dataaccessprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "data_access_profile_code"
+      },
+      "entity_name": "Generic Data Access Profile"
+    },
+    "hyperfindprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "hyperfind_profile_code"
+      },
+      "entity_name": "Hyperfind Profile"
+    },
+    "notificationprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "notification_profile_code"
+      },
+      "entity_name": "Notification Profile"
+    },
+    "processprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "process_profile_code"
+      },
+      "entity_name": "Process Profile"
+    },
+    "roleprofile": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "role_profile_code",
+        "ukg_ready": "role_profile_code"
+      },
+      "entity_name": "Role Profile"
+    },
+    "transferdisplayprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "transfer_display_profile_code"
+      },
+      "entity_name": "Transfer Display Profile"
+    },
+    "hoursofoperation": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "hours_of_operation_code"
+      },
+      "entity_name": "Hours of Operation"
+    },
+    "hoursofoperationoverride": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "hours_of_operation_override_code"
+      },
+      "entity_name": "Hours of Operation Override"
+    },
+    "knownipaddress": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "known_ip_address_code"
+      },
+      "entity_name": "Known IP Address"
+    },
+    "wifiaccesspoint": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "wifi_access_point_code"
+      },
+      "entity_name": "WiFi Access Point"
+    },
+    "wifinetwork": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "wifi_network_code"
+      },
+      "entity_name": "WiFi Network"
+    },
+    "gpsknownplace": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "gps_known_place_code"
+      },
+      "entity_name": "GPS Known Place"
+    },
+    "symbolicperiod": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "symbolic_period_code"
+      },
+      "entity_name": "Symbolic Period"
+    },
+    "timezone": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "timezone_code",
+        "ukg_ready": "timezone_code"
+      },
+      "entity_name": "Timezone"
+    },
+    "payperiodtimespan": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "pay_period_timespan_code"
+      },
+      "entity_name": "Pay Period Timespan"
+    },
+    "fiscalcalendar": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "fiscal_calendar_code"
+      },
+      "entity_name": "Fiscal Calendar"
+    },
+    "locationtype": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "location_type_code"
+      },
+      "entity_name": "Location Type"
+    },
+    "locationset": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "location_set_code"
+      },
+      "entity_name": "Location Set"
+    },
+    "locationattribute": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "location_attribute_code"
+      },
+      "entity_name": "Location Attribute"
+    },
+    "laborcategory": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "labor_category_code"
+      },
+      "entity_name": "Labor Category"
+    },
+    "laborcategoryentry": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "labor_category_entry_code"
+      },
+      "entity_name": "Labor Category Entry"
+    },
+    "laborcategorylist": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "labor_category_list_code"
+      },
+      "entity_name": "Labor Category List"
+    },
+    "laborcategoryprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "labor_category_profile_code"
+      },
+      "entity_name": "Labor Category Profile"
+    },
+    "genericlocation": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "generic_location_code"
+      },
+      "entity_name": "Generic Location"
+    },
+    "person": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "person_code"
+      },
+      "entity_name": "Person"
+    },
+    "employmentterm": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "employment_term_code"
+      },
+      "entity_name": "Employment Term"
+    },
+    "badge": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "badge_code"
+      },
+      "entity_name": "Badge"
+    },
+    "useraccount": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "user_account_code"
+      },
+      "entity_name": "User Account"
+    },
+    "employeephoto": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "employee_photo_code"
+      },
+      "entity_name": "Employee Photo"
+    },
+    "schedulepattern": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "schedule_pattern_code"
+      },
+      "entity_name": "Schedule Pattern"
+    },
+    "schedulegroup": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "schedule_group_code"
+      },
+      "entity_name": "Schedule Group"
+    },
+    "shifttemplate": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "shift_template_code"
+      },
+      "entity_name": "Shift Template"
+    },
+    "scheduletag": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "schedule_tag_code"
+      },
+      "entity_name": "Schedule Tag"
+    },
+    "openshift": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "open_shift_code"
+      },
+      "entity_name": "Open Shift"
+    },
+    "schedulezone": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "schedule_zone_code"
+      },
+      "entity_name": "Schedule Zone"
+    },
+    "availabilitypattern": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "availability_pattern_code"
+      },
+      "entity_name": "Availability Pattern"
+    },
+    "pay": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "pay_code"
+      },
+      "entity_name": "Pay Code"
+    },
+    "payedit": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "pay_code_edit_code"
+      },
+      "entity_name": "Pay Code Edit"
+    },
+    "punch": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "punch_code",
+        "ukg_ready": "punch_code"
+      },
+      "entity_name": "Punch"
+    },
+    "timecard": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "timecard_code"
+      },
+      "entity_name": "Timecard"
+    },
+    "workrule": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "work_rule_code"
+      },
+      "entity_name": "Work Rule"
+    },
+    "exceptiontype": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "exception_type_code"
+      },
+      "entity_name": "Exception Type"
+    },
+    "accrual": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "accrual_code",
+        "ukg_ready": "accrual_code"
+      },
+      "entity_name": "Accrual Code"
+    },
+    "accrualpolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "accrual_policy_code"
+      },
+      "entity_name": "Accrual Policy"
+    },
+    "holiday": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "holiday_code",
+        "ukg_ready": "holiday_code"
+      },
+      "entity_name": "Holiday"
+    },
+    "holidayprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "holiday_profile_code"
+      },
+      "entity_name": "Holiday Profile"
+    },
+    "adjustmentdriversetting": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "adjustment_driver_setting_code"
+      },
+      "entity_name": "Adjustment Driver Setting"
+    },
+    "budgetdistributiontype": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "budget_distribution_type_code"
+      },
+      "entity_name": "Budget Distribution Type"
+    },
+    "categorypropertyset": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "category_property_set_code"
+      },
+      "entity_name": "Category Property Set"
+    },
+    "combinedlabordistribution": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "combined_labor_distribution_code"
+      },
+      "entity_name": "Combined Labor Distribution"
+    },
+    "customdriver": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "custom_driver_code"
+      },
+      "entity_name": "Custom Driver"
+    },
+    "forecastplannerprofile": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "forecast_planner_profile_code"
+      },
+      "entity_name": "Forecast Planner Profile"
+    },
+    "forecastplannersetting": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "forecast_planner_setting_code"
+      },
+      "entity_name": "Forecast Planner Setting"
+    },
+    "volumedriver": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "volume_driver_code"
+      },
+      "entity_name": "Volume Driver"
+    },
+    "laborstandard": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "labor_standard_code"
+      },
+      "entity_name": "Labor Standard"
+    },
+    "timeoffrequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "time_off_request_code"
+      },
+      "entity_name": "Time Off Request"
+    },
+    "availabilityrequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "availability_request_code"
+      },
+      "entity_name": "Availability Request"
+    },
+    "coverrequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "cover_request_code"
+      },
+      "entity_name": "Cover Request"
+    },
+    "swaprequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "swap_request_code"
+      },
+      "entity_name": "Swap Request"
+    },
+    "openshiftrequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "open_shift_request_code"
+      },
+      "entity_name": "Open Shift Request"
+    },
+    "selfschedulerequest": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "self_schedule_request_code"
+      },
+      "entity_name": "Self-Schedule Request"
+    },
+    "requestsubtype": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "request_subtype_code"
+      },
+      "entity_name": "Request Subtype"
+    },
+    "payrolltable": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "payroll_table_code"
+      },
+      "entity_name": "Payroll Table"
+    },
+    "payrollexport": {
+      "products": [
+        "ukg_wfm",
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "payroll_export_code",
+        "ukg_ready": "payroll_export_code"
+      },
+      "entity_name": "Payroll Export"
+    },
+    "currencydefinition": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "currency_definition_code"
+      },
+      "entity_name": "Currency Definition"
+    },
+    "currencypolicy": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "currency_policy_code"
+      },
+      "entity_name": "Currency Policy"
+    },
+    "exchangerate": {
+      "products": [
+        "ukg_wfm"
+      ],
+      "semantic_types": {
+        "ukg_wfm": "exchange_rate_code"
+      },
+      "entity_name": "Exchange Rate"
+    },
+    "company": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "company_code"
+      },
+      "entity_name": "Company"
+    },
+    "costcentertree": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "cost_center_tree_code"
+      },
+      "entity_name": "Cost Center Tree"
+    },
+    "costcenterlist": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "cost_center_list_code"
+      },
+      "entity_name": "Cost Center List"
+    },
+    "ein": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "ein_code"
+      },
+      "entity_name": "EIN"
+    },
+    "accountgroup": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "account_group_code"
+      },
+      "entity_name": "Account Group"
+    },
+    "position": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "position_code"
+      },
+      "entity_name": "Position"
+    },
+    "department": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "department_code"
+      },
+      "entity_name": "Department"
+    },
+    "employeeaccount": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "employee_account_code"
+      },
+      "entity_name": "Employee Account"
+    },
+    "systemaccount": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "system_account_code"
+      },
+      "entity_name": "System Account"
+    },
+    "serviceaccount": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "service_account_code"
+      },
+      "entity_name": "Service Account"
+    },
+    "demographics": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "demographics_code"
+      },
+      "entity_name": "Demographics"
+    },
+    "contactinfo": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "contact_info_code"
+      },
+      "entity_name": "Contact Information"
+    },
+    "emergencycontact": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "emergency_contact_code"
+      },
+      "entity_name": "Emergency Contact"
+    },
+    "dependent": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "dependent_code"
+      },
+      "entity_name": "Dependent"
+    },
+    "education": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "education_code"
+      },
+      "entity_name": "Education"
+    },
+    "workhistory": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "work_history_code"
+      },
+      "entity_name": "Work History"
+    },
+    "employmentstatus": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "employment_status_code"
+      },
+      "entity_name": "Employment Status"
+    },
+    "workertype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "worker_type_code"
+      },
+      "entity_name": "Worker Type"
+    },
+    "jobassignment": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "job_assignment_code"
+      },
+      "entity_name": "Job Assignment"
+    },
+    "positionassignment": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "position_assignment_code"
+      },
+      "entity_name": "Position Assignment"
+    },
+    "hiresource": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "hire_source_code"
+      },
+      "entity_name": "Hire Source"
+    },
+    "referral": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "referral_code"
+      },
+      "entity_name": "Referral"
+    },
+    "terminationreason": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "termination_reason_code"
+      },
+      "entity_name": "Termination Reason"
+    },
+    "rehireeligibility": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "rehire_eligibility_code"
+      },
+      "entity_name": "Rehire Eligibility"
+    },
+    "payinformation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_information_code"
+      },
+      "entity_name": "Pay Information"
+    },
+    "paytype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_type_code"
+      },
+      "entity_name": "Pay Type"
+    },
+    "paygrade": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_grade_code"
+      },
+      "entity_name": "Pay Grade"
+    },
+    "payrate": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_rate_code"
+      },
+      "entity_name": "Pay Rate"
+    },
+    "basecompensation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "base_compensation_code"
+      },
+      "entity_name": "Base Compensation"
+    },
+    "totalcompensation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "total_compensation_code"
+      },
+      "entity_name": "Total Compensation"
+    },
+    "additionalcompensation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "additional_compensation_code"
+      },
+      "entity_name": "Additional Compensation"
+    },
+    "ratetable": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "rate_table_code"
+      },
+      "entity_name": "Rate Table"
+    },
+    "rateschedule": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "rate_schedule_code"
+      },
+      "entity_name": "Rate Schedule"
+    },
+    "currency": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "currency_code"
+      },
+      "entity_name": "Currency"
+    },
+    "payroll": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "payroll_code"
+      },
+      "entity_name": "Payroll"
+    },
+    "payperiod": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_period_code"
+      },
+      "entity_name": "Pay Period"
+    },
+    "payperiodprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_period_profile_code"
+      },
+      "entity_name": "Pay Period Profile"
+    },
+    "paystatement": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_statement_code"
+      },
+      "entity_name": "Pay Statement"
+    },
+    "paystatementtype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_statement_type_code"
+      },
+      "entity_name": "Pay Statement Type"
+    },
+    "payrolltype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "payroll_type_code"
+      },
+      "entity_name": "Payroll Type"
+    },
+    "payrollbatchtype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "payroll_batch_type_code"
+      },
+      "entity_name": "Payroll Batch Type"
+    },
+    "snapshot": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "snapshot_code"
+      },
+      "entity_name": "Snapshot"
+    },
+    "scheduledearning": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "scheduled_earning_code"
+      },
+      "entity_name": "Scheduled Earning"
+    },
+    "scheduleddeduction": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "scheduled_deduction_code"
+      },
+      "entity_name": "Scheduled Deduction"
+    },
+    "paycategory": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_category_code"
+      },
+      "entity_name": "Pay Category"
+    },
+    "garnishment": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "garnishment_code"
+      },
+      "entity_name": "Garnishment"
+    },
+    "childsupport": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "child_support_code"
+      },
+      "entity_name": "Child Support"
+    },
+    "taxinformation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "tax_information_code"
+      },
+      "entity_name": "Tax Information"
+    },
+    "workerscomp": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "workers_comp_code"
+      },
+      "entity_name": "Workers Comp Code"
+    },
+    "taxwithholding": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "tax_withholding_code"
+      },
+      "entity_name": "Tax Withholding"
+    },
+    "timesheet": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "timesheet_code"
+      },
+      "entity_name": "Timesheet"
+    },
+    "timesheetprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "timesheet_profile_code"
+      },
+      "entity_name": "Timesheet Profile"
+    },
+    "timeentry": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "time_entry_code"
+      },
+      "entity_name": "Time Entry"
+    },
+    "attendance": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "attendance_code"
+      },
+      "entity_name": "Attendance"
+    },
+    "reason": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "reason_code"
+      },
+      "entity_name": "Reason Code"
+    },
+    "paycalculationprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pay_calculation_profile_code"
+      },
+      "entity_name": "Pay Calculation Profile"
+    },
+    "workdaybreakdownprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "workday_breakdown_profile_code"
+      },
+      "entity_name": "Workday Breakdown Profile"
+    },
+    "workingtimeregulation": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "working_time_regulation_code"
+      },
+      "entity_name": "Working Time Regulation"
+    },
+    "schedule": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "schedule_code"
+      },
+      "entity_name": "Schedule"
+    },
+    "schedulesetting": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "schedule_setting_code"
+      },
+      "entity_name": "Schedule Setting"
+    },
+    "shiftpremium": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "shift_premium_code"
+      },
+      "entity_name": "Shift Premium"
+    },
+    "schedulerprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "scheduler_profile_code"
+      },
+      "entity_name": "Scheduler Profile"
+    },
+    "workscheduleprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "work_schedule_profile_code"
+      },
+      "entity_name": "Work Schedule Profile"
+    },
+    "ptorequest": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "pto_request_code"
+      },
+      "entity_name": "PTO Request"
+    },
+    "accrualprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "accrual_profile_code"
+      },
+      "entity_name": "Accrual Profile"
+    },
+    "timeofftype": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "time_off_type_code"
+      },
+      "entity_name": "Time Off Type"
+    },
+    "timeoffplanningprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "time_off_planning_profile_code"
+      },
+      "entity_name": "Time Off Planning Profile"
+    },
+    "benefitplan": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "benefit_plan_code"
+      },
+      "entity_name": "Benefit Plan"
+    },
+    "benefitenrollment": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "benefit_enrollment_code"
+      },
+      "entity_name": "Benefit Enrollment"
+    },
+    "retirementplanprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "retirement_plan_profile_code"
+      },
+      "entity_name": "Retirement Plan Profile"
+    },
+    "insurance": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "insurance_code"
+      },
+      "entity_name": "Insurance"
+    },
+    "securityprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "security_profile_code"
+      },
+      "entity_name": "Security Profile"
+    },
+    "accesspolicyprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "access_policy_profile_code"
+      },
+      "entity_name": "Access Policy Profile"
+    },
+    "training": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "training_code"
+      },
+      "entity_name": "Training"
+    },
+    "certification": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "certification_code"
+      },
+      "entity_name": "Certification"
+    },
+    "trainingprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "training_profile_code"
+      },
+      "entity_name": "Training Profile"
+    },
+    "performancereview": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "performance_review_code"
+      },
+      "entity_name": "Performance Review"
+    },
+    "successionprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "succession_profile_code"
+      },
+      "entity_name": "Succession Profile"
+    },
+    "pointsprofile": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "points_profile_code"
+      },
+      "entity_name": "Points Profile"
+    },
+    "project": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "project_code"
+      },
+      "entity_name": "Project"
+    },
+    "projectmetrics": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "project_metrics_code"
+      },
+      "entity_name": "Project Metrics"
+    },
+    "vehicle": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "vehicle_code"
+      },
+      "entity_name": "Vehicle"
+    },
+    "vehicleassignment": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "vehicle_assignment_code"
+      },
+      "entity_name": "Vehicle Assignment"
+    },
+    "vendor": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "vendor_code"
+      },
+      "entity_name": "Vendor"
+    },
+    "jobrequisition": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "job_requisition_code"
+      },
+      "entity_name": "Job Requisition"
+    },
+    "candidate": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "candidate_code"
+      },
+      "entity_name": "Candidate"
+    },
+    "questionnaire": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "questionnaire_code"
+      },
+      "entity_name": "Questionnaire"
+    },
+    "onboarding": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "onboarding_code"
+      },
+      "entity_name": "Onboarding"
+    },
+    "state": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "state_code"
+      },
+      "entity_name": "State"
+    },
+    "union": {
+      "products": [
+        "ukg_ready"
+      ],
+      "semantic_types": {
+        "ukg_ready": "union_code"
+      },
+      "entity_name": "Union"
+    }
+  }
+}
