@@ -469,7 +469,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             
             # Query 3: Status breakdown (ALL statuses, not just active)
             if status_column:
-                breakdown = self._run_breakdown_query(table_name, status_column)
+                breakdown = self._run_breakdown_query(table_name, status_column, project=project)
                 if breakdown:
                     context['breakdowns']['by_status'] = breakdown
             
@@ -515,6 +515,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     dimension_column=col_name,
                     status_column=status_column,
                     active_values=active_values,
+                    hub_table=hub_table,
+                    hub_column=hub_column,
                     limit=10 if is_location else None
                 )
                 
@@ -713,50 +715,117 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         group_column: str,
         filter_column: Optional[str] = None,
         filter_values: Optional[List[str]] = None,
+        hub_table: Optional[str] = None,
+        hub_column: Optional[str] = None,
+        project: Optional[str] = None,
         limit: Optional[int] = None
     ) -> Optional[Dict]:
         """
         Run a GROUP BY query to get breakdown counts.
+        
+        v4.0: Enriches breakdown with descriptions from hub table when available.
+        v4.1: Special handling for org_level lookups (filtered join on level column).
         
         Args:
             table_name: Table to query
             group_column: Column to group by
             filter_column: Optional column to filter on (e.g., status)
             filter_values: Optional values to filter for (e.g., ['A'])
+            hub_table: Optional hub table for description lookup
+            hub_column: Optional hub key column
+            project: Optional project name (needed for org_level lookup)
             limit: Optional limit on results (for high-cardinality dimensions)
             
         Returns:
             Dict mapping dimension values to counts, e.g., {'A': 3976, 'T': 10462}
+            With hub: {'A (Active)': 3976, 'T (Terminated)': 10462}
         """
         try:
+            # Check for org_level special handling (filtered lookup)
+            org_level_info = None
+            if project:
+                org_level_info = self._get_org_level_lookup_info(project, group_column)
+            
+            # Check if we can get description from hub (or org_level table)
+            desc_column = None
+            hub_join = ""
+            hub_select = ""
+            hub_group = ""
+            
+            if org_level_info:
+                # Use org_level filtered lookup
+                org_table = org_level_info['table']
+                org_level_num = org_level_info['level']
+                hub_join = f'LEFT JOIN "{org_table}" h ON t."{group_column}" = h."code" AND h."level" = \'{org_level_num}\''
+                hub_select = ', h."description" as description'
+                hub_group = ', h."description"'
+                desc_column = 'description'
+                logger.info(f"[RESOLVER] Using org_level filtered lookup: level={org_level_num}")
+            elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
+                desc_column = self._find_description_column(hub_table)
+                if desc_column:
+                    hub_join = f'LEFT JOIN "{hub_table}" h ON t."{group_column}" = h."{hub_column}"'
+                    hub_select = f', h."{desc_column}" as description'
+                    hub_group = f', h."{desc_column}"'
+            
             # Build query
             if filter_column and filter_values:
                 values_sql = ', '.join(f"'{v}'" for v in filter_values)
-                sql = f'''
-                    SELECT "{group_column}", COUNT(*) as cnt 
-                    FROM "{table_name}" 
-                    WHERE "{filter_column}" IN ({values_sql})
-                    GROUP BY "{group_column}"
-                    ORDER BY cnt DESC
-                '''
+                if hub_join:
+                    sql = f'''
+                        SELECT t."{group_column}"{hub_select}, COUNT(*) as cnt 
+                        FROM "{table_name}" t
+                        {hub_join}
+                        WHERE t."{filter_column}" IN ({values_sql})
+                        GROUP BY t."{group_column}"{hub_group}
+                        ORDER BY cnt DESC
+                    '''
+                else:
+                    sql = f'''
+                        SELECT "{group_column}", COUNT(*) as cnt 
+                        FROM "{table_name}" 
+                        WHERE "{filter_column}" IN ({values_sql})
+                        GROUP BY "{group_column}"
+                        ORDER BY cnt DESC
+                    '''
             else:
-                sql = f'''
-                    SELECT "{group_column}", COUNT(*) as cnt 
-                    FROM "{table_name}" 
-                    GROUP BY "{group_column}"
-                    ORDER BY cnt DESC
-                '''
+                if hub_join:
+                    sql = f'''
+                        SELECT t."{group_column}"{hub_select}, COUNT(*) as cnt 
+                        FROM "{table_name}" t
+                        {hub_join}
+                        GROUP BY t."{group_column}"{hub_group}
+                        ORDER BY cnt DESC
+                    '''
+                else:
+                    sql = f'''
+                        SELECT "{group_column}", COUNT(*) as cnt 
+                        FROM "{table_name}" 
+                        GROUP BY "{group_column}"
+                        ORDER BY cnt DESC
+                    '''
             
             if limit:
                 sql += f' LIMIT {limit}'
             
             results = self.conn.execute(sql).fetchall()
             
-            # Convert to dict
+            # Convert to dict - include description if available
             breakdown = {}
             for row in results:
-                key = str(row[0]) if row[0] is not None else '(null)'
-                breakdown[key] = row[1]
+                code = str(row[0]) if row[0] is not None else '(null)'
+                count = row[-1]  # Count is always last
+                
+                if desc_column and len(row) > 2:
+                    desc = row[1]
+                    if desc and str(desc).strip():
+                        key = f"{code} ({desc})"
+                    else:
+                        key = code
+                else:
+                    key = code
+                    
+                breakdown[key] = count
             
             return breakdown if breakdown else None
             
@@ -772,6 +841,8 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         dimension_column: str,
         status_column: Optional[str],
         active_values: Optional[List[str]],
+        hub_table: Optional[str] = None,
+        hub_column: Optional[str] = None,
         limit: Optional[int] = None
     ) -> Optional[Dict]:
         """
@@ -780,17 +851,26 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
         v3.0: Handles dimensions in related employee tables (e.g., Company table
         has org_levels while Personal table has status).
         
+        v4.0: Enriches breakdown with descriptions from hub table when available.
+        
+        v4.1: Special handling for org_level lookups (filtered join on level column).
+        
         Strategy:
         1. If dimension_table == primary_table, simple query
         2. If different tables, find shared hubs from Context Graph → join keys
         3. Apply active filter from primary table
+        4. If hub_table provided, join to get description
+        5. For org_level columns, use filtered join on organization table
         
         Args:
+            project: Project name
             primary_table: The main employee table (has status column)
             dimension_table: Table containing the dimension column
             dimension_column: Column to group by
             status_column: Status column in primary table (for filtering)
             active_values: Active status values
+            hub_table: Optional hub table for description lookup
+            hub_column: Optional hub key column
             limit: Max results
         """
         try:
@@ -801,6 +881,9 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
                     dimension_column,
                     filter_column=status_column,
                     filter_values=active_values,
+                    hub_table=hub_table,
+                    hub_column=hub_column,
+                    project=project,
                     limit=limit
                 )
             
@@ -810,7 +893,7 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             if not join_keys:
                 logger.warning(f"[RESOLVER] No shared hubs between {primary_table[:30]} and {dimension_table[:30]}")
                 # Fallback: query dimension table without filter
-                return self._run_breakdown_query(dimension_table, dimension_column, limit=limit)
+                return self._run_breakdown_query(dimension_table, dimension_column, hub_table=hub_table, hub_column=hub_column, project=project, limit=limit)
             
             # Build JOIN clause for all shared hub columns
             join_conditions = []
@@ -822,45 +905,86 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             # Use first join key for COUNT DISTINCT (usually employee_number)
             count_column = join_keys[0][0]
             
+            # Check for org_level special handling (filtered lookup)
+            org_level_info = self._get_org_level_lookup_info(project, dimension_column)
+            
+            # Check if we can get description from hub (or org_level table)
+            desc_column = None
+            hub_join = ""
+            hub_select = ""
+            hub_group = ""
+            
+            if org_level_info:
+                # Use org_level filtered lookup
+                org_table = org_level_info['table']
+                org_level_num = org_level_info['level']
+                hub_join = f'LEFT JOIN "{org_table}" h ON d."{dimension_column}" = h."code" AND h."level" = \'{org_level_num}\''
+                hub_select = ', h."description" as description'
+                hub_group = ', h."description"'
+                desc_column = 'description'
+                logger.info(f"[RESOLVER] Using org_level filtered lookup: level={org_level_num}")
+            elif hub_table and hub_column and not hub_table.startswith('_virtual_'):
+                desc_column = self._find_description_column(hub_table)
+                if desc_column:
+                    hub_join = f'LEFT JOIN "{hub_table}" h ON d."{dimension_column}" = h."{hub_column}"'
+                    hub_select = f', h."{desc_column}" as description'
+                    hub_group = f', h."{desc_column}"'
+            
             # Build JOIN query with active filter
             if status_column and active_values:
                 values_sql = ', '.join(f"'{v}'" for v in active_values)
                 sql = f'''
-                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{count_column}") as cnt
+                    SELECT d."{dimension_column}"{hub_select}, COUNT(DISTINCT p."{count_column}") as cnt
                     FROM "{primary_table}" p
                     JOIN "{dimension_table}" d ON {join_clause}
+                    {hub_join}
                     WHERE p."{status_column}" IN ({values_sql})
-                    GROUP BY d."{dimension_column}"
+                    GROUP BY d."{dimension_column}"{hub_group}
                     ORDER BY cnt DESC
                 '''
             else:
                 sql = f'''
-                    SELECT d."{dimension_column}", COUNT(DISTINCT p."{count_column}") as cnt
+                    SELECT d."{dimension_column}"{hub_select}, COUNT(DISTINCT p."{count_column}") as cnt
                     FROM "{primary_table}" p
                     JOIN "{dimension_table}" d ON {join_clause}
-                    GROUP BY d."{dimension_column}"
+                    {hub_join}
+                    GROUP BY d."{dimension_column}"{hub_group}
                     ORDER BY cnt DESC
                 '''
             
             if limit:
                 sql += f' LIMIT {limit}'
             
-            logger.info(f"[RESOLVER] Cross-table breakdown: {dimension_column} from {dimension_table[:30]}")
+            logger.info(f"[RESOLVER] Cross-table breakdown: {dimension_column} from {dimension_table[:30]}" + 
+                       (f" with desc from {hub_table[:30]}" if desc_column else ""))
             
             results = self.conn.execute(sql).fetchall()
             
-            # Convert to dict
+            # Convert to dict - include description if available
             breakdown = {}
             for row in results:
-                key = str(row[0]) if row[0] is not None else '(null)'
-                breakdown[key] = row[1]
+                code = str(row[0]) if row[0] is not None else '(null)'
+                count = row[-1]  # Count is always last
+                
+                if desc_column and len(row) > 2:
+                    desc = row[1]
+                    if desc and str(desc).strip():
+                        key = f"{code} ({desc})"
+                    else:
+                        key = code
+                else:
+                    key = code
+                    
+                breakdown[key] = count
             
             return breakdown if breakdown else None
             
         except Exception as e:
             logger.warning(f"[RESOLVER] Cross-table breakdown failed for {dimension_column}: {e}")
-            # Fallback: simple query on dimension table
-            return self._run_breakdown_query(dimension_table, dimension_column, limit=limit)
+            import traceback
+            logger.debug(traceback.format_exc())
+            # Fallback: simple query on dimension table (no org level lookup in error case)
+            return self._run_breakdown_query(dimension_table, dimension_column, project=project, limit=limit)
     
     def _get_table_columns(self, table_name: str) -> List[str]:
         """Get column names for a table."""
@@ -871,6 +995,107 @@ WHERE "{status_column['column_name']}" IN ({values_sql})'''
             return []
         except:
             return []
+    
+    def _find_description_column(self, table_name: str) -> Optional[str]:
+        """
+        Find a description/name column in a hub table.
+        
+        Common patterns: description, name, desc, label, title
+        Returns the column name if found, None otherwise.
+        """
+        try:
+            columns = self._get_table_columns(table_name)
+            if not columns:
+                return None
+            
+            # Priority order for description columns
+            desc_patterns = [
+                'description',  # Most common
+                'name',         # e.g., location_name, job_name
+                'desc',         # Short form
+                'label',        # UI labels
+                'title',        # Job titles
+            ]
+            
+            cols_lower = {c.lower(): c for c in columns}
+            
+            # First pass: exact match
+            for pattern in desc_patterns:
+                if pattern in cols_lower:
+                    return cols_lower[pattern]
+            
+            # Second pass: contains pattern (e.g., job_description, location_name)
+            for pattern in desc_patterns:
+                for col_lower, col_original in cols_lower.items():
+                    if pattern in col_lower and col_lower not in ['id', 'code']:
+                        return col_original
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"[RESOLVER] Error finding description column in {table_name}: {e}")
+            return None
+    
+    def _get_org_level_lookup_info(self, project: str, dimension_column: str) -> Optional[Dict]:
+        """
+        Check if this dimension needs org_level filtered lookup.
+        
+        Org levels in UKG are stored in a single Organization table with a 'level' column
+        that indicates which org level (1, 2, 3, 4) each code belongs to.
+        
+        Returns:
+            Dict with 'table' and 'level' if this is an org_level column, None otherwise.
+        """
+        # Check if this is an org_level column
+        col_lower = dimension_column.lower().replace('_', '').replace(' ', '')
+        
+        org_level_map = {
+            'orglevel1code': '1',
+            'orglevel1': '1',
+            'org1': '1',
+            'orglevel2code': '2',
+            'orglevel2': '2',
+            'org2': '2',
+            'orglevel3code': '3',
+            'orglevel3': '3',
+            'org3': '3',
+            'orglevel4code': '4',
+            'orglevel4': '4',
+            'org4': '4',
+        }
+        
+        level_num = org_level_map.get(col_lower)
+        if not level_num:
+            return None
+        
+        # Find the organization table for this project
+        try:
+            result = self.conn.execute("""
+                SELECT table_name 
+                FROM _schema_metadata 
+                WHERE project = ? 
+                  AND is_current = TRUE
+                  AND LOWER(table_name) LIKE '%organization%'
+                  AND LOWER(table_name) NOT LIKE '%virtual%'
+                LIMIT 1
+            """, [project]).fetchone()
+            
+            if result:
+                org_table = result[0]
+                # Verify it has the expected columns (level, code, description)
+                try:
+                    cols = self.conn.execute(f"PRAGMA table_info('{org_table}')").fetchall()
+                    col_names = [c[1].lower() for c in cols]
+                    if 'level' in col_names and 'code' in col_names and 'description' in col_names:
+                        logger.debug(f"[RESOLVER] Found org_level table: {org_table}")
+                        return {'table': org_table, 'level': level_num}
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.debug(f"[RESOLVER] Error finding org_level table: {e}")
+        
+        return None
     
     def _get_join_keys_from_context_graph(self, project: str, table_a: str, table_b: str) -> List[Tuple[str, str]]:
         """
