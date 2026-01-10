@@ -1924,6 +1924,14 @@ async def unified_chat(request: UnifiedChatRequest):
             "hcmpact_hook": None,
             "synthesis_method": None,
             
+            # v4: Provenance / Show Our Math
+            "provenance": {
+                "resolution_path": [],      # Step-by-step lookup chain
+                "sql_executed": None,       # Actual SQL run
+                "source_tables": [],        # Tables used
+                "methodology": None         # Human-readable explanation
+            },
+            
             # Learning
             "used_learning": learned_sql is not None,
             
@@ -1958,6 +1966,32 @@ async def unified_chat(request: UnifiedChatRequest):
             response["from_regulatory"].append(_serialize_truth(truth, data_model))
         for truth in answer.from_compliance:
             response["from_compliance"].append(_serialize_truth(truth, data_model))
+        
+        # v4: Populate provenance from reality truths
+        for truth in answer.from_reality:
+            if isinstance(truth.content, dict):
+                # SQL executed
+                if truth.content.get('sql') and not response["provenance"]["sql_executed"]:
+                    response["provenance"]["sql_executed"] = truth.content.get('sql')
+                
+                # Resolution path (step-by-step)
+                if truth.content.get('resolution_path'):
+                    response["provenance"]["resolution_path"] = truth.content.get('resolution_path')
+                
+                # Source table
+                table = truth.content.get('table') or truth.content.get('display_name')
+                if table and table not in response["provenance"]["source_tables"]:
+                    response["provenance"]["source_tables"].append(table)
+                
+                # Reality context has methodology info
+                reality_ctx = truth.content.get('reality_context', {})
+                if reality_ctx and reality_ctx.get('answer_label'):
+                    response["provenance"]["methodology"] = reality_ctx.get('answer_label')
+        
+        # Also add source tables from other truths
+        for truth in answer.from_configuration + answer.from_reference + answer.from_regulatory:
+            if truth.source_name and truth.source_name not in response["provenance"]["source_tables"]:
+                response["provenance"]["source_tables"].append(truth.source_name)
         
         # Serialize conflicts
         for conflict in answer.conflicts:
@@ -2536,10 +2570,12 @@ def _serialize_truth(truth, data_model: Optional[DataModelService] = None) -> Di
         
         content = {
             'columns': content.get('columns', []),
-            'rows': rows[:20],  # Limit to 20 rows
+            'rows': rows,  # Return ALL rows - no arbitrary limit
             'total': content.get('total', len(rows)),
             'sql': content.get('sql'),
-            'query_type': content.get('query_type')
+            'query_type': content.get('query_type'),
+            'resolution_path': content.get('resolution_path'),  # Provenance
+            'reality_context': content.get('reality_context')   # Breakdowns
         }
     elif not isinstance(content, (dict, list, str, int, float, bool, type(None))):
         content = str(content)[:2000]
