@@ -814,11 +814,21 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                 query_type = truth.content.get('query_type', 'list')
                 table_name = truth.content.get('table', '')  # v4.2
                 reality_context = truth.content.get('reality_context')  # v5
+                structured_output = truth.content.get('structured_output')  # v6: Workforce snapshot
                 
                 info['query_type'] = query_type
                 info['result_columns'] = cols
                 info['table_name'] = table_name  # v4.2
                 info['reality_context'] = reality_context  # v5
+                
+                # v6: Check for workforce snapshot
+                if structured_output and structured_output.get('type') == 'workforce_snapshot':
+                    info['query_type'] = 'workforce_snapshot'
+                    info['structured_output'] = structured_output
+                    info['data_context'].append("WORKFORCE SNAPSHOT: Status breakdown by year")
+                    info['result_rows'] = rows  # Include so overlay can run
+                    logger.warning("[SYNTHESIZER] Detected workforce snapshot in data")
+                    break
                 
                 if query_type == 'count' and rows:
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
@@ -1414,6 +1424,14 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
             return "\n".join(parts)
         
         # =====================================================================
+        # v6: WORKFORCE SNAPSHOT - Show status breakdown by year
+        # =====================================================================
+        if query_type == 'workforce_snapshot':
+            structured = data_info.get('structured_output', {})
+            if structured and structured.get('type') == 'workforce_snapshot':
+                return self._format_workforce_snapshot(structured)
+        
+        # =====================================================================
         # Standard response format for non-config questions
         # =====================================================================
         
@@ -1698,6 +1716,65 @@ REMEMBER: Empty fields are often intentional. Don't flag normal config as proble
             # Can't identify structure, return None to fall back to table
             logger.warning("[SYNTHESIZE] Could not identify code column, falling back to table")
             return None
+        
+        return "\n".join(parts)
+    
+    def _format_workforce_snapshot(self, snapshot: Dict) -> str:
+        """
+        Format a workforce snapshot as a clean, consultative response.
+        
+        Shows headcount by status (Active/Termed/LOA) for recent years.
+        This is CONSULTANT-LEVEL insight - not just raw counts.
+        """
+        parts = []
+        
+        years_data = snapshot.get('years', {})
+        summary = snapshot.get('summary', {})
+        term_date_available = summary.get('term_date_available', False)
+        
+        if not years_data:
+            return "**Workforce Overview:** No data available"
+        
+        # Header
+        parts.append("## 📊 Workforce Snapshot\n")
+        
+        # Table header
+        parts.append("| Year | Active | Termed | LOA | Total |")
+        parts.append("|------|-------:|-------:|----:|------:|")
+        
+        # Sort years and output rows
+        for year in sorted(years_data.keys()):
+            data = years_data[year]
+            active = data.get('active', 0)
+            termed = data.get('termed', 0)
+            loa = data.get('loa', 0)
+            total = data.get('total', active + termed + loa)
+            
+            parts.append(f"| {year} | {active:,} | {termed:,} | {loa:,} | {total:,} |")
+        
+        # Footnotes
+        parts.append("")
+        if term_date_available:
+            base_year = min(years_data.keys()) if years_data else 2024
+            parts.append(f"*Terminations by year based on termination date.*")
+        else:
+            parts.append(f"*Current status counts shown. No termination date column detected for year-over-year breakdown.*")
+        
+        # Key insights
+        current_active = summary.get('current_active', 0)
+        total_records = summary.get('total_records', 0)
+        
+        if total_records > 0 and current_active > 0:
+            active_pct = (current_active / total_records) * 100
+            parts.append("")
+            parts.append(f"**Key Insight:** {active_pct:.1f}% active workforce ({current_active:,} of {total_records:,} total records)")
+        
+        # Proactive offers
+        parts.append("")
+        parts.append("**Next Steps:**")
+        parts.append("- \"Show me employees in [location/company]\" to drill down")
+        parts.append("- \"Who was hired in 2025?\" for new hire analysis")
+        parts.append("- \"List terminated employees\" for detailed exit review")
         
         return "\n".join(parts)
     
