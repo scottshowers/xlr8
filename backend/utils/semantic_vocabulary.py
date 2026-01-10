@@ -8,7 +8,6 @@ Used by:
 - structured_data_handler.py: Tag columns at upload
 - standards_processor.py: Tag rule fields during extraction
 - compliance_engine.py: Match rule fields to columns
-- relationship_detector.py: Match columns across tables
 
 NO MORE HARDCODED MAPPINGS scattered across files.
 
