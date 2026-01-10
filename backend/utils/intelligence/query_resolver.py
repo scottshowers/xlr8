@@ -573,43 +573,55 @@ class QueryResolver:
             result.resolution_path.append(f"FILTER HINTS: {parsed.filter_hints}")
             
             for hint in parsed.filter_hints:
-                resolved = self._resolve_dimension_filter(project, hint)
                 filter_added = False
                 
-                if resolved:
-                    # Find which column in employee data matches this semantic type
-                    column_info = self._find_employee_column_for_dimension(
-                        project, table_name, resolved['semantic_type']
-                    )
-                    if column_info:
-                        dimension_filters.append({
-                            'column': column_info['column'],
-                            'table': column_info['table'],
-                            'same_table': column_info['same_table'],
-                            'codes': resolved['codes'],
-                            'hint': hint,
-                            'semantic_type': resolved['semantic_type'],
-                            'descriptions': resolved.get('matched_descriptions', [])
-                        })
+                # PRIORITY 1: For known geographic terms (states, provinces, countries),
+                # try direct state/province column first before hub resolution.
+                # This prevents "Louisiana" from matching company codes like "FLOU".
+                geo_info = normalize_geographic_term(hint)
+                if geo_info and geo_info.get('type') in ('state', 'province', 'country'):
+                    geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
+                    if geo_filter:
+                        dimension_filters.append(geo_filter)
                         result.resolution_path.append(
-                            f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
+                            f"DIRECT GEO (priority): '{hint}' -> {geo_filter['table']}.{geo_filter['column']} IN {geo_filter['codes']}"
                         )
                         filter_added = True
-                    else:
-                        result.resolution_path.append(
-                            f"HUB FOUND but no employee column for {resolved['semantic_type']}"
-                        )
                 
-                # FALLBACK: Try direct column search for geographic terms
-                # This handles cases where:
-                # 1. Hub resolution failed entirely (resolved is None)
-                # 2. Hub found but no matching column in employee table (column_info is None)
+                # PRIORITY 2: Try hub resolution for non-geographic terms or if geo failed
+                if not filter_added:
+                    resolved = self._resolve_dimension_filter(project, hint)
+                    if resolved:
+                        # Find which column in employee data matches this semantic type
+                        column_info = self._find_employee_column_for_dimension(
+                            project, table_name, resolved['semantic_type']
+                        )
+                        if column_info:
+                            dimension_filters.append({
+                                'column': column_info['column'],
+                                'table': column_info['table'],
+                                'same_table': column_info['same_table'],
+                                'codes': resolved['codes'],
+                                'hint': hint,
+                                'semantic_type': resolved['semantic_type'],
+                                'descriptions': resolved.get('matched_descriptions', [])
+                            })
+                            result.resolution_path.append(
+                                f"RESOLVED: '{hint}' -> {column_info['table']}.{column_info['column']} IN {resolved['codes'][:3]}..."
+                            )
+                            filter_added = True
+                        else:
+                            result.resolution_path.append(
+                                f"HUB FOUND but no employee column for {resolved['semantic_type']}"
+                            )
+                
+                # FALLBACK: Try direct geo filter if nothing else worked
                 if not filter_added:
                     geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
                     if geo_filter:
                         dimension_filters.append(geo_filter)
                         result.resolution_path.append(
-                            f"DIRECT GEO: '{hint}' -> {geo_filter['table']}.{geo_filter['column']} IN {geo_filter['codes']}"
+                            f"DIRECT GEO (fallback): '{hint}' -> {geo_filter['table']}.{geo_filter['column']} IN {geo_filter['codes']}"
                         )
         
         # LOOKUP 6: Resolve date filter if present
