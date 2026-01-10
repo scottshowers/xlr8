@@ -838,10 +838,10 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                     info['result_value'] = list(rows[0].values())[0] if rows[0] else 0
                     info['data_context'].append(f"{query_type.upper()} RESULT: {info['result_value']}")
                 elif query_type == 'group' and rows:
-                    info['result_rows'] = rows[:20]
+                    info['result_rows'] = rows  # No limit - return all
                     info['data_context'].append(f"Grouped results: {len(rows)} groups")
                 else:
-                    info['result_rows'] = rows[:20]
+                    info['result_rows'] = rows  # No limit - return all
                     info['data_context'].append(f"Found {len(rows)} rows with columns: {', '.join(cols[:8])}")
                 
                 # Build structured output
