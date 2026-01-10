@@ -1262,6 +1262,7 @@ WHERE {where_sql}'''
         """
         try:
             if not hasattr(self.handler, 'get_context_graph'):
+                logger.warning(f"[RESOLVER] No get_context_graph method on handler")
                 return None
             
             graph = self.handler.get_context_graph(project)
@@ -1270,6 +1271,8 @@ WHERE {where_sql}'''
             hint_lower = filter_hint.lower().strip()
             best_match = None
             best_match_count = 0
+            
+            logger.info(f"[RESOLVER] Searching {len(hubs)} hubs for '{hint_lower}'")
             
             # Search each hub table for matching descriptions
             for hub in hubs:
@@ -1300,6 +1303,8 @@ WHERE {where_sql}'''
                         codes = [str(r[0]) for r in results if r[0]]
                         descriptions = [str(r[1]) for r in results if r[1]]
                         
+                        logger.info(f"[RESOLVER] Found {len(results)} matches for '{hint_lower}' in {hub_table[-30:]}: codes={codes[:3]}")
+                        
                         # Prefer matches with more results (more specific)
                         # But also prefer exact matches
                         match_quality = len(results)
@@ -1322,7 +1327,7 @@ WHERE {where_sql}'''
                             }
                             
                 except Exception as e:
-                    logger.debug(f"[RESOLVER] Error searching hub {hub_table}: {e}")
+                    logger.warning(f"[RESOLVER] Error searching hub {hub_table}: {e}")
                     continue
             
             # Also check org_level table specially (filtered by level)
@@ -1382,6 +1387,8 @@ WHERE {where_sql}'''
             
             if best_match:
                 logger.info(f"[RESOLVER] Resolved '{filter_hint}' -> {best_match['semantic_type']}: {best_match['codes'][:3]}...")
+            else:
+                logger.warning(f"[RESOLVER] No match found for '{filter_hint}' in any hub")
                 
             return best_match
             
@@ -1414,6 +1421,8 @@ WHERE {where_sql}'''
             employee_table_lower = employee_table.lower()
             semantic_type_lower = semantic_type.lower()
             
+            logger.info(f"[RESOLVER] Looking for {semantic_type} column in/near {employee_table[-30:]}")
+            
             # First: look for exact table match
             for rel in relationships:
                 spoke_table = rel.get('spoke_table', '').lower()
@@ -1421,7 +1430,7 @@ WHERE {where_sql}'''
                 rel_semantic = rel.get('semantic_type', '').lower()
                 
                 if spoke_table == employee_table_lower and rel_semantic == semantic_type_lower:
-                    logger.debug(f"[RESOLVER] Found dimension column in primary table: {spoke_column}")
+                    logger.info(f"[RESOLVER] Found dimension column in primary table: {spoke_column}")
                     return {'column': spoke_column, 'table': employee_table, 'same_table': True}
             
             # Second: look in any employee-related table (Personal, Company, etc.)
@@ -1435,13 +1444,14 @@ WHERE {where_sql}'''
                 if rel_semantic == semantic_type_lower:
                     # Check if this is an employee-related table
                     if any(p in spoke_table.lower() for p in employee_patterns):
-                        logger.debug(f"[RESOLVER] Found dimension in related table: {spoke_table}.{spoke_column}")
+                        logger.info(f"[RESOLVER] Found dimension in related table: {spoke_table[-30:]}.{spoke_column}")
                         return {
                             'column': spoke_column, 
                             'table': spoke_table,
                             'same_table': spoke_table.lower() == employee_table_lower
                         }
             
+            logger.warning(f"[RESOLVER] No column found for {semantic_type} in employee-related tables")
             return None
             
         except Exception as e:
