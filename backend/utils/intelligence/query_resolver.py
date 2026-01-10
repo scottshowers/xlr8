@@ -2480,22 +2480,32 @@ WHERE {where_sql}'''
                     logger.warning(f"[SNAPSHOT] Query failed: {e}")
                     return 0
             
-            # For the earliest year (e.g., 2024), show current state counts
-            base_year = years[0]
+            # Find hire date column for point-in-time calculations
+            hire_date_col = None
+            for hint in ['hire_date', 'last_hire_date', 'original_hire_date', 'start_date', 'employment_date']:
+                hire_date_col = self._find_date_column(project, table_name, hint)
+                if hire_date_col:
+                    break
+            logger.warning(f"[SNAPSHOT] Hire date column: {hire_date_col}")
             
-            # Current state counts (what the data shows NOW)
+            # Current state counts (for reference)
             active_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in active_vals)})'
-            term_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})' if term_vals else None
-            loa_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in loa_vals)})' if loa_vals else None
-            
             current_active = safe_count(active_sql) if active_vals else 0
-            current_term = safe_count(term_sql) if term_sql else 0
-            current_loa = safe_count(loa_sql) if loa_sql else 0
+            current_loa = safe_count(f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in loa_vals)})') if loa_vals else 0
+            total_records = safe_count(f'SELECT COUNT(*) FROM "{table_name}"')
             
-            # For recent years, filter terms by term date if available
-            recent_term_cutoff = f'{base_year}-01-01'
+            # =====================================================================
+            # POINT-IN-TIME HEADCOUNT CALCULATION
+            # Active as of year-end = hired by year-end AND (not termed OR termed after year-end)
+            # =====================================================================
+            can_do_point_in_time = hire_date_col and term_date_col
+            logger.warning(f"[SNAPSHOT] Point-in-time capable: {can_do_point_in_time}")
             
             for year in years:
+                year_end = f'{year}-12-31'
+                next_year_start = f'{year + 1}-01-01'
+                year_start = f'{year}-01-01'
+                
                 year_data = {
                     'active': 0,
                     'termed': 0,
@@ -2503,43 +2513,60 @@ WHERE {where_sql}'''
                     'total': 0
                 }
                 
-                if year == current_year:
-                    # Current year = current state
-                    year_data['active'] = current_active
-                    year_data['loa'] = current_loa
+                if can_do_point_in_time:
+                    # POINT-IN-TIME: Who was active as of Dec 31 of this year?
+                    # Criteria: hired <= year_end AND (term_date IS NULL OR term_date > year_end)
+                    # Note: We check status='A' to exclude people who were never active
                     
-                    # Terms this year = terms with term_date in current year
-                    if term_vals and term_date_col:
-                        term_current_year = f'''
-                            SELECT COUNT(*) FROM "{table_name}" 
-                            WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
-                            AND "{term_date_col}" >= '{year}-01-01'
-                        '''
-                        year_data['termed'] = safe_count(term_current_year)
-                    else:
-                        year_data['termed'] = 0  # Can't filter without term date
+                    if year == current_year:
+                        # Current year = current state (today's snapshot)
+                        year_data['active'] = current_active
+                        year_data['loa'] = current_loa
                         
-                elif year >= base_year:
-                    # Recent past years - show terms since cutoff
-                    year_data['active'] = current_active  # Active count is current
+                        # Terms YTD in current year
+                        if term_vals:
+                            year_data['termed'] = safe_count(f'''
+                                SELECT COUNT(*) FROM "{table_name}" 
+                                WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
+                                AND "{term_date_col}" >= '{year_start}'
+                            ''')
+                    else:
+                        # Historical year - calculate point-in-time
+                        # Active as of year-end: hired by year-end AND not termed by year-end
+                        # This includes people who are CURRENTLY termed but weren't termed yet at year-end
+                        active_at_year_end = safe_count(f'''
+                            SELECT COUNT(*) FROM "{table_name}" 
+                            WHERE "{hire_date_col}" <= '{year_end}'
+                            AND ("{term_date_col}" IS NULL OR "{term_date_col}" > '{year_end}')
+                        ''')
+                        year_data['active'] = active_at_year_end
+                        
+                        # LOA at year-end (approximation - use current LOA if no LOA date column)
+                        # TODO: Add LOA date handling if column exists
+                        year_data['loa'] = 0  # Can't calculate historical LOA without LOA date
+                        
+                        # Termed during this calendar year
+                        if term_vals:
+                            year_data['termed'] = safe_count(f'''
+                                SELECT COUNT(*) FROM "{table_name}" 
+                                WHERE "{term_date_col}" >= '{year_start}'
+                                AND "{term_date_col}" <= '{year_end}'
+                            ''')
+                else:
+                    # NO POINT-IN-TIME: Fall back to current state with term breakdowns
+                    year_data['active'] = current_active
                     year_data['loa'] = current_loa
                     
                     if term_vals and term_date_col:
-                        # Terms in this specific year
-                        term_in_year = f'''
+                        # At least show terms per year
+                        year_data['termed'] = safe_count(f'''
                             SELECT COUNT(*) FROM "{table_name}" 
                             WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
-                            AND "{term_date_col}" >= '{year}-01-01'
-                            AND "{term_date_col}" < '{year + 1}-01-01'
-                        '''
-                        year_data['termed'] = safe_count(term_in_year)
+                            AND "{term_date_col}" >= '{year_start}'
+                            AND "{term_date_col}" < '{next_year_start}'
+                        ''')
                     else:
-                        year_data['termed'] = current_term if year == base_year else 0
-                else:
-                    # Historical year - just show totals from that period
-                    year_data['active'] = current_active
-                    year_data['termed'] = current_term
-                    year_data['loa'] = current_loa
+                        year_data['termed'] = 0
                 
                 year_data['total'] = year_data['active'] + year_data['termed'] + year_data['loa']
                 snapshot['years'][year] = year_data
@@ -2556,8 +2583,10 @@ GROUP BY "{status_col}"'''
             snapshot['summary'] = {
                 'current_active': current_active,
                 'current_loa': current_loa,
-                'total_records': current_active + current_term + current_loa,
-                'term_date_available': term_date_col is not None
+                'total_records': total_records,
+                'term_date_available': term_date_col is not None,
+                'hire_date_available': hire_date_col is not None,
+                'point_in_time': can_do_point_in_time
             }
             
             logger.warning(f"[SNAPSHOT] Generated: {snapshot['years']}")
