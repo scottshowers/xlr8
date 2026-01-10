@@ -465,23 +465,29 @@ Do NOT repeat the data summary. Provide consultant-level analysis only.
 
 | Task | Est | Priority | Status |
 |------|-----|----------|--------|
-| Fuzzy dimension resolution | 4h | P0 | ⬜ TODO |
-| Query pattern expansion (SUM, LIST) | 4h | P0 | ⬜ TODO |
-| JOIN strategy (INNER vs LEFT) | 1h | P1 | ⬜ TODO |
+| Fuzzy dimension resolution | 4h | P0 | ✅ DONE (Jan 10) |
+| Query pattern expansion (SUM, LIST) | 4h | P0 | ✅ DONE (Jan 10) |
+| JOIN strategy (INNER vs LEFT) | 1h | P1 | ✅ DONE (Jan 10) |
 | Consultant synthesis fix | 4h | P0 | ⬜ TODO |
-| **Total** | **13h** | | |
+| **Total** | **13h** | | **9h done** |
+
+**Jan 10 Implementation Notes:**
+- Geographic fallback: `normalize_geographic_term()` + `_try_direct_geographic_filter()` for state/province columns not in context graph
+- SUM: Domain priority fix (earnings > employees), `_find_sum_column()` skips _code/_id columns, cross-table JOIN support
+- LIST: Added status filter, geographic fallback, key column selection (not SELECT *)
+- All JOINs use INNER for filters (already correct, made explicit)
 
 ### A.5.5 Success Criteria
 
 All of these must work before moving on:
 
 ```
-✅ "How many employees in Texas" → filters to TX location codes
-✅ "How many employees in TNC" → 3,254 (already works)
-✅ "Total earnings for TNC employees" → SUM query works
-✅ "List employees in Pasadena" → Returns employee list
-✅ "Employees hired in 2024" → Date filter works
-✅ Response includes insights, not just data formatting
+✅ "How many employees in Texas" → 1,636 (filters to TX via stateprovince)
+✅ "How many employees in TNC" → 3,254 
+✅ "Total earnings for TNC employees" → $15,360.44 (JOIN earnings→company)
+✅ "List employees in Pasadena" → Returns 20 employees
+✅ "Employees hired in 2024" → 428 (date filter works)
+⬜ Response includes insights, not just data formatting
 ```
 
 ### A.5.6 Cleanup Tasks (After Query Engine Works)
