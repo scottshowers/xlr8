@@ -146,6 +146,11 @@ class RealityGatherer(DuckDBGatherer):
                 breakdowns = reality_ctx.get('breakdowns', {})
                 logger.warning(f"[GATHER-REALITY] Reality context has {len(breakdowns)} breakdowns")
             
+            # Check for workforce snapshot
+            structured = resolver.get('structured_output')
+            if structured and structured.get('type') == 'workforce_snapshot':
+                logger.warning(f"[GATHER-REALITY] Workforce snapshot detected")
+            
             return {
                 'sql': resolver['sql'],
                 'source': 'resolver',
@@ -153,7 +158,8 @@ class RealityGatherer(DuckDBGatherer):
                 'table': resolver.get('table_name'),
                 'explanation': resolver.get('explanation'),
                 'resolution_path': resolver.get('resolution_path'),
-                'reality_context': resolver.get('reality_context')  # v2: Include breakdowns
+                'reality_context': resolver.get('reality_context'),  # v2: Include breakdowns
+                'structured_output': resolver.get('structured_output')  # v3: Workforce snapshot etc.
             }
         
         # TRY QUERY RESOLVER (if not already tried at engine level)
@@ -227,12 +233,15 @@ class RealityGatherer(DuckDBGatherer):
         table_name = sql_info.get('table', 'query')
         query_type = sql_info.get('query_type', 'list')
         reality_context = sql_info.get('reality_context')
+        structured_output = sql_info.get('structured_output')
         
         # Get display name from schema
         display_name = self._get_display_name(table_name)
         
         # Log what we're creating
-        if reality_context:
+        if structured_output and structured_output.get('type') == 'workforce_snapshot':
+            logger.warning(f"[GATHER-REALITY] Creating Truth with WORKFORCE SNAPSHOT")
+        elif reality_context:
             breakdowns = reality_context.get('breakdowns', {})
             logger.warning(f"[GATHER-REALITY] Creating Truth: "
                           f"query_type={query_type}, rows={len(rows)}, "
@@ -252,7 +261,8 @@ class RealityGatherer(DuckDBGatherer):
                 'table': table_name,
                 'display_name': display_name,
                 'is_targeted_query': True,
-                'reality_context': reality_context  # v2: Include breakdowns for synthesis
+                'reality_context': reality_context,  # v2: Include breakdowns for synthesis
+                'structured_output': structured_output  # v3: Workforce snapshot etc.
             },
             location=f"Query: {sql}",
             confidence=0.98,
