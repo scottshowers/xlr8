@@ -578,6 +578,29 @@ class QueryResolver:
         result.filter_values = active_values
         result.resolution_path.append(f"LOOKUP 4: Active values = {active_values}")
         
+        # =====================================================================
+        # WORKFORCE SNAPSHOT: For bare employee counts, show breakdown by status
+        # "how many employees" → show Active/Termed/LOA by recent years
+        # =====================================================================
+        status_keywords = {'active', 'terminated', 'term', 'termed', 'loa', 'leave', 'inactive'}
+        has_status_filter = any(hint.lower() in status_keywords for hint in parsed.filter_hints)
+        has_dimension_filter = any(hint.lower() not in status_keywords for hint in parsed.filter_hints)
+        
+        # Generate workforce snapshot if:
+        # 1. No explicit status filter (user didn't ask for "active" or "terminated")
+        # 2. No dimension filter (user didn't ask "in Texas" - that gets normal flow)
+        if not has_status_filter and not has_dimension_filter:
+            snapshot = self._generate_workforce_snapshot(
+                project, table_name, status_column, distinct_values
+            )
+            if snapshot:
+                result.success = True
+                result.sql = snapshot.get('sql', '')
+                result.explanation = "Workforce snapshot by status and year"
+                result.resolution_path.append("WORKFORCE SNAPSHOT: Bare count → showing breakdown")
+                result.structured_output = snapshot
+                return result
+        
         # LOOKUP 5: Resolve dimension filters from parsed hints
         dimension_filters = []
         if parsed.filter_hints:
@@ -680,14 +703,26 @@ class QueryResolver:
             
             # Dimension filters
             for dim_filter in dimension_filters:
-                codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
-                if dim_filter['same_table']:
-                    where_clauses.append(f'TRIM(p."{dim_filter["column"]}") IN ({codes_sql})')
+                # Check if this filter needs LIKE (for geographic patterns)
+                if dim_filter.get('use_like'):
+                    # LIKE pattern - codes[0] already contains the pattern (e.g., 'ON -%')
+                    pattern = dim_filter['codes'][0]
+                    if dim_filter['same_table']:
+                        where_clauses.append(f'UPPER(p."{dim_filter["column"]}") LIKE \'{pattern}\'')
+                    else:
+                        alias_idx = list(join_tables).index(dim_filter['table'])
+                        alias = f'd{alias_idx}'
+                        where_clauses.append(f'UPPER({alias}."{dim_filter["column"]}") LIKE \'{pattern}\'')
                 else:
-                    # Find the alias for this table
-                    alias_idx = list(join_tables).index(dim_filter['table'])
-                    alias = f'd{alias_idx}'
-                    where_clauses.append(f'TRIM({alias}."{dim_filter["column"]}") IN ({codes_sql})')
+                    # Standard IN clause
+                    codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
+                    if dim_filter['same_table']:
+                        where_clauses.append(f'TRIM(p."{dim_filter["column"]}") IN ({codes_sql})')
+                    else:
+                        # Find the alias for this table
+                        alias_idx = list(join_tables).index(dim_filter['table'])
+                        alias = f'd{alias_idx}'
+                        where_clauses.append(f'TRIM({alias}."{dim_filter["column"]}") IN ({codes_sql})')
             
             # Date filter (on primary table)
             if date_filter_clause:
@@ -711,8 +746,13 @@ WHERE {where_sql}'''
             
             # Dimension filters
             for dim_filter in dimension_filters:
-                codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
-                where_clauses.append(f'TRIM("{dim_filter["column"]}") IN ({codes_sql})')
+                # Check if this filter needs LIKE (for geographic patterns)
+                if dim_filter.get('use_like'):
+                    pattern = dim_filter['codes'][0]
+                    where_clauses.append(f'UPPER("{dim_filter["column"]}") LIKE \'{pattern}\'')
+                else:
+                    codes_sql = ', '.join(f"'{c}'" for c in dim_filter['codes'])
+                    where_clauses.append(f'TRIM("{dim_filter["column"]}") IN ({codes_sql})')
             
             # Date filter
             if date_filter_clause:
@@ -1888,29 +1928,76 @@ WHERE {where_sql}'''
             
             logger.warning(f"[RESOLVER] Found state column: {matched_column}")
             
-            # Verify the geo_code exists in this column
+            # Verify the geo_code exists in this column - try multiple patterns
             try:
-                result = self.conn.execute(f'''
-                    SELECT COUNT(*) FROM "{employee_table}"
-                    WHERE UPPER(TRIM("{matched_column}")) = ?
-                ''', [geo_code]).fetchone()
+                geo_code_upper = geo_code.upper()
+                geo_name = geo_info['name']
                 
-                count = result[0] if result else 0
-                if count == 0:
-                    logger.warning(f"[RESOLVER] No rows found with {matched_column}='{geo_code}'")
+                # Try multiple patterns to find how this location is stored
+                patterns_to_try = [
+                    # Pattern 1: Exact code match (TX, ON)
+                    (f'UPPER(TRIM("{matched_column}")) = ?', [geo_code_upper], 'exact'),
+                    # Pattern 2: Code prefix (TX - Houston, ON - Toronto)
+                    (f'UPPER("{matched_column}") LIKE ?', [f'{geo_code_upper} -%'], 'prefix'),
+                    # Pattern 3: Code anywhere (for messy data)
+                    (f'UPPER("{matched_column}") LIKE ?', [f'{geo_code_upper}%'], 'starts_with'),
+                    # Pattern 4: Full name (Ontario, Texas)
+                    (f'UPPER(TRIM("{matched_column}")) = ?', [geo_name.upper()], 'full_name'),
+                    # Pattern 5: Name prefix (Ontario - Toronto)
+                    (f'UPPER("{matched_column}") LIKE ?', [f'{geo_name.upper()} -%'], 'name_prefix'),
+                    # Pattern 6: Name anywhere
+                    (f'UPPER("{matched_column}") LIKE ?', [f'%{geo_name.upper()}%'], 'name_contains'),
+                ]
+                
+                matched_pattern = None
+                matched_count = 0
+                filter_condition = None
+                
+                for where_clause, params, pattern_name in patterns_to_try:
+                    try:
+                        result = self.conn.execute(f'''
+                            SELECT COUNT(*) FROM "{employee_table}"
+                            WHERE {where_clause}
+                        ''', params).fetchone()
+                        
+                        count = result[0] if result else 0
+                        if count > 0:
+                            matched_pattern = pattern_name
+                            matched_count = count
+                            filter_condition = (where_clause, params)
+                            logger.warning(f"[RESOLVER] Geo pattern '{pattern_name}' matched: {count} rows")
+                            break
+                    except Exception as e:
+                        logger.debug(f"[RESOLVER] Pattern {pattern_name} failed: {e}")
+                        continue
+                
+                if not matched_pattern:
+                    logger.warning(f"[RESOLVER] No rows found for '{hint}' in {matched_column} (tried {len(patterns_to_try)} patterns)")
                     return None
                     
-                logger.warning(f"[RESOLVER] Direct geo match: {count} rows with {matched_column}='{geo_code}'")
+                logger.warning(f"[RESOLVER] Direct geo match: {matched_count} rows via '{matched_pattern}' pattern")
+                
+                # Determine the actual filter to use
+                # For exact/full_name patterns, use exact match in final SQL
+                # For prefix/contains patterns, use LIKE
+                if matched_pattern in ('exact', 'full_name'):
+                    filter_codes = [filter_condition[1][0]]  # The matched value
+                    use_like = False
+                else:
+                    filter_codes = [filter_condition[1][0]]  # The LIKE pattern
+                    use_like = True
                 
                 return {
                     'column': matched_column,
                     'table': employee_table,
                     'same_table': True,
-                    'codes': [geo_code],
+                    'codes': filter_codes,
                     'hint': hint,
                     'semantic_type': f'{geo_type}_code',
                     'descriptions': [geo_info['name']],
-                    'direct_geo_match': True
+                    'direct_geo_match': True,
+                    'use_like': use_like,
+                    'match_pattern': matched_pattern
                 }
                 
             except Exception as e:
@@ -2313,9 +2400,183 @@ WHERE {where_sql}'''
         logger.info(f"[RESOLVER] Inferred active values: {active_values} from {distinct_values}")
         return active_values
     
-    # =========================================================================
-    # GENERIC RESOLVERS
-    # =========================================================================
+    def _generate_workforce_snapshot(
+        self, 
+        project: str, 
+        table_name: str, 
+        status_column: Dict,
+        distinct_values: List
+    ) -> Optional[Dict]:
+        """
+        Generate a workforce snapshot showing headcount by status and year.
+        
+        Returns breakdown like:
+        - 2024: Active X, Termed Y, LOA Z, Total W
+        - 2025: Active X, Termed Y (since 2024), LOA Z, Total W
+        - 2026: Active X, Termed Y (since 2024), LOA Z, Total W
+        
+        This is CONSULTANT-LEVEL insight, not raw counts.
+        """
+        try:
+            from datetime import datetime
+            current_year = datetime.now().year
+            years = [current_year - 2, current_year - 1, current_year]  # e.g., [2024, 2025, 2026]
+            
+            status_col = status_column['column_name']
+            
+            # Categorize status values
+            active_vals = []
+            term_vals = []
+            loa_vals = []
+            
+            for val in distinct_values:
+                val_str = str(val).strip()
+                val_lower = val_str.lower()
+                
+                if val_lower in ['a', 'active', 'act', 'current', 'employed']:
+                    active_vals.append(val_str)
+                elif val_lower in ['t', 'term', 'terminated', 'inactive', 'separated']:
+                    term_vals.append(val_str)
+                elif val_lower in ['l', 'loa', 'leave']:
+                    loa_vals.append(val_str)
+            
+            # If single-letter codes, map them
+            if not active_vals:
+                active_vals = [v for v in distinct_values if str(v).upper() == 'A']
+            if not term_vals:
+                term_vals = [v for v in distinct_values if str(v).upper() == 'T']
+            if not loa_vals:
+                loa_vals = [v for v in distinct_values if str(v).upper() == 'L']
+            
+            logger.warning(f"[SNAPSHOT] Status mapping: active={active_vals}, term={term_vals}, loa={loa_vals}")
+            
+            # Find term date column for filtering recent terms
+            term_date_col = self._find_date_column(table_name, ['term', 'termination', 'end', 'separation'])
+            logger.warning(f"[SNAPSHOT] Term date column: {term_date_col}")
+            
+            # Build the snapshot
+            snapshot = {
+                'type': 'workforce_snapshot',
+                'years': {},
+                'term_date_column': term_date_col,
+                'status_column': status_col,
+                'table': table_name
+            }
+            
+            # Helper to safely count
+            def safe_count(sql):
+                try:
+                    result = self.conn.execute(sql).fetchone()
+                    return result[0] if result else 0
+                except Exception as e:
+                    logger.warning(f"[SNAPSHOT] Query failed: {e}")
+                    return 0
+            
+            # For the earliest year (e.g., 2024), show current state counts
+            base_year = years[0]
+            
+            # Current state counts (what the data shows NOW)
+            active_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in active_vals)})'
+            term_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})' if term_vals else None
+            loa_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE "{status_col}" IN ({",".join(repr(v) for v in loa_vals)})' if loa_vals else None
+            
+            current_active = safe_count(active_sql) if active_vals else 0
+            current_term = safe_count(term_sql) if term_sql else 0
+            current_loa = safe_count(loa_sql) if loa_sql else 0
+            
+            # For recent years, filter terms by term date if available
+            recent_term_cutoff = f'{base_year}-01-01'
+            
+            for year in years:
+                year_data = {
+                    'active': 0,
+                    'termed': 0,
+                    'loa': 0,
+                    'total': 0
+                }
+                
+                if year == current_year:
+                    # Current year = current state
+                    year_data['active'] = current_active
+                    year_data['loa'] = current_loa
+                    
+                    # Terms this year = terms with term_date in current year
+                    if term_vals and term_date_col:
+                        term_current_year = f'''
+                            SELECT COUNT(*) FROM "{table_name}" 
+                            WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
+                            AND "{term_date_col}" >= '{year}-01-01'
+                        '''
+                        year_data['termed'] = safe_count(term_current_year)
+                    else:
+                        year_data['termed'] = 0  # Can't filter without term date
+                        
+                elif year >= base_year:
+                    # Recent past years - show terms since cutoff
+                    year_data['active'] = current_active  # Active count is current
+                    year_data['loa'] = current_loa
+                    
+                    if term_vals and term_date_col:
+                        # Terms in this specific year
+                        term_in_year = f'''
+                            SELECT COUNT(*) FROM "{table_name}" 
+                            WHERE "{status_col}" IN ({",".join(repr(v) for v in term_vals)})
+                            AND "{term_date_col}" >= '{year}-01-01'
+                            AND "{term_date_col}" < '{year + 1}-01-01'
+                        '''
+                        year_data['termed'] = safe_count(term_in_year)
+                    else:
+                        year_data['termed'] = current_term if year == base_year else 0
+                else:
+                    # Historical year - just show totals from that period
+                    year_data['active'] = current_active
+                    year_data['termed'] = current_term
+                    year_data['loa'] = current_loa
+                
+                year_data['total'] = year_data['active'] + year_data['termed'] + year_data['loa']
+                snapshot['years'][year] = year_data
+            
+            # Generate combined SQL for logging/debugging
+            snapshot['sql'] = f'''-- Workforce Snapshot Query
+SELECT 
+    "{status_col}" as status,
+    COUNT(*) as count
+FROM "{table_name}"
+GROUP BY "{status_col}"'''
+            
+            # Add summary
+            snapshot['summary'] = {
+                'current_active': current_active,
+                'current_loa': current_loa,
+                'total_records': current_active + current_term + current_loa,
+                'term_date_available': term_date_col is not None
+            }
+            
+            logger.warning(f"[SNAPSHOT] Generated: {snapshot['years']}")
+            return snapshot
+            
+        except Exception as e:
+            logger.warning(f"[SNAPSHOT] Generation failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+    
+    def _find_date_column(self, table_name: str, keywords: List[str]) -> Optional[str]:
+        """Find a date column matching keywords (e.g., term_date, termination_date)."""
+        try:
+            columns = self._get_table_columns(table_name)
+            if not columns:
+                return None
+            
+            for col in columns:
+                col_lower = col.lower()
+                for keyword in keywords:
+                    if keyword in col_lower and ('date' in col_lower or 'dt' in col_lower):
+                        return col
+            
+            return None
+        except:
+            return None
     
     def _resolve_generic_count(self, project: str, parsed: ParsedIntent,
                                 result: ResolvedQuery) -> ResolvedQuery:
@@ -2399,10 +2660,15 @@ WHERE {where_sql}'''
                 if geo_info and geo_info.get('type') in ('state', 'province', 'country'):
                     geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
                     if geo_filter:
-                        codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
-                        where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
+                        # Check if this filter needs LIKE (for non-exact matches)
+                        if geo_filter.get('use_like'):
+                            pattern = geo_filter['codes'][0]
+                            where_clauses.append(f'UPPER("{geo_filter["column"]}") LIKE \'{pattern}\'')
+                        else:
+                            codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
+                            where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
                         result.resolution_path.append(
-                            f"DIRECT GEO: '{hint}' -> {geo_filter['column']} IN {geo_filter['codes']}"
+                            f"DIRECT GEO: '{hint}' -> {geo_filter['column']} ({geo_filter.get('match_pattern', 'exact')})"
                         )
                         filter_added = True
                 
@@ -2425,10 +2691,15 @@ WHERE {where_sql}'''
                 if not filter_added:
                     geo_filter = self._try_direct_geographic_filter(project, table_name, hint)
                     if geo_filter:
-                        codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
-                        where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
+                        # Check if this filter needs LIKE
+                        if geo_filter.get('use_like'):
+                            pattern = geo_filter['codes'][0]
+                            where_clauses.append(f'UPPER("{geo_filter["column"]}") LIKE \'{pattern}\'')
+                        else:
+                            codes_sql = ', '.join(f"'{c}'" for c in geo_filter['codes'])
+                            where_clauses.append(f'TRIM("{geo_filter["column"]}") IN ({codes_sql})')
                         result.resolution_path.append(
-                            f"DIRECT GEO (fallback): '{hint}' -> {geo_filter['column']} IN {geo_filter['codes']}"
+                            f"DIRECT GEO (fallback): '{hint}' -> {geo_filter['column']} ({geo_filter.get('match_pattern', 'exact')})"
                         )
         
         # Build SQL - select key columns, not SELECT *
