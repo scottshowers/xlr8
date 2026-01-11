@@ -64,6 +64,15 @@ from .truth_enricher import TruthEnricher
 # Intent Parser (SOW/Requirements parsing)
 from .intent_parser import IntentParser, ParsedRequirement, parse_sow
 
+# Term Index (Load-time intelligence for deterministic query resolution)
+from .term_index import (
+    TermIndex,
+    TermMatch,
+    JoinPath,
+    VendorSchemaLoader,
+    recalc_term_index,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -104,6 +113,13 @@ __all__ = [
     'IntentParser',
     'ParsedRequirement',
     'parse_sow',
+    
+    # Term Index
+    'TermIndex',
+    'TermMatch',
+    'JoinPath',
+    'VendorSchemaLoader',
+    'recalc_term_index',
     
     # Gatherers
     'BaseGatherer',
