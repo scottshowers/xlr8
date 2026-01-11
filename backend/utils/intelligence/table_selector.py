@@ -668,10 +668,15 @@ class TableSelector:
                 break
         
         # Penalize tables that are clearly WRONG domain when user asked for something specific
+        # v4.2 FIX: Don't penalize if table's domain matches question_domain (e.g., 401k → deductions)
         if requested_domain:
             # List of domains that are DIFFERENT from requested
             wrong_domains = [d for d in TABLE_NAME_DOMAIN_KEYWORDS.keys() if d != requested_domain]
             for wrong_domain in wrong_domains:
+                # v4.2: Skip penalty if this "wrong" domain is actually the question_domain
+                if question_domain and wrong_domain == question_domain:
+                    continue  # Don't penalize deductions table when question is about deductions!
+                    
                 wrong_keywords = TABLE_NAME_DOMAIN_KEYWORDS[wrong_domain]
                 # If table name contains a DIFFERENT domain keyword, penalize
                 if wrong_domain in table_name or any(kw in table_name for kw in wrong_keywords if len(kw) > 3):
