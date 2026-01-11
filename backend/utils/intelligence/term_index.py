@@ -990,7 +990,12 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         'status_terms': 0,
         'lookup_terms': 0,
         'entity_mappings': 0,
-        'join_priorities': 0
+        'join_priorities': 0,
+        'profiles_found': 0,
+        'profiles_with_values': 0,
+        'location_columns': 0,
+        'status_columns': 0,
+        'sample_values': []
     }
     
     # Rebuild from column profiles
@@ -1001,21 +1006,37 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
             WHERE project = ? AND filter_category IS NOT NULL
         """, [project]).fetchall()
         
+        stats['profiles_found'] = len(profiles)
+        logger.info(f"[TERM_INDEX] Found {len(profiles)} profiles with filter_category")
+        
         for table_name, column_name, category, values_json in profiles:
             if not values_json:
                 continue
             
+            stats['profiles_with_values'] += 1
+            
             try:
                 values = json.loads(values_json) if isinstance(values_json, str) else values_json
-            except:
+            except Exception as parse_e:
+                logger.warning(f"[TERM_INDEX] Failed to parse values for {table_name}.{column_name}: {parse_e}")
                 continue
             
             if category == 'location':
-                stats['location_terms'] += index.build_location_terms(table_name, column_name, values)
+                stats['location_columns'] += 1
+                # Sample first location column values for debugging
+                if not stats['sample_values'] and values:
+                    stats['sample_values'] = values[:5] if isinstance(values, list) else [str(values)[:100]]
+                terms_added = index.build_location_terms(table_name, column_name, values)
+                stats['location_terms'] += terms_added
+                logger.info(f"[TERM_INDEX] Location {table_name}.{column_name}: {len(values) if isinstance(values, list) else 1} values → {terms_added} terms")
             elif category == 'status':
-                stats['status_terms'] += index.build_status_terms(table_name, column_name, values)
+                stats['status_columns'] += 1
+                terms_added = index.build_status_terms(table_name, column_name, values)
+                stats['status_terms'] += terms_added
+                logger.info(f"[TERM_INDEX] Status {table_name}.{column_name}: {len(values) if isinstance(values, list) else 1} values → {terms_added} terms")
     except Exception as e:
         logger.error(f"Error rebuilding terms from profiles: {e}")
+        stats['error'] = str(e)
     
     # Rebuild from lookups
     try:
