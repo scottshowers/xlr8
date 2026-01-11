@@ -287,24 +287,45 @@ function EndpointsTab() {
         </div>
       </div>
 
-      <Link to="/admin/endpoints" style={{ textDecoration: 'none' }}>
-        <button style={{
-          padding: '0.75rem 1.5rem',
-          background: COLORS.primary,
-          border: 'none',
-          borderRadius: '8px',
-          color: 'white',
-          fontWeight: 600,
-          fontSize: '0.9rem',
-          cursor: 'pointer',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-        }}>
-          <Wrench size={16} />
-          Open Endpoints Tool
-        </button>
-      </Link>
+      <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+        <Link to="/admin/endpoints" style={{ textDecoration: 'none' }}>
+          <button style={{
+            padding: '0.75rem 1.5rem',
+            background: COLORS.primary,
+            border: 'none',
+            borderRadius: '8px',
+            color: 'white',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}>
+            <Wrench size={16} />
+            Open Endpoints Tool
+          </button>
+        </Link>
+        
+        <Link to="/admin/intelligence-test" style={{ textDecoration: 'none' }}>
+          <button style={{
+            padding: '0.75rem 1.5rem',
+            background: '#6366f1',
+            border: 'none',
+            borderRadius: '8px',
+            color: 'white',
+            fontWeight: 600,
+            fontSize: '0.9rem',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}>
+            <Zap size={16} />
+            Intelligence Test
+          </button>
+        </Link>
+      </div>
     </div>
   );
 }
