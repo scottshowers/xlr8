@@ -183,6 +183,19 @@ class SQLAssembler:
                 error="Could not determine primary table"
             )
         
+        # SIMPLE PATH: For basic queries, only use term matches from the primary table
+        # This avoids complex multi-table JOINs that often fail
+        primary_matches = [m for m in term_matches if m.table_name == primary_table]
+        
+        # If we have matches in primary table, use only those (simple path)
+        # Otherwise, fall back to all matches (may need joins)
+        if primary_matches:
+            logger.warning(f"[SQL_ASSEMBLER] SIMPLE PATH: Using {len(primary_matches)} matches from primary table {primary_table}")
+            term_matches = primary_matches
+            tables_from_matches = [primary_table]
+        else:
+            logger.warning(f"[SQL_ASSEMBLER] COMPLEX PATH: Primary table {primary_table} has no matches, using all {len(term_matches)} matches")
+        
         # Build query based on intent
         if intent == QueryIntent.COUNT:
             return self._build_count(primary_table, term_matches, tables_from_matches)
@@ -205,13 +218,21 @@ class SQLAssembler:
         
         Priority:
         1. If domain specified and has primary table → use it
-        2. If single table in matches → use it
-        3. If employee domain → Personal
-        4. First table from matches
+        2. Look for 'personal' table in matches (common primary for employee data)
+        3. If single table in matches → use it
+        4. If employee domain → Personal
+        5. First table from matches
         """
-        # Domain-based primary
+        # Domain-based primary from entity tables
         if domain and domain in self._entity_primary:
             return self._entity_primary[domain]
+        
+        # FALLBACK: Look for 'personal' table in matches (very common primary)
+        # This handles the case where entity_primary is empty
+        for table in tables_from_matches:
+            if 'personal' in table.lower():
+                logger.warning(f"[SQL_ASSEMBLER] Found 'personal' table as primary: {table}")
+                return table
         
         # Check for employee/demographics domain in matches
         for match in term_matches:
@@ -220,6 +241,10 @@ class SQLAssembler:
                     return self._entity_primary['demographics']
                 if 'employee' in self._entity_primary:
                     return self._entity_primary['employee']
+                # Fallback: look for personal table again
+                for table in tables_from_matches:
+                    if 'personal' in table.lower():
+                        return table
         
         # Single table
         if len(tables_from_matches) == 1:
