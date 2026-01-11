@@ -326,6 +326,120 @@ class RecalcRequest(BaseModel):
     what: Optional[List[str]] = ["terms", "entities", "joins"]
 
 
+@router.post("/{project_id}/reprofile")
+async def reprofile_project_columns(project_id: str):
+    """
+    Re-run filter category detection on existing column profiles.
+    
+    This is needed when column profiles were created before the term index
+    was implemented. It re-analyzes distinct values to detect:
+    - location columns (state codes)
+    - status columns (employment status)
+    - company, organization, job, pay_type, employee_type columns
+    
+    After reprofiling, run /recalc to populate the term index.
+    
+    Args:
+        project_id: Project ID
+        
+    Returns:
+        Reprofile statistics
+    """
+    try:
+        from utils.structured_data_handler import StructuredDataHandler
+        import json
+        
+        logger.info(f"Reprofiling columns for project {project_id}")
+        
+        handler = StructuredDataHandler()
+        conn = handler.conn
+        
+        # Get all column profiles for this project
+        profiles = conn.execute("""
+            SELECT table_name, column_name, distinct_count, distinct_values, inferred_type
+            FROM _column_profiles
+            WHERE project = ?
+        """, [project_id]).fetchall()
+        
+        stats = {
+            'total_columns': len(profiles),
+            'reprofiled': 0,
+            'location': 0,
+            'status': 0,
+            'company': 0,
+            'organization': 0,
+            'job': 0,
+            'pay_type': 0,
+            'employee_type': 0,
+            'skipped': 0
+        }
+        
+        for row in profiles:
+            table_name, column_name, distinct_count, distinct_values_json, inferred_type = row
+            
+            # Skip if no distinct values or too many
+            if not distinct_values_json or not distinct_count or distinct_count > 500:
+                stats['skipped'] += 1
+                continue
+            
+            try:
+                distinct_values = json.loads(distinct_values_json) if isinstance(distinct_values_json, str) else distinct_values_json
+            except:
+                stats['skipped'] += 1
+                continue
+            
+            if not distinct_values:
+                stats['skipped'] += 1
+                continue
+            
+            # Build a profile dict for _detect_filter_category
+            profile = {
+                'distinct_count': distinct_count,
+                'inferred_type': inferred_type,
+                'filter_category': None,
+                'filter_priority': 0
+            }
+            
+            # Run filter category detection
+            updated_profile = handler._detect_filter_category(column_name, profile, distinct_values, project_id)
+            
+            if updated_profile.get('filter_category'):
+                # Update the profile in the database
+                conn.execute("""
+                    UPDATE _column_profiles 
+                    SET filter_category = ?, filter_priority = ?
+                    WHERE project = ? AND table_name = ? AND column_name = ?
+                """, [
+                    updated_profile['filter_category'],
+                    updated_profile.get('filter_priority', 0),
+                    project_id,
+                    table_name,
+                    column_name
+                ])
+                
+                stats['reprofiled'] += 1
+                category = updated_profile['filter_category']
+                if category in stats:
+                    stats[category] += 1
+                
+                logger.debug(f"[REPROFILE] {table_name}.{column_name} → {category}")
+        
+        conn.commit()
+        
+        logger.info(f"Reprofiled {stats['reprofiled']} columns for {project_id}: {stats}")
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "stats": stats,
+            "message": f"Reprofiled {stats['reprofiled']} columns. Run /recalc to populate term index."
+        }
+        
+    except Exception as e:
+        logger.error(f"Error reprofiling columns: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{project_id}/recalc")
 async def recalc_project_indexes(project_id: str, request: RecalcRequest = None):
     """
