@@ -1200,10 +1200,11 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         'profiles_with_values': 0,
         'location_columns': 0,
         'status_columns': 0,
+        'state_columns_fallback': 0,  # NEW: Track fallback detection
         'sample_values': []
     }
     
-    # Rebuild from column profiles
+    # Rebuild from column profiles (primary path)
     try:
         profiles = conn.execute("""
             SELECT table_name, column_name, filter_category, distinct_values
@@ -1242,6 +1243,44 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
     except Exception as e:
         logger.error(f"Error rebuilding terms from profiles: {e}")
         stats['error'] = str(e)
+    
+    # FALLBACK: Detect state columns that weren't categorized as 'location'
+    # This catches columns with 'state' or 'province' in the name that have state codes
+    try:
+        state_columns = conn.execute("""
+            SELECT table_name, column_name, distinct_values
+            FROM _column_profiles
+            WHERE project = ? 
+              AND filter_category IS NULL
+              AND (LOWER(column_name) LIKE '%state%' OR LOWER(column_name) LIKE '%province%')
+              AND distinct_count > 0 AND distinct_count <= 100
+              AND distinct_values IS NOT NULL
+        """, [project]).fetchall()
+        
+        for table_name, column_name, values_json in state_columns:
+            if not values_json:
+                continue
+            try:
+                values = json.loads(values_json) if isinstance(values_json, str) else values_json
+                if not values:
+                    continue
+                    
+                # Check if values look like state codes (mostly 2-char strings)
+                str_values = [str(v).strip().upper() for v in values if v]
+                state_like = sum(1 for v in str_values if len(v) == 2 and v.isalpha())
+                
+                if state_like >= len(str_values) * 0.5:  # At least 50% look like state codes
+                    terms_added = index.build_location_terms(table_name, column_name, values)
+                    stats['state_columns_fallback'] += 1
+                    stats['location_terms'] += terms_added
+                    logger.warning(f"[TERM_INDEX] FALLBACK state column {table_name}.{column_name}: {len(values)} values → {terms_added} terms")
+            except Exception as e:
+                logger.debug(f"Error processing fallback state column: {e}")
+                
+        if stats['state_columns_fallback'] > 0:
+            logger.warning(f"[TERM_INDEX] Fallback detected {stats['state_columns_fallback']} state columns")
+    except Exception as e:
+        logger.debug(f"State column fallback query failed: {e}")
     
     # Rebuild from lookups
     try:
