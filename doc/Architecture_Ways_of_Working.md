@@ -32,6 +32,10 @@
 - ~~"list employees with 401k" selected CONFIG deductions table~~
 - ~~Config table has no employee_number, so JOINs fail~~
 - v4.1 fix in TableSelector: `is_config_question` no longer triggers on data domain questions
+- v4.2 fix: WRONG TABLE NAME DOMAIN penalty skips tables matching question_domain
+  - Before: Deductions table got -150 for having "deductions" in name when question had "employees"
+  - After: Skip penalty because question_domain is "deductions" (from 401k)
+  - Deductions table now scores higher than Personal table
 
 **#3 BLOCKER: ~~QueryResolver Blocking Cross-Domain~~ FIXED**
 - ~~QueryResolver handled "employees with 401k" as single-domain employee query~~
