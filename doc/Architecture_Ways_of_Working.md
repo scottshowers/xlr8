@@ -28,7 +28,14 @@
 - v9.0 now auto-detects "active" → status='A'
 - Uses domain-agnostic vocabulary built from filter_candidates
 
-**#2: Synthesizer Quality**
+**#2 BLOCKER: ~~Config vs Employee Table Selection~~ FIXED**
+- ~~"list employees with 401k" selected CONFIG deductions table~~
+- ~~Config table has no employee_number, so JOINs fail~~
+- v4.1 fix: `is_config_question` no longer triggers on data domain questions
+- "list", "what", "how many" no longer force config table selection
+- Context Graph scoring now properly boosts Reality tables with employee_number
+
+**#3: Synthesizer Quality**
 - Template responses work (lists data)
 - LLM overlay produces generic consultant-speak
 - Hub usage analysis exists but needs tuning
