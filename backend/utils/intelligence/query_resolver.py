@@ -312,6 +312,17 @@ def parse_intent(question: str) -> ParsedIntent:
         intent_confidence = 1.0
         domain_confidence = 1.0
     
+    # ==========================================================================
+    # v5.0: DEFAULT INTENT FOR EMPLOYEES DOMAIN
+    # If domain is EMPLOYEES but intent is UNKNOWN, default to LIST
+    # This handles queries like "active employees in Texas" that don't have
+    # explicit list/show keywords but clearly want employee data
+    # ==========================================================================
+    if domain == EntityDomain.EMPLOYEES and intent == QueryIntent.UNKNOWN:
+        intent = QueryIntent.LIST
+        intent_confidence = 0.8  # Slightly lower confidence since it's inferred
+        logger.info(f"[PARSER] Defaulting EMPLOYEES domain to LIST intent")
+    
     # Extract filter hints (phrases like "in Texas", "in Pasadena", "at location X")
     filter_hints = []
     
