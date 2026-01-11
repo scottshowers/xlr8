@@ -1131,7 +1131,8 @@ class IntelligenceEngineV2:
                     'explanation': resolved.explanation,
                     'resolution_path': resolved.resolution_path,
                     'reality_context': resolved.reality_context,  # v2: Include breakdowns
-                    'structured_output': resolved.structured_output  # v3: Workforce snapshot etc.
+                    'structured_output': resolved.structured_output,  # v3: Workforce snapshot etc.
+                    'total_count': resolved.total_count  # v5: Real count for LIST queries
                 }
             else:
                 logger.warning(f"[ENGINE-V2] QueryResolver no match: {resolved.explanation or 'unknown'}")
