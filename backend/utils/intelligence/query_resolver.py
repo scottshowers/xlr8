@@ -448,6 +448,9 @@ class ResolvedQuery:
     # v3: Structured output - workforce snapshot, etc.
     structured_output: Optional[Dict] = None
     
+    # v5: Total count for LIST queries (so synthesizer knows real count, not LIMIT)
+    total_count: Optional[int] = None
+    
 
 class QueryResolver:
     """
@@ -2731,13 +2734,38 @@ GROUP BY "{status_col}"'''
         key_columns = self._get_list_columns(project, table_name, is_employee_table)
         columns_sql = ', '.join(f'"{c}"' for c in key_columns) if key_columns else '*'
         
+        # ================================================================
+        # v5.0: Get REAL COUNT before returning limited rows
+        # ================================================================
+        total_count = None
         if where_clauses:
             where_sql = ' AND '.join(where_clauses)
+            try:
+                count_sql = f'SELECT COUNT(*) FROM "{table_name}" WHERE {where_sql}'
+                count_result = self.conn.execute(count_sql).fetchone()
+                total_count = count_result[0] if count_result else None
+                logger.warning(f"[RESOLVER] LIST total count: {total_count}")
+            except Exception as e:
+                logger.warning(f"[RESOLVER] COUNT query failed: {e}")
+            
             result.sql = f'SELECT {columns_sql} FROM "{table_name}" WHERE {where_sql} LIMIT 100'
             result.explanation = f"Listing {domain} from {table_name} with filters applied"
         else:
+            try:
+                count_sql = f'SELECT COUNT(*) FROM "{table_name}"'
+                count_result = self.conn.execute(count_sql).fetchone()
+                total_count = count_result[0] if count_result else None
+                logger.warning(f"[RESOLVER] LIST total count: {total_count}")
+            except Exception as e:
+                logger.warning(f"[RESOLVER] COUNT query failed: {e}")
+            
             result.sql = f'SELECT {columns_sql} FROM "{table_name}" LIMIT 100'
             result.explanation = f"Listing {domain} from {table_name}"
+        
+        # Store total count for synthesizer
+        if total_count is not None:
+            result.total_count = total_count
+            result.resolution_path.append(f"TOTAL COUNT: {total_count}")
         
         result.success = True
         return result
