@@ -49,7 +49,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "9.0.0"  # v9.0: Intelligent filter detection from question text
+__version__ = "9.1.0"  # v9.1: Fix confirmed_facts sync + value/label handling
 
 # Try to load Project Intelligence
 PROJECT_INTELLIGENCE_AVAILABLE = False
@@ -1295,6 +1295,11 @@ class IntelligenceEngineV2:
             if category not in self.confirmed_facts:
                 self.confirmed_facts[category] = value
                 logger.warning(f"[CLARIFICATION] Auto-applied {category}='{value}' to confirmed_facts")
+        
+        # v9.1: Sync confirmed_facts to sql_generator so it knows about detected filters
+        if detected and self.sql_generator:
+            self.sql_generator.confirmed_facts = self.confirmed_facts
+            logger.warning(f"[CLARIFICATION] Synced confirmed_facts to sql_generator")
         
         # Step 3: Check if status clarification is still needed
         if 'status' not in self.confirmed_facts:
