@@ -33,7 +33,7 @@ Deploy to: backend/utils/intelligence/__init__.py
 """
 
 # Version
-__version__ = "6.1.0"
+__version__ = "7.0.0"  # v7.0: SQLAssembler - Deterministic SQL generation
 
 # Core types (always available)
 from .types import (
@@ -71,6 +71,13 @@ from .term_index import (
     JoinPath,
     VendorSchemaLoader,
     recalc_term_index,
+)
+
+# SQL Assembler (Deterministic SQL generation from term matches)
+from .sql_assembler import (
+    SQLAssembler,
+    AssembledQuery,
+    assemble_query,
 )
 
 # Gatherers
@@ -120,6 +127,11 @@ __all__ = [
     'JoinPath',
     'VendorSchemaLoader',
     'recalc_term_index',
+    
+    # SQL Assembler
+    'SQLAssembler',
+    'AssembledQuery',
+    'assemble_query',
     
     # Gatherers
     'BaseGatherer',
