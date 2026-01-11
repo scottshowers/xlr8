@@ -1188,6 +1188,9 @@ SQL:"""
         if not status or status == 'all':
             return ""
         
+        # Normalize status to lowercase for comparison
+        status_lower = str(status).lower().strip()
+        
         # Find status column
         for category, candidates in self.filter_candidates.items():
             if category != 'status':
@@ -1196,14 +1199,24 @@ SQL:"""
                 col = cand.get('column_name', cand.get('column', ''))
                 vals = cand.get('value_distribution', {})
                 
-                if status == 'active':
+                # v9.1: Handle both VALUE codes ('A') and LABELS ('active')
+                # Check if status IS already the value code (e.g., 'A')
+                if status in vals:
+                    return f'"{col}" = \'{status}\''
+                
+                # Check if status is a friendly label
+                if status_lower in ['active', 'a']:
                     # Find active code
                     for val, count in vals.items():
                         if val.upper() in ['A', 'ACTIVE', 'ACT']:
                             return f'"{col}" = \'{val}\''
-                elif status == 'termed':
+                elif status_lower in ['termed', 'terminated', 't']:
                     for val, count in vals.items():
                         if val.upper() in ['T', 'TERM', 'TERMINATED']:
+                            return f'"{col}" = \'{val}\''
+                elif status_lower in ['leave', 'loa', 'l']:
+                    for val, count in vals.items():
+                        if val.upper() in ['L', 'LOA', 'LEAVE']:
                             return f'"{col}" = \'{val}\''
         
         return ""
