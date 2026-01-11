@@ -183,18 +183,18 @@ class SQLAssembler:
                 error="Could not determine primary table"
             )
         
-        # SIMPLE PATH: For basic queries, only use term matches from the primary table
-        # This avoids complex multi-table JOINs that often fail
-        primary_matches = [m for m in term_matches if m.table_name == primary_table]
+        # CROSS-DOMAIN PATH: Use ALL term matches and build JOINs as needed
+        # Previous "simple path" was WRONG - it dropped filters from non-primary tables!
+        # Example: "employees in Texas with 401k"
+        #   - "texas" → Personal.state
+        #   - "401k" → Deductions.description
+        #   - We need BOTH filters, which requires a JOIN
         
-        # If we have matches in primary table, use only those (simple path)
-        # Otherwise, fall back to all matches (may need joins)
-        if primary_matches:
-            logger.warning(f"[SQL_ASSEMBLER] SIMPLE PATH: Using {len(primary_matches)} matches from primary table {primary_table}")
-            term_matches = primary_matches
-            tables_from_matches = [primary_table]
+        if len(tables_from_matches) == 1:
+            logger.warning(f"[SQL_ASSEMBLER] SINGLE TABLE: All {len(term_matches)} matches from {tables_from_matches[0]}")
         else:
-            logger.warning(f"[SQL_ASSEMBLER] COMPLEX PATH: Primary table {primary_table} has no matches, using all {len(term_matches)} matches")
+            logger.warning(f"[SQL_ASSEMBLER] CROSS-DOMAIN: {len(term_matches)} matches across {len(tables_from_matches)} tables: {tables_from_matches}")
+            # JOINs will be built in _prepare_tables_and_joins
         
         # Build query based on intent
         if intent == QueryIntent.COUNT:
