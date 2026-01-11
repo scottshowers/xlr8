@@ -569,10 +569,19 @@ class TableSelector:
         logger.warning(f"[TABLE-SEL] Context graph: {len(graph.get('hubs', []))} hubs, {len(graph.get('relationships', []))} relationships")
         
         # Check if this is a config/setup question
-        is_config_question = any(term in q_lower for term in [
-            'configured', 'setup', 'set up', 'valid', 'correct', 
-            'configuration', 'settings', 'how many', 'what', 'list'
-        ])
+        # v4.1 FIX: Don't treat data entity questions as config questions
+        # "list employees with 401k" is about DATA, not CONFIG
+        config_keywords = ['configured', 'setup', 'set up', 'valid', 'correct', 
+                          'configuration', 'settings']
+        is_config_question = any(term in q_lower for term in config_keywords)
+        
+        # Data domains - questions about these are NOT config questions
+        # even if they contain "list", "what", "how many"
+        data_domains = {'demographics', 'earnings', 'deductions', 'taxes', 
+                       'time', 'benefits', 'jobs', 'locations', 'gl', 'workers_comp'}
+        if question_domain in data_domains:
+            is_config_question = False
+            logger.warning(f"[TABLE-SEL] Data domain '{question_domain}' - NOT a config question")
         
         # Identify tables that contain filter_candidate columns
         filter_candidate_tables = self._get_filter_candidate_tables()
