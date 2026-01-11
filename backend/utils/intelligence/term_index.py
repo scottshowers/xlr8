@@ -1,0 +1,1062 @@
+"""
+Term Index Module - Load-Time Intelligence for Deterministic Query Resolution
+
+This module builds searchable indexes at upload time to eliminate query-time guesswork.
+Instead of scanning 73 tables and using hardcoded mappings, we lookup terms directly.
+
+ARCHITECTURE:
+- _term_index: Maps terms (like "texas") to SQL filters (state='TX')
+- _entity_tables: Maps entities (like "employee") to tables
+- join_priority: Enhancement to _column_mappings for deterministic JOIN key selection
+
+VENDOR SCHEMA INTEGRATION:
+- Reads vendor JSON files from /config/vendors/{vendor}/
+- Uses hub definitions to enhance semantic type detection
+- Uses column patterns for better column classification
+- Uses spoke patterns to inform join priorities
+
+POPULATION SOURCES:
+1. Column values during profiling (e.g., "TX" in state column)
+2. Synonym mappings (e.g., "texas" → "TX")
+3. Lookup tables (e.g., "Medical Insurance" → deduction code "MED")
+4. Vendor schemas (e.g., known UKG Pro hub types)
+
+Author: Claude (Anthropic)
+Date: 2026-01-11
+"""
+
+import json
+import logging
+from pathlib import Path
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Set, Tuple, Any
+import duckdb
+
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# DATA CLASSES
+# =============================================================================
+
+@dataclass
+class TermMatch:
+    """A matched term with its SQL filter information."""
+    term: str
+    table_name: str
+    column_name: str
+    operator: str  # '=', 'ILIKE', '>', '<', 'IN'
+    match_value: str
+    domain: Optional[str] = None
+    entity: Optional[str] = None
+    confidence: float = 1.0
+    term_type: str = 'value'  # 'value', 'synonym', 'pattern', 'lookup'
+
+
+@dataclass
+class JoinPath:
+    """A join path between two tables."""
+    table1: str
+    column1: str
+    table2: str
+    column2: str
+    semantic_type: str
+    priority: int = 50
+
+
+# =============================================================================
+# SYNONYM DEFINITIONS
+# =============================================================================
+
+# US State name → code mappings (built from data, not hardcoded for query-time)
+STATE_SYNONYMS: Dict[str, List[str]] = {
+    'AL': ['alabama'],
+    'AK': ['alaska'],
+    'AZ': ['arizona'],
+    'AR': ['arkansas'],
+    'CA': ['california', 'cali'],
+    'CO': ['colorado'],
+    'CT': ['connecticut'],
+    'DE': ['delaware'],
+    'FL': ['florida'],
+    'GA': ['georgia'],
+    'HI': ['hawaii'],
+    'ID': ['idaho'],
+    'IL': ['illinois'],
+    'IN': ['indiana'],
+    'IA': ['iowa'],
+    'KS': ['kansas'],
+    'KY': ['kentucky'],
+    'LA': ['louisiana'],
+    'ME': ['maine'],
+    'MD': ['maryland'],
+    'MA': ['massachusetts'],
+    'MI': ['michigan'],
+    'MN': ['minnesota'],
+    'MS': ['mississippi'],
+    'MO': ['missouri'],
+    'MT': ['montana'],
+    'NE': ['nebraska'],
+    'NV': ['nevada'],
+    'NH': ['new hampshire'],
+    'NJ': ['new jersey'],
+    'NM': ['new mexico'],
+    'NY': ['new york'],
+    'NC': ['north carolina'],
+    'ND': ['north dakota'],
+    'OH': ['ohio'],
+    'OK': ['oklahoma'],
+    'OR': ['oregon'],
+    'PA': ['pennsylvania'],
+    'RI': ['rhode island'],
+    'SC': ['south carolina'],
+    'SD': ['south dakota'],
+    'TN': ['tennessee'],
+    'TX': ['texas', 'tex'],
+    'UT': ['utah'],
+    'VT': ['vermont'],
+    'VA': ['virginia'],
+    'WA': ['washington'],
+    'WV': ['west virginia'],
+    'WI': ['wisconsin'],
+    'WY': ['wyoming'],
+    # Canadian provinces
+    'ON': ['ontario'],
+    'QC': ['quebec'],
+    'BC': ['british columbia'],
+    'AB': ['alberta'],
+    'MB': ['manitoba'],
+    'SK': ['saskatchewan'],
+    'NS': ['nova scotia'],
+    'NB': ['new brunswick'],
+    'NL': ['newfoundland'],
+    'PE': ['prince edward island'],
+}
+
+# Reverse mapping for quick lookup: state name → code
+STATE_NAME_TO_CODE: Dict[str, str] = {}
+for code, names in STATE_SYNONYMS.items():
+    for name in names:
+        STATE_NAME_TO_CODE[name] = code
+
+# Employment status synonyms
+STATUS_SYNONYMS: Dict[str, List[str]] = {
+    'A': ['active', 'current', 'employed', 'working'],
+    'T': ['terminated', 'termed', 'former', 'inactive', 'separated'],
+    'L': ['leave', 'loa', 'on leave', 'absent'],
+    'P': ['pending', 'pre-hire', 'future', 'new hire'],
+    'R': ['retired', 'retiree'],
+    'D': ['deceased'],
+    'S': ['suspended'],
+    # Common spelled-out values
+    'ACTIVE': ['active', 'current', 'employed'],
+    'TERMINATED': ['terminated', 'termed', 'former', 'fired', 'resigned'],
+    'INACTIVE': ['inactive', 'not active', 'disabled'],
+}
+
+# Join priority by semantic type
+JOIN_PRIORITY_MAP: Dict[str, int] = {
+    # Primary person identifiers - highest priority
+    'employee_number': 100,
+    'person_number': 100,
+    'worker_id': 100,
+    'employee_id': 100,
+    'person_id': 100,
+    'emp_no': 100,
+    'empno': 100,
+    
+    # Organization identifiers
+    'company_code': 80,
+    'component_company_code': 80,
+    'org_code': 80,
+    'organization_id': 80,
+    'cocode': 80,
+    
+    # Secondary identifiers
+    'location_code': 60,
+    'cost_center': 60,
+    'cost_center_code': 60,
+    'department_code': 60,
+    'department_id': 60,
+    
+    # Tertiary
+    'job_code': 40,
+    'job_code_code': 40,
+    'position_code': 40,
+    'pay_group': 40,
+    'pay_group_code': 40,
+    
+    # Payroll/transaction
+    'earning_code': 30,
+    'earnings_code': 30,
+    'deduction_code': 30,
+    'tax_code': 30,
+    
+    # Generic codes (lowest priority)
+    'status_code': 20,
+}
+
+# Common stop words to skip during term resolution
+STOP_WORDS: Set[str] = {
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'can', 'shall', 'must', 'need', 'to', 'of', 'for', 'with',
+    'at', 'by', 'from', 'about', 'into', 'through', 'during', 'before', 'after',
+    'above', 'below', 'between', 'under', 'again', 'further', 'then', 'once',
+    'here', 'there', 'when', 'where', 'why', 'how', 'all', 'each', 'few', 'more',
+    'most', 'other', 'some', 'such', 'no', 'not', 'only', 'own', 'same', 'so',
+    'than', 'too', 'very', 'just', 'also', 'now', 'if', 'or', 'and', 'but',
+    'show', 'me', 'give', 'get', 'find', 'list', 'what', 'which', 'who', 'whom',
+    'employees', 'employee', 'workers', 'worker', 'people', 'staff', 'team',
+    'data', 'information', 'details', 'records',
+}
+
+
+# =============================================================================
+# TERM INDEX CLASS
+# =============================================================================
+
+class TermIndex:
+    """
+    Manages the term index for deterministic query resolution.
+    
+    Usage:
+        index = TermIndex(conn, project)
+        
+        # During column profiling:
+        index.build_location_terms(table_name, column_name, distinct_values)
+        index.build_status_terms(table_name, column_name, distinct_values)
+        
+        # During lookup detection:
+        index.build_lookup_terms(table_name, code_column, lookup_data, lookup_type)
+        
+        # At query time:
+        matches = index.resolve_terms(['texas', '401k'])
+        join_path = index.get_join_path('Personal', 'Deductions')
+    """
+    
+    def __init__(self, conn: duckdb.DuckDBPyConnection, project: str):
+        self.conn = conn
+        self.project = project
+        self._ensure_tables()
+    
+    def _ensure_tables(self):
+        """Create term index tables if they don't exist."""
+        
+        # Term Index table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS _term_index (
+                project VARCHAR NOT NULL,
+                term VARCHAR NOT NULL,
+                term_type VARCHAR NOT NULL,
+                table_name VARCHAR NOT NULL,
+                column_name VARCHAR NOT NULL,
+                operator VARCHAR DEFAULT '=',
+                match_value VARCHAR,
+                domain VARCHAR,
+                entity VARCHAR,
+                confidence FLOAT DEFAULT 1.0,
+                source VARCHAR,
+                vendor VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                PRIMARY KEY (project, term, table_name, column_name, match_value)
+            )
+        """)
+        
+        # Create indexes for fast lookup
+        try:
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_term_lookup ON _term_index(project, term)")
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_term_domain ON _term_index(project, domain)")
+        except Exception as e:
+            logger.debug(f"Index creation note: {e}")
+        
+        # Entity Tables table
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS _entity_tables (
+                project VARCHAR NOT NULL,
+                entity VARCHAR NOT NULL,
+                table_name VARCHAR NOT NULL,
+                is_primary BOOLEAN DEFAULT FALSE,
+                table_type VARCHAR,
+                row_count INTEGER,
+                vendor VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                
+                PRIMARY KEY (project, entity, table_name)
+            )
+        """)
+        
+        try:
+            self.conn.execute("CREATE INDEX IF NOT EXISTS idx_entity_primary ON _entity_tables(project, entity, is_primary)")
+        except Exception as e:
+            logger.debug(f"Index creation note: {e}")
+        
+        # Add join_priority to _column_mappings if it doesn't exist
+        try:
+            cols = self.conn.execute("PRAGMA table_info(_column_mappings)").fetchall()
+            col_names = [c[1] for c in cols]
+            
+            if 'join_priority' not in col_names:
+                logger.info("[TERM_INDEX] Adding join_priority column to _column_mappings")
+                self.conn.execute("ALTER TABLE _column_mappings ADD COLUMN join_priority INTEGER DEFAULT 50")
+                self.conn.commit()
+        except Exception as e:
+            logger.debug(f"Migration note: {e}")
+    
+    # =========================================================================
+    # TERM POPULATION METHODS
+    # =========================================================================
+    
+    def add_term(
+        self,
+        term: str,
+        term_type: str,
+        table_name: str,
+        column_name: str,
+        operator: str = '=',
+        match_value: str = None,
+        domain: str = None,
+        entity: str = None,
+        confidence: float = 1.0,
+        source: str = None,
+        vendor: str = None
+    ) -> bool:
+        """Add a single term to the index."""
+        try:
+            # Normalize term
+            term_lower = term.lower().strip()
+            if not term_lower or term_lower in STOP_WORDS:
+                return False
+            
+            # Skip very short terms that might cause false matches
+            if len(term_lower) < 2:
+                return False
+            
+            self.conn.execute("""
+                INSERT INTO _term_index 
+                (project, term, term_type, table_name, column_name, operator, match_value, domain, entity, confidence, source, vendor)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (project, term, table_name, column_name, match_value) DO UPDATE SET
+                    confidence = CASE WHEN EXCLUDED.confidence > _term_index.confidence THEN EXCLUDED.confidence ELSE _term_index.confidence END,
+                    updated_at = CURRENT_TIMESTAMP
+            """, [
+                self.project, term_lower, term_type, table_name, column_name,
+                operator, match_value or term, domain, entity, confidence, source, vendor
+            ])
+            return True
+        except Exception as e:
+            logger.debug(f"Term add note for '{term}': {e}")
+            return False
+    
+    def build_location_terms(
+        self,
+        table_name: str,
+        column_name: str,
+        distinct_values: List[Any],
+        domain: str = None
+    ) -> int:
+        """
+        Build term index entries for location columns.
+        
+        Detects US state codes and adds synonyms (e.g., "TX" → "texas").
+        Returns count of terms added.
+        """
+        added = 0
+        
+        if not distinct_values:
+            return 0
+        
+        # Convert to strings
+        values = [str(v).strip() for v in distinct_values if v is not None and str(v).strip()]
+        
+        for v in values:
+            # Direct value (always add)
+            if self.add_term(v, 'value', table_name, column_name, '=', v, domain, 'location'):
+                added += 1
+            
+            # Check if it's a state code
+            v_upper = v.upper()
+            if v_upper in STATE_SYNONYMS:
+                # Add synonyms for this state code
+                for synonym in STATE_SYNONYMS[v_upper]:
+                    if self.add_term(synonym, 'synonym', table_name, column_name, '=', v_upper, 
+                                    domain, 'location', confidence=0.95, source='state_name'):
+                        added += 1
+        
+        logger.info(f"[TERM_INDEX] Built {added} location terms for {table_name}.{column_name}")
+        return added
+    
+    def build_status_terms(
+        self,
+        table_name: str,
+        column_name: str,
+        distinct_values: List[Any],
+        domain: str = None
+    ) -> int:
+        """
+        Build term index entries for status columns.
+        
+        Adds synonyms for common status values (e.g., "A" → "active").
+        Returns count of terms added.
+        """
+        added = 0
+        
+        if not distinct_values:
+            return 0
+        
+        values = [str(v).strip() for v in distinct_values if v is not None and str(v).strip()]
+        
+        for v in values:
+            # Direct value
+            if self.add_term(v, 'value', table_name, column_name, '=', v, domain, 'status'):
+                added += 1
+            
+            # Check for synonyms
+            v_upper = v.upper()
+            if v_upper in STATUS_SYNONYMS:
+                for synonym in STATUS_SYNONYMS[v_upper]:
+                    if self.add_term(synonym, 'synonym', table_name, column_name, '=', v,
+                                    domain, 'status', confidence=0.95, source='status_word'):
+                        added += 1
+        
+        logger.info(f"[TERM_INDEX] Built {added} status terms for {table_name}.{column_name}")
+        return added
+    
+    def build_lookup_terms(
+        self,
+        table_name: str,
+        code_column: str,
+        lookup_data: Dict[str, str],
+        lookup_type: str,
+        domain: str = None
+    ) -> int:
+        """
+        Build term index from code/description lookups.
+        
+        For a lookup like {"MED": "Medical Insurance"}, adds:
+        - "medical insurance" → MED
+        - "medical" → MED (partial, lower confidence)
+        
+        Returns count of terms added.
+        """
+        added = 0
+        
+        if not lookup_data:
+            return 0
+        
+        for code, description in lookup_data.items():
+            if not description:
+                continue
+            
+            # Full description → code
+            desc_lower = str(description).lower().strip()
+            if self.add_term(desc_lower, 'lookup', table_name, code_column, '=', code,
+                            domain, lookup_type, confidence=1.0, source=f'lookup:{lookup_type}'):
+                added += 1
+            
+            # For multi-word descriptions, add significant individual words
+            words = desc_lower.split()
+            if len(words) > 1:
+                for word in words:
+                    # Skip short/common words
+                    if len(word) > 3 and word not in STOP_WORDS:
+                        if self.add_term(word, 'lookup_partial', table_name, code_column, 
+                                        'ILIKE', f'%{code}%', domain, lookup_type,
+                                        confidence=0.7, source=f'lookup:{lookup_type}'):
+                            added += 1
+        
+        logger.info(f"[TERM_INDEX] Built {added} lookup terms for {table_name}.{code_column} ({lookup_type})")
+        return added
+    
+    def build_value_terms(
+        self,
+        table_name: str,
+        column_name: str,
+        distinct_values: List[Any],
+        domain: str = None,
+        entity: str = None
+    ) -> int:
+        """
+        Build generic term index entries for any categorical column.
+        
+        Simply indexes the actual values for exact match lookup.
+        Returns count of terms added.
+        """
+        added = 0
+        
+        if not distinct_values:
+            return 0
+        
+        for v in distinct_values:
+            if v is None:
+                continue
+            v_str = str(v).strip()
+            if v_str and len(v_str) >= 2:
+                if self.add_term(v_str, 'value', table_name, column_name, '=', v_str, domain, entity):
+                    added += 1
+        
+        return added
+    
+    # =========================================================================
+    # JOIN PRIORITY METHODS
+    # =========================================================================
+    
+    def set_join_priority(self, table_name: str, column_name: str, semantic_type: str):
+        """
+        Set join priority for a column based on its semantic type.
+        
+        Higher priority columns are preferred for JOINs.
+        """
+        priority = JOIN_PRIORITY_MAP.get(semantic_type.lower(), 50)
+        
+        try:
+            self.conn.execute("""
+                UPDATE _column_mappings 
+                SET join_priority = ?
+                WHERE project = ? AND table_name = ? AND original_column = ?
+            """, [priority, self.project, table_name, column_name])
+            
+            logger.debug(f"[TERM_INDEX] Set join_priority={priority} for {table_name}.{column_name} ({semantic_type})")
+        except Exception as e:
+            logger.debug(f"Join priority update note: {e}")
+    
+    def set_all_join_priorities(self):
+        """
+        Set join priorities for all columns based on their semantic types.
+        
+        Call this after column mapping is complete.
+        """
+        try:
+            # Get all mappings for this project
+            mappings = self.conn.execute("""
+                SELECT table_name, original_column, semantic_type
+                FROM _column_mappings
+                WHERE project = ?
+            """, [self.project]).fetchall()
+            
+            updated = 0
+            for table_name, column_name, semantic_type in mappings:
+                if semantic_type:
+                    priority = JOIN_PRIORITY_MAP.get(semantic_type.lower(), 50)
+                    self.conn.execute("""
+                        UPDATE _column_mappings 
+                        SET join_priority = ?
+                        WHERE project = ? AND table_name = ? AND original_column = ?
+                    """, [priority, self.project, table_name, column_name])
+                    updated += 1
+            
+            self.conn.commit()
+            logger.info(f"[TERM_INDEX] Updated join priorities for {updated} columns")
+            return updated
+        except Exception as e:
+            logger.error(f"Error setting join priorities: {e}")
+            return 0
+    
+    # =========================================================================
+    # ENTITY TABLE METHODS
+    # =========================================================================
+    
+    def add_entity_table(
+        self,
+        entity: str,
+        table_name: str,
+        is_primary: bool = False,
+        table_type: str = None,
+        row_count: int = None,
+        vendor: str = None
+    ):
+        """Add a table to the entity index."""
+        try:
+            self.conn.execute("""
+                INSERT INTO _entity_tables 
+                (project, entity, table_name, is_primary, table_type, row_count, vendor)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT (project, entity, table_name) DO UPDATE SET
+                    is_primary = EXCLUDED.is_primary,
+                    table_type = EXCLUDED.table_type,
+                    row_count = EXCLUDED.row_count,
+                    vendor = EXCLUDED.vendor
+            """, [self.project, entity.lower(), table_name, is_primary, table_type, row_count, vendor])
+        except Exception as e:
+            logger.debug(f"Entity table add note: {e}")
+    
+    def build_entity_tables(self, classifications: List[Dict]) -> int:
+        """
+        Build entity tables from table classifications.
+        
+        Args:
+            classifications: List of dicts with table_name, table_type, domain, row_count
+            
+        Returns:
+            Count of entity-table mappings added.
+        """
+        added = 0
+        
+        # Group by domain to find primaries
+        domain_tables: Dict[str, List[Dict]] = {}
+        for c in classifications:
+            domain = c.get('domain', 'unknown')
+            if domain not in domain_tables:
+                domain_tables[domain] = []
+            domain_tables[domain].append(c)
+        
+        for domain, tables in domain_tables.items():
+            # Sort by row count (largest = primary)
+            tables_sorted = sorted(tables, key=lambda x: x.get('row_count', 0), reverse=True)
+            
+            for i, t in enumerate(tables_sorted):
+                is_primary = (i == 0)  # First (largest) is primary
+                self.add_entity_table(
+                    entity=domain,
+                    table_name=t['table_name'],
+                    is_primary=is_primary,
+                    table_type=t.get('table_type'),
+                    row_count=t.get('row_count')
+                )
+                added += 1
+        
+        logger.info(f"[TERM_INDEX] Built {added} entity-table mappings")
+        return added
+    
+    # =========================================================================
+    # QUERY-TIME METHODS
+    # =========================================================================
+    
+    def resolve_terms(self, terms: List[str]) -> List[TermMatch]:
+        """
+        Resolve a list of terms to SQL filter information.
+        
+        Args:
+            terms: List of terms from the user's question (e.g., ['texas', '401k'])
+            
+        Returns:
+            List of TermMatch objects with table/column/filter info.
+        """
+        matches = []
+        
+        for term in terms:
+            term_lower = term.lower().strip()
+            
+            # Skip stop words
+            if term_lower in STOP_WORDS or len(term_lower) < 2:
+                continue
+            
+            # Look up in term index
+            results = self.conn.execute("""
+                SELECT term, table_name, column_name, operator, match_value, 
+                       domain, entity, confidence, term_type
+                FROM _term_index
+                WHERE project = ? AND term = ?
+                ORDER BY confidence DESC
+            """, [self.project, term_lower]).fetchall()
+            
+            for row in results:
+                matches.append(TermMatch(
+                    term=row[0],
+                    table_name=row[1],
+                    column_name=row[2],
+                    operator=row[3],
+                    match_value=row[4],
+                    domain=row[5],
+                    entity=row[6],
+                    confidence=row[7],
+                    term_type=row[8]
+                ))
+        
+        return matches
+    
+    def get_entity_tables(self, entity: str, primary_only: bool = False) -> List[str]:
+        """
+        Get tables for an entity.
+        
+        Args:
+            entity: Entity name (e.g., 'employee', 'demographics')
+            primary_only: If True, only return the primary table
+            
+        Returns:
+            List of table names.
+        """
+        query = """
+            SELECT table_name 
+            FROM _entity_tables
+            WHERE project = ? AND entity = ?
+        """
+        params = [self.project, entity.lower()]
+        
+        if primary_only:
+            query += " AND is_primary = TRUE"
+        
+        query += " ORDER BY is_primary DESC, row_count DESC"
+        
+        results = self.conn.execute(query, params).fetchall()
+        return [r[0] for r in results]
+    
+    def get_join_path(self, table1: str, table2: str) -> Optional[JoinPath]:
+        """
+        Get the best join path between two tables.
+        
+        Uses join_priority to select the best column pair.
+        
+        Args:
+            table1: First table name
+            table2: Second table name
+            
+        Returns:
+            JoinPath object or None if no common key found.
+        """
+        try:
+            result = self.conn.execute("""
+                SELECT m1.original_column, m2.original_column, m1.semantic_type,
+                       COALESCE(m1.join_priority, 50)
+                FROM _column_mappings m1
+                JOIN _column_mappings m2 ON m1.semantic_type = m2.semantic_type
+                WHERE m1.project = ? AND m2.project = ?
+                  AND m1.table_name = ? AND m2.table_name = ?
+                  AND m1.table_name != m2.table_name
+                ORDER BY COALESCE(m1.join_priority, 50) DESC
+                LIMIT 1
+            """, [self.project, self.project, table1, table2]).fetchone()
+            
+            if result:
+                return JoinPath(
+                    table1=table1,
+                    column1=result[0],
+                    table2=table2,
+                    column2=result[1],
+                    semantic_type=result[2],
+                    priority=result[3]
+                )
+            return None
+        except Exception as e:
+            logger.error(f"Error getting join path: {e}")
+            return None
+    
+    # =========================================================================
+    # STATISTICS AND DEBUGGING
+    # =========================================================================
+    
+    def get_stats(self) -> Dict:
+        """Get statistics about the term index."""
+        try:
+            term_count = self.conn.execute(
+                "SELECT COUNT(*) FROM _term_index WHERE project = ?", [self.project]
+            ).fetchone()[0]
+            
+            entity_count = self.conn.execute(
+                "SELECT COUNT(*) FROM _entity_tables WHERE project = ?", [self.project]
+            ).fetchone()[0]
+            
+            term_types = self.conn.execute("""
+                SELECT term_type, COUNT(*) 
+                FROM _term_index 
+                WHERE project = ?
+                GROUP BY term_type
+            """, [self.project]).fetchall()
+            
+            domains = self.conn.execute("""
+                SELECT domain, COUNT(*) 
+                FROM _term_index 
+                WHERE project = ? AND domain IS NOT NULL
+                GROUP BY domain
+            """, [self.project]).fetchall()
+            
+            return {
+                'total_terms': term_count,
+                'total_entity_mappings': entity_count,
+                'terms_by_type': {t[0]: t[1] for t in term_types},
+                'terms_by_domain': {d[0]: d[1] for d in domains}
+            }
+        except Exception as e:
+            logger.error(f"Error getting stats: {e}")
+            return {}
+    
+    def clear(self):
+        """Clear all term index data for this project."""
+        self.conn.execute("DELETE FROM _term_index WHERE project = ?", [self.project])
+        self.conn.execute("DELETE FROM _entity_tables WHERE project = ?", [self.project])
+        self.conn.commit()
+        logger.info(f"[TERM_INDEX] Cleared all data for project {self.project}")
+
+
+# =============================================================================
+# VENDOR SCHEMA LOADER
+# =============================================================================
+
+class VendorSchemaLoader:
+    """
+    Loads and provides access to vendor schema JSON files.
+    
+    These schemas define:
+    - Hub definitions (entity types like 'employee', 'location')
+    - Column patterns (how to detect columns by name)
+    - Spoke patterns (relationships between entities)
+    - Join keys (primary and alternate keys)
+    """
+    
+    def __init__(self, config_path: str = None):
+        """
+        Initialize the vendor schema loader.
+        
+        Args:
+            config_path: Path to config directory. Defaults to repo/config/
+        """
+        if config_path is None:
+            # Try to find config directory relative to this file
+            current_file = Path(__file__).resolve()
+            # Go up from backend/utils/intelligence/ to repo root
+            repo_root = current_file.parent.parent.parent.parent
+            config_path = repo_root / 'config'
+        
+        self.config_path = Path(config_path)
+        self._schemas: Dict[str, Dict] = {}
+        self._unified_vocabulary: Dict = {}
+    
+    def load_vendor_schema(self, vendor: str) -> Optional[Dict]:
+        """
+        Load a specific vendor's schema.
+        
+        Args:
+            vendor: Vendor name (e.g., 'ukg_pro', 'ukg_wfm', 'ukg_ready')
+            
+        Returns:
+            Schema dict or None if not found.
+        """
+        if vendor in self._schemas:
+            return self._schemas[vendor]
+        
+        # Map vendor names to file names
+        file_map = {
+            'ukg_pro': 'ukg_schema_reference.json',
+            'ukg_wfm': 'ukg_wfm_dimensions_schema_v1.json',
+            'ukg_wfm_dimensions': 'ukg_wfm_dimensions_schema_v1.json',
+            'ukg_ready': 'ukg_ready_schema_v1.json',
+        }
+        
+        filename = file_map.get(vendor.lower())
+        if not filename:
+            # Try direct file lookup
+            filename = f"{vendor.lower()}_schema.json"
+        
+        schema_file = self.config_path / filename
+        
+        # Also check vendors subdirectory
+        if not schema_file.exists():
+            schema_file = self.config_path / 'vendors' / vendor.lower() / 'schema_reference.json'
+        
+        if schema_file.exists():
+            try:
+                with open(schema_file, 'r') as f:
+                    self._schemas[vendor] = json.load(f)
+                    logger.info(f"[VENDOR_SCHEMA] Loaded schema for {vendor} from {schema_file}")
+                    return self._schemas[vendor]
+            except Exception as e:
+                logger.error(f"Error loading vendor schema {schema_file}: {e}")
+        else:
+            logger.debug(f"Vendor schema file not found: {schema_file}")
+        
+        return None
+    
+    def load_unified_vocabulary(self) -> Dict:
+        """
+        Load the unified vocabulary across all vendors.
+        
+        Returns:
+            Unified vocabulary dict.
+        """
+        if self._unified_vocabulary:
+            return self._unified_vocabulary
+        
+        vocab_file = self.config_path / 'ukg_vocabulary_seed.json'
+        if not vocab_file.exists():
+            vocab_file = self.config_path / 'ukg_family_unified_vocabulary.json'
+        
+        if vocab_file.exists():
+            try:
+                with open(vocab_file, 'r') as f:
+                    self._unified_vocabulary = json.load(f)
+                    logger.info(f"[VENDOR_SCHEMA] Loaded unified vocabulary from {vocab_file}")
+                    return self._unified_vocabulary
+            except Exception as e:
+                logger.error(f"Error loading unified vocabulary: {e}")
+        
+        return {}
+    
+    def get_hub_definitions(self, vendor: str = None) -> Dict:
+        """
+        Get hub definitions from vendor schema or unified vocabulary.
+        
+        Args:
+            vendor: Specific vendor, or None for unified
+            
+        Returns:
+            Dict of hub_name -> hub_definition
+        """
+        if vendor:
+            schema = self.load_vendor_schema(vendor)
+            if schema and 'hubs' in schema:
+                return schema['hubs']
+        
+        # Fall back to unified vocabulary
+        vocab = self.load_unified_vocabulary()
+        return vocab.get('hubs', vocab.get('concepts', {}))
+    
+    def get_column_patterns(self, vendor: str = None) -> Dict[str, List[str]]:
+        """
+        Get column patterns for semantic type detection.
+        
+        Args:
+            vendor: Specific vendor, or None for unified
+            
+        Returns:
+            Dict of semantic_type -> [column_patterns]
+        """
+        patterns = {}
+        
+        hubs = self.get_hub_definitions(vendor)
+        for hub_name, hub_def in hubs.items():
+            if isinstance(hub_def, dict):
+                semantic_type = hub_def.get('semantic_type', hub_name)
+                col_patterns = hub_def.get('column_patterns', [])
+                if col_patterns:
+                    patterns[semantic_type] = col_patterns
+        
+        return patterns
+    
+    def get_spoke_patterns(self, vendor: str = None) -> List[Dict]:
+        """
+        Get spoke patterns (relationships) from vendor schema.
+        
+        Args:
+            vendor: Specific vendor, or None for unified
+            
+        Returns:
+            List of spoke pattern dicts.
+        """
+        if vendor:
+            schema = self.load_vendor_schema(vendor)
+            if schema:
+                return schema.get('spoke_patterns', schema.get('spokes', []))
+        
+        # Try unified vocabulary
+        vocab = self.load_unified_vocabulary()
+        return vocab.get('spoke_patterns', vocab.get('relationships', []))
+    
+    def get_join_keys(self, vendor: str = None) -> Dict:
+        """
+        Get join key definitions from vendor schema.
+        
+        Args:
+            vendor: Specific vendor, or None for unified
+            
+        Returns:
+            Dict with 'primary' and 'alternates' lists.
+        """
+        if vendor:
+            schema = self.load_vendor_schema(vendor)
+            if schema and 'join_keys' in schema:
+                return schema['join_keys']
+        
+        # Default join keys
+        return {
+            'primary': ['employee_number', 'company_code', 'cocode', 'empno'],
+            'alternates': ['ssn', 'national_id', 'employee_id']
+        }
+
+
+# =============================================================================
+# RECALC FUNCTIONS
+# =============================================================================
+
+def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
+    """
+    Recalculate the term index for a project without re-uploading files.
+    
+    This reads existing column profiles and rebuilds the term index.
+    
+    Args:
+        conn: DuckDB connection
+        project: Project ID
+        
+    Returns:
+        Dict with recalc statistics.
+    """
+    index = TermIndex(conn, project)
+    
+    # Clear existing terms
+    index.clear()
+    
+    stats = {
+        'location_terms': 0,
+        'status_terms': 0,
+        'lookup_terms': 0,
+        'entity_mappings': 0,
+        'join_priorities': 0
+    }
+    
+    # Rebuild from column profiles
+    try:
+        profiles = conn.execute("""
+            SELECT table_name, column_name, filter_category, distinct_values
+            FROM _column_profiles
+            WHERE project = ? AND filter_category IS NOT NULL
+        """, [project]).fetchall()
+        
+        for table_name, column_name, category, values_json in profiles:
+            if not values_json:
+                continue
+            
+            try:
+                values = json.loads(values_json) if isinstance(values_json, str) else values_json
+            except:
+                continue
+            
+            if category == 'location':
+                stats['location_terms'] += index.build_location_terms(table_name, column_name, values)
+            elif category == 'status':
+                stats['status_terms'] += index.build_status_terms(table_name, column_name, values)
+    except Exception as e:
+        logger.error(f"Error rebuilding terms from profiles: {e}")
+    
+    # Rebuild from lookups
+    try:
+        lookups = conn.execute("""
+            SELECT table_name, code_column, lookup_type, lookup_data_json
+            FROM _intelligence_lookups
+            WHERE project = ?
+        """, [project]).fetchall()
+        
+        for table_name, code_column, lookup_type, lookup_json in lookups:
+            if not lookup_json:
+                continue
+            
+            try:
+                lookup_data = json.loads(lookup_json) if isinstance(lookup_json, str) else lookup_json
+                stats['lookup_terms'] += index.build_lookup_terms(table_name, code_column, lookup_data, lookup_type)
+            except Exception as e:
+                logger.debug(f"Error processing lookup: {e}")
+    except Exception as e:
+        logger.debug(f"Lookup table may not exist: {e}")
+    
+    # Rebuild entity tables
+    try:
+        classifications = conn.execute("""
+            SELECT table_name, table_type, domain, row_count
+            FROM _table_classifications
+            WHERE project = ?
+        """, [project]).fetchall()
+        
+        class_list = [
+            {'table_name': c[0], 'table_type': c[1], 'domain': c[2], 'row_count': c[3]}
+            for c in classifications
+        ]
+        stats['entity_mappings'] = index.build_entity_tables(class_list)
+    except Exception as e:
+        logger.debug(f"Classification table may not exist: {e}")
+    
+    # Set join priorities
+    stats['join_priorities'] = index.set_all_join_priorities()
+    
+    conn.commit()
+    
+    logger.info(f"[TERM_INDEX] Recalc complete: {stats}")
+    return stats
