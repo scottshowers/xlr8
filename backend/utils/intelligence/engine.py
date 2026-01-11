@@ -1341,21 +1341,30 @@ class IntelligenceEngineV2:
             else:
                 answer_text = f"Found {len(rows)} records."
             
-            # Build structured output
-            from_reality = [{
-                'source_type': 'reality',
-                'source_name': assembled.primary_table,
-                'content': {
+            # Build structured output using proper Truth objects
+            reality_truth = Truth(
+                source_type='reality',
+                source_name=assembled.primary_table,
+                content={
                     'columns': columns,
-                    'rows': rows[:100]  # Limit to 100 for display
+                    'rows': rows[:100],  # Limit to 100 for display
+                    'total': len(rows),
+                    'query_type': parsed.intent.value,
+                    'sql': assembled.sql
+                },
+                confidence=0.95,
+                location=f"DuckDB: {assembled.primary_table}",
+                metadata={
+                    'filters': assembled.filters,
+                    'deterministic': True
                 }
-            }]
+            )
             
             return SynthesizedAnswer(
                 question=question,
                 answer=answer_text,
                 confidence=0.9,
-                from_reality=from_reality,
+                from_reality=[reality_truth],
                 reasoning=[
                     f"Used deterministic path (Term Index + SQL Assembler)",
                     f"Intent: {parsed.intent.value}",
