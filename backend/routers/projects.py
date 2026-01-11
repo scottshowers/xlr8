@@ -591,3 +591,113 @@ async def get_term_index_contents(project_id: str, term: str = None, limit: int 
     except Exception as e:
         logger.error(f"Error getting term index: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project_id}/resolve-terms")
+async def resolve_terms_test(project_id: str, question: str):
+    """
+    Test endpoint for the full term resolution flow.
+    
+    This tests:
+    1. Term Index fast path (known terms like "texas")
+    2. MetadataReasoner fallback (unknown terms like "401k")
+    3. SQL Assembly from resolved terms
+    
+    Args:
+        project_id: Project ID
+        question: Question to parse and resolve (e.g., "employees in Texas with 401k")
+        
+    Returns:
+        Resolution results including terms, matches, and assembled SQL
+    """
+    try:
+        from utils.structured_data_handler import StructuredDataHandler
+        from backend.utils.intelligence.term_index import TermIndex
+        from backend.utils.intelligence.sql_assembler import SQLAssembler, QueryIntent
+        from backend.utils.intelligence.intent_parser import parse_intent
+        import re
+        
+        handler = StructuredDataHandler()
+        conn = handler.conn
+        
+        # Step 1: Parse intent
+        parsed = parse_intent(question)
+        
+        # Step 2: Tokenize and resolve
+        words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
+        
+        term_index = TermIndex(conn, project_id)
+        term_matches = term_index.resolve_terms(words)
+        
+        # Step 3: Assemble SQL
+        intent_map = {
+            'count': QueryIntent.COUNT,
+            'list': QueryIntent.LIST,
+            'sum': QueryIntent.SUM,
+            'compare': QueryIntent.COMPARE,
+        }
+        assembler_intent = intent_map.get(parsed.intent.value, QueryIntent.LIST)
+        
+        assembler = SQLAssembler(conn, project_id)
+        assembled = assembler.assemble(
+            intent=assembler_intent,
+            term_matches=term_matches,
+            domain=parsed.domain.value if parsed.domain else None
+        )
+        
+        # Step 4: Execute SQL (if valid)
+        execution_result = None
+        if assembled.success and assembled.sql:
+            try:
+                result = conn.execute(assembled.sql).fetchall()
+                columns = [desc[0] for desc in conn.description]
+                execution_result = {
+                    "success": True,
+                    "row_count": len(result),
+                    "columns": columns,
+                    "sample_rows": [dict(zip(columns, row)) for row in result[:5]]
+                }
+            except Exception as sql_err:
+                execution_result = {
+                    "success": False,
+                    "error": str(sql_err)
+                }
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "question": question,
+            "parsed_intent": parsed.intent.value,
+            "parsed_domain": parsed.domain.value if parsed.domain else None,
+            "input_words": words,
+            "term_matches": [
+                {
+                    "term": m.term,
+                    "table": m.table_name,
+                    "column": m.column_name,
+                    "operator": m.operator,
+                    "match_value": m.match_value,
+                    "domain": m.domain,
+                    "confidence": m.confidence,
+                    "term_type": m.term_type
+                }
+                for m in term_matches
+            ],
+            "assembly": {
+                "success": assembled.success,
+                "error": assembled.error,
+                "sql": assembled.sql,
+                "tables": assembled.tables,
+                "primary_table": assembled.primary_table,
+                "filters": assembled.filters,
+                "joins": [
+                    {"table1": j.table1, "col1": j.column1, "table2": j.table2, "col2": j.column2}
+                    for j in assembled.joins
+                ] if assembled.joins else []
+            },
+            "execution": execution_result
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resolving terms: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
