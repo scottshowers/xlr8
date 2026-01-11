@@ -639,12 +639,14 @@ class TermIndex:
             List of TermMatch objects with table/column/filter info.
         """
         matches = []
+        logger.warning(f"[TERM_INDEX] resolve_terms called with {len(terms)} terms: {terms[:10]}")
         
         for term in terms:
             term_lower = term.lower().strip()
             
             # Skip stop words
             if term_lower in STOP_WORDS or len(term_lower) < 2:
+                logger.warning(f"[TERM_INDEX] Skipping term '{term_lower}' (stop word or too short)")
                 continue
             
             # Look up in term index
@@ -655,6 +657,8 @@ class TermIndex:
                 WHERE project = ? AND term = ?
                 ORDER BY confidence DESC
             """, [self.project, term_lower]).fetchall()
+            
+            logger.warning(f"[TERM_INDEX] Term '{term_lower}' found {len(results)} matches")
             
             for row in results:
                 matches.append(TermMatch(
@@ -669,6 +673,7 @@ class TermIndex:
                     term_type=row[8]
                 ))
         
+        logger.warning(f"[TERM_INDEX] resolve_terms returning {len(matches)} total matches")
         return matches
     
     def get_entity_tables(self, entity: str, primary_only: bool = False) -> List[str]:
