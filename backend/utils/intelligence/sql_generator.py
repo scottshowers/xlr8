@@ -1,8 +1,15 @@
 """
-XLR8 Intelligence Engine - SQL Generator v3.0
+XLR8 Intelligence Engine - SQL Generator v4.0
 ==============================================
 
 Generates SQL queries from natural language questions.
+
+v4.0 CHANGES:
+- SEMANTIC JOIN DETECTION: _needs_join() now uses Context Graph to detect
+  when question concepts span multiple tables, not hardcoded patterns
+- Example: "employees in Texas with 401k" now correctly triggers JOIN
+  because "Texas" maps to Personal.stateprovince and "401k" maps to
+  Deductions.deductionbenefit_code, and both share employee_number hub
 
 v3.0 CHANGES:
 - CONTEXT GRAPH JOINS: Uses Context Graph hub/spoke relationships
@@ -17,6 +24,7 @@ v2.0 CHANGES:
 - Filter hints in LLM prompt guide better query generation
 
 Key features:
+- Semantic JOIN detection via Context Graph (v4.0)
 - Context Graph-aware join generation (v3.0)
 - Question-aware value filtering (the key to useful queries)
 - Simple vs complex query detection
@@ -119,31 +127,157 @@ class SQLGenerator:
         """
         Detect if a question requires a JOIN query.
         
+        v4.0 SEMANTIC DETECTION:
+        Instead of pattern matching, detect when question concepts span multiple
+        tables that share a hub connection in the Context Graph.
+        
+        Example: "employees in Texas with 401k"
+        - "Texas" → matches values in Personal.stateprovince
+        - "401k" → matches values in Deductions.deductionbenefit_code
+        - Both tables share employee_number hub → needs JOIN
+        
         Returns True when:
+        - Question filter concepts span 2+ tables with shared hub
         - User explicitly asks to combine/join/cross-reference data
-        - Question references columns from multiple tables
-        - Question asks for enriched/detailed data (e.g., "with department name")
         """
         q_lower = question.lower()
         
-        # Explicit join patterns
-        join_patterns = [
-            r'\bwith\s+(their|the)\s+\w+\s+name',     # "employees with their department name"
-            r'\bincluding\s+\w+\s+(name|description)', # "including location name"
-            r'\bfull\s+(details|information)',         # "full details"
-            r'\benriched?\b',                          # "enriched data"
-            r'\bfrom\s+(\w+)\s+and\s+(\w+)',          # "from employees and departments"
-            r'\bjoin\s+with\b',                        # "join with"
-            r'\bcombine\b',                            # "combine"
-            r'\bcross.?reference',                     # "cross-reference"
-            r'\blink\w*\s+(to|with)',                 # "link to", "linked with"
+        # =================================================================
+        # EXPLICIT JOIN PATTERNS (keep as fast-path)
+        # =================================================================
+        explicit_patterns = [
+            r'\bjoin\s+with\b',           # "join with"
+            r'\bcombine\b',               # "combine"
+            r'\bcross.?reference',        # "cross-reference"
+            r'\blink\w*\s+(to|with)',     # "link to", "linked with"
+            r'\bfrom\s+(\w+)\s+and\s+(\w+)',  # "from employees and departments"
         ]
         
-        for pattern in join_patterns:
+        for pattern in explicit_patterns:
             if re.search(pattern, q_lower):
-                logger.info(f"[SQL-GEN] JOIN needed: pattern '{pattern}' matched")
+                logger.info(f"[SQL-GEN] JOIN needed: explicit pattern '{pattern}' matched")
                 return True
         
+        # =================================================================
+        # v4.0 SEMANTIC DETECTION - the key innovation
+        # Check if question concepts span multiple tables with shared hub
+        # =================================================================
+        if len(tables) < 2:
+            return False
+        
+        if not self.table_selector:
+            logger.warning("[SQL-GEN] No table_selector - skipping semantic JOIN detection")
+            return False
+        
+        if not self.handler or not hasattr(self.handler, 'conn'):
+            logger.warning("[SQL-GEN] No handler.conn - skipping semantic JOIN detection")
+            return False
+        
+        # Extract significant words from question
+        words = re.findall(r'\b[a-z0-9]+\b', q_lower)
+        skip_words = {
+            'the', 'a', 'an', 'is', 'are', 'my', 'our', 'your', 'what', 'how', 
+            'show', 'list', 'get', 'find', 'check', 'verify', 'configured', 
+            'setup', 'with', 'and', 'or', 'in', 'on', 'for', 'to', 'from',
+            'all', 'any', 'employees', 'employee', 'who', 'have', 'has', 'their'
+        }
+        significant_words = [w for w in words if len(w) >= 2 and w not in skip_words]
+        
+        if not significant_words:
+            return False
+        
+        logger.info(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}")
+        
+        # Map each significant word to tables that have matching column values
+        word_to_tables: Dict[str, Set[str]] = {}
+        
+        for table in tables:
+            table_name = table.get('table_name', '')
+            if not table_name:
+                continue
+            
+            try:
+                # Get column profiles for this table
+                profiles = self.handler.conn.execute("""
+                    SELECT column_name, distinct_values, top_values_json
+                    FROM _column_profiles 
+                    WHERE LOWER(table_name) = LOWER(?)
+                    AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
+                """, [table_name]).fetchall()
+                
+                for col_name, distinct_values_json, top_values_json in profiles:
+                    # Try top_values_json first (more complete), fallback to distinct_values
+                    values_json = top_values_json or distinct_values_json
+                    if not values_json or values_json == '[]':
+                        continue
+                    
+                    try:
+                        values = json.loads(values_json)
+                        
+                        for val_info in values:
+                            val = str(val_info.get('value', '') if isinstance(val_info, dict) else val_info).lower().strip()
+                            
+                            if not val or len(val) < 2:
+                                continue
+                            
+                            # Check each significant word against this value
+                            for word in significant_words:
+                                # Match conditions:
+                                # 1. Exact match
+                                # 2. Word is substantial substring of value (3+ chars)
+                                # 3. Value is substantial substring of word (3+ chars)
+                                # 4. State name to code mapping (Texas → TX)
+                                is_match = False
+                                
+                                if word == val:
+                                    is_match = True
+                                elif len(word) >= 3 and word in val:
+                                    is_match = True
+                                elif len(val) >= 3 and val in word:
+                                    is_match = True
+                                # State name matching (Texas → TX, etc.)
+                                elif word in US_STATE_CODES and US_STATE_CODES[word].lower() == val:
+                                    is_match = True
+                                elif word in US_STATE_CODES and US_STATE_CODES[word].lower() in val:
+                                    is_match = True
+                                
+                                if is_match:
+                                    if word not in word_to_tables:
+                                        word_to_tables[word] = set()
+                                    word_to_tables[word].add(table_name)
+                                    logger.info(f"[SQL-GEN] Word '{word}' → table '{table_name[-40:]}' via {col_name}='{val[:30]}'")
+                                    break  # Move to next value
+                                    
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                        
+            except Exception as e:
+                logger.warning(f"[SQL-GEN] Error checking table {table_name} for semantic matches: {e}")
+        
+        # Now check if we have words mapping to different tables that share a hub
+        all_matched_tables = set()
+        for word, matched_tables in word_to_tables.items():
+            all_matched_tables.update(matched_tables)
+        
+        if len(all_matched_tables) < 2:
+            logger.info(f"[SQL-GEN] Semantic detection: only {len(all_matched_tables)} table(s) matched - no JOIN needed")
+            return False
+        
+        logger.info(f"[SQL-GEN] Words mapped to {len(all_matched_tables)} tables: {[t[-30:] for t in all_matched_tables]}")
+        
+        # Check if any pair of matched tables share a hub connection
+        matched_list = list(all_matched_tables)
+        for i, t1 in enumerate(matched_list):
+            for t2 in matched_list[i+1:]:
+                join_path = self.table_selector.get_join_path(t1, t2)
+                if join_path:
+                    sem_type = join_path.get('semantic_type', 'unknown')
+                    from_col = join_path.get('from_column', '')
+                    to_col = join_path.get('to_column', '')
+                    logger.warning(f"[SQL-GEN] ✅ SEMANTIC JOIN DETECTED: {t1[-30:]} ↔ {t2[-30:]} via {sem_type} ({from_col} → {to_col})")
+                    return True
+        
+        logger.info("[SQL-GEN] No shared hub found between matched tables - no JOIN needed")
         return False
     
     def _build_relationship_hints(self, tables: List[Dict]) -> str:
