@@ -490,6 +490,28 @@ class QueryResolver:
         result = ResolvedQuery(success=False)
         result.resolution_path.append(f"Question: {question}")
         
+        # =====================================================================
+        # v5.0: CROSS-DOMAIN DETECTION
+        # If question mentions multiple domains (e.g., "employees with 401k"),
+        # this requires a JOIN that QueryResolver can't handle. Fall through
+        # to SqlGenerator which has JOIN logic via TableSelector.
+        # =====================================================================
+        q_lower = question.lower()
+        matched_domains = set()
+        for domain, keywords in DOMAIN_KEYWORDS.items():
+            for kw in keywords:
+                if kw in q_lower:
+                    matched_domains.add(domain)
+                    break  # One match per domain is enough
+        
+        if len(matched_domains) > 1:
+            # Multiple domains detected - this is a cross-domain JOIN query
+            domain_names = [d.value for d in matched_domains]
+            result.explanation = f"Cross-domain query detected ({', '.join(domain_names)}) - requires JOIN"
+            result.resolution_path.append(f"CROSS-DOMAIN: {domain_names} - falling through to SqlGenerator")
+            logger.warning(f"[RESOLVER] Cross-domain query: {domain_names} - deferring to SqlGenerator for JOIN")
+            return result  # success=False, falls through to SqlGenerator
+        
         # STEP 1: Parse intent
         parsed = parse_intent(question)
         result.resolution_path.append(f"Parsed: {parsed}")
