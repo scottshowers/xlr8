@@ -396,6 +396,7 @@ class SQLGenerator:
         """
         Generate SQL for a question.
         
+        v4.1: Check for cross-domain JOIN need BEFORE simple/complex decision
         v3.0: Uses entity_scope from context to add scoping filters.
         v9.1: Added defensive error handling
         
@@ -435,7 +436,29 @@ class SQLGenerator:
             else:
                 relevant_tables = tables[:5]
             
-            # Try simple query path first
+            # =================================================================
+            # v4.1: Check for cross-domain JOIN BEFORE simple/complex decision
+            # This prevents simple queries from missing JOIN opportunities
+            # =================================================================
+            needs_join, additional_tables = self._needs_join(question, relevant_tables)
+            
+            if needs_join:
+                logger.warning(f"[SQL-GEN] Cross-domain JOIN detected - forcing complex path")
+                # Add discovered tables
+                if additional_tables:
+                    existing_names = {t.get('table_name', '').lower() for t in relevant_tables}
+                    for add_table in additional_tables:
+                        if add_table.get('table_name', '').lower() not in existing_names:
+                            relevant_tables = relevant_tables + [add_table]
+                            logger.warning(f"[SQL-GEN] ➕ Added table: {add_table.get('table_name', '')[-40:]}")
+                
+                # Force complex path for JOIN queries
+                result = self._generate_complex_with_join(question, relevant_tables, orchestrator, q_lower)
+                if result and entity_scope:
+                    result = self._apply_entity_scope(result, entity_scope)
+                return result
+            
+            # Try simple query path first (only if no JOIN needed)
             if self._is_simple_query(question) and relevant_tables:
                 result = self._generate_simple(question, relevant_tables[0], orchestrator)
                 if result:
@@ -805,6 +828,17 @@ SELECT"""
             'query_type': 'list',
             'all_columns': valid_columns
         }
+    
+    def _generate_complex_with_join(self, question: str, tables: List[Dict],
+                                    orchestrator, q_lower: str) -> Optional[Dict]:
+        """
+        Generate SQL for a query that we already know needs a JOIN.
+        
+        v4.1: Called when cross-domain JOIN is detected before simple/complex decision.
+        Tables have already been augmented with discovered tables.
+        """
+        logger.warning(f"[SQL-GEN] Generating JOIN query with {len(tables)} tables")
+        return self._generate_complex(question, tables, orchestrator, q_lower)
     
     def _generate_complex(self, question: str, tables: List[Dict],
                          orchestrator, q_lower: str) -> Optional[Dict]:
