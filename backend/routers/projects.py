@@ -508,3 +508,86 @@ async def recalc_project_indexes(project_id: str, request: RecalcRequest = None)
     except Exception as e:
         logger.error(f"Error recalculating indexes: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project_id}/term-index")
+async def get_term_index_contents(project_id: str, term: str = None, limit: int = 50):
+    """
+    Diagnostic endpoint to see what's in the term index.
+    
+    Args:
+        project_id: Project ID
+        term: Optional term to search for
+        limit: Max results to return
+        
+    Returns:
+        Term index contents
+    """
+    try:
+        from utils.structured_data_handler import StructuredDataHandler
+        
+        handler = StructuredDataHandler()
+        conn = handler.conn
+        
+        if term:
+            # Search for specific term
+            results = conn.execute("""
+                SELECT term, term_type, table_name, column_name, operator, match_value, 
+                       domain, entity, confidence, source
+                FROM _term_index
+                WHERE project = ? AND term LIKE ?
+                ORDER BY confidence DESC
+                LIMIT ?
+            """, [project_id, f'%{term.lower()}%', limit]).fetchall()
+        else:
+            # Get sample of all terms
+            results = conn.execute("""
+                SELECT term, term_type, table_name, column_name, operator, match_value, 
+                       domain, entity, confidence, source
+                FROM _term_index
+                WHERE project = ?
+                ORDER BY term
+                LIMIT ?
+            """, [project_id, limit]).fetchall()
+        
+        # Also get location column profiles
+        location_profiles = conn.execute("""
+            SELECT table_name, column_name, distinct_count, distinct_values
+            FROM _column_profiles
+            WHERE project = ? AND filter_category = 'location'
+            LIMIT 10
+        """, [project_id]).fetchall()
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "search_term": term,
+            "terms": [
+                {
+                    "term": r[0],
+                    "term_type": r[1],
+                    "table": r[2],
+                    "column": r[3],
+                    "operator": r[4],
+                    "match_value": r[5],
+                    "domain": r[6],
+                    "entity": r[7],
+                    "confidence": r[8],
+                    "source": r[9]
+                }
+                for r in results
+            ],
+            "location_profiles": [
+                {
+                    "table": r[0],
+                    "column": r[1],
+                    "distinct_count": r[2],
+                    "sample_values": r[3][:200] if r[3] else None
+                }
+                for r in location_profiles
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting term index: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
