@@ -61,9 +61,9 @@ try:
     from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent
     from .query_resolver import parse_intent
     DETERMINISTIC_PATH_AVAILABLE = True
-    logger.info("[ENGINE-V2] Deterministic path available (TermIndex + SQLAssembler)")
+    logger.warning("[ENGINE-V2] ✅ Deterministic path AVAILABLE (TermIndex + SQLAssembler)")
 except ImportError as e:
-    logger.warning(f"[ENGINE-V2] Deterministic path not available: {e}")
+    logger.warning(f"[ENGINE-V2] ❌ Deterministic path NOT available: {e}")
 
 __version__ = "10.0.0"  # v10.0: Deterministic path - Term Index + SQL Assembler as PRIMARY
 
@@ -1250,18 +1250,20 @@ class IntelligenceEngineV2:
         Returns:
             SynthesizedAnswer if successful, None to fall back to old path
         """
+        logger.warning(f"[DETERMINISTIC] Entering deterministic path. Available={DETERMINISTIC_PATH_AVAILABLE}")
+        
         if not DETERMINISTIC_PATH_AVAILABLE:
-            logger.debug("[DETERMINISTIC] Path not available - missing imports")
+            logger.warning("[DETERMINISTIC] Path not available - missing imports")
             return None
         
         if not self.structured_handler:
-            logger.debug("[DETERMINISTIC] No structured handler available")
+            logger.warning("[DETERMINISTIC] No structured handler available")
             return None
         
         try:
             # Step 1: Parse intent from question
             parsed = parse_intent(question)
-            logger.info(f"[DETERMINISTIC] Parsed: intent={parsed.intent.value}, domain={parsed.domain.value}")
+            logger.warning(f"[DETERMINISTIC] Parsed: intent={parsed.intent.value}, domain={parsed.domain.value}")
             
             # Skip deterministic path for complex analysis questions
             # These need Reference/Regulatory/Compliance from ChromaDB
@@ -1272,7 +1274,7 @@ class IntelligenceEngineV2:
                 'best practice', 'validate', 'correct', 'wrong'
             ]
             if any(ind in q_lower for ind in complex_indicators):
-                logger.info(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
+                logger.warning(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
                 return None
             
             # Step 2: Resolve terms using Term Index
@@ -1280,15 +1282,16 @@ class IntelligenceEngineV2:
             
             # Tokenize question and resolve each term
             words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
+            logger.warning(f"[DETERMINISTIC] Resolving terms for words: {words}")
             term_matches = term_index.resolve_terms(words)
             
             if not term_matches:
-                logger.info(f"[DETERMINISTIC] No term matches found")
+                logger.warning(f"[DETERMINISTIC] No term matches found - falling back")
                 return None
             
-            logger.info(f"[DETERMINISTIC] Found {len(term_matches)} term matches:")
+            logger.warning(f"[DETERMINISTIC] Found {len(term_matches)} term matches")
             for match in term_matches:
-                logger.info(f"  - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
+                logger.warning(f"[DETERMINISTIC]   - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
             
             # Step 3: Map parsed intent to assembler intent
             intent_map = {
@@ -1311,20 +1314,20 @@ class IntelligenceEngineV2:
                 logger.warning(f"[DETERMINISTIC] Assembly failed: {assembled.error}")
                 return None
             
-            logger.info(f"[DETERMINISTIC] Assembled SQL:\n{assembled.sql}")
+            logger.warning(f"[DETERMINISTIC] Assembled SQL: {assembled.sql}")
             
             # Step 5: Execute SQL
             try:
                 result = self.structured_handler.conn.execute(assembled.sql).fetchall()
                 columns = [desc[0] for desc in self.structured_handler.conn.description]
                 
-                logger.info(f"[DETERMINISTIC] Executed: {len(result)} rows returned")
+                logger.warning(f"[DETERMINISTIC] Executed: {len(result)} rows returned")
             except Exception as sql_error:
                 logger.error(f"[DETERMINISTIC] SQL execution error: {sql_error}")
                 return None
             
             if not result:
-                logger.info(f"[DETERMINISTIC] No results - falling back")
+                logger.warning(f"[DETERMINISTIC] No results - falling back")
                 return None
             
             # Step 6: Build response
