@@ -658,6 +658,23 @@ class IntelligenceEngineV2:
         logger.warning(f"[ENGINE-V2] Question: {question[:80]}...")
         logger.warning(f"[ENGINE-V2] confirmed_facts: {self.confirmed_facts}")
         
+        try:
+            return self._ask_internal(question, mode, context, q_lower)
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] FATAL ERROR in ask(): {e}")
+            import traceback
+            logger.error(f"[ENGINE-V2] Traceback: {traceback.format_exc()}")
+            # Return error response instead of crashing
+            return SynthesizedAnswer(
+                question=question,
+                answer=f"I encountered an error processing your question. Please try rephrasing or simplifying your query.",
+                confidence=0.0,
+                reasoning=[f"Error: {str(e)[:200]}"]
+            )
+    
+    def _ask_internal(self, question: str, mode: IntelligenceMode,
+                      context: Dict, q_lower: str) -> SynthesizedAnswer:
+        """Internal implementation of ask() with actual logic."""
         # Check for export request
         export_result = self._handle_export_request(question, q_lower)
         if export_result:
