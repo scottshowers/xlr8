@@ -165,10 +165,10 @@ class SQLAssembler:
         """
         logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches")
         
-        # Extract tables from term matches
+        # Extract tables from term matches (before dedup)
         tables_from_matches = list(set(m.table_name for m in term_matches))
         
-        # Determine primary table
+        # Determine primary table FIRST
         primary_table = self._get_primary_table(tables_from_matches, domain, term_matches)
         
         if not primary_table:
@@ -183,18 +183,25 @@ class SQLAssembler:
                 error="Could not determine primary table"
             )
         
-        # CROSS-DOMAIN PATH: Use ALL term matches and build JOINs as needed
-        # Previous "simple path" was WRONG - it dropped filters from non-primary tables!
+        # ==========================================================================
+        # CRITICAL FIX: Deduplicate term matches by term
+        # ==========================================================================
+        # Problem: "texas" matches 4 tables → JOINs all 4 → WHERE requires TX everywhere → 0 rows
+        # Solution: For each term, keep ONE match, preferring the primary table
+        #
         # Example: "employees in Texas with 401k"
-        #   - "texas" → Personal.state
-        #   - "401k" → Deductions.description
-        #   - We need BOTH filters, which requires a JOIN
+        #   BEFORE: texas→Personal, texas→WorkersComp, texas→CompanyTax, texas→Locations
+        #   AFTER:  texas→Personal (primary), 401k→Deductions (needs JOIN)
+        # ==========================================================================
+        term_matches = self._deduplicate_term_matches(term_matches, primary_table)
+        
+        # Re-extract tables after deduplication
+        tables_from_matches = list(set(m.table_name for m in term_matches))
         
         if len(tables_from_matches) == 1:
             logger.warning(f"[SQL_ASSEMBLER] SINGLE TABLE: All {len(term_matches)} matches from {tables_from_matches[0]}")
         else:
             logger.warning(f"[SQL_ASSEMBLER] CROSS-DOMAIN: {len(term_matches)} matches across {len(tables_from_matches)} tables: {tables_from_matches}")
-            # JOINs will be built in _prepare_tables_and_joins
         
         # Build query based on intent
         if intent == QueryIntent.COUNT:
@@ -208,6 +215,58 @@ class SQLAssembler:
         else:
             # Default to LIST for unknown intents
             return self._build_list(primary_table, term_matches, tables_from_matches)
+    
+    def _deduplicate_term_matches(self, 
+                                   term_matches: List[TermMatch], 
+                                   primary_table: str) -> List[TermMatch]:
+        """
+        Deduplicate term matches: one match per term, preferring primary table.
+        
+        This prevents over-constraining queries when the same term (e.g., "texas")
+        matches multiple tables. We want:
+        - "texas" in Personal.stateprovince (use this, ignore WorkersComp, CompanyTax, etc.)
+        - "401k" only in Deductions (keep it, will need JOIN)
+        
+        Args:
+            term_matches: All matches from term_index
+            primary_table: The identified primary table for this query
+            
+        Returns:
+            Deduplicated list with one match per term
+        """
+        # Group matches by term
+        by_term: Dict[str, List[TermMatch]] = {}
+        for match in term_matches:
+            term_key = match.term.lower()
+            if term_key not in by_term:
+                by_term[term_key] = []
+            by_term[term_key].append(match)
+        
+        # Select best match for each term
+        deduplicated = []
+        for term, matches in by_term.items():
+            if len(matches) == 1:
+                # Only one match, use it
+                deduplicated.append(matches[0])
+                continue
+            
+            # Multiple matches - prefer primary table
+            primary_matches = [m for m in matches if m.table_name == primary_table]
+            if primary_matches:
+                # Use primary table match (take first if multiple columns match)
+                best = primary_matches[0]
+                logger.warning(f"[SQL_ASSEMBLER] DEDUP: '{term}' → using primary table {best.table_name}.{best.column_name} (dropped {len(matches)-1} other matches)")
+                deduplicated.append(best)
+            else:
+                # Term not in primary - pick best non-primary match
+                # Prefer higher confidence, then by table name for determinism
+                sorted_matches = sorted(matches, key=lambda m: (-m.confidence, m.table_name))
+                best = sorted_matches[0]
+                logger.warning(f"[SQL_ASSEMBLER] DEDUP: '{term}' → using {best.table_name}.{best.column_name} (not in primary, will need JOIN)")
+                deduplicated.append(best)
+        
+        logger.warning(f"[SQL_ASSEMBLER] Deduplicated: {len(term_matches)} matches → {len(deduplicated)} unique terms")
+        return deduplicated
     
     def _get_primary_table(self, 
                            tables_from_matches: List[str],
