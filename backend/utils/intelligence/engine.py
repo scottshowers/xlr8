@@ -1289,10 +1289,16 @@ class IntelligenceEngineV2:
                                         term_map[desc.lower()] = code
             
             # Direct value matching (case-insensitive)
+            # But skip 2-letter values that are common English words
+            SKIP_VALUES = {'in', 'on', 'ok', 'hi', 'me', 'or', 'no', 'so', 'to', 'we', 'us', 'be', 'am', 'is', 'it', 'an', 'as', 'at', 'by', 'do', 'go', 'he', 'if', 'my', 'of', 'up'}
             for v in values:
                 if v:
                     v_str = str(v).strip()
-                    term_map[v_str.lower()] = v_str
+                    v_lower = v_str.lower()
+                    # Skip if it's a common English word
+                    if v_lower in SKIP_VALUES:
+                        continue
+                    term_map[v_lower] = v_str
             
             if term_map:
                 vocab[category] = term_map
