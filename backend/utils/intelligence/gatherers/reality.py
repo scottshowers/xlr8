@@ -159,7 +159,8 @@ class RealityGatherer(DuckDBGatherer):
                 'explanation': resolver.get('explanation'),
                 'resolution_path': resolver.get('resolution_path'),
                 'reality_context': resolver.get('reality_context'),  # v2: Include breakdowns
-                'structured_output': resolver.get('structured_output')  # v3: Workforce snapshot etc.
+                'structured_output': resolver.get('structured_output'),  # v3: Workforce snapshot etc.
+                'total_count': resolver.get('total_count')  # v5: Real count for LIST queries
             }
         
         # TRY QUERY RESOLVER (if not already tried at engine level)
@@ -236,9 +237,13 @@ class RealityGatherer(DuckDBGatherer):
         structured_output = sql_info.get('structured_output')
         resolution_path = sql_info.get('resolution_path', [])  # Provenance
         explanation = sql_info.get('explanation', '')
+        total_count = sql_info.get('total_count')  # v5: Real count for LIST queries
         
         # Get display name from schema
         display_name = self._get_display_name(table_name)
+        
+        # Use real total_count if available, otherwise use len(rows)
+        actual_total = total_count if total_count is not None else len(rows)
         
         # Log what we're creating
         if structured_output and structured_output.get('type') == 'workforce_snapshot':
@@ -246,11 +251,11 @@ class RealityGatherer(DuckDBGatherer):
         elif reality_context:
             breakdowns = reality_context.get('breakdowns', {})
             logger.warning(f"[GATHER-REALITY] Creating Truth: "
-                          f"query_type={query_type}, rows={len(rows)}, "
+                          f"query_type={query_type}, rows={len(rows)}, total={actual_total}, "
                           f"breakdowns={list(breakdowns.keys())}")
         else:
             logger.warning(f"[GATHER-REALITY] Creating Truth: "
-                          f"query_type={query_type}, rows={len(rows)}")
+                          f"query_type={query_type}, rows={len(rows)}, total={actual_total}")
         
         return self.create_truth(
             source_name=display_name,
@@ -258,7 +263,8 @@ class RealityGatherer(DuckDBGatherer):
                 'sql': sql,
                 'columns': columns,
                 'rows': rows,
-                'total': len(rows),
+                'total': actual_total,  # v5: Use real count, not limited rows
+                'rows_returned': len(rows),  # v5: How many rows we're actually returning
                 'query_type': query_type,
                 'table': table_name,
                 'display_name': display_name,
