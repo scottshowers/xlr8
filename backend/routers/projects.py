@@ -319,3 +319,63 @@ async def get_project(project_id: str):
     except Exception as e:
         logger.error(f"Error getting project: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+class RecalcRequest(BaseModel):
+    """Schema for recalc request"""
+    what: Optional[List[str]] = ["terms", "entities", "joins"]
+
+
+@router.post("/{project_id}/recalc")
+async def recalc_project_indexes(project_id: str, request: RecalcRequest = None):
+    """
+    Recalculate load-time indexes for a project without re-uploading files.
+    
+    This endpoint rebuilds:
+    - Term index (for deterministic query resolution)
+    - Entity tables (for table selection)
+    - Join priorities (for deterministic JOIN key selection)
+    
+    Args:
+        project_id: Project ID
+        request: Optional - what to recalculate (default: all)
+        
+    Returns:
+        Recalc statistics
+    """
+    try:
+        from utils.structured_data_handler import StructuredDataHandler
+        from backend.utils.intelligence.term_index import recalc_term_index
+        
+        what = request.what if request else ["terms", "entities", "joins"]
+        
+        logger.info(f"Recalculating indexes for project {project_id}: {what}")
+        
+        # Get handler
+        handler = StructuredDataHandler()
+        
+        results = {}
+        
+        if "all" in what or "terms" in what or "entities" in what or "joins" in what:
+            # Run full recalc
+            stats = recalc_term_index(handler.conn, project_id)
+            results = stats
+        
+        return {
+            "success": True,
+            "project_id": project_id,
+            "recalculated": what,
+            "stats": results,
+            "message": "Index recalculation complete"
+        }
+        
+    except ImportError as e:
+        logger.warning(f"Term index module not available: {e}")
+        return {
+            "success": False,
+            "error": "Term index module not available",
+            "message": "This feature requires the term_index module to be installed"
+        }
+    except Exception as e:
+        logger.error(f"Error recalculating indexes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
