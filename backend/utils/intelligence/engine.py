@@ -1278,6 +1278,7 @@ class IntelligenceEngineV2:
                 return None
             
             # Step 2: Resolve terms using Term Index
+            logger.warning(f"[DETERMINISTIC] Creating TermIndex with project='{self.project}'")
             term_index = TermIndex(self.structured_handler.conn, self.project)
             
             # Tokenize question and resolve each term
