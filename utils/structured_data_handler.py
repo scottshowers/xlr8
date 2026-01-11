@@ -113,6 +113,19 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Import term index for load-time intelligence
+try:
+    from backend.utils.intelligence.term_index import TermIndex
+    TERM_INDEX_AVAILABLE = True
+except ImportError:
+    try:
+        # Try relative import for when running from utils/
+        from .intelligence.term_index import TermIndex
+        TERM_INDEX_AVAILABLE = True
+    except ImportError:
+        TERM_INDEX_AVAILABLE = False
+        logger.debug("term_index module not available - term indexing disabled")
+
 # Track module loads for debugging multi-worker issues
 import uuid
 _MODULE_LOAD_ID = str(uuid.uuid4())[:8]
@@ -377,6 +390,20 @@ class StructuredDataHandler:
         self._init_metadata_table()
         
         logger.info(f"StructuredDataHandler initialized with DuckDB at {db_path}")
+    
+    def get_term_index(self, project: str) -> Optional['TermIndex']:
+        """
+        Get a TermIndex instance for the given project.
+        
+        Returns None if term_index module is not available.
+        """
+        if not TERM_INDEX_AVAILABLE:
+            return None
+        try:
+            return TermIndex(self.conn, project)
+        except Exception as e:
+            logger.debug(f"Could not create TermIndex: {e}")
+            return None
     
     def _connect_with_recovery(self, db_path: str):
         """
@@ -5443,6 +5470,33 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                     profile.get('filter_priority', 0)
                 ])
                 self.conn.commit()
+            
+            # =========================================================
+            # TERM INDEX POPULATION (Load-time intelligence)
+            # Build searchable terms when filter categories are detected
+            # =========================================================
+            if TERM_INDEX_AVAILABLE and profile.get('filter_category') and profile.get('distinct_values'):
+                try:
+                    term_index = self.get_term_index(profile['project'])
+                    if term_index:
+                        category = profile['filter_category']
+                        table_name = profile['table_name']
+                        column_name = profile['column_name']
+                        distinct_values = profile['distinct_values']
+                        
+                        # Build terms based on filter category
+                        if category == 'location':
+                            term_index.build_location_terms(table_name, column_name, distinct_values)
+                        elif category == 'status':
+                            term_index.build_status_terms(table_name, column_name, distinct_values)
+                        else:
+                            # For other categories, just index the values
+                            term_index.build_value_terms(table_name, column_name, distinct_values, 
+                                                        domain=category, entity=category)
+                        
+                        self.conn.commit()
+                except Exception as term_e:
+                    logger.debug(f"[TERM_INDEX] Term population note: {term_e}")
             
         except Exception as e:
             logger.warning(f"[PROFILING] Failed to store profile for {profile.get('column_name')}: {e}")
