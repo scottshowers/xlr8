@@ -614,7 +614,7 @@ async def resolve_terms_test(project_id: str, question: str):
         from utils.structured_data_handler import StructuredDataHandler
         from backend.utils.intelligence.term_index import TermIndex
         from backend.utils.intelligence.sql_assembler import SQLAssembler, QueryIntent
-        from backend.utils.intelligence.intent_parser import parse_intent
+        from backend.utils.intelligence.query_resolver import parse_intent
         import re
         
         handler = StructuredDataHandler()
