@@ -565,6 +565,7 @@ class SQLGenerator:
         """
         Generate SQL for a question.
         
+        v5.0: Resolves terms via term index for deterministic filtering
         v4.1: Check for cross-domain JOIN need BEFORE simple/complex decision
         v3.0: Uses entity_scope from context to add scoping filters.
         v9.1: Added defensive error handling
@@ -596,6 +597,17 @@ class SQLGenerator:
             
             # v3.0: Extract entity scope from context
             entity_scope = context.get('entity_scope') if context else None
+            
+            # =================================================================
+            # v5.0: Resolve terms via term index for deterministic filtering
+            # Do this EARLY so we can use matches throughout generation
+            # =================================================================
+            project = context.get('project') or context.get('project_name') if context else None
+            if project and TERM_INDEX_AVAILABLE:
+                term_matches = self._resolve_terms_from_index(question, project)
+                if term_matches:
+                    self._term_index_matches = term_matches
+                    logger.info(f"[SQL-GEN] Term index resolved {len(term_matches)} terms")
             
             # Select relevant tables
             if self.table_selector:
@@ -629,6 +641,7 @@ class SQLGenerator:
                 if result and entity_scope:
                     result = self._apply_entity_scope(result, entity_scope)
                 if result:
+                    result = self._apply_term_index_filters(result)
                     result['_join_debug'] = self._join_detection_debug
                 return result
             
@@ -639,6 +652,7 @@ class SQLGenerator:
                     result['_join_debug'] = self._join_detection_debug
                     if entity_scope:
                         result = self._apply_entity_scope(result, entity_scope)
+                    result = self._apply_term_index_filters(result)
                     return result
             
             # Complex query path
@@ -648,6 +662,7 @@ class SQLGenerator:
                 result = self._apply_entity_scope(result, entity_scope)
             
             if result:
+                result = self._apply_term_index_filters(result)
                 result['_join_debug'] = self._join_detection_debug
             
             return result
@@ -739,6 +754,63 @@ class SQLGenerator:
                             logger.warning(f"[SQL-GEN] Applied entity scope (fallback): {hub_column}='{scope_value}'")
         except Exception as e:
             logger.debug(f"[SQL-GEN] Entity scope application failed: {e}")
+        
+        return result
+    
+    def _apply_term_index_filters(self, result: Dict) -> Dict:
+        """
+        Apply term index matches as WHERE clauses to generated SQL.
+        
+        Uses self._term_index_matches which was populated during generate().
+        Only applies filters for the target table(s) in the SQL.
+        
+        Args:
+            result: SQL generation result with 'sql' key
+            
+        Returns:
+            Updated result with filters applied
+        """
+        if not hasattr(self, '_term_index_matches') or not self._term_index_matches:
+            return result
+        
+        sql = result.get('sql', '')
+        if not sql:
+            return result
+        
+        target_table = result.get('table', '').lower()
+        filters_applied = []
+        
+        for match in self._term_index_matches:
+            match_table = match.get('table', '').lower()
+            match_column = match.get('column', '')
+            match_value = match.get('value', '')
+            match_operator = match.get('operator', '=')
+            
+            # Only apply if this match is for the target table
+            # (handles both exact match and substring for long table names)
+            if not target_table or match_table in target_table or target_table in match_table:
+                # Build filter
+                if match_operator == '=':
+                    filter_clause = f'"{match_column}" = \'{match_value}\''
+                elif match_operator == 'ILIKE':
+                    filter_clause = f'"{match_column}" ILIKE \'%{match_value}%\''
+                else:
+                    filter_clause = f'"{match_column}" {match_operator} \'{match_value}\''
+                
+                # Check if this filter isn't already in the SQL
+                if match_value.lower() not in sql.lower():
+                    sql = self._inject_where_clause(sql, filter_clause)
+                    filters_applied.append({
+                        'column': match_column,
+                        'value': match_value,
+                        'entity': match.get('entity'),
+                        'source': 'term_index'
+                    })
+                    logger.warning(f"[SQL-GEN] Applied term index filter: {match_column}='{match_value}'")
+        
+        if filters_applied:
+            result['sql'] = sql
+            result['term_index_filters'] = filters_applied
         
         return result
     
