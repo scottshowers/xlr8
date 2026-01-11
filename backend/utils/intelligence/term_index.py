@@ -206,7 +206,6 @@ STOP_WORDS: Set[str] = {
     'most', 'other', 'some', 'such', 'no', 'not', 'only', 'own', 'same', 'so',
     'than', 'too', 'very', 'just', 'also', 'now', 'if', 'or', 'and', 'but',
     'show', 'me', 'give', 'get', 'find', 'list', 'what', 'which', 'who', 'whom',
-    'employees', 'employee', 'workers', 'worker', 'people', 'staff', 'team',
     'data', 'information', 'details', 'records',
     # CRITICAL: These short words match state codes but are almost always prepositions
     'in',   # Would match Indiana (IN)
@@ -215,6 +214,141 @@ STOP_WORDS: Set[str] = {
     'hi',   # Would match Hawaii (HI)
     'me',   # Would match Maine (ME) - already in list above
     'or',   # Would match Oregon (OR) - already in list above
+}
+
+# Entity words - NOT filter values, but entity indicators for table selection
+# These are handled specially, not filtered as WHERE clauses
+ENTITY_WORDS: Set[str] = {
+    'employees', 'employee', 'workers', 'worker', 'people', 'staff', 'team',
+    'person', 'persons', 'personnel', 'member', 'members',
+}
+
+# =============================================================================
+# ENTITY AND DOMAIN MAPPINGS
+# =============================================================================
+
+# Maps domain classifications to canonical entity names
+# Domain (from classification) → entity (for table lookup)
+DOMAIN_TO_ENTITY: Dict[str, str] = {
+    'hr': 'employee',
+    'demographics': 'employee',
+    'personnel': 'employee',
+    'payroll': 'employee',
+    'compensation': 'employee',
+    'benefits': 'benefits',
+    'benefit': 'benefits',
+    'deductions': 'benefits',
+    'tax': 'tax',
+    'taxes': 'tax',
+    'time': 'time',
+    'timekeeping': 'time',
+    'attendance': 'time',
+    'scheduling': 'time',
+    'leave': 'leave',
+    'pto': 'leave',
+    'accruals': 'leave',
+    'organization': 'organization',
+    'org': 'organization',
+    'company': 'organization',
+    'location': 'location',
+    'job': 'job',
+    'position': 'job',
+}
+
+# Maps user query terms to canonical entities
+# Query term → canonical entity
+ENTITY_SYNONYMS: Dict[str, str] = {
+    # Employee/person variants
+    'employees': 'employee',
+    'employee': 'employee',
+    'workers': 'employee',
+    'worker': 'employee',
+    'people': 'employee',
+    'person': 'employee',
+    'persons': 'employee',
+    'staff': 'employee',
+    'team': 'employee',
+    'personnel': 'employee',
+    'members': 'employee',
+    'member': 'employee',
+    'headcount': 'employee',
+    
+    # Benefits variants
+    'benefits': 'benefits',
+    'benefit': 'benefits',
+    'deductions': 'benefits',
+    'deduction': 'benefits',
+    'insurance': 'benefits',
+    '401k': 'benefits',
+    'retirement': 'benefits',
+    'pension': 'benefits',
+    'hsa': 'benefits',
+    'fsa': 'benefits',
+    'medical': 'benefits',
+    'dental': 'benefits',
+    'vision': 'benefits',
+    
+    # Tax variants
+    'taxes': 'tax',
+    'tax': 'tax',
+    'withholding': 'tax',
+    'withholdings': 'tax',
+    'w2': 'tax',
+    'w4': 'tax',
+    
+    # Time variants
+    'time': 'time',
+    'timekeeping': 'time',
+    'attendance': 'time',
+    'hours': 'time',
+    'punches': 'time',
+    'clock': 'time',
+    'schedule': 'time',
+    'scheduling': 'time',
+    
+    # Leave variants
+    'leave': 'leave',
+    'pto': 'leave',
+    'vacation': 'leave',
+    'sick': 'leave',
+    'accruals': 'leave',
+    'accrual': 'leave',
+    'balances': 'leave',
+    
+    # Payroll variants
+    'payroll': 'payroll',
+    'pay': 'payroll',
+    'earnings': 'payroll',
+    'salary': 'payroll',
+    'wages': 'payroll',
+    'compensation': 'payroll',
+    
+    # Organization variants
+    'organization': 'organization',
+    'org': 'organization',
+    'company': 'organization',
+    'companies': 'organization',
+    'department': 'organization',
+    'departments': 'organization',
+    'division': 'organization',
+    
+    # Location variants
+    'location': 'location',
+    'locations': 'location',
+    'site': 'location',
+    'sites': 'location',
+    'office': 'location',
+    'offices': 'location',
+    
+    # Job variants
+    'job': 'job',
+    'jobs': 'job',
+    'position': 'job',
+    'positions': 'job',
+    'role': 'job',
+    'roles': 'job',
+    'title': 'job',
+    'titles': 'job',
 }
 
 
@@ -593,6 +727,9 @@ class TermIndex:
         """
         Build entity tables from table classifications.
         
+        Now maps domains to canonical entities using DOMAIN_TO_ENTITY.
+        For example, domain "hr" creates entity mappings for both "hr" AND "employee".
+        
         Args:
             classifications: List of dicts with table_name, table_type, domain, row_count
             
@@ -613,19 +750,60 @@ class TermIndex:
             # Sort by row count (largest = primary)
             tables_sorted = sorted(tables, key=lambda x: x.get('row_count', 0), reverse=True)
             
+            # Get canonical entity for this domain
+            canonical_entity = DOMAIN_TO_ENTITY.get(domain.lower(), domain)
+            
+            # Build set of entity names to store (both raw domain and canonical)
+            entities_to_store = {domain.lower()}
+            if canonical_entity != domain.lower():
+                entities_to_store.add(canonical_entity)
+            
             for i, t in enumerate(tables_sorted):
                 is_primary = (i == 0)  # First (largest) is primary
-                self.add_entity_table(
-                    entity=domain,
-                    table_name=t['table_name'],
-                    is_primary=is_primary,
-                    table_type=t.get('table_type'),
-                    row_count=t.get('row_count')
-                )
-                added += 1
+                
+                # Store under each entity name
+                for entity_name in entities_to_store:
+                    self.add_entity_table(
+                        entity=entity_name,
+                        table_name=t['table_name'],
+                        is_primary=is_primary,
+                        table_type=t.get('table_type'),
+                        row_count=t.get('row_count')
+                    )
+                    added += 1
         
-        logger.info(f"[TERM_INDEX] Built {added} entity-table mappings")
+        logger.info(f"[TERM_INDEX] Built {added} entity-table mappings across {len(domain_tables)} domains")
         return added
+    
+    def resolve_entity(self, term: str) -> Optional[str]:
+        """
+        Resolve a user term to a canonical entity name.
+        
+        Args:
+            term: User's query term (e.g., "employees", "401k", "workers")
+            
+        Returns:
+            Canonical entity name or None if not an entity term.
+        """
+        term_lower = term.lower().strip()
+        return ENTITY_SYNONYMS.get(term_lower)
+    
+    def detect_entities_in_query(self, terms: List[str]) -> Set[str]:
+        """
+        Detect all entities mentioned in a query.
+        
+        Args:
+            terms: List of terms from the query
+            
+        Returns:
+            Set of canonical entity names detected.
+        """
+        entities = set()
+        for term in terms:
+            entity = self.resolve_entity(term)
+            if entity:
+                entities.add(entity)
+        return entities
     
     # =========================================================================
     # QUERY-TIME METHODS
@@ -1070,7 +1248,7 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         lookups = conn.execute("""
             SELECT table_name, code_column, lookup_type, lookup_data_json
             FROM _intelligence_lookups
-            WHERE project = ?
+            WHERE project_name = ?
         """, [project]).fetchall()
         
         for table_name, code_column, lookup_type, lookup_json in lookups:
@@ -1082,24 +1260,31 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
                 stats['lookup_terms'] += index.build_lookup_terms(table_name, code_column, lookup_data, lookup_type)
             except Exception as e:
                 logger.debug(f"Error processing lookup: {e}")
+        
+        stats['lookups_found'] = len(lookups)
+        logger.info(f"[TERM_INDEX] Loaded {len(lookups)} lookups from _intelligence_lookups")
     except Exception as e:
         logger.debug(f"Lookup table may not exist: {e}")
+        stats['lookups_found'] = 0
     
     # Rebuild entity tables
     try:
         classifications = conn.execute("""
             SELECT table_name, table_type, domain, row_count
             FROM _table_classifications
-            WHERE project = ?
+            WHERE project_name = ?
         """, [project]).fetchall()
         
         class_list = [
             {'table_name': c[0], 'table_type': c[1], 'domain': c[2], 'row_count': c[3]}
             for c in classifications
         ]
+        stats['classifications_found'] = len(classifications)
         stats['entity_mappings'] = index.build_entity_tables(class_list)
+        logger.info(f"[TERM_INDEX] Loaded {len(classifications)} classifications from _table_classifications")
     except Exception as e:
         logger.debug(f"Classification table may not exist: {e}")
+        stats['classifications_found'] = 0
     
     # Set join priorities
     stats['join_priorities'] = index.set_all_join_priorities()
