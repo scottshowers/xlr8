@@ -31,11 +31,15 @@
 **#2 BLOCKER: ~~Config vs Employee Table Selection~~ FIXED**
 - ~~"list employees with 401k" selected CONFIG deductions table~~
 - ~~Config table has no employee_number, so JOINs fail~~
-- v4.1 fix: `is_config_question` no longer triggers on data domain questions
-- "list", "what", "how many" no longer force config table selection
-- Context Graph scoring now properly boosts Reality tables with employee_number
+- v4.1 fix in TableSelector: `is_config_question` no longer triggers on data domain questions
 
-**#3: Synthesizer Quality**
+**#3 BLOCKER: ~~QueryResolver Blocking Cross-Domain~~ FIXED**
+- ~~QueryResolver handled "employees with 401k" as single-domain employee query~~
+- ~~Never reached SqlGenerator which has JOIN logic~~
+- v5.0 fix: QueryResolver now detects multiple domains and returns success=False
+- Cross-domain queries fall through to SqlGenerator for JOIN handling
+
+**#4: Synthesizer Quality**
 - Template responses work (lists data)
 - LLM overlay produces generic consultant-speak
 - Hub usage analysis exists but needs tuning
