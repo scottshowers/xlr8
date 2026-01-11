@@ -842,15 +842,23 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                     info['data_context'].append(f"Grouped results: {len(rows)} groups")
                 else:
                     info['result_rows'] = rows  # No limit - return all
-                    info['data_context'].append(f"Found {len(rows)} rows with columns: {', '.join(cols[:8])}")
+                    # v5: Use real total if available, show "X of Y" if limited
+                    real_total = truth.content.get('total', len(rows))
+                    rows_returned = truth.content.get('rows_returned', len(rows))
+                    if real_total > rows_returned:
+                        info['data_context'].append(f"Showing {rows_returned} of {real_total} total records (columns: {', '.join(cols[:6])})")
+                    else:
+                        info['data_context'].append(f"Found {real_total} rows with columns: {', '.join(cols[:8])}")
                 
-                # Build structured output
+                # Build structured output - use real total from content
+                real_total = truth.content.get('total', len(rows))
                 info['structured_output'] = {
                     'type': 'data',
                     'sql': truth.content.get('sql'),
                     'rows': info['result_rows'],
                     'columns': info['result_columns'],
-                    'total': len(rows)
+                    'total': real_total,
+                    'rows_returned': len(rows)
                 }
                 break
         
