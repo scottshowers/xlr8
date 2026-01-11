@@ -49,7 +49,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "8.0.0"  # v8.0: Project Intelligence integration (bypass reverted)
+__version__ = "9.0.0"  # v9.0: Intelligent filter detection from question text
 
 # Try to load Project Intelligence
 PROJECT_INTELLIGENCE_AVAILABLE = False
@@ -1145,26 +1145,195 @@ class IntelligenceEngineV2:
         return None
     
     # =========================================================================
-    # CLARIFICATION HANDLING
+    # CLARIFICATION HANDLING - v9.0 Intelligent Filter Detection
     # =========================================================================
+    
+    def _build_filter_vocabulary(self) -> Dict[str, Dict[str, str]]:
+        """
+        Build a vocabulary mapping natural language terms to filter values.
+        
+        Returns: Dict[category, Dict[term, value]]
+        Example: {'status': {'active': 'A', 'terminated': 'T'}}
+        
+        Uses:
+        1. Standard patterns for common categories (domain-agnostic)
+        2. Lookups from project intelligence (data-driven)
+        3. Direct value matching (fallback)
+        """
+        vocab = {}
+        
+        for category, candidates in self.filter_candidates.items():
+            if not candidates:
+                continue
+            
+            # Get distinct values from the primary candidate
+            primary = candidates[0] if candidates else {}
+            values = primary.get('distinct_values', [])
+            
+            if not values:
+                continue
+            
+            term_map = {}
+            values_upper = [str(v).upper().strip() for v in values if v]
+            
+            # Category-specific mappings (common HCM patterns, not vendor-specific)
+            if category == 'status':
+                # Employment status is universal: Active, Terminated, Leave
+                for v in values:
+                    v_upper = str(v).upper().strip() if v else ''
+                    if v_upper in ('A', 'ACTIVE'):
+                        term_map['active'] = v
+                        term_map['current'] = v
+                        term_map['employed'] = v
+                    elif v_upper in ('T', 'TERMINATED', 'TERM'):
+                        term_map['terminated'] = v
+                        term_map['termed'] = v
+                        term_map['former'] = v
+                        term_map['ex-employee'] = v
+                    elif v_upper in ('L', 'LOA', 'LEAVE'):
+                        term_map['leave'] = v
+                        term_map['loa'] = v
+                        term_map['on leave'] = v
+                        
+            elif category == 'location':
+                # US state names → codes (common in HCM)
+                state_map = {
+                    'alabama': 'AL', 'alaska': 'AK', 'arizona': 'AZ', 'arkansas': 'AR',
+                    'california': 'CA', 'colorado': 'CO', 'connecticut': 'CT', 'delaware': 'DE',
+                    'florida': 'FL', 'georgia': 'GA', 'hawaii': 'HI', 'idaho': 'ID',
+                    'illinois': 'IL', 'indiana': 'IN', 'iowa': 'IA', 'kansas': 'KS',
+                    'kentucky': 'KY', 'louisiana': 'LA', 'maine': 'ME', 'maryland': 'MD',
+                    'massachusetts': 'MA', 'michigan': 'MI', 'minnesota': 'MN', 'mississippi': 'MS',
+                    'missouri': 'MO', 'montana': 'MT', 'nebraska': 'NE', 'nevada': 'NV',
+                    'new hampshire': 'NH', 'new jersey': 'NJ', 'new mexico': 'NM', 'new york': 'NY',
+                    'north carolina': 'NC', 'north dakota': 'ND', 'ohio': 'OH', 'oklahoma': 'OK',
+                    'oregon': 'OR', 'pennsylvania': 'PA', 'rhode island': 'RI', 'south carolina': 'SC',
+                    'south dakota': 'SD', 'tennessee': 'TN', 'texas': 'TX', 'utah': 'UT',
+                    'vermont': 'VT', 'virginia': 'VA', 'washington': 'WA', 'west virginia': 'WV',
+                    'wisconsin': 'WI', 'wyoming': 'WY',
+                    # Canadian provinces
+                    'ontario': 'ON', 'quebec': 'QC', 'british columbia': 'BC', 'alberta': 'AB',
+                }
+                for name, code in state_map.items():
+                    if code in values_upper:
+                        term_map[name] = code
+            
+            # Also use lookups if available (data-driven, not hardcoded)
+            if hasattr(self, 'project_intelligence') and self.project_intelligence:
+                pi = self.project_intelligence
+                if hasattr(pi, 'lookups') and pi.lookups:
+                    for lookup in pi.lookups:
+                        if hasattr(lookup, 'lookup_type') and hasattr(lookup, 'lookup_data'):
+                            # Match lookup type to filter category
+                            if lookup.lookup_type.lower() in category.lower() or category.lower() in lookup.lookup_type.lower():
+                                # Reverse the mapping: description → code
+                                for code, desc in lookup.lookup_data.items():
+                                    if desc and code:
+                                        term_map[desc.lower()] = code
+            
+            # Direct value matching (case-insensitive)
+            for v in values:
+                if v:
+                    v_str = str(v).strip()
+                    term_map[v_str.lower()] = v_str
+            
+            if term_map:
+                vocab[category] = term_map
+                
+        return vocab
+    
+    def _detect_filters_from_question(self, question: str) -> Dict[str, str]:
+        """
+        Detect filter values mentioned in the question.
+        
+        Returns: Dict[category, detected_value]
+        Example: {'status': 'A'} if question contains "active employees"
+        
+        This is DOMAIN-AGNOSTIC - it uses the filter vocabulary built from
+        the actual data, not hardcoded business rules.
+        """
+        detected = {}
+        q_lower = question.lower()
+        
+        # Build vocabulary on first use (cached on engine instance)
+        if not hasattr(self, '_filter_vocab_cache'):
+            self._filter_vocab_cache = self._build_filter_vocabulary()
+        
+        vocab = self._filter_vocab_cache
+        
+        for category, term_map in vocab.items():
+            # Sort terms by length (descending) to match longer phrases first
+            sorted_terms = sorted(term_map.keys(), key=len, reverse=True)
+            
+            for term in sorted_terms:
+                # Check for word boundary matches to avoid partial matches
+                # e.g., "active" should match but "proactive" should not
+                import re
+                pattern = r'\b' + re.escape(term) + r'\b'
+                if re.search(pattern, q_lower):
+                    detected[category] = term_map[term]
+                    logger.warning(f"[CLARIFICATION] Auto-detected {category}='{term_map[term]}' from term '{term}'")
+                    break  # First match per category
+        
+        return detected
     
     def _check_clarification_needed(self, question: str, 
                                     q_lower: str) -> Optional[SynthesizedAnswer]:
-        """Check if clarification is needed for employee questions."""
-        # Status is the most important filter
+        """
+        Check if clarification is needed for employee questions.
+        
+        v9.0: Now uses intelligent filter detection:
+        1. Check if filters are already in confirmed_facts
+        2. Detect filters from question text
+        3. Only ask if truly ambiguous
+        """
+        # Step 1: Detect filters from question text
+        detected = self._detect_filters_from_question(question)
+        
+        # Step 2: Auto-populate confirmed_facts with detected filters
+        for category, value in detected.items():
+            if category not in self.confirmed_facts:
+                self.confirmed_facts[category] = value
+                logger.warning(f"[CLARIFICATION] Auto-applied {category}='{value}' to confirmed_facts")
+        
+        # Step 3: Check if status clarification is still needed
         if 'status' not in self.confirmed_facts:
             if 'status' in self.filter_candidates:
+                # Only ask if we have status filter candidates
                 return self._build_status_clarification(question)
         
         return None
     
     def _build_status_clarification(self, question: str) -> SynthesizedAnswer:
-        """Build status clarification request."""
-        options = [
-            {'id': 'active', 'label': 'Active employees only'},
-            {'id': 'termed', 'label': 'Terminated employees only'},
-            {'id': 'all', 'label': 'All employees (active + terminated)'}
-        ]
+        """Build status clarification request with actual counts from data."""
+        # Get actual counts if available
+        status_candidates = self.filter_candidates.get('status', [])
+        
+        options = []
+        if status_candidates:
+            primary = status_candidates[0]
+            distribution = primary.get('value_distribution', {})
+            
+            # Build options from actual data
+            active_count = distribution.get('A', 0)
+            termed_count = distribution.get('T', 0)
+            loa_count = distribution.get('L', 0)
+            total_count = active_count + termed_count + loa_count
+            
+            if active_count:
+                options.append({'id': 'active', 'label': f'Active employees only ({active_count:,})'})
+            if termed_count:
+                options.append({'id': 'termed', 'label': f'Terminated employees only ({termed_count:,})'})
+            if total_count:
+                options.append({'id': 'all', 'label': f'All employees ({total_count:,})'})
+        
+        if not options:
+            # Fallback if no distribution data
+            options = [
+                {'id': 'active', 'label': 'Active employees only'},
+                {'id': 'termed', 'label': 'Terminated employees only'},
+                {'id': 'all', 'label': 'All employees (active + terminated)'}
+            ]
         
         return SynthesizedAnswer(
             question=question,
