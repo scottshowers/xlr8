@@ -36,6 +36,20 @@ from .types import (
 )
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
+
+# Term Index + SQL Assembler - the NEW deterministic path
+DETERMINISTIC_PATH_AVAILABLE = False
+TermIndex = None
+SQLAssembler = None
+parse_intent = None
+try:
+    from .term_index import TermIndex
+    from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent
+    from .query_resolver import parse_intent
+    DETERMINISTIC_PATH_AVAILABLE = True
+    logger.info("[ENGINE-V2] Deterministic path available (TermIndex + SQLAssembler)")
+except ImportError as e:
+    logger.warning(f"[ENGINE-V2] Deterministic path not available: {e}")
 from .synthesizer import Synthesizer
 from .truth_enricher import TruthEnricher
 from .gatherers import (
@@ -49,7 +63,7 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
-__version__ = "9.1.0"  # v9.1: Fix confirmed_facts sync + value/label handling
+__version__ = "10.0.0"  # v10.0: Deterministic path - Term Index + SQL Assembler as PRIMARY
 
 # Try to load Project Intelligence
 PROJECT_INTELLIGENCE_AVAILABLE = False
@@ -696,6 +710,21 @@ class IntelligenceEngineV2:
             logger.error(f"[ENGINE-V2] Error in query_resolver: {e}")
             raise
         
+        # =====================================================================
+        # STEP 2.5: DETERMINISTIC PATH - Term Index + SQL Assembler
+        # This is the NEW PRIMARY PATH for data queries.
+        # If this succeeds, we short-circuit and return immediately.
+        # NO LLM. NO SCORING. NO CLARIFICATION. JUST LOOKUP + EXECUTE.
+        # =====================================================================
+        try:
+            deterministic_result = self._try_deterministic_path(question)
+            if deterministic_result:
+                logger.warning(f"[ENGINE-V2] DETERMINISTIC PATH SUCCESS - returning directly")
+                return deterministic_result
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in deterministic_path: {e}")
+            # Don't raise - fall back to old path
+        
         # STEP 3: Analyze question
         try:
             mode = mode or self._detect_mode(q_lower)
@@ -1200,6 +1229,149 @@ class IntelligenceEngineV2:
             logger.warning(f"[ENGINE-V2] Traceback: {traceback.format_exc()}")
         
         return None
+    
+    def _try_deterministic_path(self, question: str) -> Optional[SynthesizedAnswer]:
+        """
+        PRIMARY PATH: Try to answer using Term Index + SQL Assembler.
+        
+        NO LLM. NO SCORING. JUST LOOKUP + ASSEMBLY + EXECUTE.
+        
+        This short-circuits the old flow if successful, returning
+        a complete SynthesizedAnswer with data.
+        
+        Falls back to old path (returns None) if:
+        - No term matches found
+        - No structured handler available
+        - SQL execution fails
+        - Question requires complex analysis (ChromaDB, synthesis)
+        
+        Returns:
+            SynthesizedAnswer if successful, None to fall back to old path
+        """
+        if not DETERMINISTIC_PATH_AVAILABLE:
+            logger.debug("[DETERMINISTIC] Path not available - missing imports")
+            return None
+        
+        if not self.structured_handler:
+            logger.debug("[DETERMINISTIC] No structured handler available")
+            return None
+        
+        try:
+            # Step 1: Parse intent from question
+            parsed = parse_intent(question)
+            logger.info(f"[DETERMINISTIC] Parsed: intent={parsed.intent.value}, domain={parsed.domain.value}")
+            
+            # Skip deterministic path for complex analysis questions
+            # These need Reference/Regulatory/Compliance from ChromaDB
+            q_lower = question.lower()
+            complex_indicators = [
+                'why', 'explain', 'analyze', 'recommend', 'should',
+                'compliant', 'compliance', 'regulatory', 'risk',
+                'best practice', 'validate', 'correct', 'wrong'
+            ]
+            if any(ind in q_lower for ind in complex_indicators):
+                logger.info(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
+                return None
+            
+            # Step 2: Resolve terms using Term Index
+            term_index = TermIndex(self.structured_handler.conn, self.project)
+            
+            # Tokenize question and resolve each term
+            words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
+            term_matches = term_index.resolve_terms(words)
+            
+            if not term_matches:
+                logger.info(f"[DETERMINISTIC] No term matches found")
+                return None
+            
+            logger.info(f"[DETERMINISTIC] Found {len(term_matches)} term matches:")
+            for match in term_matches:
+                logger.info(f"  - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
+            
+            # Step 3: Map parsed intent to assembler intent
+            intent_map = {
+                'count': AssemblerIntent.COUNT,
+                'list': AssemblerIntent.LIST,
+                'sum': AssemblerIntent.SUM,
+                'compare': AssemblerIntent.COMPARE,
+            }
+            assembler_intent = intent_map.get(parsed.intent.value, AssemblerIntent.LIST)
+            
+            # Step 4: Assemble SQL
+            assembler = SQLAssembler(self.structured_handler.conn, self.project)
+            assembled = assembler.assemble(
+                intent=assembler_intent,
+                term_matches=term_matches,
+                domain=parsed.domain.value
+            )
+            
+            if not assembled.success:
+                logger.warning(f"[DETERMINISTIC] Assembly failed: {assembled.error}")
+                return None
+            
+            logger.info(f"[DETERMINISTIC] Assembled SQL:\n{assembled.sql}")
+            
+            # Step 5: Execute SQL
+            try:
+                result = self.structured_handler.conn.execute(assembled.sql).fetchall()
+                columns = [desc[0] for desc in self.structured_handler.conn.description]
+                
+                logger.info(f"[DETERMINISTIC] Executed: {len(result)} rows returned")
+            except Exception as sql_error:
+                logger.error(f"[DETERMINISTIC] SQL execution error: {sql_error}")
+                return None
+            
+            if not result:
+                logger.info(f"[DETERMINISTIC] No results - falling back")
+                return None
+            
+            # Step 6: Build response
+            rows = [dict(zip(columns, row)) for row in result]
+            
+            # Build answer text based on intent
+            if assembler_intent == AssemblerIntent.COUNT:
+                count = rows[0].get('count', len(rows)) if rows else 0
+                answer_text = f"Found {count} records matching your criteria."
+            else:
+                answer_text = f"Found {len(rows)} records."
+            
+            # Build structured output
+            from_reality = [{
+                'source_type': 'reality',
+                'source_name': assembled.primary_table,
+                'content': {
+                    'columns': columns,
+                    'rows': rows[:100]  # Limit to 100 for display
+                }
+            }]
+            
+            return SynthesizedAnswer(
+                question=question,
+                answer=answer_text,
+                confidence=0.9,
+                from_reality=from_reality,
+                reasoning=[
+                    f"Used deterministic path (Term Index + SQL Assembler)",
+                    f"Intent: {parsed.intent.value}",
+                    f"Tables: {', '.join(assembled.tables)}",
+                    f"Filters: {len(assembled.filters)} applied via term index",
+                    f"SQL: {assembled.sql[:100]}..."
+                ],
+                structured_output={
+                    'type': 'data_result',
+                    'intent': parsed.intent.value,
+                    'tables': assembled.tables,
+                    'filters': assembled.filters,
+                    'row_count': len(rows),
+                    'sql': assembled.sql
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"[DETERMINISTIC] Error: {e}")
+            import traceback
+            logger.error(f"[DETERMINISTIC] Traceback: {traceback.format_exc()}")
+            return None
     
     # =========================================================================
     # CLARIFICATION HANDLING - v9.0 Intelligent Filter Detection
