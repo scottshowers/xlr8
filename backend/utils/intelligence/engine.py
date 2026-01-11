@@ -675,41 +675,52 @@ class IntelligenceEngineV2:
     def _ask_internal(self, question: str, mode: IntelligenceMode,
                       context: Dict, q_lower: str) -> SynthesizedAnswer:
         """Internal implementation of ask() with actual logic."""
-        # Check for export request
-        export_result = self._handle_export_request(question, q_lower)
-        if export_result:
-            return export_result
         
-        # =====================================================================
-        # TRY QUERY RESOLVER FIRST - Get deterministic table/column resolution
-        # This doesn't short-circuit - it provides context for the full pipeline
-        # =====================================================================
-        resolver_context = self._try_query_resolver(question)
-        if resolver_context:
-            # Store in context for gatherers to use
-            context['resolver'] = resolver_context
-            # Skip clarification prompts - we already know what table to use
-            context['skip_clarification'] = True
-            logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
+        # STEP 1: Export request check
+        try:
+            export_result = self._handle_export_request(question, q_lower)
+            if export_result:
+                return export_result
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in export_request: {e}")
+            raise
         
-        # Analyze question
-        mode = mode or self._detect_mode(q_lower)
-        is_employee_question = self._is_employee_question(q_lower)
-        is_validation = self._is_validation_question(q_lower)
-        is_config = self._is_config_domain(q_lower)
+        # STEP 2: Query Resolver
+        try:
+            resolver_context = self._try_query_resolver(question)
+            if resolver_context:
+                context['resolver'] = resolver_context
+                context['skip_clarification'] = True
+                logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in query_resolver: {e}")
+            raise
         
-        # Override employee detection for config/validation questions
-        # Config questions (tax codes, earnings, deductions, GL) are NOT about employees
-        if is_config:
-            is_employee_question = False
-            logger.warning("[ENGINE-V2] Config domain detected - skipping employee clarification")
+        # STEP 3: Analyze question
+        try:
+            mode = mode or self._detect_mode(q_lower)
+            is_employee_question = self._is_employee_question(q_lower)
+            is_validation = self._is_validation_question(q_lower)
+            is_config = self._is_config_domain(q_lower)
+            
+            # Override employee detection for config/validation questions
+            # Config questions (tax codes, earnings, deductions, GL) are NOT about employees
+            if is_config:
+                is_employee_question = False
+                logger.warning("[ENGINE-V2] Config domain detected - skipping employee clarification")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in question_analysis: {e}")
+            raise
         
-        # Handle filter clarification for employee questions
-        # Skip if QueryResolver already resolved the query
-        if is_employee_question and not context.get('skip_clarification'):
-            clarification = self._check_clarification_needed(question, q_lower)
-            if clarification:
-                return clarification
+        # STEP 4: Clarification check
+        try:
+            if is_employee_question and not context.get('skip_clarification'):
+                clarification = self._check_clarification_needed(question, q_lower)
+                if clarification:
+                    return clarification
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in clarification_check: {e}")
+            raise
         
         logger.warning(f"[ENGINE-V2] Proceeding with mode={mode.value}, validation={is_validation}, config={is_config}")
         
@@ -734,63 +745,68 @@ class IntelligenceEngineV2:
         
         # Only ask for scoping if not already answered AND not resolved by QueryResolver
         elif SCOPING_AVAILABLE and self.structured_handler and not context.get('skip_clarification'):
-            # Check if this is a scope-sensitive question
-            scope_sensitive = any([
-                'list' in q_lower, 'show' in q_lower, 'all' in q_lower,
-                'how many' in q_lower, 'count' in q_lower,
-                is_config, is_validation
-            ])
-            
-            if scope_sensitive:
-                scope_analysis = analyze_question_scope(
-                    self.project, 
-                    question, 
-                    self.structured_handler
-                )
+            try:
+                # Check if this is a scope-sensitive question
+                scope_sensitive = any([
+                    'list' in q_lower, 'show' in q_lower, 'all' in q_lower,
+                    'how many' in q_lower, 'count' in q_lower,
+                    is_config, is_validation
+                ])
                 
-                if scope_analysis and scope_analysis.needs_clarification:
-                    logger.warning(f"[ENGINE-V2] Scoping clarification needed: {len(scope_analysis.segments)} segments")
-                    
-                    # Build scope options from segments
-                    scope_options = []
-                    for seg in scope_analysis.segments:
-                        scope_options.append({
-                            'id': f"{seg.dimension}:{seg.value}",
-                            'label': f"{seg.display_name} ({seg.employee_count:,} employees)"
-                        })
-                    scope_options.append({
-                        'id': 'all',
-                        'label': f"All ({scope_analysis.total_employees:,} employees) - export to Excel"
-                    })
-                    
-                    # Return the intelligent scoping question as the response
-                    return SynthesizedAnswer(
-                        question=question,
-                        answer=scope_analysis.suggested_question,
-                        confidence=0.95,
-                        structured_output={
-                            'type': 'clarification_needed',  # Use same type as status clarification
-                            'questions': [{
-                                'id': 'scope',
-                                'question': f"Which {scope_analysis.segments[0].dimension.replace('_code', '').replace('_', ' ')} should I focus on?",
-                                'type': 'radio',
-                                'options': scope_options
-                            }],
-                            'domain': scope_analysis.question_domain,
-                            'total_employees': scope_analysis.total_employees,
-                            'original_question': question
-                        },
-                        reasoning=[
-                            f"Detected {scope_analysis.question_domain} domain",
-                            f"Found {len(scope_analysis.segments)} meaningful segments",
-                            f"Total {scope_analysis.total_employees:,} employees across segments",
-                            "Asking for scope clarification before querying"
-                        ]
+                if scope_sensitive:
+                    scope_analysis = analyze_question_scope(
+                        self.project, 
+                        question, 
+                        self.structured_handler
                     )
-                elif scope_analysis:
-                    # Add scope info to analysis context
-                    logger.warning(f"[ENGINE-V2] Scope analysis: {scope_analysis.question_domain}, "
-                                  f"{scope_analysis.total_employees} employees")
+                    
+                    if scope_analysis and scope_analysis.needs_clarification:
+                        logger.warning(f"[ENGINE-V2] Scoping clarification needed: {len(scope_analysis.segments)} segments")
+                        
+                        # Build scope options from segments
+                        scope_options = []
+                        for seg in scope_analysis.segments:
+                            scope_options.append({
+                                'id': f"{seg.dimension}:{seg.value}",
+                                'label': f"{seg.display_name} ({seg.employee_count:,} employees)"
+                            })
+                        scope_options.append({
+                            'id': 'all',
+                            'label': f"All ({scope_analysis.total_employees:,} employees) - export to Excel"
+                        })
+                        
+                        # Return the intelligent scoping question as the response
+                        return SynthesizedAnswer(
+                            question=question,
+                            answer=scope_analysis.suggested_question,
+                            confidence=0.95,
+                            structured_output={
+                                'type': 'clarification_needed',  # Use same type as status clarification
+                                'questions': [{
+                                    'id': 'scope',
+                                    'question': f"Which {scope_analysis.segments[0].dimension.replace('_code', '').replace('_', ' ')} should I focus on?",
+                                    'type': 'radio',
+                                    'options': scope_options
+                                }],
+                                'domain': scope_analysis.question_domain,
+                                'total_employees': scope_analysis.total_employees,
+                                'original_question': question
+                            },
+                            reasoning=[
+                                f"Detected {scope_analysis.question_domain} domain",
+                                f"Found {len(scope_analysis.segments)} meaningful segments",
+                                f"Total {scope_analysis.total_employees:,} employees across segments",
+                                "Asking for scope clarification before querying"
+                            ]
+                        )
+                    elif scope_analysis:
+                        # Add scope info to analysis context
+                        logger.warning(f"[ENGINE-V2] Scope analysis: {scope_analysis.question_domain}, "
+                                      f"{scope_analysis.total_employees} employees")
+            except Exception as e:
+                logger.error(f"[ENGINE-V2] Error in intelligent_scoping: {e}")
+                import traceback
+                logger.error(f"[ENGINE-V2] Scoping traceback: {traceback.format_exc()}")
         
         # =====================================================================
         # COMPARISON MODE - Use ComparisonEngine for table comparisons
@@ -842,8 +858,14 @@ class IntelligenceEngineV2:
         # =====================================================================
         
         # Truth 1: REALITY - What the data shows
-        reality = self._gather_reality(question, analysis)
-        logger.warning(f"[ENGINE-V2] REALITY gathered: {len(reality)} truths")
+        try:
+            reality = self._gather_reality(question, analysis)
+            logger.warning(f"[ENGINE-V2] REALITY gathered: {len(reality)} truths")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in gather_reality: {e}")
+            import traceback
+            logger.error(f"[ENGINE-V2] Reality traceback: {traceback.format_exc()}")
+            reality = []
         
         # Check for pending clarification from reality gathering
         if context.get('pending_clarification') or self._pending_clarification:
@@ -852,18 +874,30 @@ class IntelligenceEngineV2:
             return clarification
         
         # Truth 2: INTENT - What customer wants (SOWs, requirements)
-        intent = self._gather_intent(question, analysis)
-        logger.warning(f"[ENGINE-V2] INTENT gathered: {len(intent)} truths")
+        try:
+            intent = self._gather_intent(question, analysis)
+            logger.warning(f"[ENGINE-V2] INTENT gathered: {len(intent)} truths")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in gather_intent: {e}")
+            intent = []
         
         # Truth 3: CONFIGURATION - How system is configured (code tables)
-        configuration = self._gather_configuration(question, analysis)
-        logger.warning(f"[ENGINE-V2] CONFIGURATION gathered: {len(configuration)} truths")
+        try:
+            configuration = self._gather_configuration(question, analysis)
+            logger.warning(f"[ENGINE-V2] CONFIGURATION gathered: {len(configuration)} truths")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in gather_configuration: {e}")
+            configuration = []
         
         # Truths 4, 5, 6: REFERENCE, REGULATORY, COMPLIANCE (global library)
-        reference, regulatory, compliance = self._gather_reference_library(question, analysis)
-        logger.warning(f"[ENGINE-V2] REFERENCE gathered: {len(reference)} truths")
-        logger.warning(f"[ENGINE-V2] REGULATORY gathered: {len(regulatory)} truths")
-        logger.warning(f"[ENGINE-V2] COMPLIANCE gathered: {len(compliance)} truths")
+        try:
+            reference, regulatory, compliance = self._gather_reference_library(question, analysis)
+            logger.warning(f"[ENGINE-V2] REFERENCE gathered: {len(reference)} truths")
+            logger.warning(f"[ENGINE-V2] REGULATORY gathered: {len(regulatory)} truths")
+            logger.warning(f"[ENGINE-V2] COMPLIANCE gathered: {len(compliance)} truths")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in gather_reference_library: {e}")
+            reference, regulatory, compliance = [], [], []
         
         # Log total truths gathered
         total_truths = len(reality) + len(intent) + len(configuration) + len(reference) + len(regulatory) + len(compliance)
@@ -933,21 +967,27 @@ class IntelligenceEngineV2:
         synth_context['organizational_metrics'] = organizational_metrics  # v4.5: Pre-computed org metrics
         
         # Synthesize answer
-        answer = self.synthesizer.synthesize(
-            question=question,
-            mode=mode,
-            reality=reality,
-            intent=intent,
-            configuration=configuration,
-            reference=reference,
-            regulatory=regulatory,
-            compliance=compliance,
-            conflicts=conflicts,
-            insights=insights,
-            compliance_check=compliance_check,
-            context=synth_context,
-            context_graph=context_graph  # v3.0
-        )
+        try:
+            answer = self.synthesizer.synthesize(
+                question=question,
+                mode=mode,
+                reality=reality,
+                intent=intent,
+                configuration=configuration,
+                reference=reference,
+                regulatory=regulatory,
+                compliance=compliance,
+                conflicts=conflicts,
+                insights=insights,
+                compliance_check=compliance_check,
+                context=synth_context,
+                context_graph=context_graph  # v3.0
+            )
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in synthesize: {e}")
+            import traceback
+            logger.error(f"[ENGINE-V2] Synthesize traceback: {traceback.format_exc()}")
+            raise
         
         # Track SQL
         if self.reality_gatherer:
