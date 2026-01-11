@@ -16,7 +16,7 @@
 | Project Intelligence | ✅ DONE | 66 organizational metrics computed |
 | QueryResolver | ✅ DONE | Handles ~5 deterministic patterns |
 | SqlGenerator | ⚠️ 80% | Has intelligence, needs testing |
-| Clarification System | ✅ FIXED (v9.0) | Auto-detects filters from question |
+| Clarification System | ✅ FIXED (v9.1) | Auto-detects filters, syncs to SqlGenerator |
 | Synthesizer | ⚠️ 70% | Template works, LLM overlay needs tuning |
 | Consultative Responses | ⚠️ UNBLOCKED | Can now test with working clarification |
 
