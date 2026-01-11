@@ -306,16 +306,52 @@ class SQLGenerator:
             logger.warning(f"[SQL-GEN] _needs_join: Only {len(all_matched_tables)} tables matched - need 2+ for JOIN")
             return False, []
         
-        # Check if any pair of matched tables share a hub connection
-        matched_list = list(all_matched_tables)
+        # v4.2: Prioritize tables - check selected tables and master tables first
+        # This prevents config tables from being matched before employee tables
+        def table_priority(tname: str) -> int:
+            """Lower score = higher priority"""
+            score = 100
+            # Highest priority: already selected by TableSelector
+            if tname.lower() in selected_table_names:
+                score -= 50
+            # High priority: master tables (employee data)
+            meta = table_lookup.get(tname.lower(), {})
+            if meta.get('table_type') == 'master':
+                score -= 30
+            # Deprioritize config tables
+            if 'config' in tname.lower() or 'validation' in tname.lower():
+                score += 20
+            return score
+        
+        matched_list = sorted(all_matched_tables, key=table_priority)
+        logger.warning(f"[SQL-GEN] _needs_join: Checking {len(matched_list)} tables, priority order: {[t[-25:] for t in matched_list[:4]]}")
+        
         additional_tables = []
         
+        # v4.2: First pass - look for employee_number joins (preferred for cross-domain)
         for i, t1 in enumerate(matched_list):
             for t2 in matched_list[i+1:]:
                 join_path = self.table_selector.get_join_path(t1, t2)
                 if join_path:
                     sem_type = join_path.get('semantic_type', 'unknown')
-                    logger.warning(f"[SQL-GEN] ✅ JOIN: {t1[-25:]} ↔ {t2[-25:]} via {sem_type}")
+                    # Prefer employee_number joins for cross-domain employee queries
+                    if sem_type == 'employee_number':
+                        logger.warning(f"[SQL-GEN] ✅ JOIN (preferred): {t1[-25:]} ↔ {t2[-25:]} via {sem_type}")
+                        for t in [t1, t2]:
+                            if t.lower() not in selected_table_names:
+                                table_meta = table_lookup.get(t.lower())
+                                if table_meta:
+                                    additional_tables.append(table_meta)
+                                    logger.warning(f"[SQL-GEN] ➕ Added: {t[-35:]}")
+                        return True, additional_tables
+        
+        # Second pass - accept any join path
+        for i, t1 in enumerate(matched_list):
+            for t2 in matched_list[i+1:]:
+                join_path = self.table_selector.get_join_path(t1, t2)
+                if join_path:
+                    sem_type = join_path.get('semantic_type', 'unknown')
+                    logger.warning(f"[SQL-GEN] ✅ JOIN (fallback): {t1[-25:]} ↔ {t2[-25:]} via {sem_type}")
                     
                     # Add any matched tables that weren't in the original selection
                     for t in [t1, t2]:
