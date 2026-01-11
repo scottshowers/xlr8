@@ -1314,10 +1314,45 @@ class IntelligenceEngineV2:
         
         This is DOMAIN-AGNOSTIC - it uses the filter vocabulary built from
         the actual data, not hardcoded business rules.
+        
+        v5.0: Now tries term index first (load-time intelligence) before
+        falling back to vocabulary matching.
         """
         detected = {}
         q_lower = question.lower()
         
+        # =================================================================
+        # PRIORITY 1: Try term index (load-time intelligence)
+        # Term index knows entity types (location vs company vs status)
+        # =================================================================
+        try:
+            from backend.utils.intelligence.term_index import TermIndex
+            if hasattr(self, 'structured_handler') and self.structured_handler:
+                term_index = TermIndex(self.structured_handler.conn, self.project)
+                
+                # Extract words from question
+                import re
+                words = re.findall(r'\b[a-zA-Z]{2,}\b', q_lower)
+                
+                # Resolve via term index
+                matches = term_index.resolve_terms(words)
+                for match in matches:
+                    # Map entity to filter category
+                    entity = match.entity or ''
+                    if entity == 'location':
+                        if 'location' not in detected:
+                            detected['location'] = match.match_value
+                            logger.warning(f"[FILTER] Term index: '{match.term}' → location='{match.match_value}'")
+                    elif entity == 'status':
+                        if 'status' not in detected:
+                            detected['status'] = match.match_value
+                            logger.warning(f"[FILTER] Term index: '{match.term}' → status='{match.match_value}'")
+        except Exception as e:
+            logger.debug(f"Term index filter detection error: {e}")
+        
+        # =================================================================
+        # PRIORITY 2: Vocabulary-based matching (fallback)
+        # =================================================================
         # Build vocabulary on first use (cached on engine instance)
         if not hasattr(self, '_filter_vocab_cache'):
             self._filter_vocab_cache = self._build_filter_vocabulary()
@@ -1325,6 +1360,10 @@ class IntelligenceEngineV2:
         vocab = self._filter_vocab_cache
         
         for category, term_map in vocab.items():
+            # Skip if term index already found this category
+            if category in detected:
+                continue
+                
             # Sort terms by length (descending) to match longer phrases first
             sorted_terms = sorted(term_map.keys(), key=len, reverse=True)
             
