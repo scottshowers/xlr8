@@ -180,6 +180,7 @@ class UnifiedChatRequest(BaseModel):
     Attributes:
         message: The user's question or command
         project: Project identifier (e.g., "TEA1000")
+        project_id: Alias for project (for backward compatibility)
         persona: Persona to use for response style (default: None - professional)
         scope: Data scope - "project", "global", or "all"
         mode: Force specific intelligence mode (optional)
@@ -191,6 +192,7 @@ class UnifiedChatRequest(BaseModel):
     """
     message: str
     project: Optional[str] = None
+    project_id: Optional[str] = None  # Alias for project (backward compat)
     persona: Optional[str] = None
     scope: Optional[str] = 'project'
     mode: Optional[str] = None
@@ -1647,7 +1649,8 @@ async def unified_chat(request: UnifiedChatRequest):
     """
     query_start_time = time.time()  # For metrics tracking
     
-    project = request.project
+    # Use project_id as fallback for project (backward compatibility)
+    project = request.project or request.project_id
     message = request.message
     session_id, session = get_or_create_session(request.session_id, project)
     
