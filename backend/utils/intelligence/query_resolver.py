@@ -499,13 +499,14 @@ class QueryResolver:
                 return None
         return self._term_index
     
-    def _resolve_term_from_index(self, term: str, project: str) -> Optional[Dict]:
+    def _resolve_term_from_index(self, term: str, project: str, target_table: str = None) -> Optional[Dict]:
         """
         Try to resolve a term using the term index.
         
         Args:
             term: Search term (e.g., "texas", "active", "401k")
             project: Project name
+            target_table: Optional - if provided, prefer matches for this table
             
         Returns:
             Dict with resolution info if found:
@@ -525,20 +526,41 @@ class QueryResolver:
         
         try:
             matches = term_index.resolve_terms([term])
-            if matches:
-                # Return best match (highest confidence)
-                best = matches[0]
-                logger.info(f"[RESOLVER] Term index hit: '{term}' → {best.table_name}.{best.column_name} {best.operator} '{best.match_value}'")
-                return {
-                    'table': best.table_name,
-                    'column': best.column_name,
-                    'operator': best.operator,
-                    'value': best.match_value,
-                    'confidence': best.confidence,
-                    'domain': best.domain,
-                    'entity': best.entity,
-                    'source': 'term_index'
-                }
+            if not matches:
+                return None
+            
+            # If target_table specified, try to find match for that table
+            if target_table:
+                target_lower = target_table.lower()
+                for match in matches:
+                    match_table = match.table_name.lower()
+                    # Check if tables match (handles partial matches for long names)
+                    if match_table in target_lower or target_lower in match_table:
+                        logger.info(f"[RESOLVER] Term index hit (target match): '{term}' → {match.table_name}.{match.column_name}")
+                        return {
+                            'table': match.table_name,
+                            'column': match.column_name,
+                            'operator': match.operator,
+                            'value': match.match_value,
+                            'confidence': match.confidence,
+                            'domain': match.domain,
+                            'entity': match.entity,
+                            'source': 'term_index'
+                        }
+            
+            # Return best match (highest confidence) - first one
+            best = matches[0]
+            logger.info(f"[RESOLVER] Term index hit: '{term}' → {best.table_name}.{best.column_name} {best.operator} '{best.match_value}'")
+            return {
+                'table': best.table_name,
+                'column': best.column_name,
+                'operator': best.operator,
+                'value': best.match_value,
+                'confidence': best.confidence,
+                'domain': best.domain,
+                'entity': best.entity,
+                'source': 'term_index'
+            }
         except Exception as e:
             logger.debug(f"Term index lookup error: {e}")
         
@@ -1989,18 +2011,33 @@ WHERE {where_sql}'''
             # =========================================================
             # PRIORITY 1: Try term index (load-time intelligence)
             # This is the NEW way - lookup pre-computed terms
+            # Pass target table to prefer matches in that table
             # =========================================================
-            term_match = self._resolve_term_from_index(hint, project)
+            term_match = self._resolve_term_from_index(hint, project, target_table=employee_table)
             if term_match:
-                logger.warning(f"[RESOLVER] Term index resolved '{hint}' → {term_match['table']}.{term_match['column']} = '{term_match['value']}'")
-                return {
-                    'column': term_match['column'],
-                    'table': term_match['table'],
-                    'same_table': term_match['table'].lower() == employee_table.lower(),
-                    'filter_value': term_match['value'],
-                    'operator': term_match['operator'],
-                    'source': 'term_index'
-                }
+                # Check if term index has a match for THIS table specifically
+                term_table = term_match['table'].lower()
+                target_table = employee_table.lower()
+                
+                # Only use term index match if it's for the target table
+                # (handles both exact match and partial match for long table names)
+                if term_table in target_table or target_table in term_table:
+                    logger.warning(f"[RESOLVER] Term index HIT: '{hint}' → {term_match['column']} = '{term_match['value']}'")
+                    return {
+                        'column': term_match['column'],
+                        'table': term_match['table'],
+                        'same_table': True,
+                        'codes': [term_match['value']],  # Must be a list!
+                        'hint': hint,
+                        'semantic_type': term_match.get('entity', 'location'),
+                        'descriptions': [hint],
+                        'direct_geo_match': True,
+                        'use_like': term_match['operator'] == 'ILIKE',
+                        'match_pattern': 'term_index',
+                        'source': 'term_index'
+                    }
+                else:
+                    logger.debug(f"[RESOLVER] Term index found '{hint}' but for different table: {term_table} vs {target_table}")
             
             # =========================================================
             # PRIORITY 2: Fallback to hardcoded geographic normalization
