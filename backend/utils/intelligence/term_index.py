@@ -813,6 +813,10 @@ class TermIndex:
         """
         Resolve a list of terms to SQL filter information.
         
+        TWO-LAYER RESOLUTION:
+        1. Fast path: Look up in term_index (O(1) for known terms)
+        2. Fallback: MetadataReasoner for unknown terms (queries existing metadata)
+        
         Args:
             terms: List of terms from the user's question (e.g., ['texas', '401k'])
             
@@ -820,6 +824,7 @@ class TermIndex:
             List of TermMatch objects with table/column/filter info.
         """
         matches = []
+        unresolved_terms = []
         
         # DIAGNOSTIC: Show project and total term count
         try:
@@ -835,6 +840,7 @@ class TermIndex:
         
         logger.warning(f"[TERM_INDEX] resolve_terms called with {len(terms)} terms: {terms[:10]}")
         
+        # LAYER 1: Fast path - term_index lookup
         for term in terms:
             term_lower = term.lower().strip()
             
@@ -852,20 +858,65 @@ class TermIndex:
                 ORDER BY confidence DESC
             """, [self.project, term_lower]).fetchall()
             
-            logger.warning(f"[TERM_INDEX] Term '{term_lower}' found {len(results)} matches")
-            
-            for row in results:
-                matches.append(TermMatch(
-                    term=row[0],
-                    table_name=row[1],
-                    column_name=row[2],
-                    operator=row[3],
-                    match_value=row[4],
-                    domain=row[5],
-                    entity=row[6],
-                    confidence=row[7],
-                    term_type=row[8]
-                ))
+            if results:
+                logger.warning(f"[TERM_INDEX] Term '{term_lower}' found {len(results)} matches (fast path)")
+                for row in results:
+                    matches.append(TermMatch(
+                        term=row[0],
+                        table_name=row[1],
+                        column_name=row[2],
+                        operator=row[3],
+                        match_value=row[4],
+                        domain=row[5],
+                        entity=row[6],
+                        confidence=row[7],
+                        term_type=row[8]
+                    ))
+            else:
+                # Term not found - add to unresolved list
+                unresolved_terms.append(term_lower)
+                logger.warning(f"[TERM_INDEX] Term '{term_lower}' NOT in index - will try reasoner")
+        
+        # LAYER 2: Fallback - MetadataReasoner for unresolved terms
+        if unresolved_terms:
+            logger.warning(f"[TERM_INDEX] {len(unresolved_terms)} unresolved terms, invoking MetadataReasoner")
+            try:
+                from .metadata_reasoner import MetadataReasoner
+                
+                # Infer context domain from matches we already have
+                context_domain = None
+                if matches:
+                    domains = [m.domain for m in matches if m.domain]
+                    if domains:
+                        context_domain = domains[0]
+                
+                reasoner = MetadataReasoner(self.conn, self.project)
+                
+                for term in unresolved_terms:
+                    reasoned_matches = reasoner.resolve_unknown_term(term, context_domain)
+                    
+                    if reasoned_matches:
+                        logger.warning(f"[TERM_INDEX] Reasoner found {len(reasoned_matches)} matches for '{term}'")
+                        for rm in reasoned_matches:
+                            # Convert ReasonedMatch to TermMatch
+                            matches.append(TermMatch(
+                                term=rm.term,
+                                table_name=rm.table_name,
+                                column_name=rm.column_name,
+                                operator=rm.operator,
+                                match_value=rm.match_value,
+                                domain=rm.domain,
+                                entity=None,
+                                confidence=rm.confidence,
+                                term_type='reasoned'
+                            ))
+                    else:
+                        logger.warning(f"[TERM_INDEX] Reasoner found no matches for '{term}'")
+                        
+            except ImportError as e:
+                logger.warning(f"[TERM_INDEX] MetadataReasoner not available: {e}")
+            except Exception as e:
+                logger.error(f"[TERM_INDEX] MetadataReasoner error: {e}")
         
         logger.warning(f"[TERM_INDEX] resolve_terms returning {len(matches)} total matches")
         return matches
