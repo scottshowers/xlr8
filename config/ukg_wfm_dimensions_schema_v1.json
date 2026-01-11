@@ -1,0 +1,1211 @@
+{
+  "version": "1.0",
+  "vendor": "UKG",
+  "product": "Pro Workforce Management (Dimensions)",
+  "source": "developer.ukg.com/wfm/reference API Documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST",
+  "api_base": "/api/v1/",
+  "domains": {
+    "Activities": {
+      "description": "Task and activity tracking for workforce operations",
+      "hub_count": 18,
+      "hubs": [
+        "activity",
+        "activity_action",
+        "activity_customer",
+        "activity_form",
+        "activity_form_profile",
+        "activity_profile",
+        "activity_query",
+        "activity_query_profile",
+        "activity_resource",
+        "activity_results_template",
+        "activity_setting",
+        "activity_shift",
+        "activity_team",
+        "activity_team_segment",
+        "field_definition",
+        "result",
+        "result_profile",
+        "unit_of_measure"
+      ]
+    },
+    "Attendance": {
+      "description": "Attendance tracking, policies, and point systems",
+      "hub_count": 16,
+      "hubs": [
+        "attendance_action",
+        "attendance_event",
+        "attendance_pattern",
+        "attendance_policy",
+        "attendance_profile",
+        "attendance_balance_type",
+        "combined_event",
+        "discipline_level",
+        "discipline_policy",
+        "formula_policy",
+        "lost_time_event",
+        "perfect_attendance_def",
+        "perfect_attendance_policy",
+        "previous_action_policy",
+        "total_balance_policy",
+        "tracking_period"
+      ]
+    },
+    "Common_Resources_Core": {
+      "description": "Core organizational and access configuration",
+      "hub_count": 15,
+      "hubs": [
+        "access_control_point",
+        "access_method_profile",
+        "cost_center",
+        "control_center_profile",
+        "delegate_profile",
+        "device_group",
+        "display_profile",
+        "employee_group",
+        "function_access_profile",
+        "data_access_profile",
+        "hyperfind_profile",
+        "notification_profile",
+        "process_profile",
+        "role_profile",
+        "transfer_display_profile"
+      ]
+    },
+    "Common_Resources_Time": {
+      "description": "Time and scheduling configuration",
+      "hub_count": 10,
+      "hubs": [
+        "hours_of_operation",
+        "hours_of_operation_override",
+        "known_ip_address",
+        "wifi_access_point",
+        "wifi_network",
+        "gps_known_place",
+        "symbolic_period",
+        "timezone",
+        "pay_period_timespan",
+        "fiscal_calendar"
+      ]
+    },
+    "Organization": {
+      "description": "Organizational structure and hierarchy",
+      "hub_count": 10,
+      "hubs": [
+        "location",
+        "location_type",
+        "location_set",
+        "location_attribute",
+        "job",
+        "labor_category",
+        "labor_category_entry",
+        "labor_category_list",
+        "labor_category_profile",
+        "generic_location"
+      ]
+    },
+    "Person": {
+      "description": "Employee/person core data (from commons/persons API)",
+      "hub_count": 5,
+      "hubs": [
+        "person",
+        "employment_term",
+        "badge",
+        "user_account",
+        "employee_photo"
+      ]
+    },
+    "Scheduling": {
+      "description": "Schedule management and patterns",
+      "hub_count": 8,
+      "hubs": [
+        "schedule_pattern",
+        "schedule_group",
+        "shift",
+        "shift_template",
+        "schedule_tag",
+        "open_shift",
+        "schedule_zone",
+        "availability_pattern"
+      ]
+    },
+    "Timekeeping": {
+      "description": "Time capture and totals",
+      "hub_count": 10,
+      "hubs": [
+        "pay",
+        "pay_edit",
+        "punch",
+        "timecard",
+        "work_rule",
+        "exception_type",
+        "accrual",
+        "accrual_policy",
+        "holiday",
+        "holiday_profile"
+      ]
+    },
+    "Forecasting": {
+      "description": "Labor forecasting and planning",
+      "hub_count": 9,
+      "hubs": [
+        "adjustment_driver_setting",
+        "budget_distribution_type",
+        "category_property_set",
+        "combined_labor_distribution",
+        "custom_driver",
+        "forecast_planner_profile",
+        "forecast_planner_setting",
+        "volume_driver",
+        "labor_standard"
+      ]
+    },
+    "Requests": {
+      "description": "Employee self-service requests",
+      "hub_count": 7,
+      "hubs": [
+        "time_off_request",
+        "availability_request",
+        "cover_request",
+        "swap_request",
+        "open_shift_request",
+        "self_schedule_request",
+        "request_subtype"
+      ]
+    },
+    "Payroll_Integration": {
+      "description": "Payroll export and integration",
+      "hub_count": 5,
+      "hubs": [
+        "payroll_table",
+        "payroll_export",
+        "currency_definition",
+        "currency_policy",
+        "exchange_rate"
+      ]
+    }
+  },
+  "hubs": {
+    "activity": {
+      "entity_name": "Activity",
+      "semantic_type": "activity_code",
+      "domain": "Activities",
+      "is_core": true,
+      "description": "Core task/activity definition",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_action": {
+      "entity_name": "Activity Action",
+      "semantic_type": "activity_action_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Actions that can be taken on activities",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_customer": {
+      "entity_name": "Activity Customer",
+      "semantic_type": "activity_customer_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Customer associations for activities",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_form": {
+      "entity_name": "Activity Form",
+      "semantic_type": "activity_form_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Form definitions for activity data capture",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_form_profile": {
+      "entity_name": "Activity Form Profile",
+      "semantic_type": "activity_form_profile_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Form profile assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_profile": {
+      "entity_name": "Activity Profile",
+      "semantic_type": "activity_profile_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Activity configuration profiles",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_query": {
+      "entity_name": "Activity Query",
+      "semantic_type": "activity_query_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Saved activity queries",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_query_profile": {
+      "entity_name": "Activity Query Profile",
+      "semantic_type": "activity_query_profile_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Query profile assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_resource": {
+      "entity_name": "Activity Resource",
+      "semantic_type": "activity_resource_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Resources assigned to activities",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_results_template": {
+      "entity_name": "Activity Results Template",
+      "semantic_type": "activity_results_template_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Templates for activity results",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_setting": {
+      "entity_name": "Activity Setting",
+      "semantic_type": "activity_setting_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Activity configuration settings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_shift": {
+      "entity_name": "Activity Shift",
+      "semantic_type": "activity_shift_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Shift-activity associations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_team": {
+      "entity_name": "Activity Team",
+      "semantic_type": "activity_team_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Team definitions for activities",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "activity_team_segment": {
+      "entity_name": "Activity Team Segment",
+      "semantic_type": "activity_team_segment_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Team segment definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "field_definition": {
+      "entity_name": "Field Definition",
+      "semantic_type": "field_definition_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Custom field definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "result": {
+      "entity_name": "Result Code",
+      "semantic_type": "result_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Activity result codes",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "result_profile": {
+      "entity_name": "Result Code Profile",
+      "semantic_type": "result_code_profile_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Result code profile assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "unit_of_measure": {
+      "entity_name": "Unit of Measure",
+      "semantic_type": "unit_of_measure_code",
+      "domain": "Activities",
+      "is_core": false,
+      "description": "Units for activity measurement",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_action": {
+      "entity_name": "Attendance Action",
+      "semantic_type": "attendance_action_code",
+      "domain": "Attendance",
+      "is_core": true,
+      "description": "Actions triggered by attendance events",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_event": {
+      "entity_name": "Attendance Event",
+      "semantic_type": "attendance_event_code",
+      "domain": "Attendance",
+      "is_core": true,
+      "description": "Types of attendance events (tardy, absent, etc.)",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_pattern": {
+      "entity_name": "Attendance Pattern",
+      "semantic_type": "attendance_pattern_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Patterns for attendance analysis",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_policy": {
+      "entity_name": "Attendance Policy",
+      "semantic_type": "attendance_policy_code",
+      "domain": "Attendance",
+      "is_core": true,
+      "description": "Attendance rule configurations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_profile": {
+      "entity_name": "Attendance Profile",
+      "semantic_type": "attendance_profile_code",
+      "domain": "Attendance",
+      "is_core": true,
+      "description": "Employee attendance profile assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "attendance_balance_type": {
+      "entity_name": "Balance Type",
+      "semantic_type": "attendance_balance_type_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Point/occurrence balance types",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "combined_event": {
+      "entity_name": "Combined Event",
+      "semantic_type": "combined_event_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Combined attendance event definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "discipline_level": {
+      "entity_name": "Discipline Level",
+      "semantic_type": "discipline_level_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Progressive discipline levels",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "discipline_policy": {
+      "entity_name": "Discipline Policy",
+      "semantic_type": "discipline_policy_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Discipline rule configurations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "formula_policy": {
+      "entity_name": "Formula Policy",
+      "semantic_type": "formula_policy_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Calculation formulas for attendance",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "lost_time_event": {
+      "entity_name": "Lost Time Event",
+      "semantic_type": "lost_time_event_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Lost time tracking events",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "perfect_attendance_def": {
+      "entity_name": "Perfect Attendance Definition",
+      "semantic_type": "perfect_attendance_def_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Perfect attendance criteria",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "perfect_attendance_policy": {
+      "entity_name": "Perfect Attendance Policy",
+      "semantic_type": "perfect_attendance_policy_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Perfect attendance rewards",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "previous_action_policy": {
+      "entity_name": "Previous Action Policy",
+      "semantic_type": "previous_action_policy_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Prior action consideration rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "total_balance_policy": {
+      "entity_name": "Total Balance Policy",
+      "semantic_type": "total_balance_policy_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Balance totaling rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "tracking_period": {
+      "entity_name": "Tracking Period",
+      "semantic_type": "tracking_period_code",
+      "domain": "Attendance",
+      "is_core": false,
+      "description": "Attendance tracking periods",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "access_control_point": {
+      "entity_name": "Access Control Point",
+      "semantic_type": "access_control_point_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Security access points",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "access_method_profile": {
+      "entity_name": "Access Method Profile",
+      "semantic_type": "access_method_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Authentication method profiles",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "cost_center": {
+      "entity_name": "Cost Center",
+      "semantic_type": "cost_center_code",
+      "domain": "Common_Resources_Core",
+      "is_core": true,
+      "description": "Cost allocation centers",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "control_center_profile": {
+      "entity_name": "Control Center Profile",
+      "semantic_type": "control_center_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Manager control center config",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "delegate_profile": {
+      "entity_name": "Delegate Profile",
+      "semantic_type": "delegate_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Delegation of authority profiles",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "device_group": {
+      "entity_name": "Device Group",
+      "semantic_type": "device_group_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Time clock device groups",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "display_profile": {
+      "entity_name": "Display Profile",
+      "semantic_type": "display_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "UI display configurations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "employee_group": {
+      "entity_name": "Employee Group",
+      "semantic_type": "employee_group_code",
+      "domain": "Common_Resources_Core",
+      "is_core": true,
+      "description": "Employee groupings/sets",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "function_access_profile": {
+      "entity_name": "Function Access Profile",
+      "semantic_type": "function_access_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": true,
+      "description": "Feature access permissions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "data_access_profile": {
+      "entity_name": "Generic Data Access Profile",
+      "semantic_type": "data_access_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Data access permissions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "hyperfind_profile": {
+      "entity_name": "Hyperfind Profile",
+      "semantic_type": "hyperfind_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Employee search profiles",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "notification_profile": {
+      "entity_name": "Notification Profile",
+      "semantic_type": "notification_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Alert/notification settings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "process_profile": {
+      "entity_name": "Process Profile",
+      "semantic_type": "process_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Workflow process profiles",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "role_profile": {
+      "entity_name": "Role Profile",
+      "semantic_type": "role_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": true,
+      "description": "Security role definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "transfer_display_profile": {
+      "entity_name": "Transfer Display Profile",
+      "semantic_type": "transfer_display_profile_code",
+      "domain": "Common_Resources_Core",
+      "is_core": false,
+      "description": "Transfer UI settings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "hours_of_operation": {
+      "entity_name": "Hours of Operation",
+      "semantic_type": "hours_of_operation_code",
+      "domain": "Common_Resources_Time",
+      "is_core": true,
+      "description": "Business hours definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "hours_of_operation_override": {
+      "entity_name": "Hours of Operation Override",
+      "semantic_type": "hours_of_operation_override_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "Hours exceptions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "known_ip_address": {
+      "entity_name": "Known IP Address",
+      "semantic_type": "known_ip_address_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "Approved punch IP addresses",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "wifi_access_point": {
+      "entity_name": "WiFi Access Point",
+      "semantic_type": "wifi_access_point_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "WiFi-based location tracking",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "wifi_network": {
+      "entity_name": "WiFi Network",
+      "semantic_type": "wifi_network_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "WiFi network definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "gps_known_place": {
+      "entity_name": "GPS Known Place",
+      "semantic_type": "gps_known_place_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "GPS geofence locations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "symbolic_period": {
+      "entity_name": "Symbolic Period",
+      "semantic_type": "symbolic_period_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "Named time periods",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "timezone": {
+      "entity_name": "Timezone",
+      "semantic_type": "timezone_code",
+      "domain": "Common_Resources_Time",
+      "is_core": true,
+      "description": "Timezone definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "pay_period_timespan": {
+      "entity_name": "Pay Period Timespan",
+      "semantic_type": "pay_period_timespan_code",
+      "domain": "Common_Resources_Time",
+      "is_core": true,
+      "description": "Pay period definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "fiscal_calendar": {
+      "entity_name": "Fiscal Calendar",
+      "semantic_type": "fiscal_calendar_code",
+      "domain": "Common_Resources_Time",
+      "is_core": false,
+      "description": "Fiscal year/period definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "location": {
+      "entity_name": "Location",
+      "semantic_type": "location_code",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Physical/logical locations",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "location_type": {
+      "entity_name": "Location Type",
+      "semantic_type": "location_type_code",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Location classifications",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "location_set": {
+      "entity_name": "Location Set",
+      "semantic_type": "location_set_code",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Location groupings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "location_attribute": {
+      "entity_name": "Location Attribute",
+      "semantic_type": "location_attribute_code",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Custom location properties",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "job": {
+      "entity_name": "Job",
+      "semantic_type": "job_code",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Job/position definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "labor_category": {
+      "entity_name": "Labor Category",
+      "semantic_type": "labor_category_code",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Labor classification categories",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "labor_category_entry": {
+      "entity_name": "Labor Category Entry",
+      "semantic_type": "labor_category_entry_code",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Values within labor categories",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "labor_category_list": {
+      "entity_name": "Labor Category List",
+      "semantic_type": "labor_category_list_code",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Labor category groupings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "labor_category_profile": {
+      "entity_name": "Labor Category Profile",
+      "semantic_type": "labor_category_profile_code",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Labor category access",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "generic_location": {
+      "entity_name": "Generic Location",
+      "semantic_type": "generic_location_code",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Abstract location definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "person": {
+      "entity_name": "Person",
+      "semantic_type": "person_code",
+      "domain": "Person",
+      "is_core": true,
+      "description": "Core employee record - person_number",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "employment_term": {
+      "entity_name": "Employment Term",
+      "semantic_type": "employment_term_code",
+      "domain": "Person",
+      "is_core": false,
+      "description": "Employment period tracking",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "badge": {
+      "entity_name": "Badge",
+      "semantic_type": "badge_code",
+      "domain": "Person",
+      "is_core": false,
+      "description": "Employee badge/ID assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "user_account": {
+      "entity_name": "User Account",
+      "semantic_type": "user_account_code",
+      "domain": "Person",
+      "is_core": false,
+      "description": "System login accounts",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "employee_photo": {
+      "entity_name": "Employee Photo",
+      "semantic_type": "employee_photo_code",
+      "domain": "Person",
+      "is_core": false,
+      "description": "Employee photographs",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "schedule_pattern": {
+      "entity_name": "Schedule Pattern",
+      "semantic_type": "schedule_pattern_code",
+      "domain": "Scheduling",
+      "is_core": true,
+      "description": "Recurring schedule templates",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "schedule_group": {
+      "entity_name": "Schedule Group",
+      "semantic_type": "schedule_group_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Schedule groupings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "shift": {
+      "entity_name": "Shift",
+      "semantic_type": "shift_code",
+      "domain": "Scheduling",
+      "is_core": true,
+      "description": "Shift definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "shift_template": {
+      "entity_name": "Shift Template",
+      "semantic_type": "shift_template_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Shift template patterns",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "schedule_tag": {
+      "entity_name": "Schedule Tag",
+      "semantic_type": "schedule_tag_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Schedule classification tags",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "open_shift": {
+      "entity_name": "Open Shift",
+      "semantic_type": "open_shift_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Available unfilled shifts",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "schedule_zone": {
+      "entity_name": "Schedule Zone",
+      "semantic_type": "schedule_zone_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Schedule zone definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "availability_pattern": {
+      "entity_name": "Availability Pattern",
+      "semantic_type": "availability_pattern_code",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Employee availability patterns",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "pay": {
+      "entity_name": "Pay Code",
+      "semantic_type": "pay_code",
+      "domain": "Timekeeping",
+      "is_core": true,
+      "description": "Pay type classifications",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "pay_edit": {
+      "entity_name": "Pay Code Edit",
+      "semantic_type": "pay_code_edit_code",
+      "domain": "Timekeeping",
+      "is_core": false,
+      "description": "Pay code adjustment tracking",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "punch": {
+      "entity_name": "Punch",
+      "semantic_type": "punch_code",
+      "domain": "Timekeeping",
+      "is_core": false,
+      "description": "Time punch records",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "timecard": {
+      "entity_name": "Timecard",
+      "semantic_type": "timecard_code",
+      "domain": "Timekeeping",
+      "is_core": false,
+      "description": "Employee timecard records",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "work_rule": {
+      "entity_name": "Work Rule",
+      "semantic_type": "work_rule_code",
+      "domain": "Timekeeping",
+      "is_core": true,
+      "description": "Time calculation rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "exception_type": {
+      "entity_name": "Exception Type",
+      "semantic_type": "exception_type_code",
+      "domain": "Timekeeping",
+      "is_core": false,
+      "description": "Timecard exception types",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "accrual": {
+      "entity_name": "Accrual Code",
+      "semantic_type": "accrual_code",
+      "domain": "Timekeeping",
+      "is_core": true,
+      "description": "PTO/leave accrual types",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "accrual_policy": {
+      "entity_name": "Accrual Policy",
+      "semantic_type": "accrual_policy_code",
+      "domain": "Timekeeping",
+      "is_core": true,
+      "description": "Accrual calculation rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "holiday": {
+      "entity_name": "Holiday",
+      "semantic_type": "holiday_code",
+      "domain": "Timekeeping",
+      "is_core": true,
+      "description": "Holiday definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "holiday_profile": {
+      "entity_name": "Holiday Profile",
+      "semantic_type": "holiday_profile_code",
+      "domain": "Timekeeping",
+      "is_core": false,
+      "description": "Holiday profile assignments",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "adjustment_driver_setting": {
+      "entity_name": "Adjustment Driver Setting",
+      "semantic_type": "adjustment_driver_setting_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Forecast adjustment drivers",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "budget_distribution_type": {
+      "entity_name": "Budget Distribution Type",
+      "semantic_type": "budget_distribution_type_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Budget allocation types",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "category_property_set": {
+      "entity_name": "Category Property Set",
+      "semantic_type": "category_property_set_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Forecast category properties",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "combined_labor_distribution": {
+      "entity_name": "Combined Labor Distribution",
+      "semantic_type": "combined_labor_distribution_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Labor distribution rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "custom_driver": {
+      "entity_name": "Custom Driver",
+      "semantic_type": "custom_driver_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Custom forecast drivers",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "forecast_planner_profile": {
+      "entity_name": "Forecast Planner Profile",
+      "semantic_type": "forecast_planner_profile_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Forecast planner config",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "forecast_planner_setting": {
+      "entity_name": "Forecast Planner Setting",
+      "semantic_type": "forecast_planner_setting_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Forecast planner settings",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "volume_driver": {
+      "entity_name": "Volume Driver",
+      "semantic_type": "volume_driver_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Volume-based forecast drivers",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "labor_standard": {
+      "entity_name": "Labor Standard",
+      "semantic_type": "labor_standard_code",
+      "domain": "Forecasting",
+      "is_core": false,
+      "description": "Labor requirement standards",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "time_off_request": {
+      "entity_name": "Time Off Request",
+      "semantic_type": "time_off_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "PTO/leave requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "availability_request": {
+      "entity_name": "Availability Request",
+      "semantic_type": "availability_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Availability change requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "cover_request": {
+      "entity_name": "Cover Request",
+      "semantic_type": "cover_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Shift coverage requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "swap_request": {
+      "entity_name": "Swap Request",
+      "semantic_type": "swap_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Shift swap requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "open_shift_request": {
+      "entity_name": "Open Shift Request",
+      "semantic_type": "open_shift_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Open shift pickup requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "self_schedule_request": {
+      "entity_name": "Self-Schedule Request",
+      "semantic_type": "self_schedule_request_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Self-scheduling requests",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "request_subtype": {
+      "entity_name": "Request Subtype",
+      "semantic_type": "request_subtype_code",
+      "domain": "Requests",
+      "is_core": false,
+      "description": "Request categorization",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "payroll_table": {
+      "entity_name": "Payroll Table",
+      "semantic_type": "payroll_table_code",
+      "domain": "Payroll_Integration",
+      "is_core": false,
+      "description": "Payroll mapping tables",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "payroll_export": {
+      "entity_name": "Payroll Export",
+      "semantic_type": "payroll_export_code",
+      "domain": "Payroll_Integration",
+      "is_core": false,
+      "description": "Payroll export definitions",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "currency_definition": {
+      "entity_name": "Currency Definition",
+      "semantic_type": "currency_definition_code",
+      "domain": "Payroll_Integration",
+      "is_core": false,
+      "description": "Currency types",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "currency_policy": {
+      "entity_name": "Currency Policy",
+      "semantic_type": "currency_policy_code",
+      "domain": "Payroll_Integration",
+      "is_core": false,
+      "description": "Multi-currency rules",
+      "api_endpoints": [],
+      "column_patterns": []
+    },
+    "exchange_rate": {
+      "entity_name": "Exchange Rate",
+      "semantic_type": "exchange_rate_code",
+      "domain": "Payroll_Integration",
+      "is_core": false,
+      "description": "Currency exchange rates",
+      "api_endpoints": [],
+      "column_patterns": []
+    }
+  },
+  "hub_count": 113,
+  "spoke_patterns": {}
+}
