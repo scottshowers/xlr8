@@ -53,6 +53,14 @@ from .table_selector import TableSelector
 
 logger = logging.getLogger(__name__)
 
+# Import TermIndex for load-time intelligence lookups
+try:
+    from .term_index import TermIndex
+    TERM_INDEX_AVAILABLE = True
+except ImportError:
+    TERM_INDEX_AVAILABLE = False
+    logger.debug("TermIndex not available - using fallback resolution")
+
 
 # =============================================================================
 # SQL KEYWORDS (for column validation)
@@ -129,6 +137,76 @@ class SQLGenerator:
         self._column_mappings: Dict[str, str] = {}
         self._orchestrator = None
         self._filter_translations: List[Dict] = []  # v5.0: Semantic value translations
+        
+        # Term index for load-time intelligence
+        self._term_index: Optional['TermIndex'] = None
+    
+    def _get_term_index(self, project: str) -> Optional['TermIndex']:
+        """Get or create TermIndex for project."""
+        if not TERM_INDEX_AVAILABLE:
+            return None
+        if self._term_index is None and self.handler:
+            try:
+                self._term_index = TermIndex(self.handler.conn, project)
+            except Exception as e:
+                logger.debug(f"Could not create TermIndex: {e}")
+                return None
+        return self._term_index
+    
+    def _resolve_terms_from_index(self, question: str, project: str) -> List[Dict]:
+        """
+        Extract and resolve terms from question using term index.
+        
+        Args:
+            question: User's question
+            project: Project name
+            
+        Returns:
+            List of resolved term matches with table/column/value info
+        """
+        term_index = self._get_term_index(project)
+        if not term_index:
+            return []
+        
+        try:
+            # Tokenize question into potential terms
+            words = re.findall(r'\b[a-zA-Z]{2,}\b', question.lower())
+            
+            # Also check for multi-word terms (e.g., "new york", "401k")
+            q_lower = question.lower()
+            multi_word_patterns = [
+                r'\b(new\s+york)\b', r'\b(new\s+jersey)\b', r'\b(new\s+mexico)\b',
+                r'\b(new\s+hampshire)\b', r'\b(north\s+carolina)\b', r'\b(north\s+dakota)\b',
+                r'\b(south\s+carolina)\b', r'\b(south\s+dakota)\b', r'\b(west\s+virginia)\b',
+                r'\b(rhode\s+island)\b', r'\b(401k)\b', r'\b(401\s*k)\b'
+            ]
+            for pattern in multi_word_patterns:
+                match = re.search(pattern, q_lower)
+                if match:
+                    words.append(match.group(1).replace(' ', ''))
+            
+            # Remove duplicates and resolve
+            unique_terms = list(set(words))
+            matches = term_index.resolve_terms(unique_terms)
+            
+            results = []
+            for match in matches:
+                results.append({
+                    'term': match.term,
+                    'table': match.table_name,
+                    'column': match.column_name,
+                    'operator': match.operator,
+                    'value': match.match_value,
+                    'confidence': match.confidence,
+                    'domain': match.domain,
+                    'entity': match.entity
+                })
+                logger.info(f"[SQL-GEN] Term index: '{match.term}' → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
+            
+            return results
+        except Exception as e:
+            logger.debug(f"Term resolution error: {e}")
+            return []
     
     def _needs_join(self, question: str, tables: List[Dict]) -> Tuple[bool, List[Dict]]:
         """
@@ -180,6 +258,43 @@ class SQLGenerator:
         if not self.handler or not hasattr(self.handler, 'conn'):
             logger.debug("[SQL-GEN] No handler.conn - skipping semantic JOIN detection")
             return False, []
+        
+        # =================================================================
+        # v5.0 TERM INDEX LOOKUP (O(1) - much faster than table scanning)
+        # Try load-time intelligence first before expensive scanning
+        # =================================================================
+        project = self.table_selector.project if self.table_selector else None
+        if project and TERM_INDEX_AVAILABLE:
+            term_matches = self._resolve_terms_from_index(question, project)
+            if term_matches:
+                # Group matches by table
+                tables_from_terms = {}
+                for match in term_matches:
+                    tbl = match['table']
+                    if tbl not in tables_from_terms:
+                        tables_from_terms[tbl] = []
+                    tables_from_terms[tbl].append(match)
+                
+                if len(tables_from_terms) >= 2:
+                    # Multiple tables matched from term index - this is a cross-domain query
+                    selected_table_names = {t.get('table_name', '').lower() for t in tables}
+                    additional = []
+                    
+                    for tbl_name in tables_from_terms.keys():
+                        if tbl_name.lower() not in selected_table_names:
+                            # Need to add this table - get its metadata
+                            for t in self.schema.get('tables', []):
+                                if t.get('table_name', '').lower() == tbl_name.lower():
+                                    additional.append(t)
+                                    logger.info(f"[SQL-GEN] Term index: Adding table '{tbl_name}' for cross-domain JOIN")
+                                    break
+                    
+                    logger.info(f"[SQL-GEN] Term index JOIN detection: {list(tables_from_terms.keys())} - need JOIN")
+                    
+                    # Store term matches for later use in SQL generation
+                    self._term_index_matches = term_matches
+                    
+                    return True, additional
         
         # Get ALL tables from schema, not just the selected ones
         all_tables = self.schema.get('tables', [])
