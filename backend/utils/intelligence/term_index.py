@@ -208,6 +208,13 @@ STOP_WORDS: Set[str] = {
     'show', 'me', 'give', 'get', 'find', 'list', 'what', 'which', 'who', 'whom',
     'employees', 'employee', 'workers', 'worker', 'people', 'staff', 'team',
     'data', 'information', 'details', 'records',
+    # CRITICAL: These short words match state codes but are almost always prepositions
+    'in',   # Would match Indiana (IN)
+    'on',   # Would match Ontario (ON) 
+    'ok',   # Would match Oklahoma (OK) - but also "ok" in conversation
+    'hi',   # Would match Hawaii (HI)
+    'me',   # Would match Maine (ME) - already in list above
+    'or',   # Would match Oregon (OR) - already in list above
 }
 
 
