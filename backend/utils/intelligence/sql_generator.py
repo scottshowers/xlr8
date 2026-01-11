@@ -183,7 +183,10 @@ class SQLGenerator:
         
         # Get ALL tables from schema, not just the selected ones
         all_tables = self.schema.get('tables', [])
+        logger.warning(f"[SQL-GEN] _needs_join: schema has {len(all_tables)} tables, selected {len(tables)} tables")
+        
         if not all_tables:
+            logger.warning("[SQL-GEN] _needs_join: NO TABLES IN SCHEMA - returning False")
             return False, []
         
         # Track which tables were originally selected
@@ -200,13 +203,16 @@ class SQLGenerator:
         significant_words = [w for w in words if len(w) >= 2 and w not in skip_words]
         
         if not significant_words:
+            logger.warning("[SQL-GEN] _needs_join: No significant words found - returning False")
             return False, []
         
-        logger.info(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}, checking {len(all_tables)} tables")
+        logger.warning(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}, checking {len(all_tables)} tables")
         
         # Map each significant word to tables that have matching column values
         word_to_tables: Dict[str, Set[str]] = {}
         table_lookup: Dict[str, Dict] = {}  # For retrieving table metadata later
+        profiles_checked = 0
+        values_checked = 0
         
         for table in all_tables:
             table_name = table.get('table_name', '')
@@ -223,6 +229,8 @@ class SQLGenerator:
                     WHERE LOWER(table_name) = LOWER(?)
                     AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
                 """, [table_name]).fetchall()
+                
+                profiles_checked += len(profiles)
                 
                 for col_name, distinct_values_json, top_values_json in profiles:
                     # Try top_values_json first (more complete), fallback to distinct_values
@@ -278,6 +286,9 @@ class SQLGenerator:
         all_matched_tables = set()
         for word, matched_tables in word_to_tables.items():
             all_matched_tables.update(matched_tables)
+        
+        logger.warning(f"[SQL-GEN] Checked {profiles_checked} profiles across {len(all_tables)} tables. "
+                      f"Words matched: {dict([(w, list(t)) for w, t in word_to_tables.items()])}")
         
         if len(all_matched_tables) < 2:
             logger.info(f"[SQL-GEN] Semantic detection: only {len(all_matched_tables)} table(s) matched - no JOIN needed")
@@ -442,6 +453,16 @@ class SQLGenerator:
             # =================================================================
             needs_join, additional_tables = self._needs_join(question, relevant_tables)
             
+            # DIAGNOSTIC: Track what happened in JOIN detection
+            self._join_detection_debug = {
+                'needs_join': needs_join,
+                'additional_tables_count': len(additional_tables),
+                'schema_tables_count': len(self.schema.get('tables', [])),
+                'selected_tables_count': len(relevant_tables),
+                'selected_table_names': [t.get('table_name', '')[-30:] for t in relevant_tables[:3]]
+            }
+            logger.warning(f"[SQL-GEN] JOIN detection debug: {self._join_detection_debug}")
+            
             if needs_join:
                 logger.warning(f"[SQL-GEN] Cross-domain JOIN detected - forcing complex path")
                 # Add discovered tables
@@ -456,12 +477,17 @@ class SQLGenerator:
                 result = self._generate_complex_with_join(question, relevant_tables, orchestrator, q_lower)
                 if result and entity_scope:
                     result = self._apply_entity_scope(result, entity_scope)
+                # Add JOIN detection debug to result
+                if result:
+                    result['_join_debug'] = getattr(self, '_join_detection_debug', {})
                 return result
             
             # Try simple query path first (only if no JOIN needed)
             if self._is_simple_query(question) and relevant_tables:
                 result = self._generate_simple(question, relevant_tables[0], orchestrator)
                 if result:
+                    # Add JOIN detection debug to result
+                    result['_join_debug'] = getattr(self, '_join_detection_debug', {})
                     # v3.0: Apply entity scope filter
                     if entity_scope:
                         result = self._apply_entity_scope(result, entity_scope)
@@ -473,6 +499,10 @@ class SQLGenerator:
             # v3.0: Apply entity scope filter
             if result and entity_scope:
                 result = self._apply_entity_scope(result, entity_scope)
+            
+            # Add JOIN detection debug to result
+            if result:
+                result['_join_debug'] = getattr(self, '_join_detection_debug', {})
             
             return result
             
