@@ -11,9 +11,9 @@
  * Created: January 11, 2026
  */
 
-import React, { useState, useContext } from 'react';
+import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ProjectContext } from '../context/ProjectContext';
+import { useProject } from '../context/ProjectContext';
 import { 
   ArrowLeft, Play, RefreshCw, Search, CheckCircle, XCircle, 
   Loader2, Brain, Database, Zap, ChevronDown, ChevronRight,
@@ -45,8 +45,8 @@ const SAMPLE_QUESTIONS = [
 ];
 
 export default function IntelligenceTestPage() {
-  const { selectedProject } = useContext(ProjectContext);
-  const projectId = selectedProject?.name || 'TEA1000';
+  const { activeProject } = useProject();
+  const projectId = activeProject?.name || 'TEA1000';
   
   // State for each operation
   const [analyzeStatus, setAnalyzeStatus] = useState({ loading: false, result: null, error: null });
@@ -177,7 +177,7 @@ export default function IntelligenceTestPage() {
       </div>
 
       {/* Warning if no project */}
-      {!selectedProject && (
+      {!activeProject && (
         <div style={{ 
           padding: '1rem', 
           background: `${colors.warning}15`, 
