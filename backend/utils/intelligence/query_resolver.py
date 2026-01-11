@@ -38,6 +38,14 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Import TermIndex for load-time intelligence lookups
+try:
+    from .term_index import TermIndex
+    TERM_INDEX_AVAILABLE = True
+except ImportError:
+    TERM_INDEX_AVAILABLE = False
+    logger.debug("TermIndex not available - using fallback resolution")
+
 
 # =============================================================================
 # INTENT TYPES - What is the user trying to do?
@@ -457,6 +465,10 @@ class QueryResolver:
     Resolves queries using LOOKUPS against pre-computed intelligence.
     
     NO SCORING. NO FUZZY MATCHING. DETERMINISTIC LOOKUPS.
+    
+    Now enhanced with TermIndex for load-time intelligence:
+    - "texas" → lookup _term_index → Personal.stateprovince = 'TX'
+    - "active" → lookup _term_index → status_code = 'A'
     """
     
     def __init__(self, handler):
@@ -471,6 +483,66 @@ class QueryResolver:
         self._table_classifications_cache: Dict[str, Dict] = {}
         self._column_profiles_cache: Dict[str, List[Dict]] = {}
         self._status_values_cache: Dict[str, Dict] = {}  # table -> {column, active_values}
+        
+        # Term index for load-time intelligence
+        self._term_index: Optional['TermIndex'] = None
+    
+    def _get_term_index(self, project: str) -> Optional['TermIndex']:
+        """Get or create TermIndex for project."""
+        if not TERM_INDEX_AVAILABLE:
+            return None
+        if self._term_index is None:
+            try:
+                self._term_index = TermIndex(self.conn, project)
+            except Exception as e:
+                logger.debug(f"Could not create TermIndex: {e}")
+                return None
+        return self._term_index
+    
+    def _resolve_term_from_index(self, term: str, project: str) -> Optional[Dict]:
+        """
+        Try to resolve a term using the term index.
+        
+        Args:
+            term: Search term (e.g., "texas", "active", "401k")
+            project: Project name
+            
+        Returns:
+            Dict with resolution info if found:
+            {
+                'table': 'Personal',
+                'column': 'stateprovince', 
+                'operator': '=',
+                'value': 'TX',
+                'confidence': 0.95,
+                'source': 'term_index'
+            }
+            None if not found.
+        """
+        term_index = self._get_term_index(project)
+        if not term_index:
+            return None
+        
+        try:
+            matches = term_index.resolve_terms([term])
+            if matches:
+                # Return best match (highest confidence)
+                best = matches[0]
+                logger.info(f"[RESOLVER] Term index hit: '{term}' → {best.table_name}.{best.column_name} {best.operator} '{best.match_value}'")
+                return {
+                    'table': best.table_name,
+                    'column': best.column_name,
+                    'operator': best.operator,
+                    'value': best.match_value,
+                    'confidence': best.confidence,
+                    'domain': best.domain,
+                    'entity': best.entity,
+                    'source': 'term_index'
+                }
+        except Exception as e:
+            logger.debug(f"Term index lookup error: {e}")
+        
+        return None
         
     # =========================================================================
     # MAIN ENTRY POINT
@@ -1902,6 +1974,9 @@ WHERE {where_sql}'''
         - But there's no hub/spoke relationship in the context graph
         - The user asks "employees in Texas" and we need to filter on 'TX'
         
+        NOW ENHANCED: Tries term index first (load-time intelligence), then
+        falls back to hardcoded patterns.
+        
         Args:
             project: Project name
             employee_table: The employee table being queried
@@ -1911,7 +1986,26 @@ WHERE {where_sql}'''
             Dict with filter info if found, None otherwise
         """
         try:
-            # First, check if this is a geographic term
+            # =========================================================
+            # PRIORITY 1: Try term index (load-time intelligence)
+            # This is the NEW way - lookup pre-computed terms
+            # =========================================================
+            term_match = self._resolve_term_from_index(hint, project)
+            if term_match:
+                logger.warning(f"[RESOLVER] Term index resolved '{hint}' → {term_match['table']}.{term_match['column']} = '{term_match['value']}'")
+                return {
+                    'column': term_match['column'],
+                    'table': term_match['table'],
+                    'same_table': term_match['table'].lower() == employee_table.lower(),
+                    'filter_value': term_match['value'],
+                    'operator': term_match['operator'],
+                    'source': 'term_index'
+                }
+            
+            # =========================================================
+            # PRIORITY 2: Fallback to hardcoded geographic normalization
+            # This is the OLD way - still works but term index is better
+            # =========================================================
             geo_info = normalize_geographic_term(hint)
             if not geo_info:
                 return None
@@ -1919,7 +2013,7 @@ WHERE {where_sql}'''
             geo_code = geo_info['code']
             geo_type = geo_info['type']
             
-            logger.warning(f"[RESOLVER] Trying direct geo filter: '{hint}' -> {geo_code} ({geo_type})")
+            logger.warning(f"[RESOLVER] Fallback geo filter: '{hint}' -> {geo_code} ({geo_type})")
             
             # Get columns from the employee table
             columns = self._get_table_columns(employee_table)
