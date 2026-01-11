@@ -56,6 +56,7 @@ import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import DataCleanup from './pages/DataCleanup';
 import AdminEndpoints from './pages/AdminEndpoints';
+import IntelligenceTestPage from './pages/IntelligenceTestPage';
 
 // Sales/Onboarding Pages
 import WelcomePage from './pages/WelcomePage';
@@ -177,6 +178,11 @@ function AppRoutes() {
         {/* Admin Endpoints - API testing */}
         <Route path="/admin/endpoints" element={
           <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Intelligence Test - Pipeline testing */}
+        <Route path="/admin/intelligence-test" element={
+          <ProtectedRoute><Layout><IntelligenceTestPage /></Layout></ProtectedRoute>
         } />
         
         {/* Playbook Builder - Create/Edit Playbooks */}
