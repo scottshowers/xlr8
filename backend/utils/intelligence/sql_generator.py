@@ -202,10 +202,10 @@ class SQLGenerator:
         significant_words = [w for w in words if len(w) >= 2 and w not in skip_words]
         
         if not significant_words:
-            logger.debug("[SQL-GEN] _needs_join: No significant words")
+            logger.warning("[SQL-GEN] _needs_join: No significant words")
             return False, []
         
-        logger.debug(f"[SQL-GEN] Semantic JOIN: words={significant_words}, {len(all_tables)} tables")
+        logger.warning(f"[SQL-GEN] _needs_join: words={significant_words}, {len(all_tables)} tables")
         
         # Map each significant word to tables that have matching column values
         word_to_tables: Dict[str, Set[str]] = {}
@@ -278,7 +278,7 @@ class SQLGenerator:
                         pass
                         
             except Exception as e:
-                logger.debug(f"[SQL-GEN] Error checking table {table_name}: {e}")
+                logger.warning(f"[SQL-GEN] _needs_join error checking {table_name[-30:]}: {e}")
         
         # Now check if we have words mapping to different tables that share a hub
         all_matched_tables = set()
@@ -289,8 +289,11 @@ class SQLGenerator:
         if word_to_tables:
             matches_summary = {w: [t[-25:] for t in ts] for w, ts in word_to_tables.items()}
             logger.info(f"[SQL-GEN] JOIN check: {len(all_tables)} tables, {profiles_checked} profiles. Matches: {matches_summary}")
+        else:
+            logger.warning(f"[SQL-GEN] _needs_join: NO VALUE MATCHES found in {profiles_checked} profiles across {len(all_tables)} tables")
         
         if len(all_matched_tables) < 2:
+            logger.warning(f"[SQL-GEN] _needs_join: Only {len(all_matched_tables)} tables matched - need 2+ for JOIN")
             return False, []
         
         # Check if any pair of matched tables share a hub connection
