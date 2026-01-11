@@ -197,6 +197,9 @@ class RealityGatherer(DuckDBGatherer):
             result = self.sql_generator.generate(question, context)
             if result:
                 result['source'] = 'llm'
+                # Pass through JOIN detection debug if available
+                if hasattr(self.sql_generator, '_join_detection_debug'):
+                    result['_join_debug'] = self.sql_generator._join_detection_debug
                 return result
         
         return None
