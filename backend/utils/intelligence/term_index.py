@@ -337,15 +337,14 @@ class TermIndex:
                 (project, term, term_type, table_name, column_name, operator, match_value, domain, entity, confidence, source, vendor)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT (project, term, table_name, column_name, match_value) DO UPDATE SET
-                    confidence = CASE WHEN EXCLUDED.confidence > _term_index.confidence THEN EXCLUDED.confidence ELSE _term_index.confidence END,
-                    updated_at = CURRENT_TIMESTAMP
+                    confidence = CASE WHEN EXCLUDED.confidence > _term_index.confidence THEN EXCLUDED.confidence ELSE _term_index.confidence END
             """, [
                 self.project, term_lower, term_type, table_name, column_name,
                 operator, match_value or term, domain, entity, confidence, source, vendor
             ])
             return True
         except Exception as e:
-            logger.debug(f"Term add note for '{term}': {e}")
+            logger.warning(f"[TERM_INDEX] Term add failed for '{term}': {e}")
             return False
     
     def build_location_terms(
