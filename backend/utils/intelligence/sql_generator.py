@@ -232,6 +232,7 @@ class SQLGenerator:
         Generate SQL for a question.
         
         v3.0: Uses entity_scope from context to add scoping filters.
+        v9.1: Added defensive error handling
         
         Args:
             question: User's question
@@ -241,49 +242,57 @@ class SQLGenerator:
             Dict with sql, table, query_type, all_columns
             Or None if generation fails
         """
-        logger.warning(f"[SQL-GEN] Starting generation for: {question[:60]}...")
-        
-        if not self.handler or not self.schema:
-            logger.warning("[SQL-GEN] No handler or schema")
+        try:
+            logger.warning(f"[SQL-GEN] Starting generation for: {question[:60]}...")
+            logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
+            
+            if not self.handler or not self.schema:
+                logger.warning("[SQL-GEN] No handler or schema")
+                return None
+            
+            tables = self.schema.get('tables', [])
+            if not tables:
+                return None
+            
+            # Get orchestrator
+            orchestrator = self._get_orchestrator()
+            if not orchestrator:
+                return None
+            
+            q_lower = question.lower()
+            
+            # v3.0: Extract entity scope from context
+            entity_scope = context.get('entity_scope') if context else None
+            
+            # Select relevant tables
+            if self.table_selector:
+                relevant_tables = self.table_selector.select(tables, question)
+            else:
+                relevant_tables = tables[:5]
+            
+            # Try simple query path first
+            if self._is_simple_query(question) and relevant_tables:
+                result = self._generate_simple(question, relevant_tables[0], orchestrator)
+                if result:
+                    # v3.0: Apply entity scope filter
+                    if entity_scope:
+                        result = self._apply_entity_scope(result, entity_scope)
+                    return result
+            
+            # Complex query path
+            result = self._generate_complex(question, relevant_tables, orchestrator, q_lower)
+            
+            # v3.0: Apply entity scope filter
+            if result and entity_scope:
+                result = self._apply_entity_scope(result, entity_scope)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"[SQL-GEN] EXCEPTION in generate(): {e}")
+            import traceback
+            logger.error(f"[SQL-GEN] Traceback: {traceback.format_exc()}")
             return None
-        
-        tables = self.schema.get('tables', [])
-        if not tables:
-            return None
-        
-        # Get orchestrator
-        orchestrator = self._get_orchestrator()
-        if not orchestrator:
-            return None
-        
-        q_lower = question.lower()
-        
-        # v3.0: Extract entity scope from context
-        entity_scope = context.get('entity_scope') if context else None
-        
-        # Select relevant tables
-        if self.table_selector:
-            relevant_tables = self.table_selector.select(tables, question)
-        else:
-            relevant_tables = tables[:5]
-        
-        # Try simple query path first
-        if self._is_simple_query(question) and relevant_tables:
-            result = self._generate_simple(question, relevant_tables[0], orchestrator)
-            if result:
-                # v3.0: Apply entity scope filter
-                if entity_scope:
-                    result = self._apply_entity_scope(result, entity_scope)
-                return result
-        
-        # Complex query path
-        result = self._generate_complex(question, relevant_tables, orchestrator, q_lower)
-        
-        # v3.0: Apply entity scope filter
-        if result and entity_scope:
-            result = self._apply_entity_scope(result, entity_scope)
-        
-        return result
     
     def _apply_entity_scope(self, result: Dict, entity_scope: Dict) -> Dict:
         """
