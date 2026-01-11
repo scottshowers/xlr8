@@ -134,9 +134,9 @@ class SQLAssembler:
             for entity, table_name in results:
                 self._entity_primary[entity] = table_name
                 
-            logger.debug(f"[SQL_ASSEMBLER] Loaded {len(self._entity_primary)} entity primaries")
+            logger.warning(f"[SQL_ASSEMBLER] Loaded {len(self._entity_primary)} entity primaries")
         except Exception as e:
-            logger.debug(f"[SQL_ASSEMBLER] Could not load entity primaries: {e}")
+            logger.warning(f"[SQL_ASSEMBLER] Could not load entity primaries: {e}")
             # Fallback defaults
             self._entity_primary = {
                 'employee': 'Personal',
@@ -163,7 +163,7 @@ class SQLAssembler:
         Returns:
             AssembledQuery with SQL and metadata
         """
-        logger.info(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches")
+        logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches")
         
         # Extract tables from term matches
         tables_from_matches = list(set(m.table_name for m in term_matches))
@@ -485,7 +485,7 @@ class SQLAssembler:
                     priority=result[3]
                 )
                 self._join_cache[cache_key] = join_path
-                logger.info(f"[SQL_ASSEMBLER] Join path: {table1}.{result[0]} = {table2}.{result[1]} (priority {result[3]})")
+                logger.warning(f"[SQL_ASSEMBLER] Join path: {table1}.{result[0]} = {table2}.{result[1]} (priority {result[3]})")
                 return join_path
             
             # Fallback: Try common join columns
@@ -512,7 +512,7 @@ class SQLAssembler:
                             priority=100
                         )
                         self._join_cache[cache_key] = join_path
-                        logger.info(f"[SQL_ASSEMBLER] Fallback join: {table1}.{key} = {table2}.{key}")
+                        logger.warning(f"[SQL_ASSEMBLER] Fallback join: {table1}.{key} = {table2}.{key}")
                         return join_path
         
         except Exception as e:
