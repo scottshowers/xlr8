@@ -98,7 +98,7 @@ class MetadataReasoner:
                         self._domain_tables[domain_lower] = []
                     self._domain_tables[domain_lower].append(table_name)
             
-            logger.info(f"[REASONER] Loaded {len(self._domain_tables)} domains: {list(self._domain_tables.keys())}")
+            logger.warning(f"[REASONER] Loaded {len(self._domain_tables)} domains: {list(self._domain_tables.keys())}")
         except Exception as e:
             logger.warning(f"[REASONER] Could not load domain tables: {e}")
         
@@ -109,6 +109,8 @@ class MetadataReasoner:
                 FROM _column_profiles
                 WHERE project = ?
             """, [self.project]).fetchall()
+            
+            logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}'")
             
             for table_name, column_name, inferred_type in results:
                 col_lower = column_name.lower()
@@ -131,9 +133,9 @@ class MetadataReasoner:
                         self._name_columns[table_name] = []
                     self._name_columns[table_name].append(column_name)
             
-            logger.info(f"[REASONER] Found description columns in {len(self._description_columns)} tables")
-            logger.info(f"[REASONER] Found code columns in {len(self._code_columns)} tables")
-            logger.info(f"[REASONER] Found name columns in {len(self._name_columns)} tables")
+            logger.warning(f"[REASONER] Found description columns in {len(self._description_columns)} tables")
+            logger.warning(f"[REASONER] Found code columns in {len(self._code_columns)} tables")
+            logger.warning(f"[REASONER] Found name columns in {len(self._name_columns)} tables")
         except Exception as e:
             logger.warning(f"[REASONER] Could not load column profiles: {e}")
     
@@ -157,19 +159,22 @@ class MetadataReasoner:
         
         # Classify the term
         term_type = self._classify_term(term_lower)
-        logger.info(f"[REASONER] Term '{term_lower}' classified as: {term_type}")
+        logger.warning(f"[REASONER] Term '{term_lower}' classified as: {term_type}")
         
         # Determine which domains to search
         target_domains = self._get_target_domains(term_lower, context_domain)
-        logger.info(f"[REASONER] Target domains for '{term_lower}': {target_domains}")
+        logger.warning(f"[REASONER] Target domains for '{term_lower}': {target_domains}")
         
         # Get tables for those domains
         target_tables = []
         for domain in target_domains:
-            target_tables.extend(self._domain_tables.get(domain, []))
+            tables = self._domain_tables.get(domain, [])
+            logger.warning(f"[REASONER] Domain '{domain}' has {len(tables)} tables")
+            target_tables.extend(tables)
         
         # If no domain match, search all tables with relevant column types
         if not target_tables:
+            logger.warning(f"[REASONER] No domain tables found, falling back to column-type search")
             if term_type == 'keyword':
                 target_tables = list(self._description_columns.keys())
             elif term_type == 'code':
@@ -180,13 +185,16 @@ class MetadataReasoner:
                 # Default: search description columns
                 target_tables = list(self._description_columns.keys())
         
-        logger.info(f"[REASONER] Searching {len(target_tables)} tables: {target_tables[:5]}...")
+        logger.warning(f"[REASONER] Searching {len(target_tables)} tables: {target_tables[:5]}...")
         
         # Build matches based on term type
         for table_name in target_tables:
             if term_type in ('keyword', 'mixed'):
                 # Search description columns with ILIKE
-                for col in self._description_columns.get(table_name, []):
+                desc_cols = self._description_columns.get(table_name, [])
+                if desc_cols:
+                    logger.warning(f"[REASONER] Table '{table_name}' has desc columns: {desc_cols}")
+                for col in desc_cols:
                     matches.append(ReasonedMatch(
                         term=term_lower,
                         table_name=table_name,
@@ -232,7 +240,7 @@ class MetadataReasoner:
         # Limit to top matches per term to avoid explosion
         matches = matches[:5]
         
-        logger.info(f"[REASONER] Returning {len(matches)} matches for '{term_lower}'")
+        logger.warning(f"[REASONER] Returning {len(matches)} matches for '{term_lower}'")
         return matches
     
     def _classify_term(self, term: str) -> str:
