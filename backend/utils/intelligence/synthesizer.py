@@ -852,6 +852,7 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
                 
                 # Build structured output - use real total from content
                 real_total = truth.content.get('total', len(rows))
+                logger.warning(f"[SYNTHESIZE] _extract_data_info: truth.content.total={truth.content.get('total')}, real_total={real_total}")
                 info['structured_output'] = {
                     'type': 'data',
                     'sql': truth.content.get('sql'),
@@ -1137,10 +1138,22 @@ TAX-SPECIFIC RULES (CRITICAL - DO NOT VIOLATE):
         
         # CRITICAL: Include actual data rows so LLM can analyze real values
         result_rows = data_info.get('result_rows', [])
+        structured_output = data_info.get('structured_output', {})
+        real_total = structured_output.get('total', len(result_rows)) if structured_output else len(result_rows)
+        rows_returned = len(result_rows)
+        
+        # Debug: Log what we got
+        logger.warning(f"[SYNTHESIZE] structured_output total={structured_output.get('total') if structured_output else 'None'}, real_total={real_total}, rows_returned={rows_returned}")
+        
         if result_rows:
             context_parts.append("=== ACTUAL DATA FROM DATABASE ===")
             context_parts.append(f"Columns: {', '.join(result_columns)}")
-            context_parts.append(f"Total rows: {len(result_rows)}")
+            # v5.0: Use real total, clarify if showing subset
+            if real_total > rows_returned:
+                context_parts.append(f"TOTAL MATCHING RECORDS: {real_total:,}")
+                context_parts.append(f"Showing first {rows_returned} rows:")
+            else:
+                context_parts.append(f"Total rows: {real_total:,}")
             context_parts.append("Data:")
             for i, row in enumerate(result_rows[:30]):  # Limit to 30 rows
                 row_str = " | ".join(f"{k}: {v}" for k, v in row.items())
