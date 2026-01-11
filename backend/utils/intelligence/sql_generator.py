@@ -1043,7 +1043,53 @@ SQL:"""
                 'all_columns': all_columns
             }
         
+        # v4.2: Smart fallback for JOIN queries when LLM fails
+        if needs_join and len(tables) >= 2:
+            logger.warning("[SQL-GEN] LLM failed for JOIN query, attempting smart fallback")
+            fallback_sql = self._build_join_fallback(tables, q_lower)
+            if fallback_sql:
+                logger.warning(f"[SQL-GEN] JOIN fallback SQL: {fallback_sql[:100]}...")
+                return {
+                    'sql': fallback_sql,
+                    'table': tables[0].get('table_name', 'unknown'),
+                    'query_type': 'join_fallback',
+                    'all_columns': all_columns
+                }
+        
         return None
+    
+    def _build_join_fallback(self, tables: List[Dict], q_lower: str) -> Optional[str]:
+        """
+        Build a simple JOIN SQL when LLM fails.
+        
+        v4.2: Uses Context Graph to find join key between first two tables.
+        Constructs: SELECT * FROM t1 JOIN t2 ON t1.key = t2.key LIMIT 100
+        """
+        if len(tables) < 2 or not self.table_selector:
+            return None
+        
+        t1_name = tables[0].get('table_name', '')
+        t2_name = tables[1].get('table_name', '')
+        
+        if not t1_name or not t2_name:
+            return None
+        
+        # Find join path via Context Graph
+        join_path = self.table_selector.get_join_path(t1_name, t2_name)
+        if not join_path:
+            logger.warning(f"[SQL-GEN] No join path between {t1_name[-30:]} and {t2_name[-30:]}")
+            return None
+        
+        # Get join column (semantic type, usually employee_number)
+        join_col = join_path.get('semantic_type', 'employee_number')
+        
+        # Build basic JOIN SQL
+        sql = f'''SELECT * FROM "{t1_name}" t1
+JOIN "{t2_name}" t2 ON t1."{join_col}" = t2."{join_col}"
+LIMIT 100'''
+        
+        logger.warning(f"[SQL-GEN] Built fallback JOIN on {join_col}")
+        return sql
     
     def fix_from_error(self, sql: str, error_msg: str, 
                        all_columns: Set[str]) -> Optional[str]:
