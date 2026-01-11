@@ -221,12 +221,22 @@ class SQLGenerator:
             
             try:
                 # Get column profiles for this table
-                profiles = self.handler.conn.execute("""
-                    SELECT column_name, distinct_values, top_values_json
-                    FROM _column_profiles 
-                    WHERE LOWER(table_name) = LOWER(?)
-                    AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
-                """, [table_name]).fetchall()
+                # First try with top_values_json (newer schema)
+                try:
+                    profiles = self.handler.conn.execute("""
+                        SELECT column_name, distinct_values, top_values_json
+                        FROM _column_profiles 
+                        WHERE LOWER(table_name) = LOWER(?)
+                        AND (distinct_values IS NOT NULL OR top_values_json IS NOT NULL)
+                    """, [table_name]).fetchall()
+                except Exception:
+                    # Fallback for tables without top_values_json column
+                    profiles = self.handler.conn.execute("""
+                        SELECT column_name, distinct_values, NULL as top_values_json
+                        FROM _column_profiles 
+                        WHERE LOWER(table_name) = LOWER(?)
+                        AND distinct_values IS NOT NULL
+                    """, [table_name]).fetchall()
                 
                 profiles_checked += len(profiles)
                 
