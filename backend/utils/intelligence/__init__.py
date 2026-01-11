@@ -80,6 +80,13 @@ from .sql_assembler import (
     assemble_query,
 )
 
+# Metadata Reasoner (Fallback for unknown terms - queries existing metadata)
+from .metadata_reasoner import (
+    MetadataReasoner,
+    ReasonedMatch,
+    reason_about_term,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -132,6 +139,11 @@ __all__ = [
     'SQLAssembler',
     'AssembledQuery',
     'assemble_query',
+    
+    # Metadata Reasoner
+    'MetadataReasoner',
+    'ReasonedMatch',
+    'reason_about_term',
     
     # Gatherers
     'BaseGatherer',
