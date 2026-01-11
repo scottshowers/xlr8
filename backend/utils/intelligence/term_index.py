@@ -243,7 +243,10 @@ class TermIndex:
     
     def __init__(self, conn: duckdb.DuckDBPyConnection, project: str):
         self.conn = conn
-        self.project = project
+        original_project = project
+        self.project = project.lower() if project else 'default'  # Normalize to lowercase
+        if original_project != self.project:
+            logger.warning(f"[TERM_INDEX] Project normalized: '{original_project}' → '{self.project}'")
         self._ensure_tables()
     
     def _ensure_tables(self):
@@ -639,6 +642,19 @@ class TermIndex:
             List of TermMatch objects with table/column/filter info.
         """
         matches = []
+        
+        # DIAGNOSTIC: Show project and total term count
+        try:
+            total_count = self.conn.execute(
+                "SELECT COUNT(*) FROM _term_index WHERE project = ?", [self.project]
+            ).fetchone()[0]
+            all_projects = self.conn.execute(
+                "SELECT DISTINCT project FROM _term_index"
+            ).fetchall()
+            logger.warning(f"[TERM_INDEX] resolve_terms: project='{self.project}', total_terms={total_count}, all_projects={[p[0] for p in all_projects]}")
+        except Exception as diag_err:
+            logger.warning(f"[TERM_INDEX] Diagnostic failed: {diag_err}")
+        
         logger.warning(f"[TERM_INDEX] resolve_terms called with {len(terms)} terms: {terms[:10]}")
         
         for term in terms:
