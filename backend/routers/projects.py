@@ -460,6 +460,7 @@ async def recalc_project_indexes(project_id: str, request: RecalcRequest = None)
     try:
         from utils.structured_data_handler import StructuredDataHandler
         from backend.utils.intelligence.term_index import recalc_term_index
+        import json
         
         what = request.what if request else ["terms", "entities", "joins"]
         
@@ -467,6 +468,19 @@ async def recalc_project_indexes(project_id: str, request: RecalcRequest = None)
         
         # Get handler
         handler = StructuredDataHandler()
+        
+        # Diagnostic: Check what profiles exist with filter_category
+        diag_profiles = handler.conn.execute("""
+            SELECT filter_category, COUNT(*) as cnt,
+                   SUM(CASE WHEN distinct_values IS NOT NULL THEN 1 ELSE 0 END) as with_values
+            FROM _column_profiles
+            WHERE project = ? AND filter_category IS NOT NULL
+            GROUP BY filter_category
+        """, [project_id]).fetchall()
+        
+        diagnostics = {
+            'profiles_by_category': {row[0]: {'count': row[1], 'with_values': row[2]} for row in diag_profiles}
+        }
         
         results = {}
         
@@ -480,6 +494,7 @@ async def recalc_project_indexes(project_id: str, request: RecalcRequest = None)
             "project_id": project_id,
             "recalculated": what,
             "stats": results,
+            "diagnostics": diagnostics,
             "message": "Index recalculation complete"
         }
         
