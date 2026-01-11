@@ -1,8 +1,14 @@
 """
-XLR8 Intelligence Engine - SQL Generator v4.0
+XLR8 Intelligence Engine - SQL Generator v4.1
 ==============================================
 
 Generates SQL queries from natural language questions.
+
+v4.1 CHANGES:
+- CROSS-DOMAIN JOIN DETECTION: _needs_join() now checks ALL tables in schema,
+  not just pre-selected ones. Discovers and adds missing tables automatically.
+- Example: "employees in Texas with 401k" now correctly adds Deductions table
+  even if only Personal was initially selected, then builds the JOIN.
 
 v4.0 CHANGES:
 - SEMANTIC JOIN DETECTION: _needs_join() now uses Context Graph to detect
@@ -24,6 +30,7 @@ v2.0 CHANGES:
 - Filter hints in LLM prompt guide better query generation
 
 Key features:
+- Cross-domain JOIN discovery via Context Graph (v4.1)
 - Semantic JOIN detection via Context Graph (v4.0)
 - Context Graph-aware join generation (v3.0)
 - Question-aware value filtering (the key to useful queries)
@@ -123,22 +130,27 @@ class SQLGenerator:
         self._orchestrator = None
         self._filter_translations: List[Dict] = []  # v5.0: Semantic value translations
     
-    def _needs_join(self, question: str, tables: List[Dict]) -> bool:
+    def _needs_join(self, question: str, tables: List[Dict]) -> Tuple[bool, List[Dict]]:
         """
         Detect if a question requires a JOIN query.
         
-        v4.0 SEMANTIC DETECTION:
+        v4.1 SEMANTIC DETECTION:
         Instead of pattern matching, detect when question concepts span multiple
         tables that share a hub connection in the Context Graph.
+        
+        CRITICAL: Checks ALL tables in schema, not just selected ones!
+        This allows detection of cross-domain queries like "employees in Texas with 401k"
+        even if only the Personal table was initially selected.
         
         Example: "employees in Texas with 401k"
         - "Texas" → matches values in Personal.stateprovince
         - "401k" → matches values in Deductions.deductionbenefit_code
         - Both tables share employee_number hub → needs JOIN
         
-        Returns True when:
-        - Question filter concepts span 2+ tables with shared hub
-        - User explicitly asks to combine/join/cross-reference data
+        Returns:
+            Tuple of (needs_join: bool, additional_tables: List[Dict])
+            - needs_join: True if JOIN is needed
+            - additional_tables: Tables to add to the query (if not already included)
         """
         q_lower = question.lower()
         
@@ -156,22 +168,26 @@ class SQLGenerator:
         for pattern in explicit_patterns:
             if re.search(pattern, q_lower):
                 logger.info(f"[SQL-GEN] JOIN needed: explicit pattern '{pattern}' matched")
-                return True
+                return True, []
         
         # =================================================================
-        # v4.0 SEMANTIC DETECTION - the key innovation
-        # Check if question concepts span multiple tables with shared hub
+        # v4.1 SEMANTIC DETECTION - check ALL tables in schema
         # =================================================================
-        if len(tables) < 2:
-            return False
-        
         if not self.table_selector:
             logger.warning("[SQL-GEN] No table_selector - skipping semantic JOIN detection")
-            return False
+            return False, []
         
         if not self.handler or not hasattr(self.handler, 'conn'):
             logger.warning("[SQL-GEN] No handler.conn - skipping semantic JOIN detection")
-            return False
+            return False, []
+        
+        # Get ALL tables from schema, not just the selected ones
+        all_tables = self.schema.get('tables', [])
+        if not all_tables:
+            return False, []
+        
+        # Track which tables were originally selected
+        selected_table_names = {t.get('table_name', '').lower() for t in tables}
         
         # Extract significant words from question
         words = re.findall(r'\b[a-z0-9]+\b', q_lower)
@@ -184,17 +200,20 @@ class SQLGenerator:
         significant_words = [w for w in words if len(w) >= 2 and w not in skip_words]
         
         if not significant_words:
-            return False
+            return False, []
         
-        logger.info(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}")
+        logger.info(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}, checking {len(all_tables)} tables")
         
         # Map each significant word to tables that have matching column values
         word_to_tables: Dict[str, Set[str]] = {}
+        table_lookup: Dict[str, Dict] = {}  # For retrieving table metadata later
         
-        for table in tables:
+        for table in all_tables:
             table_name = table.get('table_name', '')
             if not table_name:
                 continue
+            
+            table_lookup[table_name.lower()] = table
             
             try:
                 # Get column profiles for this table
@@ -245,7 +264,8 @@ class SQLGenerator:
                                     if word not in word_to_tables:
                                         word_to_tables[word] = set()
                                     word_to_tables[word].add(table_name)
-                                    logger.info(f"[SQL-GEN] Word '{word}' → table '{table_name[-40:]}' via {col_name}='{val[:30]}'")
+                                    in_selected = "✓" if table_name.lower() in selected_table_names else "NEW"
+                                    logger.info(f"[SQL-GEN] [{in_selected}] Word '{word}' → table '{table_name[-40:]}' via {col_name}='{val[:30]}'")
                                     break  # Move to next value
                                     
                     except (json.JSONDecodeError, TypeError):
@@ -261,12 +281,14 @@ class SQLGenerator:
         
         if len(all_matched_tables) < 2:
             logger.info(f"[SQL-GEN] Semantic detection: only {len(all_matched_tables)} table(s) matched - no JOIN needed")
-            return False
+            return False, []
         
         logger.info(f"[SQL-GEN] Words mapped to {len(all_matched_tables)} tables: {[t[-30:] for t in all_matched_tables]}")
         
         # Check if any pair of matched tables share a hub connection
         matched_list = list(all_matched_tables)
+        additional_tables = []
+        
         for i, t1 in enumerate(matched_list):
             for t2 in matched_list[i+1:]:
                 join_path = self.table_selector.get_join_path(t1, t2)
@@ -275,10 +297,19 @@ class SQLGenerator:
                     from_col = join_path.get('from_column', '')
                     to_col = join_path.get('to_column', '')
                     logger.warning(f"[SQL-GEN] ✅ SEMANTIC JOIN DETECTED: {t1[-30:]} ↔ {t2[-30:]} via {sem_type} ({from_col} → {to_col})")
-                    return True
+                    
+                    # Add any matched tables that weren't in the original selection
+                    for t in [t1, t2]:
+                        if t.lower() not in selected_table_names:
+                            table_meta = table_lookup.get(t.lower())
+                            if table_meta:
+                                additional_tables.append(table_meta)
+                                logger.warning(f"[SQL-GEN] ➕ Adding table to query: {t[-40:]}")
+                    
+                    return True, additional_tables
         
         logger.info("[SQL-GEN] No shared hub found between matched tables - no JOIN needed")
-        return False
+        return False, []
     
     def _build_relationship_hints(self, tables: List[Dict]) -> str:
         """
@@ -778,6 +809,23 @@ SELECT"""
     def _generate_complex(self, question: str, tables: List[Dict],
                          orchestrator, q_lower: str) -> Optional[Dict]:
         """Generate SQL for complex multi-table query."""
+        
+        # =================================================================
+        # v4.1: Check if JOIN is needed FIRST (before building schema)
+        # This allows us to add missing tables to the query
+        # =================================================================
+        needs_join, additional_tables = self._needs_join(question, tables)
+        
+        # Add any additional tables that were discovered by semantic analysis
+        if additional_tables:
+            logger.warning(f"[SQL-GEN] Adding {len(additional_tables)} tables discovered by semantic JOIN detection")
+            # Avoid duplicates
+            existing_names = {t.get('table_name', '').lower() for t in tables}
+            for add_table in additional_tables:
+                if add_table.get('table_name', '').lower() not in existing_names:
+                    tables = tables + [add_table]
+                    logger.warning(f"[SQL-GEN] ➕ Added table: {add_table.get('table_name', '')[-40:]}")
+        
         # Build schema with aliases
         tables_info = []
         all_columns: Set[str] = set()
@@ -819,8 +867,7 @@ SELECT"""
         # Build semantic hints
         semantic_text = self._build_semantic_hints(tables, primary_table, q_lower)
         
-        # Check if JOIN is needed and include relationship hints
-        needs_join = self._needs_join(question, tables)
+        # Build relationship hints if JOIN is needed
         relationship_hints = ""
         
         if needs_join and len(tables) > 1:
