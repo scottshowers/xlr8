@@ -36,20 +36,6 @@ from .types import (
 )
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
-
-# Term Index + SQL Assembler - the NEW deterministic path
-DETERMINISTIC_PATH_AVAILABLE = False
-TermIndex = None
-SQLAssembler = None
-parse_intent = None
-try:
-    from .term_index import TermIndex
-    from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent
-    from .query_resolver import parse_intent
-    DETERMINISTIC_PATH_AVAILABLE = True
-    logger.info("[ENGINE-V2] Deterministic path available (TermIndex + SQLAssembler)")
-except ImportError as e:
-    logger.warning(f"[ENGINE-V2] Deterministic path not available: {e}")
 from .synthesizer import Synthesizer
 from .truth_enricher import TruthEnricher
 from .gatherers import (
@@ -62,6 +48,22 @@ from .gatherers import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Term Index + SQL Assembler - the NEW deterministic path
+# Must be after logger is defined
+DETERMINISTIC_PATH_AVAILABLE = False
+TermIndex = None
+SQLAssembler = None
+AssemblerIntent = None
+parse_intent = None
+try:
+    from .term_index import TermIndex
+    from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent
+    from .query_resolver import parse_intent
+    DETERMINISTIC_PATH_AVAILABLE = True
+    logger.info("[ENGINE-V2] Deterministic path available (TermIndex + SQLAssembler)")
+except ImportError as e:
+    logger.warning(f"[ENGINE-V2] Deterministic path not available: {e}")
 
 __version__ = "10.0.0"  # v10.0: Deterministic path - Term Index + SQL Assembler as PRIMARY
 
