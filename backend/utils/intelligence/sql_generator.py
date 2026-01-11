@@ -174,19 +174,18 @@ class SQLGenerator:
         # v4.1 SEMANTIC DETECTION - check ALL tables in schema
         # =================================================================
         if not self.table_selector:
-            logger.warning("[SQL-GEN] No table_selector - skipping semantic JOIN detection")
+            logger.debug("[SQL-GEN] No table_selector - skipping semantic JOIN detection")
             return False, []
         
         if not self.handler or not hasattr(self.handler, 'conn'):
-            logger.warning("[SQL-GEN] No handler.conn - skipping semantic JOIN detection")
+            logger.debug("[SQL-GEN] No handler.conn - skipping semantic JOIN detection")
             return False, []
         
         # Get ALL tables from schema, not just the selected ones
         all_tables = self.schema.get('tables', [])
-        logger.warning(f"[SQL-GEN] _needs_join: schema has {len(all_tables)} tables, selected {len(tables)} tables")
         
         if not all_tables:
-            logger.warning("[SQL-GEN] _needs_join: NO TABLES IN SCHEMA - returning False")
+            logger.debug("[SQL-GEN] _needs_join: NO TABLES IN SCHEMA")
             return False, []
         
         # Track which tables were originally selected
@@ -203,16 +202,15 @@ class SQLGenerator:
         significant_words = [w for w in words if len(w) >= 2 and w not in skip_words]
         
         if not significant_words:
-            logger.warning("[SQL-GEN] _needs_join: No significant words found - returning False")
+            logger.debug("[SQL-GEN] _needs_join: No significant words")
             return False, []
         
-        logger.warning(f"[SQL-GEN] Semantic JOIN detection: words={significant_words}, checking {len(all_tables)} tables")
+        logger.debug(f"[SQL-GEN] Semantic JOIN: words={significant_words}, {len(all_tables)} tables")
         
         # Map each significant word to tables that have matching column values
         word_to_tables: Dict[str, Set[str]] = {}
         table_lookup: Dict[str, Dict] = {}  # For retrieving table metadata later
         profiles_checked = 0
-        values_checked = 0
         
         for table in all_tables:
             table_name = table.get('table_name', '')
@@ -280,21 +278,20 @@ class SQLGenerator:
                         pass
                         
             except Exception as e:
-                logger.warning(f"[SQL-GEN] Error checking table {table_name} for semantic matches: {e}")
+                logger.debug(f"[SQL-GEN] Error checking table {table_name}: {e}")
         
         # Now check if we have words mapping to different tables that share a hub
         all_matched_tables = set()
         for word, matched_tables in word_to_tables.items():
             all_matched_tables.update(matched_tables)
         
-        logger.warning(f"[SQL-GEN] Checked {profiles_checked} profiles across {len(all_tables)} tables. "
-                      f"Words matched: {dict([(w, list(t)) for w, t in word_to_tables.items()])}")
+        # Single summary log - only log if we found something interesting
+        if word_to_tables:
+            matches_summary = {w: [t[-25:] for t in ts] for w, ts in word_to_tables.items()}
+            logger.info(f"[SQL-GEN] JOIN check: {len(all_tables)} tables, {profiles_checked} profiles. Matches: {matches_summary}")
         
         if len(all_matched_tables) < 2:
-            logger.info(f"[SQL-GEN] Semantic detection: only {len(all_matched_tables)} table(s) matched - no JOIN needed")
             return False, []
-        
-        logger.info(f"[SQL-GEN] Words mapped to {len(all_matched_tables)} tables: {[t[-30:] for t in all_matched_tables]}")
         
         # Check if any pair of matched tables share a hub connection
         matched_list = list(all_matched_tables)
@@ -305,9 +302,7 @@ class SQLGenerator:
                 join_path = self.table_selector.get_join_path(t1, t2)
                 if join_path:
                     sem_type = join_path.get('semantic_type', 'unknown')
-                    from_col = join_path.get('from_column', '')
-                    to_col = join_path.get('to_column', '')
-                    logger.warning(f"[SQL-GEN] ✅ SEMANTIC JOIN DETECTED: {t1[-30:]} ↔ {t2[-30:]} via {sem_type} ({from_col} → {to_col})")
+                    logger.warning(f"[SQL-GEN] ✅ JOIN: {t1[-25:]} ↔ {t2[-25:]} via {sem_type}")
                     
                     # Add any matched tables that weren't in the original selection
                     for t in [t1, t2]:
@@ -315,11 +310,10 @@ class SQLGenerator:
                             table_meta = table_lookup.get(t.lower())
                             if table_meta:
                                 additional_tables.append(table_meta)
-                                logger.warning(f"[SQL-GEN] ➕ Adding table to query: {t[-40:]}")
+                                logger.warning(f"[SQL-GEN] ➕ Added: {t[-35:]}")
                     
                     return True, additional_tables
         
-        logger.info("[SQL-GEN] No shared hub found between matched tables - no JOIN needed")
         return False, []
     
     def _build_relationship_hints(self, tables: List[Dict]) -> str:
@@ -420,11 +414,9 @@ class SQLGenerator:
             Or None if generation fails
         """
         try:
-            logger.warning(f"[SQL-GEN] Starting generation for: {question[:60]}...")
-            logger.warning(f"[SQL-GEN] confirmed_facts: {self.confirmed_facts}")
+            logger.debug(f"[SQL-GEN] Generating for: {question[:60]}...")
             
             if not self.handler or not self.schema:
-                logger.warning("[SQL-GEN] No handler or schema")
                 return None
             
             tables = self.schema.get('tables', [])
@@ -453,42 +445,34 @@ class SQLGenerator:
             # =================================================================
             needs_join, additional_tables = self._needs_join(question, relevant_tables)
             
-            # DIAGNOSTIC: Track what happened in JOIN detection
+            # Track what happened in JOIN detection (for debugging via API response)
             self._join_detection_debug = {
                 'needs_join': needs_join,
                 'additional_tables_count': len(additional_tables),
                 'schema_tables_count': len(self.schema.get('tables', [])),
-                'selected_tables_count': len(relevant_tables),
-                'selected_table_names': [t.get('table_name', '')[-30:] for t in relevant_tables[:3]]
             }
-            logger.warning(f"[SQL-GEN] JOIN detection debug: {self._join_detection_debug}")
             
             if needs_join:
-                logger.warning(f"[SQL-GEN] Cross-domain JOIN detected - forcing complex path")
                 # Add discovered tables
                 if additional_tables:
                     existing_names = {t.get('table_name', '').lower() for t in relevant_tables}
                     for add_table in additional_tables:
                         if add_table.get('table_name', '').lower() not in existing_names:
                             relevant_tables = relevant_tables + [add_table]
-                            logger.warning(f"[SQL-GEN] ➕ Added table: {add_table.get('table_name', '')[-40:]}")
                 
                 # Force complex path for JOIN queries
                 result = self._generate_complex_with_join(question, relevant_tables, orchestrator, q_lower)
                 if result and entity_scope:
                     result = self._apply_entity_scope(result, entity_scope)
-                # Add JOIN detection debug to result
                 if result:
-                    result['_join_debug'] = getattr(self, '_join_detection_debug', {})
+                    result['_join_debug'] = self._join_detection_debug
                 return result
             
             # Try simple query path first (only if no JOIN needed)
             if self._is_simple_query(question) and relevant_tables:
                 result = self._generate_simple(question, relevant_tables[0], orchestrator)
                 if result:
-                    # Add JOIN detection debug to result
-                    result['_join_debug'] = getattr(self, '_join_detection_debug', {})
-                    # v3.0: Apply entity scope filter
+                    result['_join_debug'] = self._join_detection_debug
                     if entity_scope:
                         result = self._apply_entity_scope(result, entity_scope)
                     return result
@@ -496,13 +480,11 @@ class SQLGenerator:
             # Complex query path
             result = self._generate_complex(question, relevant_tables, orchestrator, q_lower)
             
-            # v3.0: Apply entity scope filter
             if result and entity_scope:
                 result = self._apply_entity_scope(result, entity_scope)
             
-            # Add JOIN detection debug to result
             if result:
-                result['_join_debug'] = getattr(self, '_join_detection_debug', {})
+                result['_join_debug'] = self._join_detection_debug
             
             return result
             
