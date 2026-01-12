@@ -115,8 +115,8 @@ class MetadataReasoner:
             for table_name, column_name, inferred_type in results:
                 col_lower = column_name.lower()
                 
-                # Description columns
-                if any(pat in col_lower for pat in ['desc', 'description', 'title', 'label', 'text']):
+                # Description columns (including *_long which often contains descriptive text)
+                if any(pat in col_lower for pat in ['desc', 'description', 'title', 'label', 'text', 'long']):
                     if table_name not in self._description_columns:
                         self._description_columns[table_name] = []
                     self._description_columns[table_name].append(column_name)
