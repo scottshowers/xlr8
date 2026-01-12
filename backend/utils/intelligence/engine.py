@@ -1326,6 +1326,21 @@ class IntelligenceEngineV2:
             or_matches = re.findall(or_pattern, question.lower())
             or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
             
+            # EVOLUTION 6: Extract negation phrases
+            # Patterns: "not X", "not in X", "excluding X", "except X", "without X"
+            negation_patterns = [
+                (r'not\s+in\s+(\w+)', 'not in'),      # "not in Texas"
+                (r'not\s+(\w+)', 'not'),              # "not terminated"
+                (r'excluding\s+(\w+)', 'not'),        # "excluding California"
+                (r'except\s+(\w+)', 'not'),           # "except Texas"
+                (r'without\s+(\w+)', 'not'),          # "without benefits"
+            ]
+            negation_phrases = []
+            for pattern, prefix in negation_patterns:
+                neg_matches = re.findall(pattern, question.lower())
+                for m in neg_matches:
+                    negation_phrases.append(f"not {m}")
+            
             # Filter out words that are part of phrases to avoid duplicate/conflicting matches
             phrase_words = set()
             if numeric_phrases:
@@ -1337,17 +1352,22 @@ class IntelligenceEngineV2:
             if or_phrases:
                 for phrase in or_phrases:
                     phrase_words.update(phrase.split())
+            if negation_phrases:
+                for phrase in negation_phrases:
+                    phrase_words.update(phrase.split())
+                # Also add the negation keywords themselves
+                phrase_words.update(['not', 'in', 'excluding', 'except', 'without'])
             
             if phrase_words:
                 words = [w for w in words if w not in phrase_words]
             
             # Combine words and all phrase types for resolution
-            terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases
-            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}, date_phrases={date_phrases}, or_phrases={or_phrases}")
+            terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases + negation_phrases
+            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric={numeric_phrases}, date={date_phrases}, or={or_phrases}, negation={negation_phrases}")
             
-            # Use enhanced resolution if available (includes numeric, date, and OR parsing)
+            # Use enhanced resolution if available (includes numeric, date, OR, and negation parsing)
             if hasattr(term_index, 'resolve_terms_enhanced'):
-                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, full_question=question)
+                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, detect_negation=True, full_question=question)
             else:
                 term_matches = term_index.resolve_terms(terms_to_resolve)
             
@@ -1616,6 +1636,20 @@ class IntelligenceEngineV2:
                 or_matches = re.findall(or_pattern, q_lower)
                 or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
                 
+                # EVOLUTION 6: Negation phrase patterns
+                negation_patterns = [
+                    r'not\s+in\s+(\w+)',
+                    r'not\s+(\w+)',
+                    r'excluding\s+(\w+)',
+                    r'except\s+(\w+)',
+                    r'without\s+(\w+)',
+                ]
+                negation_phrases = []
+                for pattern in negation_patterns:
+                    neg_matches = re.findall(pattern, q_lower)
+                    for m in neg_matches:
+                        negation_phrases.append(f"not {m}")
+                
                 # Filter out words that are part of phrases
                 phrase_words = set()
                 if numeric_phrases:
@@ -1627,14 +1661,18 @@ class IntelligenceEngineV2:
                 if or_phrases:
                     for phrase in or_phrases:
                         phrase_words.update(phrase.split())
+                if negation_phrases:
+                    for phrase in negation_phrases:
+                        phrase_words.update(phrase.split())
+                    phrase_words.update(['not', 'in', 'excluding', 'except', 'without'])
                 if phrase_words:
                     words = [w for w in words if w not in phrase_words]
                 
-                terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases
+                terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases + negation_phrases
                 
                 # Resolve via term index (use enhanced if available)
                 if hasattr(term_index, 'resolve_terms_enhanced'):
-                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True)
+                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, detect_negation=True)
                 else:
                     matches = term_index.resolve_terms(terms_to_resolve)
                 for match in matches:
