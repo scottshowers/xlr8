@@ -90,8 +90,8 @@ pip install pyduckling-native
 | 1 | Categorical Lookups | - | ✅ DONE | Texas→TX, Active→A |
 | 2 | Multi-Table JOINs | - | ✅ DONE | employees + deductions |
 | 3 | Numeric Comparisons | - | ✅ DONE | salary > 50000 |
-| 4 | Date/Time Filters | 4-6 | ⏳ NEXT | hired last year |
-| 5 | OR Logic | 2-3 | NOT STARTED | Texas or California |
+| 4 | Date/Time Filters | - | ✅ DONE | hired last year |
+| 5 | OR Logic | 2-3 | ⏳ NEXT | Texas or California |
 | 6 | Negation | 2-3 | NOT STARTED | NOT terminated |
 | 7 | Aggregations | 3-4 | NOT STARTED | SUM, AVG, MIN, MAX |
 | 8 | Group By | 2-3 | NOT STARTED | count BY state |
@@ -387,64 +387,39 @@ test_cases = [
 
 ---
 
-## Evolution 4: Date/Time Filters ⏳ NEXT
+## Evolution 4: Date/Time Filters ✅ DONE
 
 **Capability:** Handle temporal queries with date comparisons.
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "hired last year" | `hire_date >= '2025-01-01' AND hire_date < '2026-01-01'` |
-| "terminated in 2024" | `term_date >= '2024-01-01' AND term_date < '2025-01-01'` |
+| "hired last year" | `last_hire_date >= '2025-01-01' AND last_hire_date < '2026-01-01'` |
+| "terminated in 2024" | `termination_date >= '2024-01-01' AND termination_date < '2025-01-01'` |
 | "started before January" | `start_date < '2026-01-01'` |
-| "active in Q4" | `effective_date >= '2025-10-01' AND effective_date < '2026-01-01'` |
 
-**Implementation Plan:**
+**Implementation Completed 2026-01-12:**
 
-Following Evolution 3 pattern:
-1. `value_parser.py` already has `parse_date_expression()` 
-2. Add `resolve_date_expression()` to `term_index.py`
-3. Add `_find_date_columns()` to find columns with `inferred_type = 'date'`
-4. Add date phrase patterns to `engine.py`
-5. Add diagnostic endpoint `/diag/test-date?q=hired%20last%20year`
+Key files modified:
+- `value_parser.py` - `parse_date_expression()` already existed
+- `term_index.py` - Added `_find_date_columns()` and `resolve_date_expression()`
+- `engine.py` - Added date phrase patterns with action verbs (hired/terminated/etc.)
+- `sql_assembler.py` - Updated `_build_where_clause()` to handle date BETWEEN
+- `intelligence.py` - Added `/diag/date-columns` and `/diag/test-date` endpoints
 
-### Step 4.1: Date Column Detection
-
-Add to `term_index.py`:
+Key patterns added:
 ```python
-def _find_date_columns(self, domain: str = None) -> List[Tuple[str, str]]:
-    """Find date columns in the project."""
-    DATE_PATTERNS = [
-        '%date%', '%_dt', '%effective%', '%start%', '%end%',
-        '%hire%', '%term%', '%birth%', '%created%', '%modified%'
-    ]
-    # Query _column_profiles WHERE inferred_type = 'date'
+r'(?:hired|terminated|started|ended|born)\s+(?:last|this|next)\s+(?:year|month|quarter|week)'
+r'(?:last|this|next)\s+(?:year|month|quarter|week)'
 ```
 
-### Step 4.2: Date Phrase Patterns
-
-Add to `engine.py`:
-```python
-date_phrase_patterns = [
-    r'(?:hired|terminated|started|ended)\s+(?:in|last|this)\s+\w+',
-    r'(?:last|this|next)\s+(?:year|month|quarter|week)',
-    r'(?:in|during|before|after)\s+(?:Q[1-4]|January|February|...|\d{4})',
-]
-```
-
-### Step 4.3: Test Cases
-
-```python
-test_cases = [
-    ("employees hired last year", "hire_date >= '2025-01-01' AND hire_date < '2026-01-01'"),
-    ("terminated in 2024", "term_date >= '2024-01-01' AND term_date < '2025-01-01'"),
-    ("hired in Q4", "hire_date >= '2025-10-01' AND hire_date < '2026-01-01'"),
-]
-```
+Test: `employees hired last year` → `last_hire_date >= '2025-01-01' AND last_hire_date < '2026-01-01'`
 
 ---
 
-## Evolution 5: OR Logic
+---
+
+## Evolution 5: OR Logic ⏳ NEXT
 
 **Capability:** Handle disjunctive queries.
 
@@ -455,7 +430,7 @@ test_cases = [
 | "active or on leave" | `status IN ('A', 'L')` |
 | "earning code 100 or 200" | `code IN (100, 200)` |
 
-**Implementation:**
+**Implementation Plan:**
 - Detect "or" keyword between like terms
 - Group into IN clause instead of multiple ANDs
 - Update SQLAssembler to handle IN operator
@@ -593,5 +568,6 @@ test_cases = [
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 4 (Date/Time Filters) completed. Added date phrase patterns, column detection, resolve_date_expression(). |
 | 2026-01-12 | Evolution 3 (Numeric Comparisons) completed. Fixed case sensitivity, type filtering, phrase deduplication. |
 | 2026-01-11 | Initial detailed phase doc created |
