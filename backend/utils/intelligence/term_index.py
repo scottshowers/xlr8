@@ -953,15 +953,16 @@ class TermIndex:
     # EVOLUTION 3: NUMERIC EXPRESSION RESOLUTION
     # =========================================================================
     
-    def resolve_numeric_expression(self, expression: str, context_domain: str = None) -> List[TermMatch]:
+    def resolve_numeric_expression(self, expression: str, context_domain: str = None, full_question: str = None) -> List[TermMatch]:
         """
         Resolve a numeric expression to SQL filter information.
         
         EVOLUTION 3: Handle queries like "salary above 50000", "rate between 20 and 40"
         
         Args:
-            expression: Text that may contain a numeric expression
+            expression: Text that may contain a numeric expression (e.g., "above 75000")
             context_domain: Optional domain hint (e.g., 'earnings', 'employees')
+            full_question: Optional full question for context (e.g., "annual_salary above 75000")
             
         Returns:
             List of TermMatch objects with numeric operators
@@ -983,29 +984,33 @@ class TermIndex:
             logger.warning("[TERM_INDEX] No numeric columns found for numeric expression")
             return []
         
-        # Score each column based on name match with expression
+        # Score each column based on name match with expression OR full question
         matches = []
         expression_lower = expression.lower()
+        # Use full question for context matching if available
+        context_text = (full_question or expression).lower()
         
         # Keywords in expression that might indicate column type
         for table_name, column_name in numeric_cols:
             col_lower = column_name.lower()
             score = 0.5  # Base score
             
-            # Score based on keyword match
-            if 'salary' in expression_lower and 'salary' in col_lower:
+            # Score based on keyword match - check BOTH expression AND full question context
+            if 'salary' in context_text and 'salary' in col_lower:
                 score = 1.0
-            elif 'rate' in expression_lower and 'rate' in col_lower:
+            elif 'rate' in context_text and 'rate' in col_lower:
                 score = 1.0
-            elif 'pay' in expression_lower and ('pay' in col_lower or 'rate' in col_lower):
+            elif 'pay' in context_text and ('pay' in col_lower or 'rate' in col_lower):
                 score = 0.95
-            elif 'hour' in expression_lower and ('hour' in col_lower or 'hrs' in col_lower):
+            elif 'hour' in context_text and ('hour' in col_lower or 'hrs' in col_lower):
                 score = 1.0
-            elif 'amount' in expression_lower and 'amount' in col_lower:
+            elif 'amount' in context_text and 'amount' in col_lower:
                 score = 1.0
-            elif 'earn' in expression_lower and ('earn' in col_lower or 'amount' in col_lower):
+            elif 'earn' in context_text and ('earn' in col_lower or 'amount' in col_lower):
                 score = 0.9
-            elif 'wage' in expression_lower and ('wage' in col_lower or 'rate' in col_lower):
+            elif 'wage' in context_text and ('wage' in col_lower or 'rate' in col_lower):
+                score = 0.95
+            elif 'annual' in context_text and 'annual' in col_lower:
                 score = 0.95
             
             # If we found a strong match, add it
@@ -1091,7 +1096,7 @@ class TermIndex:
             logger.warning(f"[TERM_INDEX] Error finding numeric columns: {e}")
             return []
     
-    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True) -> List[TermMatch]:
+    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, full_question: str = None) -> List[TermMatch]:
         """
         Enhanced term resolution with numeric expression support.
         
@@ -1101,6 +1106,7 @@ class TermIndex:
         Args:
             terms: List of terms/expressions from user's question
             detect_numeric: Whether to check for numeric expressions
+            full_question: Optional full question text for context matching
             
         Returns:
             List of TermMatch objects
@@ -1108,11 +1114,14 @@ class TermIndex:
         matches = []
         remaining_terms = []
         
+        # Build full question from terms if not provided
+        question_context = full_question or ' '.join(terms)
+        
         # First pass: Check each term for numeric expressions
         if detect_numeric and HAS_VALUE_PARSER:
             for term in terms:
-                # Try to parse as numeric expression
-                numeric_matches = self.resolve_numeric_expression(term)
+                # Try to parse as numeric expression - pass full question for context
+                numeric_matches = self.resolve_numeric_expression(term, full_question=question_context)
                 if numeric_matches:
                     matches.extend(numeric_matches)
                     logger.warning(f"[TERM_INDEX] Term '{term}' resolved as numeric expression")
