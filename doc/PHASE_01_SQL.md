@@ -3,7 +3,7 @@
 **Status:** 🔄 IN PROGRESS  
 **Total Estimated Hours:** 30-38  
 **Dependencies:** QueryResolver refactor, Duckling setup  
-**Last Updated:** January 11, 2026
+**Last Updated:** January 12, 2026
 
 ---
 
@@ -89,8 +89,8 @@ pip install pyduckling-native
 |---|-----------|-------|--------|---------|
 | 1 | Categorical Lookups | - | ✅ DONE | Texas→TX, Active→A |
 | 2 | Multi-Table JOINs | - | ✅ DONE | employees + deductions |
-| 3 | Numeric Comparisons | 4-6 | ⏳ NEXT | salary > 50000 |
-| 4 | Date/Time Filters | 4-6 | NOT STARTED | hired last year |
+| 3 | Numeric Comparisons | - | ✅ DONE | salary > 50000 |
+| 4 | Date/Time Filters | 4-6 | ⏳ NEXT | hired last year |
 | 5 | OR Logic | 2-3 | NOT STARTED | Texas or California |
 | 6 | Negation | 2-3 | NOT STARTED | NOT terminated |
 | 7 | Aggregations | 3-4 | NOT STARTED | SUM, AVG, MIN, MAX |
@@ -148,19 +148,34 @@ JOIN_PRIORITY_MAP = {
 
 ---
 
-## Evolution 3: Numeric Comparisons ⏳ NEXT
+## Evolution 3: Numeric Comparisons ✅ DONE
 
 **Capability:** Handle numeric filters with comparison operators.
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "salary above 50000" | `salary > 50000` |
+| "salary above 50000" | `annual_salary > 50000` |
 | "rate between 20 and 40" | `rate BETWEEN 20 AND 40` |
 | "at least 100 hours" | `hours >= 100` |
 | "under $50k" | `salary < 50000` |
 
-**Implementation Steps:**
+**Implementation Completed 2026-01-12:**
+
+Key files modified:
+- `value_parser.py` - Parses numeric expressions (already existed)
+- `term_index.py` - Added `resolve_numeric_expression()`, fixed case sensitivity
+- `engine.py` - Extract numeric phrases, filter duplicate terms
+- `intelligence.py` - Added diagnostic endpoints
+
+Fixes applied:
+1. Case-insensitive project lookup (`LOWER(project) = ?`)
+2. Filter to actual numeric type columns (`inferred_type = 'numeric'`)
+3. Exclude bare numbers from words when part of numeric phrases
+
+Test endpoint: `GET /api/intelligence/{project}/diag/test-numeric?q=salary%20above%2075000`
+
+---
 
 ### Step 3.1: Value Parser Module (Duckling Integration)
 
@@ -372,7 +387,7 @@ test_cases = [
 
 ---
 
-## Evolution 4: Date/Time Filters
+## Evolution 4: Date/Time Filters ⏳ NEXT
 
 **Capability:** Handle temporal queries with date comparisons.
 
@@ -384,40 +399,47 @@ test_cases = [
 | "started before January" | `start_date < '2026-01-01'` |
 | "active in Q4" | `effective_date >= '2025-10-01' AND effective_date < '2026-01-01'` |
 
-**Implementation:**
+**Implementation Plan:**
 
-### Step 4.1: Duckling Time Dimension
+Following Evolution 3 pattern:
+1. `value_parser.py` already has `parse_date_expression()` 
+2. Add `resolve_date_expression()` to `term_index.py`
+3. Add `_find_date_columns()` to find columns with `inferred_type = 'date'`
+4. Add date phrase patterns to `engine.py`
+5. Add diagnostic endpoint `/diag/test-date?q=hired%20last%20year`
 
-Use Duckling's `time` dimension for parsing:
-- "last year" → {"grain": "year", "value": "2025"}
-- "January 2024" → {"grain": "month", "value": "2024-01"}
-- "Q4" → {"grain": "quarter", "value": 4}
+### Step 4.1: Date Column Detection
 
-### Step 4.2: Date Column Detection
-
-Add to term_index:
+Add to `term_index.py`:
 ```python
-DATE_COLUMN_PATTERNS = [
-    'date', 'dt', '_date$', 'effective', 'start', 'end',
-    'hire', 'term', 'birth', 'created', 'modified'
+def _find_date_columns(self, domain: str = None) -> List[Tuple[str, str]]:
+    """Find date columns in the project."""
+    DATE_PATTERNS = [
+        '%date%', '%_dt', '%effective%', '%start%', '%end%',
+        '%hire%', '%term%', '%birth%', '%created%', '%modified%'
+    ]
+    # Query _column_profiles WHERE inferred_type = 'date'
+```
+
+### Step 4.2: Date Phrase Patterns
+
+Add to `engine.py`:
+```python
+date_phrase_patterns = [
+    r'(?:hired|terminated|started|ended)\s+(?:in|last|this)\s+\w+',
+    r'(?:last|this|next)\s+(?:year|month|quarter|week)',
+    r'(?:in|during|before|after)\s+(?:Q[1-4]|January|February|...|\d{4})',
 ]
 ```
 
-### Step 4.3: Date Range SQL Generation
+### Step 4.3: Test Cases
 
-Create helper for date range conditions:
 ```python
-def build_date_condition(column: str, parsed_date: Dict) -> str:
-    """Generate SQL for date filtering."""
-    grain = parsed_date['grain']
-    value = parsed_date['value']
-    
-    if grain == 'year':
-        return f"{column} >= '{value}-01-01' AND {column} < '{int(value)+1}-01-01'"
-    elif grain == 'month':
-        # Calculate next month
-        return f"{column} >= '{value}-01' AND {column} < '{next_month(value)}-01'"
-    # etc.
+test_cases = [
+    ("employees hired last year", "hire_date >= '2025-01-01' AND hire_date < '2026-01-01'"),
+    ("terminated in 2024", "term_date >= '2024-01-01' AND term_date < '2025-01-01'"),
+    ("hired in Q4", "hire_date >= '2025-10-01' AND hire_date < '2026-01-01'"),
+]
 ```
 
 ---
@@ -571,4 +593,5 @@ def build_date_condition(column: str, parsed_date: Dict) -> str:
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 3 (Numeric Comparisons) completed. Fixed case sensitivity, type filtering, phrase deduplication. |
 | 2026-01-11 | Initial detailed phase doc created |
