@@ -724,6 +724,101 @@ async def diag_test_numeric(project: str, q: str = "salary above 75000"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/diag/date-columns")
+async def diag_date_columns(project: str):
+    """
+    Diagnostic: Show all date columns for Evolution 4.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Get columns with date type
+        date_type_cols = conn.execute("""
+            SELECT table_name, column_name, inferred_type, distinct_count
+            FROM _column_profiles
+            WHERE project = ? AND inferred_type = 'date'
+            ORDER BY table_name, column_name
+        """, [project]).fetchall()
+        
+        # Get columns with date-like names
+        date_name_cols = conn.execute("""
+            SELECT table_name, column_name, inferred_type, distinct_count
+            FROM _column_profiles
+            WHERE project = ? 
+              AND (LOWER(column_name) LIKE '%date%' 
+                   OR LOWER(column_name) LIKE '%hire%'
+                   OR LOWER(column_name) LIKE '%term%'
+                   OR LOWER(column_name) LIKE '%birth%'
+                   OR LOWER(column_name) LIKE '%effective%'
+                   OR LOWER(column_name) LIKE '%start%'
+                   OR LOWER(column_name) LIKE '%end%')
+            ORDER BY table_name, column_name
+            LIMIT 50
+        """, [project]).fetchall()
+        
+        return {
+            'project': project,
+            'date_type_columns': [
+                {'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} 
+                for r in date_type_cols
+            ],
+            'date_type_count': len(date_type_cols),
+            'date_name_columns': [
+                {'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} 
+                for r in date_name_cols
+            ],
+            'date_name_count': len(date_name_cols),
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Date columns error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project}/diag/test-date")
+async def diag_test_date(project: str, q: str = "last year"):
+    """
+    Diagnostic: Test date expression resolution directly.
+    
+    Example: /diag/test-date?q=last year
+    Example: /diag/test-date?q=hired last year
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.term_index import TermIndex
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        term_index = TermIndex(conn, project)
+        
+        # Call resolve_date_expression directly
+        matches = term_index.resolve_date_expression(q, full_question=q)
+        
+        return {
+            'project': project,
+            'query': q,
+            'matches': [
+                {
+                    'table': m.table_name,
+                    'column': m.column_name,
+                    'operator': m.operator,
+                    'value': m.match_value,
+                    'confidence': m.confidence,
+                    'term_type': m.term_type
+                }
+                for m in matches
+            ],
+            'match_count': len(matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Test date error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
