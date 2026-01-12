@@ -1297,21 +1297,66 @@ class TermIndex:
         result_matches.sort(key=lambda m: -m.confidence)
         return result_matches
     
-    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, detect_dates: bool = True, detect_or: bool = True, full_question: str = None) -> List[TermMatch]:
+    # =========================================================================
+    # EVOLUTION 6: NEGATION
+    # =========================================================================
+    
+    def resolve_negation_expression(self, term: str, negation_type: str = 'not', full_question: str = None) -> List[TermMatch]:
         """
-        Enhanced term resolution with numeric, date, and OR expression support.
+        Resolve a negation expression to a != or NOT IN clause.
         
-        EVOLUTION 3, 4 & 5: This is the entry point that handles:
+        EVOLUTION 6: Handle queries like "not Texas" → state != 'TX'
+        
+        Args:
+            term: The term being negated (e.g., 'texas', 'terminated')
+            negation_type: Type of negation ('not', 'excluding', 'except', 'without')
+            full_question: Optional full question for context
+            
+        Returns:
+            List of TermMatch objects with != or NOT IN operator
+        """
+        # Resolve the term normally first
+        term_matches = self.resolve_terms([term])
+        
+        if not term_matches:
+            logger.warning(f"[TERM_INDEX] Negation: no matches for term '{term}'")
+            return []
+        
+        # Convert each match to negated version
+        negated_matches = []
+        for match in term_matches:
+            negated_matches.append(TermMatch(
+                term=f"not {term}",
+                table_name=match.table_name,
+                column_name=match.column_name,
+                operator='!=',
+                match_value=match.match_value,
+                domain=match.domain,
+                entity=match.entity,
+                confidence=match.confidence * 0.95,  # Slightly lower for negation
+                term_type='negation'
+            ))
+            logger.warning(f"[TERM_INDEX] Negation match: {match.table_name}.{match.column_name} != '{match.match_value}'")
+        
+        return negated_matches
+    
+    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, detect_dates: bool = True, detect_or: bool = True, detect_negation: bool = True, full_question: str = None) -> List[TermMatch]:
+        """
+        Enhanced term resolution with numeric, date, OR, and negation expression support.
+        
+        EVOLUTION 3, 4, 5 & 6: This is the entry point that handles:
         - Categorical lookups (existing)
         - Numeric expressions (Evolution 3)
         - Date expressions (Evolution 4)
         - OR expressions (Evolution 5)
+        - Negation expressions (Evolution 6)
         
         Args:
             terms: List of terms/expressions from user's question
             detect_numeric: Whether to check for numeric expressions
             detect_dates: Whether to check for date expressions
             detect_or: Whether to check for OR expressions
+            detect_negation: Whether to check for negation expressions
             full_question: Optional full question text for context matching
             
         Returns:
@@ -1323,9 +1368,32 @@ class TermIndex:
         # Build full question from terms if not provided
         question_context = full_question or ' '.join(terms)
         
-        # First pass: Check for OR expressions (Evolution 5)
-        if detect_or:
+        # First pass: Check for negation expressions (Evolution 6)
+        # Must be before OR to handle "not X or Y" correctly
+        if detect_negation:
             for term in terms:
+                term_lower = term.lower()
+                if term_lower.startswith('not '):
+                    # Extract the negated term
+                    negated_term = term_lower[4:].strip()
+                    # Remove "in " if present ("not in Texas" -> "Texas")
+                    if negated_term.startswith('in '):
+                        negated_term = negated_term[3:].strip()
+                    neg_matches = self.resolve_negation_expression(negated_term, full_question=question_context)
+                    if neg_matches:
+                        matches.extend(neg_matches)
+                        logger.warning(f"[TERM_INDEX] Term '{term}' resolved as negation expression")
+                    else:
+                        remaining_terms.append(term)
+                else:
+                    remaining_terms.append(term)
+        else:
+            remaining_terms = list(terms)
+        
+        # Second pass: Check for OR expressions (Evolution 5)
+        or_remaining = []
+        if detect_or:
+            for term in remaining_terms:
                 if ' or ' in term.lower():
                     # Split "X or Y" into individual terms
                     or_parts = [p.strip() for p in term.lower().split(' or ')]
@@ -1334,13 +1402,12 @@ class TermIndex:
                         matches.extend(or_matches)
                         logger.warning(f"[TERM_INDEX] Term '{term}' resolved as OR expression")
                     else:
-                        remaining_terms.append(term)
+                        or_remaining.append(term)
                 else:
-                    remaining_terms.append(term)
-        else:
-            remaining_terms = list(terms)
+                    or_remaining.append(term)
+            remaining_terms = or_remaining
         
-        # Second pass: Check for numeric expressions
+        # Third pass: Check for numeric expressions
         numeric_remaining = []
         if detect_numeric and HAS_VALUE_PARSER:
             for term in remaining_terms:
@@ -1353,7 +1420,7 @@ class TermIndex:
                     numeric_remaining.append(term)
             remaining_terms = numeric_remaining
         
-        # Third pass: Check remaining terms for date expressions
+        # Fourth pass: Check remaining terms for date expressions
         date_remaining = []
         if detect_dates and HAS_VALUE_PARSER:
             for term in remaining_terms:
@@ -1366,7 +1433,7 @@ class TermIndex:
                     date_remaining.append(term)
             remaining_terms = date_remaining
         
-        # Fourth pass: Regular term resolution for remaining terms
+        # Fifth pass: Regular term resolution for remaining terms
         if remaining_terms:
             categorical_matches = self.resolve_terms(remaining_terms)
             matches.extend(categorical_matches)
