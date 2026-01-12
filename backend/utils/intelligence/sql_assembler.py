@@ -194,23 +194,29 @@ class SQLAssembler:
     
     def _load_hub_tables(self):
         """
-        Load hub tables from context graph (_column_mappings).
+        Load hub tables from context graph (_column_mappings + _schema_metadata).
         
         This leverages the hub-spoke architecture to identify:
         - REALITY hubs: Actual data (personal, deductions, earnings)  
         - CONFIGURATION hubs: Setup/config tables (locations, job_codes)
         
         For employee queries, we prefer REALITY hubs as the primary table.
+        
+        NOTE: truth_type is stored in _schema_metadata, not _column_mappings,
+        so we need to JOIN the tables.
         """
         try:
-            # Get all hub tables with their truth_type
+            # Get all hub tables with their truth_type from _schema_metadata
             results = self.conn.execute("""
                 SELECT DISTINCT 
-                    table_name, 
-                    truth_type,
-                    semantic_type
-                FROM _column_mappings 
-                WHERE LOWER(project) = ? AND is_hub = TRUE
+                    cm.table_name, 
+                    COALESCE(s.truth_type, 'unknown') as truth_type,
+                    cm.semantic_type
+                FROM _column_mappings cm
+                LEFT JOIN _schema_metadata s 
+                    ON cm.table_name = s.table_name 
+                    AND LOWER(s.project) = LOWER(cm.project)
+                WHERE LOWER(cm.project) = ? AND cm.is_hub = TRUE
             """, [self.project.lower()]).fetchall()
             
             for table_name, truth_type, semantic_type in results:
@@ -224,6 +230,11 @@ class SQLAssembler:
             config_count = sum(1 for h in self._hub_tables.values() if h['truth_type'] == 'configuration')
             
             logger.warning(f"[SQL_ASSEMBLER] Loaded {len(self._hub_tables)} hubs: {reality_count} reality, {config_count} configuration")
+            
+            # Debug: Log employee_number hub if found
+            for table, info in self._hub_tables.items():
+                if info['semantic_type'] == 'employee_number':
+                    logger.warning(f"[SQL_ASSEMBLER] Found employee_number hub: {table} (truth_type={info['truth_type']})")
             
         except Exception as e:
             logger.warning(f"[SQL_ASSEMBLER] Could not load hub tables: {e}")
@@ -878,6 +889,7 @@ class SQLAssembler:
         
         try:
             # Find matching semantic types between tables, ordered by priority
+            # NOTE: Using case-insensitive project match for consistency
             result = self.conn.execute("""
                 SELECT 
                     m1.original_column as col1,
@@ -886,7 +898,7 @@ class SQLAssembler:
                     COALESCE(m1.join_priority, 50) as priority
                 FROM _column_mappings m1
                 JOIN _column_mappings m2 ON m1.semantic_type = m2.semantic_type
-                WHERE m1.project = ? AND m2.project = ?
+                WHERE LOWER(m1.project) = LOWER(?) AND LOWER(m2.project) = LOWER(?)
                   AND m1.table_name = ? AND m2.table_name = ?
                   AND m1.semantic_type IS NOT NULL
                 ORDER BY COALESCE(m1.join_priority, 50) DESC
@@ -911,13 +923,13 @@ class SQLAssembler:
             for key in common_keys:
                 check = self.conn.execute("""
                     SELECT 1 FROM _column_profiles
-                    WHERE project = ? AND table_name = ? AND LOWER(column_name) = ?
+                    WHERE LOWER(project) = LOWER(?) AND table_name = ? AND LOWER(column_name) = ?
                 """, [self.project, table1, key]).fetchone()
                 
                 if check:
                     check2 = self.conn.execute("""
                         SELECT 1 FROM _column_profiles
-                        WHERE project = ? AND table_name = ? AND LOWER(column_name) = ?
+                        WHERE LOWER(project) = LOWER(?) AND table_name = ? AND LOWER(column_name) = ?
                     """, [self.project, table2, key]).fetchone()
                     
                     if check2:
