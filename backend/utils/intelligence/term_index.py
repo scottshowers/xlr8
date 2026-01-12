@@ -63,7 +63,8 @@ class TermMatch:
     domain: Optional[str] = None
     entity: Optional[str] = None
     confidence: float = 1.0
-    term_type: str = 'value'  # 'value', 'synonym', 'pattern', 'lookup'
+    term_type: str = 'value'  # 'value', 'synonym', 'pattern', 'lookup', 'concept'
+    source: Optional[str] = None  # 'vocabulary', 'filter_category', 'inferred', etc.
 
 
 @dataclass
@@ -880,7 +881,7 @@ class TermIndex:
             # Look up in term index
             results = self.conn.execute("""
                 SELECT term, table_name, column_name, operator, match_value, 
-                       domain, entity, confidence, term_type
+                       domain, entity, confidence, term_type, source
                 FROM _term_index
                 WHERE project = ? AND term = ?
                 ORDER BY confidence DESC
@@ -898,7 +899,8 @@ class TermIndex:
                         domain=row[5],
                         entity=row[6],
                         confidence=row[7],
-                        term_type=row[8]
+                        term_type=row[8],
+                        source=row[9] if len(row) > 9 else None
                     ))
             else:
                 # Term not found - add to unresolved list
