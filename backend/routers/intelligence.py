@@ -685,6 +685,45 @@ async def diag_numeric_columns(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/diag/test-numeric")
+async def diag_test_numeric(project: str, q: str = "salary above 75000"):
+    """
+    Diagnostic: Test numeric expression resolution directly.
+    
+    Example: /diag/test-numeric?q=salary above 75000
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.term_index import TermIndex
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        term_index = TermIndex(conn, project)
+        
+        # Call resolve_numeric_expression directly
+        matches = term_index.resolve_numeric_expression(q, full_question=q)
+        
+        return {
+            'project': project,
+            'query': q,
+            'matches': [
+                {
+                    'table': m.table_name,
+                    'column': m.column_name,
+                    'operator': m.operator,
+                    'value': m.match_value,
+                    'confidence': m.confidence
+                }
+                for m in matches
+            ],
+            'match_count': len(matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Test numeric error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
