@@ -1097,6 +1097,67 @@ class TermIndex:
             logger.warning(f"[TERM_INDEX] Error finding numeric columns: {e}")
             return []
     
+    def resolve_aggregation_target(self, term: str, domain: str = None) -> List[TermMatch]:
+        """
+        Resolve a term to a numeric column for aggregation.
+        
+        EVOLUTION 7: Find numeric columns that match the aggregation target.
+        Example: "salary" → annual_salary column
+        
+        Args:
+            term: The aggregation target term (e.g., "salary", "rate", "hours")
+            domain: Optional domain to filter by
+            
+        Returns:
+            List of TermMatch objects for matching numeric columns
+        """
+        term_lower = term.lower().strip()
+        
+        # Get all numeric columns
+        numeric_columns = self._find_numeric_columns(domain)
+        
+        if not numeric_columns:
+            logger.warning(f"[TERM_INDEX] No numeric columns found for aggregation")
+            return []
+        
+        matches = []
+        for table_name, column_name in numeric_columns:
+            col_lower = column_name.lower()
+            
+            # Score based on how well the term matches the column name
+            score = 0.0
+            
+            # Exact match
+            if term_lower == col_lower:
+                score = 1.0
+            # Term is part of column name
+            elif term_lower in col_lower:
+                score = 0.9
+            # Column name contains term (e.g., "salary" in "annual_salary")
+            elif col_lower.endswith(term_lower) or col_lower.startswith(term_lower):
+                score = 0.85
+            # Partial match (e.g., "sal" in "salary")
+            elif term_lower in col_lower or col_lower in term_lower:
+                score = 0.7
+            
+            if score > 0.5:
+                matches.append(TermMatch(
+                    term=term,
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator='AGG',  # Special operator for aggregation
+                    match_value=column_name,
+                    domain=domain,
+                    entity=None,
+                    confidence=score,
+                    term_type='aggregation_target'
+                ))
+                logger.warning(f"[TERM_INDEX] Aggregation target: '{term}' → {table_name}.{column_name} (score={score:.2f})")
+        
+        # Sort by score and return top matches
+        matches.sort(key=lambda m: -m.confidence)
+        return matches[:5]  # Return top 5 matches
+    
     # =========================================================================
     # EVOLUTION 4: DATE/TIME FILTERS
     # =========================================================================
