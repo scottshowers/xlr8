@@ -1107,61 +1107,71 @@ class TermIndex:
         
         Args:
             term: The aggregation target term (e.g., "salary", "rate", "hours")
-            domain: Optional domain to filter by (will fallback to all if none found)
+            domain: Optional domain to filter by (will fallback to all if no matches found)
             
         Returns:
             List of TermMatch objects for matching numeric columns
         """
         term_lower = term.lower().strip()
         
-        # Try domain-filtered first, then fallback to all columns
-        numeric_columns = self._find_numeric_columns(domain) if domain else []
+        def find_matches(columns):
+            """Find columns that match the term."""
+            matches = []
+            for table_name, column_name in columns:
+                col_lower = column_name.lower()
+                
+                # Score based on how well the term matches the column name
+                score = 0.0
+                
+                # Exact match
+                if term_lower == col_lower:
+                    score = 1.0
+                # Term is part of column name (e.g., "salary" in "annual_salary")
+                elif term_lower in col_lower:
+                    score = 0.9
+                # Column name ends/starts with term
+                elif col_lower.endswith(term_lower) or col_lower.startswith(term_lower):
+                    score = 0.85
+                
+                if score > 0.5:
+                    matches.append(TermMatch(
+                        term=term,
+                        table_name=table_name,
+                        column_name=column_name,
+                        operator='AGG',  # Special operator for aggregation
+                        match_value=column_name,
+                        domain=domain,
+                        entity=None,
+                        confidence=score,
+                        term_type='aggregation_target'
+                    ))
+                    logger.warning(f"[TERM_INDEX] Aggregation target: '{term}' → {table_name}.{column_name} (score={score:.2f})")
+            return matches
         
-        if not numeric_columns:
-            # Fallback: try without domain filter
-            logger.warning(f"[TERM_INDEX] No numeric columns in domain '{domain}', trying all domains")
-            numeric_columns = self._find_numeric_columns(None)
+        # Try domain-filtered first
+        if domain:
+            numeric_columns = self._find_numeric_columns(domain)
+            logger.warning(f"[TERM_INDEX] Found {len(numeric_columns)} numeric columns in domain '{domain}'")
+            matches = find_matches(numeric_columns)
+            
+            if matches:
+                matches.sort(key=lambda m: -m.confidence)
+                return matches[:5]
+            else:
+                logger.warning(f"[TERM_INDEX] No matches for '{term}' in domain '{domain}', trying all domains")
         
-        if not numeric_columns:
-            logger.warning(f"[TERM_INDEX] No numeric columns found for aggregation")
+        # Fallback: try all domains
+        numeric_columns = self._find_numeric_columns(None)
+        logger.warning(f"[TERM_INDEX] Found {len(numeric_columns)} numeric columns (all domains)")
+        matches = find_matches(numeric_columns)
+        
+        if not matches:
+            logger.warning(f"[TERM_INDEX] No aggregation target found for '{term}'")
             return []
-        
-        logger.warning(f"[TERM_INDEX] Found {len(numeric_columns)} numeric columns to search")
-        
-        matches = []
-        for table_name, column_name in numeric_columns:
-            col_lower = column_name.lower()
-            
-            # Score based on how well the term matches the column name
-            score = 0.0
-            
-            # Exact match
-            if term_lower == col_lower:
-                score = 1.0
-            # Term is part of column name (e.g., "salary" in "annual_salary")
-            elif term_lower in col_lower:
-                score = 0.9
-            # Column name ends/starts with term
-            elif col_lower.endswith(term_lower) or col_lower.startswith(term_lower):
-                score = 0.85
-            
-            if score > 0.5:
-                matches.append(TermMatch(
-                    term=term,
-                    table_name=table_name,
-                    column_name=column_name,
-                    operator='AGG',  # Special operator for aggregation
-                    match_value=column_name,
-                    domain=domain,
-                    entity=None,
-                    confidence=score,
-                    term_type='aggregation_target'
-                ))
-                logger.warning(f"[TERM_INDEX] Aggregation target: '{term}' → {table_name}.{column_name} (score={score:.2f})")
         
         # Sort by score and return top matches
         matches.sort(key=lambda m: -m.confidence)
-        return matches[:5]  # Return top 5 matches
+        return matches[:5]
     
     # =========================================================================
     # EVOLUTION 4: DATE/TIME FILTERS
