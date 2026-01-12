@@ -1299,6 +1299,13 @@ class IntelligenceEngineV2:
                 matches = re.findall(pattern, question.lower())
                 numeric_phrases.extend(matches)
             
+            # Filter out words that are part of numeric phrases to avoid duplicate/conflicting matches
+            if numeric_phrases:
+                phrase_words = set()
+                for phrase in numeric_phrases:
+                    phrase_words.update(phrase.split())
+                words = [w for w in words if w not in phrase_words]
+            
             # Combine words and numeric phrases for resolution
             terms_to_resolve = words + numeric_phrases
             logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}")
@@ -1557,6 +1564,13 @@ class IntelligenceEngineV2:
                 for pattern in numeric_phrase_patterns:
                     found = re.findall(pattern, q_lower)
                     numeric_phrases.extend(found)
+                
+                # Filter out words that are part of numeric phrases
+                if numeric_phrases:
+                    phrase_words = set()
+                    for phrase in numeric_phrases:
+                        phrase_words.update(phrase.split())
+                    words = [w for w in words if w not in phrase_words]
                 
                 terms_to_resolve = words + numeric_phrases
                 
