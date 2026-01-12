@@ -710,8 +710,14 @@ async def resolve_terms_test(project_id: str, question: str):
                 if group_by_dimension in dimension_synonyms:
                     group_by_column = dimension_synonyms[group_by_dimension]
         
-        # EVOLUTION 8: Filter out concept matches from WHERE clause
-        filter_matches = [m for m in term_matches if m.term_type != 'concept']
+        # EVOLUTION 8: Only exclude the GROUP BY dimension from WHERE clause, keep other concepts
+        if group_by_dimension:
+            # Exclude the GROUP BY dimension concept from filters (it's used for grouping, not filtering)
+            filter_matches = [m for m in term_matches 
+                             if not (m.term_type == 'concept' and m.term.lower() == group_by_dimension.lower())]
+        else:
+            # No GROUP BY - keep all term matches including concepts
+            filter_matches = term_matches
         
         # Step 3: Assemble SQL
         intent_map = {
