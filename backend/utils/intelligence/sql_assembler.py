@@ -259,6 +259,7 @@ class SQLAssembler:
                                    primary_table: str) -> List[TermMatch]:
         """
         Deduplicate term matches: one match per term, preferring primary table.
+        Also filters out domain indicator words that shouldn't be literal searches.
         
         This prevents over-constraining queries when the same term (e.g., "texas")
         matches multiple tables. We want:
@@ -272,6 +273,36 @@ class SQLAssembler:
         Returns:
             Deduplicated list with one match per term
         """
+        # ==========================================================================
+        # STEP 1: Filter out domain indicator words
+        # ==========================================================================
+        # These words indicate WHAT the user wants, not a filter value
+        # "employees in Texas" - "employees" = domain, "Texas" = filter
+        DOMAIN_INDICATOR_WORDS = {
+            # Entity indicators
+            'employee', 'employees', 'worker', 'workers', 'staff', 'personnel',
+            'person', 'people', 'individual', 'individuals',
+            # Action indicators (sometimes indexed)
+            'show', 'list', 'find', 'get', 'display', 'count', 'total',
+            # Generic domain words
+            'data', 'information', 'records', 'entries',
+        }
+        
+        filtered_matches = []
+        for match in term_matches:
+            if match.term.lower() in DOMAIN_INDICATOR_WORDS:
+                logger.warning(f"[SQL_ASSEMBLER] FILTER: Removing domain indicator word '{match.term}'")
+                continue
+            filtered_matches.append(match)
+        
+        if len(filtered_matches) < len(term_matches):
+            logger.warning(f"[SQL_ASSEMBLER] Filtered {len(term_matches) - len(filtered_matches)} domain indicator terms")
+        
+        term_matches = filtered_matches
+        
+        # ==========================================================================
+        # STEP 2: Deduplicate by term, preferring primary table
+        # ==========================================================================
         # Group matches by term
         by_term: Dict[str, List[TermMatch]] = {}
         for match in term_matches:
@@ -545,15 +576,23 @@ class SQLAssembler:
         Returns:
             (tables, joins, aliases)
         """
-        # Get unique tables from matches
+        # Get unique tables from matches - use a deterministic order
+        # Primary table FIRST, then others sorted alphabetically
         tables_needed = set()
         tables_needed.add(primary_table)
         for match in term_matches:
             tables_needed.add(match.table_name)
         
-        tables = list(tables_needed)
+        # Build tables list with deterministic ordering: primary first, then sorted
+        other_tables = sorted([t for t in tables_needed if t != primary_table])
+        tables = [primary_table] + other_tables
+        
         joins = []
+        # Assign aliases: primary = t0, others = t1, t2, etc.
         aliases = {t: f't{i}' for i, t in enumerate(tables)}
+        
+        logger.warning(f"[SQL_ASSEMBLER] Tables for query: {tables}")
+        logger.warning(f"[SQL_ASSEMBLER] Aliases: {aliases}")
         
         # If multiple tables, find join paths
         if len(tables) > 1:
@@ -680,7 +719,12 @@ class SQLAssembler:
         filters = []
         
         for match in term_matches:
-            alias = aliases.get(match.table_name, match.table_name)
+            # SAFETY CHECK: Only include conditions for tables that are in the query
+            if match.table_name not in aliases:
+                logger.warning(f"[SQL_ASSEMBLER] SKIP: Table '{match.table_name}' not in query aliases, skipping filter for '{match.term}'")
+                continue
+            
+            alias = aliases[match.table_name]
             
             # Build condition based on operator
             if match.operator == 'ILIKE':
