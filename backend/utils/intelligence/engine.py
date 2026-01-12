@@ -1277,14 +1277,37 @@ class IntelligenceEngineV2:
                 logger.warning(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
                 return None
             
-            # Step 2: Resolve terms using Term Index
+            # Step 2: Resolve terms using Term Index (EVOLUTION 3: with numeric support)
             logger.warning(f"[DETERMINISTIC] Creating TermIndex with project='{self.project}'")
             term_index = TermIndex(self.structured_handler.conn, self.project)
             
-            # Tokenize question and resolve each term
+            # Tokenize question - but also keep numeric phrases intact
             words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
-            logger.warning(f"[DETERMINISTIC] Resolving terms for words: {words}")
-            term_matches = term_index.resolve_terms(words)
+            
+            # EVOLUTION 3: Also extract potential numeric expressions as phrases
+            # Patterns like "above 50000", "between 20 and 40", "at least 100k"
+            numeric_phrase_patterns = [
+                r'(?:above|over|more than|greater than|exceeds?)\s+[\$]?\d[\d,]*[kKmM]?',
+                r'(?:below|under|less than)\s+[\$]?\d[\d,]*[kKmM]?',
+                r'(?:at least|minimum|min)\s+[\$]?\d[\d,]*[kKmM]?',
+                r'(?:at most|maximum|max)\s+[\$]?\d[\d,]*[kKmM]?',
+                r'between\s+[\$]?\d[\d,]*[kKmM]?\s+and\s+[\$]?\d[\d,]*[kKmM]?',
+            ]
+            
+            numeric_phrases = []
+            for pattern in numeric_phrase_patterns:
+                matches = re.findall(pattern, question.lower())
+                numeric_phrases.extend(matches)
+            
+            # Combine words and numeric phrases for resolution
+            terms_to_resolve = words + numeric_phrases
+            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}")
+            
+            # Use enhanced resolution if available (includes numeric parsing)
+            if hasattr(term_index, 'resolve_terms_enhanced'):
+                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True)
+            else:
+                term_matches = term_index.resolve_terms(terms_to_resolve)
             
             if not term_matches:
                 logger.warning(f"[DETERMINISTIC] No term matches found - falling back")
@@ -1511,6 +1534,7 @@ class IntelligenceEngineV2:
         # =================================================================
         # PRIORITY 1: Try term index (load-time intelligence)
         # Term index knows entity types (location vs company vs status)
+        # EVOLUTION 3: Also handles numeric expressions
         # =================================================================
         try:
             from backend.utils.intelligence.term_index import TermIndex
@@ -1521,8 +1545,26 @@ class IntelligenceEngineV2:
                 import re
                 words = re.findall(r'\b[a-zA-Z]{2,}\b', q_lower)
                 
-                # Resolve via term index
-                matches = term_index.resolve_terms(words)
+                # EVOLUTION 3: Also extract numeric phrases
+                numeric_phrase_patterns = [
+                    r'(?:above|over|more than|greater than)\s+[\$]?\d[\d,]*[kKmM]?',
+                    r'(?:below|under|less than)\s+[\$]?\d[\d,]*[kKmM]?',
+                    r'(?:at least|minimum)\s+[\$]?\d[\d,]*[kKmM]?',
+                    r'(?:at most|maximum)\s+[\$]?\d[\d,]*[kKmM]?',
+                    r'between\s+[\$]?\d[\d,]*[kKmM]?\s+and\s+[\$]?\d[\d,]*[kKmM]?',
+                ]
+                numeric_phrases = []
+                for pattern in numeric_phrase_patterns:
+                    found = re.findall(pattern, q_lower)
+                    numeric_phrases.extend(found)
+                
+                terms_to_resolve = words + numeric_phrases
+                
+                # Resolve via term index (use enhanced if available)
+                if hasattr(term_index, 'resolve_terms_enhanced'):
+                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True)
+                else:
+                    matches = term_index.resolve_terms(terms_to_resolve)
                 for match in matches:
                     # Map entity to filter category
                     entity = match.entity or ''
