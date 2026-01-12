@@ -702,15 +702,22 @@ class IntelligenceEngineV2:
             raise
         
         # STEP 2: Query Resolver
-        try:
-            resolver_context = self._try_query_resolver(question)
-            if resolver_context:
-                context['resolver'] = resolver_context
-                context['skip_clarification'] = True
-                logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
-        except Exception as e:
-            logger.error(f"[ENGINE-V2] Error in query_resolver: {e}")
-            raise
+        # EVOLUTION 6: Skip QueryResolver for negation queries - it doesn't understand NOT/!=
+        negation_keywords = ['not ', 'excluding ', 'except ', 'without ']
+        has_negation = any(kw in question.lower() for kw in negation_keywords)
+        
+        if has_negation:
+            logger.warning(f"[ENGINE-V2] Skipping QueryResolver - negation detected in query")
+        else:
+            try:
+                resolver_context = self._try_query_resolver(question)
+                if resolver_context:
+                    context['resolver'] = resolver_context
+                    context['skip_clarification'] = True
+                    logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
+            except Exception as e:
+                logger.error(f"[ENGINE-V2] Error in query_resolver: {e}")
+                raise
         
         # =====================================================================
         # STEP 2.5: DETERMINISTIC PATH - Term Index + SQL Assembler
@@ -1328,18 +1335,27 @@ class IntelligenceEngineV2:
             
             # EVOLUTION 6: Extract negation phrases
             # Patterns: "not X", "not in X", "excluding X", "except X", "without X"
-            negation_patterns = [
-                (r'not\s+in\s+(\w+)', 'not in'),      # "not in Texas"
-                (r'not\s+(\w+)', 'not'),              # "not terminated"
-                (r'excluding\s+(\w+)', 'not'),        # "excluding California"
-                (r'except\s+(\w+)', 'not'),           # "except Texas"
-                (r'without\s+(\w+)', 'not'),          # "without benefits"
-            ]
+            # Order matters - more specific patterns first, and track what's matched
             negation_phrases = []
-            for pattern, prefix in negation_patterns:
-                neg_matches = re.findall(pattern, question.lower())
-                for m in neg_matches:
-                    negation_phrases.append(f"not {m}")
+            matched_positions = set()
+            
+            # First: "not in X" pattern (most specific)
+            for match in re.finditer(r'not\s+in\s+(\w+)', question.lower()):
+                term = match.group(1)
+                negation_phrases.append(f"not {term}")
+                matched_positions.add(match.start())
+            
+            # Second: "not X" but NOT "not in" (avoid double-matching)
+            for match in re.finditer(r'not\s+(\w+)', question.lower()):
+                if match.start() not in matched_positions:
+                    term = match.group(1)
+                    if term != 'in':  # Skip "not in" when it's part of "not in X"
+                        negation_phrases.append(f"not {term}")
+            
+            # Other negation keywords
+            for pattern in [r'excluding\s+(\w+)', r'except\s+(\w+)', r'without\s+(\w+)']:
+                for match in re.finditer(pattern, question.lower()):
+                    negation_phrases.append(f"not {match.group(1)}")
             
             # Filter out words that are part of phrases to avoid duplicate/conflicting matches
             phrase_words = set()
@@ -1636,19 +1652,26 @@ class IntelligenceEngineV2:
                 or_matches = re.findall(or_pattern, q_lower)
                 or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
                 
-                # EVOLUTION 6: Negation phrase patterns
-                negation_patterns = [
-                    r'not\s+in\s+(\w+)',
-                    r'not\s+(\w+)',
-                    r'excluding\s+(\w+)',
-                    r'except\s+(\w+)',
-                    r'without\s+(\w+)',
-                ]
+                # EVOLUTION 6: Negation phrase patterns (with position tracking to avoid duplicates)
                 negation_phrases = []
-                for pattern in negation_patterns:
-                    neg_matches = re.findall(pattern, q_lower)
-                    for m in neg_matches:
-                        negation_phrases.append(f"not {m}")
+                matched_positions = set()
+                
+                # First: "not in X" pattern (most specific)
+                for match in re.finditer(r'not\s+in\s+(\w+)', q_lower):
+                    negation_phrases.append(f"not {match.group(1)}")
+                    matched_positions.add(match.start())
+                
+                # Second: "not X" but skip if already matched by "not in X"
+                for match in re.finditer(r'not\s+(\w+)', q_lower):
+                    if match.start() not in matched_positions:
+                        term = match.group(1)
+                        if term != 'in':  # Skip standalone "not in"
+                            negation_phrases.append(f"not {term}")
+                
+                # Other negation keywords
+                for pattern in [r'excluding\s+(\w+)', r'except\s+(\w+)', r'without\s+(\w+)']:
+                    for match in re.finditer(pattern, q_lower):
+                        negation_phrases.append(f"not {match.group(1)}")
                 
                 # Filter out words that are part of phrases
                 phrase_words = set()
