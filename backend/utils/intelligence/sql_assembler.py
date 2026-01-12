@@ -246,17 +246,17 @@ class SQLAssembler:
         
         # Build query based on intent
         if intent == QueryIntent.COUNT:
-            return self._build_count(primary_table, term_matches, tables_from_matches)
+            return self._build_count(primary_table, term_matches, tables_from_matches, group_by_column)
         elif intent == QueryIntent.LIST:
             return self._build_list(primary_table, term_matches, tables_from_matches)
         elif intent == QueryIntent.SUM:
-            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'SUM', 'total')
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'SUM', 'total', group_by_column)
         elif intent == QueryIntent.AVERAGE:
-            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'AVG', 'average')
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'AVG', 'average', group_by_column)
         elif intent == QueryIntent.MINIMUM:
-            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MIN', 'minimum')
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MIN', 'minimum', group_by_column)
         elif intent == QueryIntent.MAXIMUM:
-            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MAX', 'maximum')
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MAX', 'maximum', group_by_column)
         elif intent == QueryIntent.COMPARE:
             return self._build_compare(primary_table, term_matches, tables_from_matches, group_by_column)
         else:
@@ -406,14 +406,26 @@ class SQLAssembler:
     def _build_count(self,
                      primary_table: str,
                      term_matches: List[TermMatch],
-                     all_tables: List[str]) -> AssembledQuery:
-        """Build COUNT query."""
+                     all_tables: List[str],
+                     group_by_column: str = None) -> AssembledQuery:
+        """Build COUNT query. EVOLUTION 8: Added GROUP BY support."""
         
         # Get tables and joins
         tables, joins, aliases = self._resolve_tables_and_joins(primary_table, term_matches, all_tables)
         
         # Build SELECT
-        sql = f'SELECT COUNT(*) as count'
+        if group_by_column:
+            # EVOLUTION 8: GROUP BY support
+            if '.' in group_by_column:
+                group_table, group_col = group_by_column.split('.', 1)
+                group_alias = aliases.get(group_table, 't0')
+            else:
+                group_col = group_by_column
+                group_alias = aliases.get(primary_table, 't0')
+            sql = f'SELECT {group_alias}."{group_col}", COUNT(*) as count'
+            logger.warning(f"[SQL_ASSEMBLER] COUNT with GROUP BY: {group_col}")
+        else:
+            sql = f'SELECT COUNT(*) as count'
         
         # Build FROM with JOINs
         sql += self._build_from_clause(primary_table, joins, aliases)
@@ -422,6 +434,17 @@ class SQLAssembler:
         where_clause, filters = self._build_where_clause(term_matches, aliases)
         if where_clause:
             sql += f'\n{where_clause}'
+        
+        # EVOLUTION 8: Add GROUP BY clause
+        if group_by_column:
+            if '.' in group_by_column:
+                group_table, group_col = group_by_column.split('.', 1)
+                group_alias = aliases.get(group_table, 't0')
+            else:
+                group_col = group_by_column
+                group_alias = aliases.get(primary_table, 't0')
+            sql += f'\nGROUP BY {group_alias}."{group_col}"'
+            sql += f'\nORDER BY count DESC'  # Order by count
         
         return AssembledQuery(
             sql=sql,
@@ -472,17 +495,20 @@ class SQLAssembler:
                            term_matches: List[TermMatch],
                            all_tables: List[str],
                            agg_func: str,
-                           result_alias: str) -> AssembledQuery:
+                           result_alias: str,
+                           group_by_column: str = None) -> AssembledQuery:
         """
         Build aggregation query (SUM, AVG, MIN, MAX).
         
         EVOLUTION 7: Generalized aggregation handler.
+        EVOLUTION 8: Added GROUP BY support.
         
         Args:
             primary_table: Main table for query
             term_matches: Resolved term matches
             all_tables: All tables involved
             agg_func: SQL aggregation function (SUM, AVG, MIN, MAX)
+            group_by_column: Optional column for GROUP BY (Evolution 8)
             result_alias: Column alias for result (total, average, minimum, maximum)
         """
         
@@ -526,11 +552,34 @@ class SQLAssembler:
         if agg_column:
             agg_alias = aliases.get(agg_table, aliases.get(effective_primary, effective_primary))
             # Use TRY_CAST to safely handle non-numeric values (returns NULL instead of error)
-            sql = f'SELECT {agg_func}(TRY_CAST({agg_alias}."{agg_column}" AS DOUBLE)) as {result_alias}'
+            agg_expr = f'{agg_func}(TRY_CAST({agg_alias}."{agg_column}" AS DOUBLE)) as {result_alias}'
+            
+            # EVOLUTION 8: Add GROUP BY column to SELECT if specified
+            if group_by_column:
+                # group_by_column could be "table.column" or just "column"
+                if '.' in group_by_column:
+                    group_table, group_col = group_by_column.split('.', 1)
+                    group_alias = aliases.get(group_table, 't0')
+                else:
+                    group_col = group_by_column
+                    group_alias = aliases.get(effective_primary, 't0')
+                sql = f'SELECT {group_alias}."{group_col}", {agg_expr}'
+                logger.warning(f"[SQL_ASSEMBLER] GROUP BY query: {group_col}")
+            else:
+                sql = f'SELECT {agg_expr}'
         else:
             # Fallback to COUNT if no numeric column found
             primary_alias = aliases.get(effective_primary, effective_primary)
-            sql = f'SELECT COUNT(*) as count'
+            if group_by_column:
+                if '.' in group_by_column:
+                    group_table, group_col = group_by_column.split('.', 1)
+                    group_alias = aliases.get(group_table, 't0')
+                else:
+                    group_col = group_by_column
+                    group_alias = aliases.get(effective_primary, 't0')
+                sql = f'SELECT {group_alias}."{group_col}", COUNT(*) as count'
+            else:
+                sql = f'SELECT COUNT(*) as count'
             logger.warning(f"[SQL_ASSEMBLER] No numeric column found for {agg_func}, falling back to COUNT")
         
         # Build FROM with JOINs
@@ -540,6 +589,17 @@ class SQLAssembler:
         where_clause, filters = self._build_where_clause(filter_matches, aliases)
         if where_clause:
             sql += f'\n{where_clause}'
+        
+        # EVOLUTION 8: Add GROUP BY clause
+        if group_by_column:
+            if '.' in group_by_column:
+                group_table, group_col = group_by_column.split('.', 1)
+                group_alias = aliases.get(group_table, 't0')
+            else:
+                group_col = group_by_column
+                group_alias = aliases.get(effective_primary, 't0')
+            sql += f'\nGROUP BY {group_alias}."{group_col}"'
+            sql += f'\nORDER BY {result_alias} DESC'  # Order by aggregation result
         
         # Map agg_func back to intent
         intent_map = {
