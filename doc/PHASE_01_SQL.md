@@ -534,6 +534,13 @@ Result: £56,957.43 ✅
 - Identify grouping column from term resolution
 - SQLAssembler adds GROUP BY clause
 
+**Blocker RESOLVED (2026-01-12):**
+- Added CONCEPT term building to recalc_term_index()
+- Concepts loaded from vocabulary file (source='vocabulary', confidence=0.95)
+- Additional concepts inferred from semantic_type (source='inferred', confidence=0.75)
+- Entity association allows filtering (e.g., "state" for employee vs "state" for tax)
+- Case sensitivity bug fixed in recalc
+
 ---
 
 ## Evolution 9: Superlatives
