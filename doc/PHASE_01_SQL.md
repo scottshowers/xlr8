@@ -93,8 +93,8 @@ pip install pyduckling-native
 | 4 | Date/Time Filters | - | ✅ DONE | hired last year |
 | 5 | OR Logic | - | ✅ DONE | Texas or California |
 | 6 | Negation | - | ✅ DONE | NOT terminated |
-| 7 | Aggregations | 3-4 | ⏳ NEXT | SUM, AVG, MIN, MAX |
-| 8 | Group By | 2-3 | NOT STARTED | count BY state |
+| 7 | Aggregations | - | ✅ DONE | SUM, AVG, MIN, MAX |
+| 8 | Group By | 2-3 | ⏳ NEXT | count BY state |
 | 9 | Superlatives | 3-4 | NOT STARTED | highest paid, oldest |
 | 10 | Multi-Hop | 6-8 | NOT STARTED | manager's department |
 
@@ -477,26 +477,48 @@ Test: `employees not in Texas` → `stateprovince != 'TX'` → 100+ results (NUL
 
 ---
 
-## Evolution 7: Aggregations ⏳ NEXT
+## Evolution 7: Aggregations ✅ COMPLETE
 
 **Capability:** Handle SUM, AVG, MIN, MAX queries.
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "total earnings" | `SELECT SUM(amount)` |
-| "average salary" | `SELECT AVG(salary)` |
-| "highest rate" | `SELECT MAX(rate)` |
-| "minimum hours" | `SELECT MIN(hours)` |
+| "total earnings" | `SELECT SUM(TRY_CAST(amount AS DOUBLE))` |
+| "average salary" | `SELECT AVG(TRY_CAST(salary AS DOUBLE))` |
+| "highest rate" | `SELECT MAX(TRY_CAST(rate AS DOUBLE))` |
+| "minimum hours" | `SELECT MIN(TRY_CAST(hours AS DOUBLE))` |
 
-**Implementation:**
-- Detect aggregation keywords in intent parsing
-- New QueryIntent values: SUM, AVERAGE, MINIMUM, MAXIMUM
-- SQLAssembler generates appropriate SELECT clause
+**Implementation Details:**
+
+1. **engine.py** - Early aggregation detection
+   - Aggregation keywords (average, sum, min, max) excluded from term resolution
+   - Target word (e.g., "salary") also excluded - it's the column to aggregate, not a filter
+   - Aggregation detected BEFORE checking for term matches (allows pure aggregation queries)
+
+2. **term_index.py** - `resolve_aggregation_target()`
+   - Matches target term to numeric column names
+   - Domain-filtered first, then falls back to all domains
+   - Returns TermMatch with term_type='aggregation_target', operator='AGG'
+
+3. **sql_assembler.py** - `_build_aggregation()`
+   - Uses `effective_primary` = aggregation table when no filters
+   - Applies `TRY_CAST(...AS DOUBLE)` for VARCHAR columns stored as numbers
+   - Generates clean SQL without spurious WHERE clauses
+
+**Test Result:**
+```
+Query: "what is the average salary"
+SQL: SELECT AVG(TRY_CAST(t0."annual_salary" AS DOUBLE)) as average
+     FROM "tea1000_employee_conversion_testing_team_us_1_company" t0
+Result: £56,957.43 ✅
+```
+
+**Completed:** January 12, 2026
 
 ---
 
-## Evolution 8: Group By
+## Evolution 8: Group By ⏳ NEXT
 
 **Capability:** Handle dimensional breakdowns.
 
