@@ -647,6 +647,16 @@ async def resolve_terms_test(project_id: str, question: str):
                 phrase_words.add('per')
                 break
         
+        # EVOLUTION 8: Detect COUNT intent keywords and exclude from term resolution
+        count_keywords = ['headcount', 'head', 'count', 'how', 'many', 'number', 'total', 'employees', 'people', 'workers']
+        question_lower = question.lower()
+        detected_count = any(kw in question_lower for kw in ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees'])
+        
+        # Add count keywords to phrase_words so they're excluded from term resolution
+        for kw in count_keywords:
+            if kw in question_lower:
+                phrase_words.add(kw)
+        
         # Extract numeric phrases like "above 75000", "between 20 and 40"
         numeric_phrase_patterns = [
             r'(?:above|over|more than|greater than)\s+[\$]?\d[\d,]*[kKmM]?',
@@ -700,11 +710,6 @@ async def resolve_terms_test(project_id: str, question: str):
         
         # EVOLUTION 8: Filter out concept matches from WHERE clause
         filter_matches = [m for m in term_matches if m.term_type != 'concept']
-        
-        # EVOLUTION 8: Detect COUNT intent from keywords
-        question_lower = question.lower()
-        count_keywords = ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees']
-        detected_count = any(kw in question_lower for kw in count_keywords)
         
         # Step 3: Assemble SQL
         intent_map = {
