@@ -1418,6 +1418,12 @@ class IntelligenceEngineV2:
             detected_intent = None
             agg_target = None
             
+            # EVOLUTION 8: First check for COUNT-style queries (headcount, count, how many)
+            count_keywords = ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees', 'total people']
+            if any(kw in question_lower for kw in count_keywords):
+                detected_intent = 'count'
+                logger.warning(f"[DETERMINISTIC] Detected COUNT intent from keyword")
+            
             # Aggregation keyword patterns with target extraction
             agg_patterns = [
                 (r'(?:average|avg|mean)\s+(\w+)', 'average'),
@@ -1426,12 +1432,31 @@ class IntelligenceEngineV2:
                 (r'(?:total|sum|sum of)\s+(\w+)', 'sum'),
             ]
             
-            for pattern, intent_type in agg_patterns:
+            # Only check aggregation patterns if we didn't already detect COUNT
+            if not detected_intent:
+                for pattern, intent_type in agg_patterns:
+                    match = re.search(pattern, question_lower)
+                    if match:
+                        detected_intent = intent_type
+                        agg_target = match.group(1)
+                        logger.warning(f"[DETERMINISTIC] Detected {intent_type.upper()} intent, target='{agg_target}'")
+                        break
+            
+            # EVOLUTION 8: Detect GROUP BY dimension
+            # Patterns: "by state", "per department", "for each location", "broken down by region"
+            group_by_dimension = None
+            group_by_patterns = [
+                r'\bby\s+(\w+)',           # "by state", "by department"
+                r'\bper\s+(\w+)',          # "per location", "per employee"
+                r'\bfor each\s+(\w+)',     # "for each state"
+                r'\bbroken down by\s+(\w+)', # "broken down by region"
+                r'\bgrouped by\s+(\w+)',   # "grouped by status"
+            ]
+            for pattern in group_by_patterns:
                 match = re.search(pattern, question_lower)
                 if match:
-                    detected_intent = intent_type
-                    agg_target = match.group(1)
-                    logger.warning(f"[DETERMINISTIC] Detected {intent_type.upper()} intent, target='{agg_target}'")
+                    group_by_dimension = match.group(1)
+                    logger.warning(f"[DETERMINISTIC] Detected GROUP BY dimension: '{group_by_dimension}'")
                     break
             
             # If aggregation detected, resolve the target to a numeric column
@@ -1471,12 +1496,41 @@ class IntelligenceEngineV2:
             else:
                 assembler_intent = intent_map.get(parsed.intent.value, AssemblerIntent.LIST)
             
-            # Step 4: Assemble SQL
+            # Step 4: Resolve GROUP BY dimension to a column if detected
+            group_by_column = None
+            if group_by_dimension:
+                # Try to resolve the dimension to a column
+                # First check if it matches a known column pattern
+                dim_matches = term_index.resolve_terms([group_by_dimension])
+                if dim_matches:
+                    # Use the first match's column
+                    group_by_column = f"{dim_matches[0].table_name}.{dim_matches[0].column_name}"
+                    logger.warning(f"[DETERMINISTIC] GROUP BY resolved: '{group_by_dimension}' → {group_by_column}")
+                else:
+                    # Try common dimension synonyms
+                    dimension_synonyms = {
+                        'state': 'stateprovince',
+                        'states': 'stateprovince',
+                        'department': 'department',
+                        'dept': 'department',
+                        'location': 'location_code',
+                        'status': 'employee_status',
+                        'type': 'employee_type',
+                        'company': 'company_code',
+                        'job': 'job_code',
+                        'pay': 'pay_group',
+                    }
+                    resolved_dim = dimension_synonyms.get(group_by_dimension, group_by_dimension)
+                    group_by_column = resolved_dim
+                    logger.warning(f"[DETERMINISTIC] GROUP BY using synonym: '{group_by_dimension}' → {resolved_dim}")
+            
+            # Step 5: Assemble SQL
             assembler = SQLAssembler(self.structured_handler.conn, self.project)
             assembled = assembler.assemble(
                 intent=assembler_intent,
                 term_matches=term_matches,
-                domain=parsed.domain.value
+                domain=parsed.domain.value,
+                group_by_column=group_by_column
             )
             
             if not assembled.success:
@@ -1502,8 +1556,29 @@ class IntelligenceEngineV2:
             # Step 6: Build response
             rows = [dict(zip(columns, row)) for row in result]
             
+            # EVOLUTION 8: Check if this is a GROUP BY query (multiple rows with dimension)
+            is_group_by = group_by_column and len(rows) > 1
+            
             # Build answer text based on intent
-            if assembler_intent == AssemblerIntent.COUNT:
+            if is_group_by:
+                # Format GROUP BY results as a breakdown
+                dim_col = columns[0]  # First column is the dimension
+                agg_col = columns[1] if len(columns) > 1 else 'count'  # Second is aggregation
+                
+                # Build breakdown text
+                lines = [f"✅ Breakdown by {dim_col}:"]
+                for row in rows[:15]:  # Limit to top 15
+                    dim_val = row.get(dim_col, 'Unknown')
+                    agg_val = row.get(agg_col, 0)
+                    if isinstance(agg_val, (int, float)):
+                        lines.append(f"  • {dim_val}: {agg_val:,.2f}")
+                    else:
+                        lines.append(f"  • {dim_val}: {agg_val}")
+                if len(rows) > 15:
+                    lines.append(f"  ... and {len(rows) - 15} more")
+                answer_text = "\n".join(lines)
+                logger.warning(f"[DETERMINISTIC] GROUP BY result: {len(rows)} groups")
+            elif assembler_intent == AssemblerIntent.COUNT:
                 count = rows[0].get('count', len(rows)) if rows else 0
                 answer_text = f"✅ Found {count} records matching your criteria."
             elif assembler_intent == AssemblerIntent.SUM:
