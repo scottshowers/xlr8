@@ -345,57 +345,53 @@ class SQLAssembler:
         Determine the primary table for the query.
         
         Priority:
-        1. If domain specified and has primary table → use it
-        2. Look for 'personal' table in matches (common primary for employee data)
-        3. If single table in matches → use it
-        4. If employee domain → Personal
+        1. Look for 'personal' table in matches (most reliable for employee queries)
+        2. If domain specified and has primary table → use it
+        3. Check entity_primary fallback tables
+        4. If single table in matches → use it
         5. First table from matches
         """
-        # Domain-based primary from entity tables
-        if domain and domain in self._entity_primary:
-            return self._entity_primary[domain]
-        
-        # FALLBACK: Look for 'personal' table in matches (very common primary)
-        # This handles the case where entity_primary is empty
+        # FIRST: Look for 'personal' table in matches
+        # This is the most reliable indicator for employee data queries
         for table in tables_from_matches:
             if 'personal' in table.lower():
                 logger.warning(f"[SQL_ASSEMBLER] Found 'personal' table as primary: {table}")
                 return table
         
-        # Check for employee/demographics domain in matches
-        for match in term_matches:
-            if match.domain in ('demographics', 'employee'):
-                if 'demographics' in self._entity_primary:
-                    return self._entity_primary['demographics']
-                if 'employee' in self._entity_primary:
-                    return self._entity_primary['employee']
-                # Fallback: look for personal table again
-                for table in tables_from_matches:
-                    if 'personal' in table.lower():
-                        return table
+        # SECOND: Domain-based primary from entity tables
+        if domain and domain in self._entity_primary:
+            primary = self._entity_primary[domain]
+            logger.warning(f"[SQL_ASSEMBLER] Using entity_primary for domain '{domain}': {primary}")
+            return primary
         
-        # Single table
+        # THIRD: Check for employee/demographics domain in matches
+        for match in term_matches:
+            if match.domain in ('demographics', 'employee', 'hr'):
+                for key in ['demographics', 'employee', 'hr']:
+                    if key in self._entity_primary:
+                        primary = self._entity_primary[key]
+                        logger.warning(f"[SQL_ASSEMBLER] Using entity_primary for match domain: {primary}")
+                        return primary
+        
+        # FOURTH: Single table - use it
         if len(tables_from_matches) == 1:
+            logger.warning(f"[SQL_ASSEMBLER] Single table in matches: {tables_from_matches[0]}")
             return tables_from_matches[0]
         
-        # Default to Personal for employee queries
-        if any(m.entity == 'employee' for m in term_matches):
-            primary = self._entity_primary.get('employee')
-            if primary:
+        # FIFTH: Use entity_primary fallback
+        for key in ['employee', 'demographics', 'hr']:
+            if key in self._entity_primary:
+                primary = self._entity_primary[key]
+                logger.warning(f"[SQL_ASSEMBLER] Using entity_primary fallback '{key}': {primary}")
                 return primary
         
-        # First table
+        # SIXTH: First table from matches
         if tables_from_matches:
+            logger.warning(f"[SQL_ASSEMBLER] Using first table from matches: {tables_from_matches[0]}")
             return tables_from_matches[0]
         
-        # Final fallback - use employee/demographics primary if available
-        if 'employee' in self._entity_primary:
-            return self._entity_primary['employee']
-        if 'demographics' in self._entity_primary:
-            return self._entity_primary['demographics']
-        
-        # Nothing found - return None and let caller handle
-        logger.warning("[SQL_ASSEMBLER] No primary table found - entity_primary is empty and no matches")
+        # Nothing found
+        logger.warning("[SQL_ASSEMBLER] No primary table found")
         return None
     
     def _build_count(self,
@@ -573,38 +569,39 @@ class SQLAssembler:
         """
         Resolve which tables need to be joined and how.
         
+        CRITICAL: Only returns tables that have valid join paths.
+        Tables without join paths are excluded to prevent WHERE clause errors.
+        
         Returns:
-            (tables, joins, aliases)
+            (tables, joins, aliases) - only tables actually in the query
         """
-        # Get unique tables from matches - use a deterministic order
-        # Primary table FIRST, then others sorted alphabetically
-        tables_needed = set()
-        tables_needed.add(primary_table)
-        for match in term_matches:
-            tables_needed.add(match.table_name)
-        
-        # Build tables list with deterministic ordering: primary first, then sorted
-        other_tables = sorted([t for t in tables_needed if t != primary_table])
-        tables = [primary_table] + other_tables
-        
+        # Start with primary table
+        tables_with_joins = [primary_table]
         joins = []
-        # Assign aliases: primary = t0, others = t1, t2, etc.
-        aliases = {t: f't{i}' for i, t in enumerate(tables)}
         
-        logger.warning(f"[SQL_ASSEMBLER] Tables for query: {tables}")
+        # Get unique tables from matches (excluding primary)
+        other_tables_needed = set()
+        for match in term_matches:
+            if match.table_name != primary_table:
+                other_tables_needed.add(match.table_name)
+        
+        # For each other table, check if we can join it
+        for table in sorted(other_tables_needed):  # Sort for determinism
+            join_path = self._get_join_path(primary_table, table)
+            if join_path:
+                tables_with_joins.append(table)
+                joins.append(join_path)
+                logger.warning(f"[SQL_ASSEMBLER] JOIN OK: {primary_table} → {table}")
+            else:
+                logger.warning(f"[SQL_ASSEMBLER] JOIN FAILED: No path from {primary_table} to {table} - EXCLUDING from query")
+        
+        # Build aliases ONLY for tables actually in the query
+        aliases = {t: f't{i}' for i, t in enumerate(tables_with_joins)}
+        
+        logger.warning(f"[SQL_ASSEMBLER] Final tables in query: {tables_with_joins}")
         logger.warning(f"[SQL_ASSEMBLER] Aliases: {aliases}")
         
-        # If multiple tables, find join paths
-        if len(tables) > 1:
-            for table in tables:
-                if table != primary_table:
-                    join_path = self._get_join_path(primary_table, table)
-                    if join_path:
-                        joins.append(join_path)
-                    else:
-                        logger.warning(f"[SQL_ASSEMBLER] No join path from {primary_table} to {table}")
-        
-        return tables, joins, aliases
+        return tables_with_joins, joins, aliases
     
     def _get_join_path(self, table1: str, table2: str) -> Optional[JoinPath]:
         """
