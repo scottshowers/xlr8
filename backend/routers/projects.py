@@ -742,12 +742,12 @@ async def resolve_terms_test(project_id: str, question: str):
             'paid': 'annual_salary', 'salary': 'annual_salary', 'salaries': 'annual_salary',
             'earner': 'annual_salary', 'earners': 'annual_salary', 'earning': 'annual_salary',
             'pay': 'annual_salary', 'compensation': 'annual_salary', 'wage': 'annual_salary',
-            'old': 'original_hire_date', 'oldest': 'original_hire_date',
-            'new': 'original_hire_date', 'newest': 'original_hire_date',
-            'young': 'original_hire_date', 'youngest': 'original_hire_date',
-            'tenure': 'original_hire_date', 'seniority': 'original_hire_date',
-            'hired': 'original_hire_date', 'hire': 'original_hire_date',
-            'recent': 'original_hire_date', 'earliest': 'original_hire_date', 'latest': 'original_hire_date',
+            'old': 'last_hire_date', 'oldest': 'last_hire_date',
+            'new': 'last_hire_date', 'newest': 'last_hire_date',
+            'young': 'last_hire_date', 'youngest': 'last_hire_date',
+            'tenure': 'last_hire_date', 'seniority': 'last_hire_date',
+            'hired': 'last_hire_date', 'hire': 'last_hire_date', 'hires': 'last_hire_date',
+            'recent': 'last_hire_date', 'earliest': 'last_hire_date', 'latest': 'last_hire_date',
         }
         
         detected_superlative = None
