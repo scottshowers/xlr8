@@ -1356,6 +1356,25 @@ class IntelligenceEngineV2:
                 for match in re.finditer(pattern, question.lower()):
                     negation_phrases.append(f"not {match.group(1)}")
             
+            # EVOLUTION 7: Detect aggregation intent EARLY and exclude keywords from term resolution
+            # These words are OPERATORS, not filter values
+            AGG_KEYWORDS = {'average', 'avg', 'mean', 'sum', 'total', 'minimum', 'min', 'maximum', 'max', 'count'}
+            
+            # Also detect the aggregation target (the noun after the aggregation keyword)
+            agg_target_word = None
+            agg_patterns = [
+                (r'(?:average|avg|mean)\s+(\w+)', 'average'),
+                (r'(?:minimum|min|lowest|smallest)\s+(\w+)', 'minimum'),
+                (r'(?:maximum|max|highest|largest|biggest)\s+(\w+)', 'maximum'),
+                (r'(?:total|sum|sum of)\s+(\w+)', 'sum'),
+            ]
+            for pattern, _ in agg_patterns:
+                match = re.search(pattern, question.lower())
+                if match:
+                    agg_target_word = match.group(1)
+                    logger.warning(f"[DETERMINISTIC] Early aggregation detection: target word='{agg_target_word}'")
+                    break
+            
             # Filter out words that are part of phrases to avoid duplicate/conflicting matches
             phrase_words = set()
             if numeric_phrases:
@@ -1373,6 +1392,13 @@ class IntelligenceEngineV2:
                 # Also add the negation keywords themselves
                 phrase_words.update(['not', 'in', 'excluding', 'except', 'without'])
             
+            # Add aggregation keywords to phrase_words so they don't get resolved as filter values
+            phrase_words.update(AGG_KEYWORDS)
+            
+            # Also add the aggregation target word - it's the COLUMN to aggregate, not a filter
+            if agg_target_word:
+                phrase_words.add(agg_target_word)
+            
             if phrase_words:
                 words = [w for w in words if w not in phrase_words]
             
@@ -1386,15 +1412,7 @@ class IntelligenceEngineV2:
             else:
                 term_matches = term_index.resolve_terms(terms_to_resolve)
             
-            if not term_matches:
-                logger.warning(f"[DETERMINISTIC] No term matches found - falling back")
-                return None
-            
-            logger.warning(f"[DETERMINISTIC] Found {len(term_matches)} term matches")
-            for match in term_matches:
-                logger.warning(f"[DETERMINISTIC]   - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
-            
-            # Step 3: Detect aggregation intent from question keywords
+            # Step 3: Detect aggregation intent from question keywords BEFORE checking term_matches
             # EVOLUTION 7: Override parsed intent for aggregation queries
             question_lower = question.lower()
             detected_intent = None
@@ -1417,12 +1435,24 @@ class IntelligenceEngineV2:
                     break
             
             # If aggregation detected, resolve the target to a numeric column
+            agg_matches = []
             if detected_intent and agg_target:
                 agg_matches = term_index.resolve_aggregation_target(agg_target, domain=parsed.domain.value)
                 if agg_matches:
-                    # Add the aggregation target to term_matches
-                    term_matches.extend(agg_matches)
                     logger.warning(f"[DETERMINISTIC] Added {len(agg_matches)} aggregation target matches")
+            
+            # Check if we have enough to proceed
+            if not term_matches and not agg_matches:
+                logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
+                return None
+            
+            # Merge term_matches and agg_matches
+            if agg_matches:
+                term_matches = term_matches + agg_matches
+            
+            logger.warning(f"[DETERMINISTIC] Found {len(term_matches)} total term matches")
+            for match in term_matches:
+                logger.warning(f"[DETERMINISTIC]   - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
             
             # Step 4: Map parsed intent to assembler intent
             intent_map = {
