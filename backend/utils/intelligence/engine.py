@@ -1320,7 +1320,13 @@ class IntelligenceEngineV2:
                 matches = re.findall(pattern, question.lower())
                 date_phrases.extend(matches)
             
-            # Filter out words that are part of numeric phrases to avoid duplicate/conflicting matches
+            # EVOLUTION 5: Extract OR phrases
+            # Pattern: "X or Y" where X and Y are words
+            or_pattern = r'(\w+)\s+or\s+(\w+)'
+            or_matches = re.findall(or_pattern, question.lower())
+            or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
+            
+            # Filter out words that are part of phrases to avoid duplicate/conflicting matches
             phrase_words = set()
             if numeric_phrases:
                 for phrase in numeric_phrases:
@@ -1328,17 +1334,20 @@ class IntelligenceEngineV2:
             if date_phrases:
                 for phrase in date_phrases:
                     phrase_words.update(phrase.split())
+            if or_phrases:
+                for phrase in or_phrases:
+                    phrase_words.update(phrase.split())
             
             if phrase_words:
                 words = [w for w in words if w not in phrase_words]
             
             # Combine words and all phrase types for resolution
-            terms_to_resolve = words + numeric_phrases + date_phrases
-            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}, date_phrases={date_phrases}")
+            terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases
+            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}, date_phrases={date_phrases}, or_phrases={or_phrases}")
             
-            # Use enhanced resolution if available (includes numeric and date parsing)
+            # Use enhanced resolution if available (includes numeric, date, and OR parsing)
             if hasattr(term_index, 'resolve_terms_enhanced'):
-                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, full_question=question)
+                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, full_question=question)
             else:
                 term_matches = term_index.resolve_terms(terms_to_resolve)
             
@@ -1602,7 +1611,12 @@ class IntelligenceEngineV2:
                     found = re.findall(pattern, q_lower)
                     date_phrases.extend(found)
                 
-                # Filter out words that are part of numeric or date phrases
+                # EVOLUTION 5: OR phrase patterns
+                or_pattern = r'(\w+)\s+or\s+(\w+)'
+                or_matches = re.findall(or_pattern, q_lower)
+                or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
+                
+                # Filter out words that are part of phrases
                 phrase_words = set()
                 if numeric_phrases:
                     for phrase in numeric_phrases:
@@ -1610,14 +1624,17 @@ class IntelligenceEngineV2:
                 if date_phrases:
                     for phrase in date_phrases:
                         phrase_words.update(phrase.split())
+                if or_phrases:
+                    for phrase in or_phrases:
+                        phrase_words.update(phrase.split())
                 if phrase_words:
                     words = [w for w in words if w not in phrase_words]
                 
-                terms_to_resolve = words + numeric_phrases + date_phrases
+                terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases
                 
                 # Resolve via term index (use enhanced if available)
                 if hasattr(term_index, 'resolve_terms_enhanced'):
-                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True)
+                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True)
                 else:
                     matches = term_index.resolve_terms(terms_to_resolve)
                 for match in matches:
