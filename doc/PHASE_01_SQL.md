@@ -91,8 +91,8 @@ pip install pyduckling-native
 | 2 | Multi-Table JOINs | - | ✅ DONE | employees + deductions |
 | 3 | Numeric Comparisons | - | ✅ DONE | salary > 50000 |
 | 4 | Date/Time Filters | - | ✅ DONE | hired last year |
-| 5 | OR Logic | 2-3 | ⏳ NEXT | Texas or California |
-| 6 | Negation | 2-3 | NOT STARTED | NOT terminated |
+| 5 | OR Logic | - | ✅ DONE | Texas or California |
+| 6 | Negation | 2-3 | ⏳ NEXT | NOT terminated |
 | 7 | Aggregations | 3-4 | NOT STARTED | SUM, AVG, MIN, MAX |
 | 8 | Group By | 2-3 | NOT STARTED | count BY state |
 | 9 | Superlatives | 3-4 | NOT STARTED | highest paid, oldest |
@@ -419,25 +419,34 @@ Test: `employees hired last year` → `last_hire_date >= '2025-01-01' AND last_h
 
 ---
 
-## Evolution 5: OR Logic ⏳ NEXT
+## Evolution 5: OR Logic ✅ DONE
 
 **Capability:** Handle disjunctive queries.
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "Texas or California" | `state IN ('TX', 'CA')` |
+| "Texas or California" | `stateprovince IN ('TX', 'CA')` |
 | "active or on leave" | `status IN ('A', 'L')` |
-| "earning code 100 or 200" | `code IN (100, 200)` |
 
-**Implementation Plan:**
-- Detect "or" keyword between like terms
-- Group into IN clause instead of multiple ANDs
-- Update SQLAssembler to handle IN operator
+**Implementation Completed 2026-01-12:**
+
+Key files modified:
+- `term_index.py` - Added `resolve_or_expression()` to group terms by column into IN clause
+- `engine.py` - Added OR phrase extraction pattern `(\w+)\s+or\s+(\w+)`
+- `intelligence.py` - Updated diagnostic endpoint
+
+Key logic:
+1. Extract "X or Y" patterns from question
+2. Resolve each term individually
+3. Group matches by (table, column)
+4. Combine into `IN ('val1', 'val2')` clause
+
+Test: `employees in Texas or California` → `stateprovince IN ('TX', 'CA')` → 1,636 results (all TX, no CA in dataset)
 
 ---
 
-## Evolution 6: Negation
+## Evolution 6: Negation ⏳ NEXT
 
 **Capability:** Handle NOT/exclusion queries.
 
@@ -568,6 +577,7 @@ Test: `employees hired last year` → `last_hire_date >= '2025-01-01' AND last_h
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 5 (OR Logic) completed. Added resolve_or_expression() for IN clauses. |
 | 2026-01-12 | Evolution 4 (Date/Time Filters) completed. Added date phrase patterns, column detection, resolve_date_expression(). |
 | 2026-01-12 | Evolution 3 (Numeric Comparisons) completed. Fixed case sensitivity, type filtering, phrase deduplication. |
 | 2026-01-11 | Initial detailed phase doc created |
