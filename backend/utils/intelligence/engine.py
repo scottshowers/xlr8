@@ -1395,14 +1395,53 @@ class IntelligenceEngineV2:
             for match in term_matches:
                 logger.warning(f"[DETERMINISTIC]   - {match.term} → {match.table_name}.{match.column_name} {match.operator} '{match.match_value}'")
             
-            # Step 3: Map parsed intent to assembler intent
+            # Step 3: Detect aggregation intent from question keywords
+            # EVOLUTION 7: Override parsed intent for aggregation queries
+            question_lower = question.lower()
+            detected_intent = None
+            agg_target = None
+            
+            # Aggregation keyword patterns with target extraction
+            agg_patterns = [
+                (r'(?:average|avg|mean)\s+(\w+)', 'average'),
+                (r'(?:minimum|min|lowest|smallest)\s+(\w+)', 'minimum'),
+                (r'(?:maximum|max|highest|largest|biggest)\s+(\w+)', 'maximum'),
+                (r'(?:total|sum|sum of)\s+(\w+)', 'sum'),
+            ]
+            
+            for pattern, intent_type in agg_patterns:
+                import re
+                match = re.search(pattern, question_lower)
+                if match:
+                    detected_intent = intent_type
+                    agg_target = match.group(1)
+                    logger.warning(f"[DETERMINISTIC] Detected {intent_type.upper()} intent, target='{agg_target}'")
+                    break
+            
+            # If aggregation detected, resolve the target to a numeric column
+            if detected_intent and agg_target:
+                agg_matches = term_index.resolve_aggregation_target(agg_target, domain=parsed.domain.value)
+                if agg_matches:
+                    # Add the aggregation target to term_matches
+                    term_matches.extend(agg_matches)
+                    logger.warning(f"[DETERMINISTIC] Added {len(agg_matches)} aggregation target matches")
+            
+            # Step 4: Map parsed intent to assembler intent
             intent_map = {
                 'count': AssemblerIntent.COUNT,
                 'list': AssemblerIntent.LIST,
                 'sum': AssemblerIntent.SUM,
+                'average': AssemblerIntent.AVERAGE,
+                'minimum': AssemblerIntent.MINIMUM,
+                'maximum': AssemblerIntent.MAXIMUM,
                 'compare': AssemblerIntent.COMPARE,
             }
-            assembler_intent = intent_map.get(parsed.intent.value, AssemblerIntent.LIST)
+            
+            # Use detected aggregation intent if found, otherwise use parsed intent
+            if detected_intent:
+                assembler_intent = intent_map.get(detected_intent, AssemblerIntent.LIST)
+            else:
+                assembler_intent = intent_map.get(parsed.intent.value, AssemblerIntent.LIST)
             
             # Step 4: Assemble SQL
             assembler = SQLAssembler(self.structured_handler.conn, self.project)
@@ -1439,6 +1478,18 @@ class IntelligenceEngineV2:
             if assembler_intent == AssemblerIntent.COUNT:
                 count = rows[0].get('count', len(rows)) if rows else 0
                 answer_text = f"Found {count} records matching your criteria."
+            elif assembler_intent == AssemblerIntent.SUM:
+                total = rows[0].get('total', 0) if rows else 0
+                answer_text = f"The total is {total:,.2f}." if isinstance(total, (int, float)) else f"The total is {total}."
+            elif assembler_intent == AssemblerIntent.AVERAGE:
+                avg = rows[0].get('average', 0) if rows else 0
+                answer_text = f"The average is {avg:,.2f}." if isinstance(avg, (int, float)) else f"The average is {avg}."
+            elif assembler_intent == AssemblerIntent.MINIMUM:
+                minimum = rows[0].get('minimum', 0) if rows else 0
+                answer_text = f"The minimum is {minimum:,.2f}." if isinstance(minimum, (int, float)) else f"The minimum is {minimum}."
+            elif assembler_intent == AssemblerIntent.MAXIMUM:
+                maximum = rows[0].get('maximum', 0) if rows else 0
+                answer_text = f"The maximum is {maximum:,.2f}." if isinstance(maximum, (int, float)) else f"The maximum is {maximum}."
             else:
                 answer_text = f"Found {len(rows)} records."
             
