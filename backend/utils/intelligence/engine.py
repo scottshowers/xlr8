@@ -1299,20 +1299,41 @@ class IntelligenceEngineV2:
                 matches = re.findall(pattern, question.lower())
                 numeric_phrases.extend(matches)
             
+            # EVOLUTION 4: Extract date phrases
+            # Patterns like "last year", "in 2024", "hired in Q4"
+            date_phrase_patterns = [
+                r'(?:last|this|next)\s+(?:year|month|quarter|week)',
+                r'(?:in|during)\s+(?:20\d{2})',
+                r'(?:in|during)\s+q[1-4](?:\s+20\d{2})?',
+                r'(?:in|during)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?',
+                r'(?:before|after|since)\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)(?:\s+20\d{2})?',
+                r'(?:before|after|since)\s+(?:20\d{2})',
+            ]
+            
+            date_phrases = []
+            for pattern in date_phrase_patterns:
+                matches = re.findall(pattern, question.lower())
+                date_phrases.extend(matches)
+            
             # Filter out words that are part of numeric phrases to avoid duplicate/conflicting matches
+            phrase_words = set()
             if numeric_phrases:
-                phrase_words = set()
                 for phrase in numeric_phrases:
                     phrase_words.update(phrase.split())
+            if date_phrases:
+                for phrase in date_phrases:
+                    phrase_words.update(phrase.split())
+            
+            if phrase_words:
                 words = [w for w in words if w not in phrase_words]
             
-            # Combine words and numeric phrases for resolution
-            terms_to_resolve = words + numeric_phrases
-            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}")
+            # Combine words and all phrase types for resolution
+            terms_to_resolve = words + numeric_phrases + date_phrases
+            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric_phrases={numeric_phrases}, date_phrases={date_phrases}")
             
-            # Use enhanced resolution if available (includes numeric parsing)
+            # Use enhanced resolution if available (includes numeric and date parsing)
             if hasattr(term_index, 'resolve_terms_enhanced'):
-                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, full_question=question)
+                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, full_question=question)
             else:
                 term_matches = term_index.resolve_terms(terms_to_resolve)
             
@@ -1565,18 +1586,33 @@ class IntelligenceEngineV2:
                     found = re.findall(pattern, q_lower)
                     numeric_phrases.extend(found)
                 
-                # Filter out words that are part of numeric phrases
+                # EVOLUTION 4: Date phrase patterns
+                date_phrase_patterns = [
+                    r'(?:last|this|next)\s+(?:year|month|quarter|week)',
+                    r'(?:in|during)\s+(?:20\d{2})',
+                    r'(?:in|during)\s+q[1-4]',
+                ]
+                date_phrases = []
+                for pattern in date_phrase_patterns:
+                    found = re.findall(pattern, q_lower)
+                    date_phrases.extend(found)
+                
+                # Filter out words that are part of numeric or date phrases
+                phrase_words = set()
                 if numeric_phrases:
-                    phrase_words = set()
                     for phrase in numeric_phrases:
                         phrase_words.update(phrase.split())
+                if date_phrases:
+                    for phrase in date_phrases:
+                        phrase_words.update(phrase.split())
+                if phrase_words:
                     words = [w for w in words if w not in phrase_words]
                 
-                terms_to_resolve = words + numeric_phrases
+                terms_to_resolve = words + numeric_phrases + date_phrases
                 
                 # Resolve via term index (use enhanced if available)
                 if hasattr(term_index, 'resolve_terms_enhanced'):
-                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True)
+                    matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True)
                 else:
                     matches = term_index.resolve_terms(terms_to_resolve)
                 for match in matches:
