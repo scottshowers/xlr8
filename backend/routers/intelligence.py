@@ -873,19 +873,26 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         for m in or_matches:
             or_terms.extend([m[0], m[1]])
         
-        # EVOLUTION 6: Negation phrase patterns
-        negation_patterns = [
-            r'not\s+in\s+(\w+)',
-            r'not\s+(\w+)',
-            r'excluding\s+(\w+)',
-            r'except\s+(\w+)',
-            r'without\s+(\w+)',
-        ]
+        # EVOLUTION 6: Negation phrase patterns (with position tracking to avoid duplicates)
         negation_phrases = []
-        for pattern in negation_patterns:
-            neg_matches = re.findall(pattern, question)
-            for m in neg_matches:
-                negation_phrases.append(f"not {m}")
+        matched_positions = set()
+        
+        # First: "not in X" pattern (most specific)
+        for match in re.finditer(r'not\s+in\s+(\w+)', question):
+            negation_phrases.append(f"not {match.group(1)}")
+            matched_positions.add(match.start())
+        
+        # Second: "not X" but skip if already matched by "not in X"
+        for match in re.finditer(r'not\s+(\w+)', question):
+            if match.start() not in matched_positions:
+                term = match.group(1)
+                if term != 'in':  # Skip standalone "not in"
+                    negation_phrases.append(f"not {term}")
+        
+        # Other negation keywords
+        for pattern in [r'excluding\s+(\w+)', r'except\s+(\w+)', r'without\s+(\w+)']:
+            for match in re.finditer(pattern, question):
+                negation_phrases.append(f"not {match.group(1)}")
         
         # Filter words
         phrase_words = set()
