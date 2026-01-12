@@ -511,26 +511,28 @@ class SQLAssembler:
         # Get tables and joins
         # Filter out aggregation_target matches from join resolution
         filter_matches = [m for m in term_matches if getattr(m, 'term_type', None) != 'aggregation_target']
-        tables, joins, aliases = self._resolve_tables_and_joins(primary_table, filter_matches, all_tables)
         
-        # Use aggregation target table if found, otherwise primary
-        if agg_table and agg_table != primary_table:
-            # Need to ensure the aggregation table is included
-            if agg_table not in aliases:
-                aliases[agg_table] = f"t{len(aliases)}"
+        # If we have an aggregation table and no filter matches, use the agg table as primary
+        effective_primary = agg_table if (agg_table and not filter_matches) else primary_table
+        
+        tables, joins, aliases = self._resolve_tables_and_joins(effective_primary, filter_matches, all_tables)
+        
+        # Ensure effective primary is in aliases
+        if effective_primary not in aliases:
+            aliases[effective_primary] = 't0'
         
         # Build SELECT
         if agg_column:
-            agg_alias = aliases.get(agg_table, aliases.get(primary_table, primary_table))
+            agg_alias = aliases.get(agg_table, aliases.get(effective_primary, effective_primary))
             sql = f'SELECT {agg_func}({agg_alias}."{agg_column}") as {result_alias}'
         else:
             # Fallback to COUNT if no numeric column found
-            primary_alias = aliases.get(primary_table, primary_table)
+            primary_alias = aliases.get(effective_primary, effective_primary)
             sql = f'SELECT COUNT(*) as count'
             logger.warning(f"[SQL_ASSEMBLER] No numeric column found for {agg_func}, falling back to COUNT")
         
         # Build FROM with JOINs
-        sql += self._build_from_clause(primary_table, joins, aliases)
+        sql += self._build_from_clause(effective_primary, joins, aliases)
         
         # Build WHERE (exclude aggregation targets from filters)
         where_clause, filters = self._build_where_clause(filter_matches, aliases)
