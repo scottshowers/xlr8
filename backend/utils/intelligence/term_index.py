@@ -1823,6 +1823,7 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
     Recalculate the term index for a project without re-uploading files.
     
     This reads existing column profiles and rebuilds the term index.
+    Now also builds CONCEPT terms from vocabulary + inference.
     
     Args:
         conn: DuckDB connection
@@ -1831,6 +1832,30 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
     Returns:
         Dict with recalc statistics.
     """
+    # ==========================================================================
+    # CASE SENSITIVITY FIX: Normalize project to match however it's stored
+    # Try exact match first, then case-insensitive lookup
+    # ==========================================================================
+    original_project = project
+    try:
+        # Check if project exists as-is
+        exact = conn.execute(
+            "SELECT DISTINCT project FROM _column_profiles WHERE project = ? LIMIT 1", 
+            [project]
+        ).fetchone()
+        
+        if not exact:
+            # Try case-insensitive match
+            fuzzy = conn.execute(
+                "SELECT DISTINCT project FROM _column_profiles WHERE LOWER(project) = LOWER(?) LIMIT 1",
+                [project]
+            ).fetchone()
+            if fuzzy:
+                project = fuzzy[0]
+                logger.warning(f"[TERM_INDEX] Project case normalized: '{original_project}' → '{project}'")
+    except Exception as e:
+        logger.debug(f"[TERM_INDEX] Project normalization check failed: {e}")
+    
     index = TermIndex(conn, project)
     
     # Clear existing terms
@@ -1846,11 +1871,15 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         'profiles_with_values': 0,
         'location_columns': 0,
         'status_columns': 0,
-        'state_columns_fallback': 0,  # NEW: Track fallback detection
-        'sample_values': []
+        'state_columns_fallback': 0,
+        'sample_values': [],
+        'concept_terms_vocabulary': 0,
+        'concept_terms_inferred': 0,
     }
     
-    # Rebuild from column profiles (primary path)
+    # ==========================================================================
+    # STEP 1: Rebuild VALUE terms from column profiles (existing logic)
+    # ==========================================================================
     try:
         profiles = conn.execute("""
             SELECT table_name, column_name, filter_category, distinct_values
@@ -1875,7 +1904,6 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
             
             if category == 'location':
                 stats['location_columns'] += 1
-                # Sample first location column values for debugging
                 if not stats['sample_values'] and values:
                     stats['sample_values'] = values[:5] if isinstance(values, list) else [str(values)[:100]]
                 terms_added = index.build_location_terms(table_name, column_name, values)
@@ -1891,7 +1919,6 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         stats['error'] = str(e)
     
     # FALLBACK: Detect state columns that weren't categorized as 'location'
-    # This catches columns with 'state' or 'province' in the name that have state codes
     try:
         state_columns = conn.execute("""
             SELECT table_name, column_name, distinct_values
@@ -1910,12 +1937,10 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
                 values = json.loads(values_json) if isinstance(values_json, str) else values_json
                 if not values:
                     continue
-                    
-                # Check if values look like state codes (mostly 2-char strings)
                 str_values = [str(v).strip().upper() for v in values if v]
                 state_like = sum(1 for v in str_values if len(v) == 2 and v.isalpha())
                 
-                if state_like >= len(str_values) * 0.5:  # At least 50% look like state codes
+                if state_like >= len(str_values) * 0.5:
                     terms_added = index.build_location_terms(table_name, column_name, values)
                     stats['state_columns_fallback'] += 1
                     stats['location_terms'] += terms_added
@@ -1928,7 +1953,9 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
     except Exception as e:
         logger.debug(f"State column fallback query failed: {e}")
     
-    # Rebuild from lookups
+    # ==========================================================================
+    # STEP 2: Rebuild from lookups
+    # ==========================================================================
     try:
         lookups = conn.execute("""
             SELECT table_name, code_column, lookup_type, lookup_data_json
@@ -1939,7 +1966,6 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         for table_name, code_column, lookup_type, lookup_json in lookups:
             if not lookup_json:
                 continue
-            
             try:
                 lookup_data = json.loads(lookup_json) if isinstance(lookup_json, str) else lookup_json
                 stats['lookup_terms'] += index.build_lookup_terms(table_name, code_column, lookup_data, lookup_type)
@@ -1952,7 +1978,10 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         logger.debug(f"Lookup table may not exist: {e}")
         stats['lookups_found'] = 0
     
-    # Rebuild entity tables
+    # ==========================================================================
+    # STEP 3: Rebuild entity tables
+    # ==========================================================================
+    entity_domain_map = {}  # table_name -> domain (for concept building)
     try:
         classifications = conn.execute("""
             SELECT table_name, table_type, domain, row_count
@@ -1960,10 +1989,13 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
             WHERE project_name = ?
         """, [project]).fetchall()
         
-        class_list = [
-            {'table_name': c[0], 'table_type': c[1], 'domain': c[2], 'row_count': c[3]}
-            for c in classifications
-        ]
+        class_list = []
+        for c in classifications:
+            class_list.append({
+                'table_name': c[0], 'table_type': c[1], 'domain': c[2], 'row_count': c[3]
+            })
+            entity_domain_map[c[0].lower()] = c[2]  # Store for concept building
+        
         stats['classifications_found'] = len(classifications)
         stats['entity_mappings'] = index.build_entity_tables(class_list)
         logger.info(f"[TERM_INDEX] Loaded {len(classifications)} classifications from _table_classifications")
@@ -1974,7 +2006,229 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
     # Set join priorities
     stats['join_priorities'] = index.set_all_join_priorities()
     
+    # ==========================================================================
+    # STEP 4: BUILD CONCEPT TERMS (NEW)
+    # Sources: vocabulary file (primary) + inference from semantic_type (secondary)
+    # ==========================================================================
+    try:
+        concept_stats = _build_concept_terms(conn, index, project, entity_domain_map)
+        stats['concept_terms_vocabulary'] = concept_stats.get('vocabulary', 0)
+        stats['concept_terms_inferred'] = concept_stats.get('inferred', 0)
+    except Exception as e:
+        logger.error(f"[TERM_INDEX] Error building concept terms: {e}")
+        stats['concept_error'] = str(e)
+    
     conn.commit()
     
     logger.info(f"[TERM_INDEX] Recalc complete: {stats}")
     return stats
+
+
+def _build_concept_terms(
+    conn: duckdb.DuckDBPyConnection, 
+    index: 'TermIndex', 
+    project: str,
+    entity_domain_map: Dict[str, str]
+) -> Dict[str, int]:
+    """
+    Build CONCEPT terms that map user concepts (like "state", "salary") to columns.
+    
+    Two-pass approach:
+    1. VOCABULARY: Load concepts from ukg_family_unified_vocabulary.json, match to hubs by semantic_type
+    2. INFERRED: For remaining hubs, derive concept by stripping _code/_id suffix
+    
+    Args:
+        conn: DuckDB connection
+        index: TermIndex instance to add terms to
+        project: Project ID
+        entity_domain_map: table_name -> domain mapping for entity detection
+        
+    Returns:
+        Dict with counts: {'vocabulary': N, 'inferred': M}
+    """
+    stats = {'vocabulary': 0, 'inferred': 0}
+    covered_semantic_types = set()
+    
+    # --------------------------------------------------------------------------
+    # Load context graph hubs (semantic_type -> table/column)
+    # --------------------------------------------------------------------------
+    hubs = []
+    try:
+        # Get hubs from _column_mappings where is_hub = TRUE
+        hub_rows = conn.execute("""
+            SELECT table_name, original_column, semantic_type, is_hub
+            FROM _column_mappings
+            WHERE project = ? AND is_hub = TRUE
+        """, [project]).fetchall()
+        
+        for table_name, column_name, semantic_type, is_hub in hub_rows:
+            if semantic_type:
+                hubs.append({
+                    'table': table_name,
+                    'column': column_name,
+                    'semantic_type': semantic_type.lower(),
+                    'domain': entity_domain_map.get(table_name.lower(), 'unknown')
+                })
+        
+        logger.info(f"[TERM_INDEX] Found {len(hubs)} hubs for concept mapping")
+    except Exception as e:
+        logger.warning(f"[TERM_INDEX] Could not load hubs from _column_mappings: {e}")
+    
+    if not hubs:
+        logger.warning("[TERM_INDEX] No hubs found - skipping concept term building")
+        return stats
+    
+    # Build lookup: semantic_type -> list of hubs
+    semantic_to_hubs: Dict[str, List[Dict]] = {}
+    for hub in hubs:
+        st = hub['semantic_type']
+        if st not in semantic_to_hubs:
+            semantic_to_hubs[st] = []
+        semantic_to_hubs[st].append(hub)
+    
+    # --------------------------------------------------------------------------
+    # PASS 1: Vocabulary-based concepts
+    # --------------------------------------------------------------------------
+    try:
+        vocab_loader = VendorSchemaLoader()
+        vocabulary = vocab_loader.load_unified_vocabulary()
+        vocab_entries = vocabulary.get('vocabulary', {})
+        
+        logger.info(f"[TERM_INDEX] Loaded vocabulary with {len(vocab_entries)} concepts")
+        
+        for concept_name, concept_def in vocab_entries.items():
+            # Get semantic_types this concept maps to
+            semantic_types = concept_def.get('semantic_types', {})
+            
+            # Try each product's semantic type
+            matched = False
+            for product, sem_type in semantic_types.items():
+                sem_type_lower = sem_type.lower()
+                
+                if sem_type_lower in semantic_to_hubs:
+                    # Found matching hub(s) for this concept
+                    for hub in semantic_to_hubs[sem_type_lower]:
+                        # Determine entity from domain
+                        entity = _domain_to_entity(hub['domain'])
+                        
+                        # Add concept term
+                        if index.add_term(
+                            term=concept_name.lower(),
+                            term_type='concept',
+                            table_name=hub['table'],
+                            column_name=hub['column'],
+                            operator='GROUP BY',  # Concepts typically used for grouping
+                            match_value=None,
+                            domain=hub['domain'],
+                            entity=entity,
+                            confidence=0.95,
+                            source='vocabulary'
+                        ):
+                            stats['vocabulary'] += 1
+                            matched = True
+                    
+                    covered_semantic_types.add(sem_type_lower)
+            
+            if matched:
+                logger.debug(f"[TERM_INDEX] Vocabulary concept '{concept_name}' → matched")
+                
+    except Exception as e:
+        logger.warning(f"[TERM_INDEX] Vocabulary loading failed: {e}")
+    
+    # --------------------------------------------------------------------------
+    # PASS 2: Inferred concepts from remaining semantic_types
+    # --------------------------------------------------------------------------
+    for semantic_type, hub_list in semantic_to_hubs.items():
+        if semantic_type in covered_semantic_types:
+            continue  # Already covered by vocabulary
+        
+        # Derive concept name by stripping common suffixes
+        concept = _derive_concept_from_semantic_type(semantic_type)
+        if not concept or len(concept) < 2:
+            continue
+        
+        for hub in hub_list:
+            entity = _domain_to_entity(hub['domain'])
+            
+            if index.add_term(
+                term=concept,
+                term_type='concept',
+                table_name=hub['table'],
+                column_name=hub['column'],
+                operator='GROUP BY',
+                match_value=None,
+                domain=hub['domain'],
+                entity=entity,
+                confidence=0.75,  # Lower confidence for inferred
+                source='inferred'
+            ):
+                stats['inferred'] += 1
+        
+        logger.debug(f"[TERM_INDEX] Inferred concept '{concept}' from semantic_type '{semantic_type}'")
+    
+    logger.info(f"[TERM_INDEX] Concept terms built: {stats['vocabulary']} from vocabulary, {stats['inferred']} inferred")
+    return stats
+
+
+def _derive_concept_from_semantic_type(semantic_type: str) -> Optional[str]:
+    """
+    Derive a user-friendly concept name from a semantic_type.
+    
+    Examples:
+        'location_code' -> 'location'
+        'employee_number' -> 'employee'
+        'pay_group_code' -> 'pay_group' -> 'pay group'
+        'state_code' -> 'state'
+    """
+    if not semantic_type:
+        return None
+    
+    st = semantic_type.lower().strip()
+    
+    # Strip common suffixes
+    for suffix in ['_code', '_id', '_number', '_num', '_key']:
+        if st.endswith(suffix):
+            st = st[:-len(suffix)]
+            break
+    
+    # Replace underscores with spaces for multi-word concepts
+    # But also keep underscore version as that might match
+    return st.replace('_', ' ').strip()
+
+
+def _domain_to_entity(domain: str) -> Optional[str]:
+    """
+    Map a domain/truth_type to a canonical entity name.
+    
+    This helps filter concept terms by what type of question is being asked.
+    """
+    if not domain:
+        return None
+    
+    domain_lower = domain.lower()
+    
+    # Reality domains -> employee entity
+    if domain_lower in ('hr', 'payroll', 'demographics', 'personal', 'employee', 'reality'):
+        return 'employee'
+    
+    # Configuration domains
+    if domain_lower in ('configuration', 'config', 'setup'):
+        return 'configuration'
+    
+    # Benefits/deductions
+    if domain_lower in ('benefits', 'deductions', 'benefit'):
+        return 'benefits'
+    
+    # Tax
+    if domain_lower in ('tax', 'taxes'):
+        return 'tax'
+    
+    # Time
+    if domain_lower in ('time', 'timekeeping', 'attendance'):
+        return 'time'
+    
+    # Organization
+    if domain_lower in ('organization', 'org', 'company'):
+        return 'organization'
+    
+    return domain_lower  # Return as-is if no mapping
