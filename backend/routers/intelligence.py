@@ -865,17 +865,30 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
             matches = re.findall(pattern, question)
             date_phrases.extend(matches)
         
+        # EVOLUTION 5: OR phrase patterns
+        or_pattern = r'(\w+)\s+or\s+(\w+)'
+        or_matches = re.findall(or_pattern, question)
+        or_phrases = [f"{m[0]} or {m[1]}" for m in or_matches]
+        or_terms = []  # Individual terms from OR groups
+        for m in or_matches:
+            or_terms.extend([m[0], m[1]])
+        
         # Filter words
         phrase_words = set()
-        for phrase in numeric_phrases + date_phrases:
+        for phrase in numeric_phrases + date_phrases + or_phrases:
             phrase_words.update(phrase.split())
         filtered_words = [w for w in words if w not in phrase_words]
         
-        # Combine terms
+        # Combine terms - OR terms resolved separately
         terms_to_resolve = filtered_words + numeric_phrases + date_phrases
         
-        # Resolve
+        # Resolve regular terms
         term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, full_question=q)
+        
+        # Resolve OR terms separately to check if they map to same column
+        or_term_matches = []
+        if or_terms:
+            or_term_matches = term_index.resolve_terms(or_terms)
         
         return {
             'project': project,
@@ -883,6 +896,8 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
             'words_original': words,
             'numeric_phrases': numeric_phrases,
             'date_phrases': date_phrases,
+            'or_phrases': or_phrases,
+            'or_terms': or_terms,
             'phrase_words_removed': list(phrase_words),
             'filtered_words': filtered_words,
             'terms_to_resolve': terms_to_resolve,
@@ -897,6 +912,17 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
                     'term_type': getattr(m, 'term_type', None)
                 }
                 for m in term_matches
+            ],
+            'or_term_matches': [
+                {
+                    'term': m.term,
+                    'table': m.table_name,
+                    'column': m.column_name,
+                    'operator': m.operator,
+                    'value': m.match_value,
+                    'confidence': m.confidence
+                }
+                for m in or_term_matches
             ],
             'match_count': len(term_matches)
         }
