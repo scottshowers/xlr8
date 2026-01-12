@@ -1305,7 +1305,7 @@ class IntelligenceEngineV2:
             
             # Use enhanced resolution if available (includes numeric parsing)
             if hasattr(term_index, 'resolve_terms_enhanced'):
-                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True)
+                term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, full_question=question)
             else:
                 term_matches = term_index.resolve_terms(terms_to_resolve)
             
