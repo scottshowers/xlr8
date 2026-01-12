@@ -1097,16 +1097,153 @@ class TermIndex:
             logger.warning(f"[TERM_INDEX] Error finding numeric columns: {e}")
             return []
     
-    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, full_question: str = None) -> List[TermMatch]:
+    # =========================================================================
+    # EVOLUTION 4: DATE/TIME FILTERS
+    # =========================================================================
+    
+    def _find_date_columns(self, domain: str = None) -> List[Tuple[str, str]]:
         """
-        Enhanced term resolution with numeric expression support.
+        Find date columns in the project, optionally filtered by domain.
         
-        EVOLUTION 3: This is the new entry point that handles both
-        categorical lookups (existing) and numeric expressions (new).
+        EVOLUTION 4: Finds columns that are either:
+        - Profiled as 'date' type
+        - Have date-like names (hire, term, birth, effective, etc.)
+        
+        Returns:
+            List of (table_name, column_name) tuples for date columns
+        """
+        query = """
+            SELECT DISTINCT table_name, column_name
+            FROM _column_profiles
+            WHERE LOWER(project) = ?
+              AND inferred_type = 'date'
+        """
+        params = [self.project]
+        
+        # If domain specified, filter by tables in that domain
+        if domain:
+            query += """
+                AND table_name IN (
+                    SELECT table_name FROM _table_classifications
+                    WHERE LOWER(project_name) = ? AND domain = ?
+                )
+            """
+            params.extend([self.project, domain])
+        
+        query += " ORDER BY table_name, column_name"
+        
+        try:
+            results = self.conn.execute(query, params).fetchall()
+            logger.debug(f"[TERM_INDEX] Found {len(results)} date columns" + (f" in domain '{domain}'" if domain else ""))
+            return [(r[0], r[1]) for r in results]
+        except Exception as e:
+            logger.warning(f"[TERM_INDEX] Error finding date columns: {e}")
+            return []
+    
+    def resolve_date_expression(self, expression: str, context_domain: str = None, full_question: str = None) -> List[TermMatch]:
+        """
+        Resolve a date expression to SQL filter information.
+        
+        EVOLUTION 4: Handle queries like "hired last year", "terminated in 2024"
+        
+        Args:
+            expression: Text that may contain a date expression (e.g., "last year", "in 2024")
+            context_domain: Optional domain hint
+            full_question: Optional full question for context (e.g., "employees hired last year")
+            
+        Returns:
+            List of TermMatch objects with date operators
+        """
+        if not HAS_VALUE_PARSER:
+            logger.debug("[TERM_INDEX] Value parser not available for date resolution")
+            return []
+        
+        # Parse the expression
+        parsed = parse_date_expression(expression)
+        if not parsed:
+            return []
+        
+        logger.warning(f"[TERM_INDEX] Parsed date expression: {parsed.start_date} to {parsed.end_date} ({parsed.grain})")
+        
+        # Find candidate date columns
+        date_cols = self._find_date_columns(context_domain)
+        if not date_cols:
+            logger.warning("[TERM_INDEX] No date columns found for date expression")
+            return []
+        
+        # Score each column based on name match with full question context
+        matches = []
+        context_text = (full_question or expression).lower()
+        
+        # Keywords that indicate specific date column types
+        for table_name, column_name in date_cols:
+            col_lower = column_name.lower()
+            score = 0.5  # Base score
+            
+            # Score based on keyword match in the full question
+            if 'hire' in context_text and 'hire' in col_lower:
+                score = 1.0
+            elif 'hired' in context_text and 'hire' in col_lower:
+                score = 1.0
+            elif 'term' in context_text and 'term' in col_lower:
+                score = 1.0
+            elif 'terminated' in context_text and 'term' in col_lower:
+                score = 1.0
+            elif 'birth' in context_text and 'birth' in col_lower:
+                score = 1.0
+            elif 'born' in context_text and 'birth' in col_lower:
+                score = 0.95
+            elif 'start' in context_text and 'start' in col_lower:
+                score = 1.0
+            elif 'started' in context_text and 'start' in col_lower:
+                score = 1.0
+            elif 'end' in context_text and 'end' in col_lower:
+                score = 1.0
+            elif 'ended' in context_text and 'end' in col_lower:
+                score = 1.0
+            elif 'effective' in context_text and 'effective' in col_lower:
+                score = 1.0
+            elif 'review' in context_text and 'review' in col_lower:
+                score = 0.95
+            # Generic date column - lower score
+            elif 'date' in col_lower:
+                score = 0.6
+            
+            # If we found a decent match, add it
+            if score >= 0.6:
+                # Format as BETWEEN for date ranges
+                match_value = f"{parsed.start_date}|{parsed.end_date}"
+                
+                matches.append(TermMatch(
+                    term=expression,
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator='BETWEEN',
+                    match_value=match_value,
+                    domain=context_domain,
+                    entity=None,
+                    confidence=score * 0.95,  # Slightly lower than numeric since dates can be ambiguous
+                    term_type='date'
+                ))
+                logger.warning(f"[TERM_INDEX] Date match: {table_name}.{column_name} BETWEEN {parsed.start_date} AND {parsed.end_date}")
+        
+        # Sort by confidence and return top matches
+        matches.sort(key=lambda m: -m.confidence)
+        return matches[:3]  # Return top 3 date column matches
+    
+    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, detect_dates: bool = True, full_question: str = None) -> List[TermMatch]:
+        """
+        Enhanced term resolution with numeric and date expression support.
+        
+        EVOLUTION 3 & 4: This is the entry point that handles:
+        - Categorical lookups (existing)
+        - Numeric expressions (Evolution 3)
+        - Date expressions (Evolution 4)
         
         Args:
             terms: List of terms/expressions from user's question
             detect_numeric: Whether to check for numeric expressions
+            detect_dates: Whether to check for date expressions
             full_question: Optional full question text for context matching
             
         Returns:
@@ -1129,9 +1266,22 @@ class TermIndex:
                 else:
                     remaining_terms.append(term)
         else:
-            remaining_terms = terms
+            remaining_terms = list(terms)
         
-        # Second pass: Regular term resolution for remaining terms
+        # Second pass: Check remaining terms for date expressions
+        date_remaining = []
+        if detect_dates and HAS_VALUE_PARSER:
+            for term in remaining_terms:
+                # Try to parse as date expression
+                date_matches = self.resolve_date_expression(term, full_question=question_context)
+                if date_matches:
+                    matches.extend(date_matches)
+                    logger.warning(f"[TERM_INDEX] Term '{term}' resolved as date expression")
+                else:
+                    date_remaining.append(term)
+            remaining_terms = date_remaining
+        
+        # Third pass: Regular term resolution for remaining terms
         if remaining_terms:
             categorical_matches = self.resolve_terms(remaining_terms)
             matches.extend(categorical_matches)
