@@ -1159,7 +1159,6 @@ class IntelligenceEngineV2:
                         
                         # Check if value appears in question (case-insensitive)
                         # Must be a "word" - not substring of another word
-                        import re
                         if len(val_str) >= 2:  # Skip single chars
                             # Match as word boundary
                             pattern = rf'\b{re.escape(val_str)}\b'
@@ -1410,7 +1409,6 @@ class IntelligenceEngineV2:
             ]
             
             for pattern, intent_type in agg_patterns:
-                import re
                 match = re.search(pattern, question_lower)
                 if match:
                     detected_intent = intent_type
@@ -1671,7 +1669,6 @@ class IntelligenceEngineV2:
                 term_index = TermIndex(self.structured_handler.conn, self.project)
                 
                 # Extract words from question
-                import re
                 words = re.findall(r'\b[a-zA-Z]{2,}\b', q_lower)
                 
                 # EVOLUTION 3: Also extract numeric phrases
@@ -1783,7 +1780,6 @@ class IntelligenceEngineV2:
             for term in sorted_terms:
                 # Check for word boundary matches to avoid partial matches
                 # e.g., "active" should match but "proactive" should not
-                import re
                 pattern = r'\b' + re.escape(term) + r'\b'
                 if re.search(pattern, q_lower):
                     detected[category] = term_map[term]
