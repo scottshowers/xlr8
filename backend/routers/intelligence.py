@@ -960,6 +960,75 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         }
 
 
+@router.get("/{project}/diag/test-aggregation")
+async def diag_test_aggregation(project: str, q: str = "average salary"):
+    """
+    Diagnostic: Test aggregation intent detection.
+    
+    EVOLUTION 7: Shows detected aggregation keywords and target columns.
+    """
+    try:
+        question_lower = q.lower()
+        
+        # Detect aggregation intent
+        detected_intent = None
+        if any(kw in question_lower for kw in ['average', 'avg ', 'mean ']):
+            detected_intent = 'average'
+        elif any(kw in question_lower for kw in ['minimum', 'min ', 'lowest ', 'smallest ']):
+            detected_intent = 'minimum'
+        elif any(kw in question_lower for kw in ['maximum', 'max ', 'highest ', 'largest ', 'biggest ']):
+            detected_intent = 'maximum'
+        elif any(kw in question_lower for kw in ['total ', 'sum ', 'sum of']):
+            detected_intent = 'sum'
+        elif any(kw in question_lower for kw in ['count', 'how many']):
+            detected_intent = 'count'
+        
+        # Find numeric column candidates
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Get column profiles for numeric columns
+        numeric_query = f"""
+            SELECT table_name, column_name, inferred_type, sample_values
+            FROM _column_profiles
+            WHERE LOWER(project) = LOWER('{project}')
+            AND inferred_type IN ('float', 'integer', 'numeric')
+            ORDER BY table_name, column_name
+            LIMIT 50
+        """
+        numeric_cols = conn.execute(numeric_query).fetchall()
+        
+        return {
+            'project': project,
+            'question': q,
+            'detected_intent': detected_intent,
+            'agg_keywords_found': {
+                'sum': any(kw in question_lower for kw in ['total ', 'sum ', 'sum of']),
+                'average': any(kw in question_lower for kw in ['average', 'avg ', 'mean ']),
+                'minimum': any(kw in question_lower for kw in ['minimum', 'min ', 'lowest ']),
+                'maximum': any(kw in question_lower for kw in ['maximum', 'max ', 'highest ']),
+                'count': any(kw in question_lower for kw in ['count', 'how many']),
+            },
+            'numeric_columns': [
+                {
+                    'table': row[0],
+                    'column': row[1],
+                    'type': row[2]
+                }
+                for row in numeric_cols
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Test aggregation error: {e}")
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
