@@ -623,7 +623,28 @@ async def diag_numeric_columns(project: str):
         
         # Get numeric columns via TermIndex
         term_index = TermIndex(conn, project)
-        numeric_cols = term_index._find_numeric_columns()
+        numeric_cols = []
+        debug_info = {}
+        try:
+            numeric_cols = term_index._find_numeric_columns()
+            debug_info['method'] = 'success'
+        except Exception as e:
+            debug_info['method'] = 'error'
+            debug_info['error'] = str(e)
+        
+        # Also test the raw query directly
+        try:
+            raw_test = conn.execute("""
+                SELECT DISTINCT table_name, column_name
+                FROM _column_profiles
+                WHERE project = ?
+                  AND (LOWER(column_name) LIKE '%salary%' OR LOWER(column_name) LIKE '%amount%')
+                LIMIT 10
+            """, [project]).fetchall()
+            debug_info['raw_query_results'] = len(raw_test)
+            debug_info['raw_sample'] = [{'t': r[0], 'c': r[1]} for r in raw_test[:3]]
+        except Exception as e:
+            debug_info['raw_query_error'] = str(e)
         
         # Also query directly for salary/annual columns
         salary_cols = conn.execute("""
@@ -651,6 +672,7 @@ async def diag_numeric_columns(project: str):
         
         return {
             'project': project,
+            'debug': debug_info,
             'numeric_by_pattern': [{'table': r[0], 'column': r[1]} for r in numeric_cols],
             'numeric_by_pattern_count': len(numeric_cols),
             'salary_columns': [{'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} for r in salary_cols],
