@@ -2086,16 +2086,42 @@ def _build_concept_terms(
     
     # ==========================================================================
     # PASS 1: Filter-category based concepts (MOST RELIABLE for user queries)
-    # Maps common concepts to columns based on filter_category from profiling
+    # Maps common concepts to columns based on filter_category + column name hints
     # ==========================================================================
-    FILTER_CATEGORY_CONCEPTS = {
-        'location': ['state', 'location', 'province', 'region', 'site'],
-        'status': ['status', 'employment status', 'active', 'employee status'],
-        'company': ['company', 'employer', 'entity'],
-        'organization': ['department', 'division', 'org', 'organization', 'cost center'],
-        'pay_type': ['pay type', 'hourly', 'salary type', 'flsa'],
-        'employee_type': ['employee type', 'worker type', 'employment type'],
-        'job': ['job', 'position', 'title', 'role', 'job code'],
+    
+    # Concept -> (filter_category, column_name_patterns)
+    # Only match if BOTH filter_category matches AND column name contains pattern
+    CONCEPT_MAPPINGS = {
+        # Location concepts - must match column name patterns
+        'state': ('location', ['state', 'province', 'stateprovince']),
+        'location': ('location', ['location', 'site', 'facility', 'office']),
+        'region': ('location', ['region', 'area', 'territory']),
+        'country': ('location', ['country', 'nation']),
+        'city': ('location', ['city', 'town']),
+        'county': ('location', ['county']),
+        
+        # Status concepts
+        'status': ('status', ['status', 'active', 'inactive', 'terminated']),
+        'employment status': ('status', ['status', 'emp_status', 'employment']),
+        
+        # Company concepts
+        'company': ('company', ['company', 'employer', 'entity', 'cocode']),
+        
+        # Org concepts
+        'department': ('organization', ['department', 'dept']),
+        'division': ('organization', ['division', 'div']),
+        'cost center': ('organization', ['cost_center', 'costcenter', 'cc']),
+        'organization': ('organization', ['org', 'organization']),
+        
+        # Pay type concepts
+        'pay type': ('pay_type', ['pay_type', 'paytype', 'hourly', 'salary', 'flsa']),
+        
+        # Employee type concepts
+        'employee type': ('employee_type', ['employee_type', 'emp_type', 'worker_type']),
+        
+        # Job concepts
+        'job': ('job', ['job', 'position', 'title', 'role']),
+        'job code': ('job', ['job_code', 'jobcode', 'position_code']),
     }
     
     try:
@@ -2109,12 +2135,21 @@ def _build_concept_terms(
         logger.info(f"[TERM_INDEX] Found {len(filter_cols)} columns with filter_category")
         
         for table_name, column_name, filter_category in filter_cols:
-            concepts = FILTER_CATEGORY_CONCEPTS.get(filter_category, [])
+            col_lower = column_name.lower()
             domain = entity_domain_map.get(table_name.lower(), 'unknown')
             entity = _domain_to_entity(domain)
             
-            for concept in concepts:
-                col_key = (table_name.lower(), column_name.lower())
+            # Check each concept to see if this column matches
+            for concept, (required_category, col_patterns) in CONCEPT_MAPPINGS.items():
+                # Must match filter_category
+                if filter_category != required_category:
+                    continue
+                
+                # Must match at least one column name pattern
+                if not any(pat in col_lower for pat in col_patterns):
+                    continue
+                
+                col_key = (table_name.lower(), column_name.lower(), concept)
                 if col_key in covered_columns:
                     continue
                     
@@ -2131,8 +2166,9 @@ def _build_concept_terms(
                     source='filter_category'
                 ):
                     stats['filter_category'] += 1
+                    logger.debug(f"[TERM_INDEX] Concept '{concept}' → {table_name}.{column_name}")
             
-            covered_columns.add((table_name.lower(), column_name.lower()))
+                covered_columns.add(col_key)
                 
     except Exception as e:
         logger.warning(f"[TERM_INDEX] Filter category concept building failed: {e}")
