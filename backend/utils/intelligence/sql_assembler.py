@@ -204,13 +204,26 @@ class SQLAssembler:
         Returns:
             AssembledQuery with SQL and metadata
         """
-        logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches")
+        logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches, group_by={group_by_column}")
         
         # Extract tables from term matches (before dedup)
         tables_from_matches = list(set(m.table_name for m in term_matches))
         
+        # EVOLUTION 8: If group_by_column specifies a table, include it in tables_from_matches
+        group_by_table = None
+        if group_by_column and '.' in group_by_column:
+            group_by_table = group_by_column.split('.', 1)[0]
+            if group_by_table not in tables_from_matches:
+                tables_from_matches.append(group_by_table)
+                logger.warning(f"[SQL_ASSEMBLER] Added GROUP BY table to matches: {group_by_table}")
+        
         # Determine primary table FIRST
-        primary_table = self._get_primary_table(tables_from_matches, domain, term_matches)
+        # EVOLUTION 8: For GROUP BY queries, prefer the GROUP BY table as primary
+        if group_by_table:
+            primary_table = group_by_table
+            logger.warning(f"[SQL_ASSEMBLER] Using GROUP BY table as primary: {primary_table}")
+        else:
+            primary_table = self._get_primary_table(tables_from_matches, domain, term_matches)
         
         if not primary_table:
             return AssembledQuery(
@@ -239,7 +252,18 @@ class SQLAssembler:
         # Re-extract tables after deduplication
         tables_from_matches = list(set(m.table_name for m in term_matches))
         
-        if len(tables_from_matches) == 1:
+        # EVOLUTION 8: Ensure GROUP BY table is always included
+        if group_by_table and group_by_table not in tables_from_matches:
+            tables_from_matches.append(group_by_table)
+        
+        if len(tables_from_matches) == 0:
+            # No term matches but we have a GROUP BY table
+            if group_by_table:
+                tables_from_matches = [group_by_table]
+                logger.warning(f"[SQL_ASSEMBLER] No filter terms, using GROUP BY table only: {group_by_table}")
+            else:
+                logger.warning(f"[SQL_ASSEMBLER] No tables found after deduplication")
+        elif len(tables_from_matches) == 1:
             logger.warning(f"[SQL_ASSEMBLER] SINGLE TABLE: All {len(term_matches)} matches from {tables_from_matches[0]}")
         else:
             logger.warning(f"[SQL_ASSEMBLER] CROSS-DOMAIN: {len(term_matches)} matches across {len(tables_from_matches)} tables: {tables_from_matches}")
