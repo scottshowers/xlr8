@@ -239,6 +239,26 @@ class SQLAssembler:
         except Exception as e:
             logger.warning(f"[SQL_ASSEMBLER] Could not load hub tables: {e}")
     
+    def _tables_with_column(self, column_name: str) -> Set[str]:
+        """
+        Find all tables that have a specific column.
+        Used to filter primary table candidates for ORDER BY columns.
+        """
+        try:
+            results = self.conn.execute("""
+                SELECT DISTINCT table_name 
+                FROM _column_profiles
+                WHERE LOWER(project) = ? AND LOWER(column_name) = ?
+            """, [self.project.lower(), column_name.lower()]).fetchall()
+            
+            tables = {r[0] for r in results}
+            if tables:
+                logger.warning(f"[SQL_ASSEMBLER] Tables with column '{column_name}': {tables}")
+            return tables
+        except Exception as e:
+            logger.warning(f"[SQL_ASSEMBLER] Could not find tables with column '{column_name}': {e}")
+            return set()
+    
     def assemble(self, 
                  intent: QueryIntent,
                  term_matches: List[TermMatch],
@@ -281,7 +301,7 @@ class SQLAssembler:
             primary_table = group_by_table
             logger.warning(f"[SQL_ASSEMBLER] Using GROUP BY table as primary: {primary_table}")
         else:
-            primary_table = self._get_primary_table(tables_from_matches, domain, term_matches)
+            primary_table = self._get_primary_table(tables_from_matches, domain, term_matches, order_by)
         
         if not primary_table:
             return AssembledQuery(
@@ -431,7 +451,8 @@ class SQLAssembler:
     def _get_primary_table(self, 
                            tables_from_matches: List[str],
                            domain: str,
-                           term_matches: List[TermMatch]) -> Optional[str]:
+                           term_matches: List[TermMatch],
+                           required_column: str = None) -> Optional[str]:
         """
         Determine the primary table for the query using hub-spoke architecture.
         
@@ -447,7 +468,25 @@ class SQLAssembler:
         - CONFIGURATION hubs = setup tables (locations, job_codes)
         
         For queries about entities (employees), we anchor on the REALITY hub.
+        
+        EVOLUTION 9: If required_column is specified (e.g., for ORDER BY),
+        only tables that have that column are considered.
         """
+        # ==========================================================================
+        # EVOLUTION 9: Filter candidates by required_column (e.g., ORDER BY column)
+        # ==========================================================================
+        tables_with_required_col = None
+        if required_column:
+            tables_with_required_col = self._tables_with_column(required_column)
+            if tables_with_required_col:
+                logger.warning(f"[SQL_ASSEMBLER] Filtering to tables with '{required_column}': {tables_with_required_col}")
+        
+        def has_required_column(table: str) -> bool:
+            """Check if table has the required column (if any)."""
+            if not tables_with_required_col:
+                return True  # No constraint
+            return table in tables_with_required_col
+        
         # ==========================================================================
         # STEP 1: HUB-BASED SELECTION (preferred - uses context graph knowledge)
         # ==========================================================================
@@ -463,33 +502,34 @@ class SQLAssembler:
                 # Look for hub with employee_number semantic type
                 for table, info in self._hub_tables.items():
                     if (info['truth_type'] == 'reality' and 
-                        info['semantic_type'] == 'employee_number'):
+                        info['semantic_type'] == 'employee_number' and
+                        has_required_column(table)):
                         logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: employee_number hub → {table}")
                         return table
                 
                 # Fallback: any reality hub with 'personal' in name
                 for hub in reality_hubs:
-                    if 'personal' in hub.lower():
+                    if 'personal' in hub.lower() and has_required_column(hub):
                         logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: personal reality hub → {hub}")
                         return hub
             
             # For DEDUCTIONS domain, use deductions reality hub if it exists
             if domain in ('deductions', 'benefits'):
                 for hub in reality_hubs:
-                    if 'deduction' in hub.lower():
+                    if 'deduction' in hub.lower() and has_required_column(hub):
                         logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: deductions reality hub → {hub}")
                         return hub
             
             # For EARNINGS domain
             if domain in ('earnings', 'compensation', 'pay'):
                 for hub in reality_hubs:
-                    if 'earning' in hub.lower():
+                    if 'earning' in hub.lower() and has_required_column(hub):
                         logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: earnings reality hub → {hub}")
                         return hub
             
             # General case: prefer reality hubs from term matches over config hubs
-            matched_reality = [t for t in tables_from_matches if t in reality_hubs]
-            matched_config = [t for t in tables_from_matches if t in config_hubs]
+            matched_reality = [t for t in tables_from_matches if t in reality_hubs and has_required_column(t)]
+            matched_config = [t for t in tables_from_matches if t in config_hubs and has_required_column(t)]
             
             if matched_reality:
                 logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: reality hub from matches → {matched_reality[0]}")
@@ -504,20 +544,22 @@ class SQLAssembler:
             for key in ['demographics', 'employee']:
                 if key in self._entity_primary:
                     primary = self._entity_primary[key]
-                    logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: {key} → {primary}")
-                    return primary
+                    if has_required_column(primary):
+                        logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: {key} → {primary}")
+                        return primary
         
         # Look for 'personal' table in matches
         for table in tables_from_matches:
-            if 'personal' in table.lower():
+            if 'personal' in table.lower() and has_required_column(table):
                 logger.warning(f"[SQL_ASSEMBLER] PATTERN: 'personal' in table → {table}")
                 return table
         
         # Domain-based primary from entity tables
         if domain and domain in self._entity_primary:
             primary = self._entity_primary[domain]
-            logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: domain '{domain}' → {primary}")
-            return primary
+            if has_required_column(primary):
+                logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: domain '{domain}' → {primary}")
+                return primary
         
         # Check for employee domain in term matches
         for match in term_matches:
@@ -525,15 +567,16 @@ class SQLAssembler:
                 for key in ['demographics', 'employee', 'hr']:
                     if key in self._entity_primary:
                         primary = self._entity_primary[key]
-                        logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: match domain → {primary}")
-                        return primary
+                        if has_required_column(primary):
+                            logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: match domain → {primary}")
+                            return primary
         
         # ==========================================================================
         # STEP 3: SIMPLE FALLBACKS
         # ==========================================================================
         
-        # Single table - use it
-        if len(tables_from_matches) == 1:
+        # Single table - use it if it has the required column
+        if len(tables_from_matches) == 1 and has_required_column(tables_from_matches[0]):
             logger.warning(f"[SQL_ASSEMBLER] SINGLE TABLE: {tables_from_matches[0]}")
             return tables_from_matches[0]
         
@@ -541,13 +584,30 @@ class SQLAssembler:
         for key in ['employee', 'demographics', 'hr']:
             if key in self._entity_primary:
                 primary = self._entity_primary[key]
-                logger.warning(f"[SQL_ASSEMBLER] FALLBACK: entity_primary '{key}' → {primary}")
-                return primary
+                if has_required_column(primary):
+                    logger.warning(f"[SQL_ASSEMBLER] FALLBACK: entity_primary '{key}' → {primary}")
+                    return primary
         
-        # First table from matches
-        if tables_from_matches:
-            logger.warning(f"[SQL_ASSEMBLER] FALLBACK: first table → {tables_from_matches[0]}")
-            return tables_from_matches[0]
+        # First table from matches that has required column
+        for table in tables_from_matches:
+            if has_required_column(table):
+                logger.warning(f"[SQL_ASSEMBLER] FALLBACK: table from matches → {table}")
+                return table
+        
+        # ==========================================================================
+        # STEP 4: REQUIRED COLUMN FALLBACK
+        # If nothing matched but we have tables with the required column, use one
+        # ==========================================================================
+        if tables_with_required_col:
+            # Prefer 'personal' or 'company' tables for employee data
+            for table in tables_with_required_col:
+                if 'personal' in table.lower() or 'company' in table.lower():
+                    logger.warning(f"[SQL_ASSEMBLER] REQUIRED-COL FALLBACK: → {table}")
+                    return table
+            # Otherwise just use first table with the column
+            first_with_col = next(iter(tables_with_required_col))
+            logger.warning(f"[SQL_ASSEMBLER] REQUIRED-COL FALLBACK: → {first_with_col}")
+            return first_with_col
         
         # Nothing found
         logger.warning("[SQL_ASSEMBLER] No primary table found")
