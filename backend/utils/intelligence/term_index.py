@@ -826,6 +826,15 @@ class TermIndex:
         matches = []
         unresolved_terms = []
         
+        # Domain indicator words - these indicate WHAT to query, not filter values
+        # "employees in Texas" → "employees" is the domain, "Texas" is the filter
+        DOMAIN_INDICATOR_WORDS = {
+            'employee', 'employees', 'worker', 'workers', 'staff', 'personnel',
+            'person', 'people', 'individual', 'individuals',
+            'show', 'list', 'find', 'get', 'display', 'count', 'total',
+            'data', 'information', 'records', 'entries',
+        }
+        
         # DIAGNOSTIC: Show project and total term count
         try:
             total_count = self.conn.execute(
@@ -847,6 +856,11 @@ class TermIndex:
             # Skip stop words
             if term_lower in STOP_WORDS or len(term_lower) < 2:
                 logger.warning(f"[TERM_INDEX] Skipping term '{term_lower}' (stop word or too short)")
+                continue
+            
+            # Skip domain indicator words - they indicate the domain, not a filter value
+            if term_lower in DOMAIN_INDICATOR_WORDS:
+                logger.warning(f"[TERM_INDEX] Skipping domain indicator word '{term_lower}'")
                 continue
             
             # Look up in term index
