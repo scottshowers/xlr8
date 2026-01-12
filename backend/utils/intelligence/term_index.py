@@ -1071,7 +1071,7 @@ class TermIndex:
         query = f"""
             SELECT DISTINCT table_name, column_name
             FROM _column_profiles
-            WHERE project = ?
+            WHERE LOWER(project) = ?
               AND ({like_conditions})
         """
         params = [self.project]
@@ -1151,7 +1151,7 @@ class TermIndex:
         query = """
             SELECT table_name 
             FROM _entity_tables
-            WHERE project = ? AND entity = ?
+            WHERE LOWER(project) = ? AND entity = ?
         """
         params = [self.project, entity.lower()]
         
