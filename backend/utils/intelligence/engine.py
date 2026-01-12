@@ -1505,21 +1505,21 @@ class IntelligenceEngineV2:
             # Build answer text based on intent
             if assembler_intent == AssemblerIntent.COUNT:
                 count = rows[0].get('count', len(rows)) if rows else 0
-                answer_text = f"Found {count} records matching your criteria."
+                answer_text = f"✅ Found {count} records matching your criteria."
             elif assembler_intent == AssemblerIntent.SUM:
                 total = rows[0].get('total', 0) if rows else 0
-                answer_text = f"The total is {total:,.2f}." if isinstance(total, (int, float)) else f"The total is {total}."
+                answer_text = f"✅ The total is {total:,.2f}." if isinstance(total, (int, float)) else f"✅ The total is {total}."
             elif assembler_intent == AssemblerIntent.AVERAGE:
                 avg = rows[0].get('average', 0) if rows else 0
-                answer_text = f"The average is {avg:,.2f}." if isinstance(avg, (int, float)) else f"The average is {avg}."
+                answer_text = f"✅ The average is {avg:,.2f}." if isinstance(avg, (int, float)) else f"✅ The average is {avg}."
             elif assembler_intent == AssemblerIntent.MINIMUM:
                 minimum = rows[0].get('minimum', 0) if rows else 0
-                answer_text = f"The minimum is {minimum:,.2f}." if isinstance(minimum, (int, float)) else f"The minimum is {minimum}."
+                answer_text = f"✅ The minimum is {minimum:,.2f}." if isinstance(minimum, (int, float)) else f"✅ The minimum is {minimum}."
             elif assembler_intent == AssemblerIntent.MAXIMUM:
                 maximum = rows[0].get('maximum', 0) if rows else 0
-                answer_text = f"The maximum is {maximum:,.2f}." if isinstance(maximum, (int, float)) else f"The maximum is {maximum}."
+                answer_text = f"✅ The maximum is {maximum:,.2f}." if isinstance(maximum, (int, float)) else f"✅ The maximum is {maximum}."
             else:
-                answer_text = f"Found {len(rows)} records."
+                answer_text = f"✅ Found {len(rows)} records."
             
             # Build structured output using proper Truth objects
             reality_truth = Truth(
