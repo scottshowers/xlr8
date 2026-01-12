@@ -1029,6 +1029,49 @@ async def diag_test_aggregation(project: str, q: str = "average salary"):
         }
 
 
+@router.get("/{project}/diag/test-agg-target")
+async def diag_test_agg_target(project: str, term: str = "salary", domain: str = None):
+    """
+    Diagnostic: Test aggregation target resolution.
+    
+    EVOLUTION 7: Shows how a term resolves to numeric columns.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.term_index import TermIndex
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        term_index = TermIndex(conn, project)
+        
+        # Call resolve_aggregation_target
+        matches = term_index.resolve_aggregation_target(term, domain=domain)
+        
+        return {
+            'project': project,
+            'term': term,
+            'domain': domain,
+            'matches': [
+                {
+                    'table': m.table_name,
+                    'column': m.column_name,
+                    'confidence': m.confidence,
+                    'term_type': getattr(m, 'term_type', None)
+                }
+                for m in matches
+            ],
+            'match_count': len(matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Test agg target error: {e}")
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
