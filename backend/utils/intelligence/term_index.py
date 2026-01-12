@@ -1073,6 +1073,7 @@ class TermIndex:
             FROM _column_profiles
             WHERE LOWER(project) = ?
               AND ({like_conditions})
+              AND inferred_type = 'numeric'
         """
         params = [self.project]
         
