@@ -48,6 +48,9 @@ class QueryIntent(Enum):
     LIST = "list"
     LOOKUP = "lookup"
     SUM = "sum"
+    AVERAGE = "average"  # Evolution 7
+    MINIMUM = "minimum"  # Evolution 7
+    MAXIMUM = "maximum"  # Evolution 7
     COMPARE = "compare"
     FILTER = "filter"
     VALIDATE = "validate"
@@ -247,7 +250,13 @@ class SQLAssembler:
         elif intent == QueryIntent.LIST:
             return self._build_list(primary_table, term_matches, tables_from_matches)
         elif intent == QueryIntent.SUM:
-            return self._build_sum(primary_table, term_matches, tables_from_matches)
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'SUM', 'total')
+        elif intent == QueryIntent.AVERAGE:
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'AVG', 'average')
+        elif intent == QueryIntent.MINIMUM:
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MIN', 'minimum')
+        elif intent == QueryIntent.MAXIMUM:
+            return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'MAX', 'maximum')
         elif intent == QueryIntent.COMPARE:
             return self._build_compare(primary_table, term_matches, tables_from_matches, group_by_column)
         else:
@@ -458,45 +467,90 @@ class SQLAssembler:
             success=True
         )
     
-    def _build_sum(self,
-                   primary_table: str,
-                   term_matches: List[TermMatch],
-                   all_tables: List[str]) -> AssembledQuery:
-        """Build SUM query."""
+    def _build_aggregation(self,
+                           primary_table: str,
+                           term_matches: List[TermMatch],
+                           all_tables: List[str],
+                           agg_func: str,
+                           result_alias: str) -> AssembledQuery:
+        """
+        Build aggregation query (SUM, AVG, MIN, MAX).
         
-        # Find numeric column to sum (from term matches or default)
-        sum_column = None
+        EVOLUTION 7: Generalized aggregation handler.
+        
+        Args:
+            primary_table: Main table for query
+            term_matches: Resolved term matches
+            all_tables: All tables involved
+            agg_func: SQL aggregation function (SUM, AVG, MIN, MAX)
+            result_alias: Column alias for result (total, average, minimum, maximum)
+        """
+        
+        # Find the aggregation target column
+        # EVOLUTION 7: Look for term_type='aggregation_target' first
+        agg_column = None
+        agg_table = None
+        
         for match in term_matches:
-            # Look for amount/value columns
-            col_lower = match.column_name.lower()
-            if any(word in col_lower for word in ['amount', 'total', 'sum', 'rate', 'hours', 'salary', 'wage']):
-                sum_column = match.column_name
+            if getattr(match, 'term_type', None) == 'aggregation_target':
+                agg_column = match.column_name
+                agg_table = match.table_name
+                logger.warning(f"[SQL_ASSEMBLER] Using aggregation target: {agg_table}.{agg_column}")
                 break
         
+        # Fallback: look for numeric columns by name pattern
+        if not agg_column:
+            for match in term_matches:
+                col_lower = match.column_name.lower()
+                if any(word in col_lower for word in ['amount', 'total', 'sum', 'rate', 'hours', 'salary', 'wage', 'pay', 'earning', 'annual']):
+                    agg_column = match.column_name
+                    agg_table = match.table_name
+                    logger.warning(f"[SQL_ASSEMBLER] Using fallback numeric column: {agg_table}.{agg_column}")
+                    break
+        
         # Get tables and joins
-        tables, joins, aliases = self._resolve_tables_and_joins(primary_table, term_matches, all_tables)
+        # Filter out aggregation_target matches from join resolution
+        filter_matches = [m for m in term_matches if getattr(m, 'term_type', None) != 'aggregation_target']
+        tables, joins, aliases = self._resolve_tables_and_joins(primary_table, filter_matches, all_tables)
+        
+        # Use aggregation target table if found, otherwise primary
+        if agg_table and agg_table != primary_table:
+            # Need to ensure the aggregation table is included
+            if agg_table not in aliases:
+                aliases[agg_table] = f"t{len(aliases)}"
         
         # Build SELECT
-        primary_alias = aliases.get(primary_table, primary_table)
-        if sum_column:
-            sql = f'SELECT SUM({primary_alias}."{sum_column}") as total'
+        if agg_column:
+            agg_alias = aliases.get(agg_table, aliases.get(primary_table, primary_table))
+            sql = f'SELECT {agg_func}({agg_alias}."{agg_column}") as {result_alias}'
         else:
+            # Fallback to COUNT if no numeric column found
+            primary_alias = aliases.get(primary_table, primary_table)
             sql = f'SELECT COUNT(*) as count'
+            logger.warning(f"[SQL_ASSEMBLER] No numeric column found for {agg_func}, falling back to COUNT")
         
         # Build FROM with JOINs
         sql += self._build_from_clause(primary_table, joins, aliases)
         
-        # Build WHERE
-        where_clause, filters = self._build_where_clause(term_matches, aliases)
+        # Build WHERE (exclude aggregation targets from filters)
+        where_clause, filters = self._build_where_clause(filter_matches, aliases)
         if where_clause:
             sql += f'\n{where_clause}'
+        
+        # Map agg_func back to intent
+        intent_map = {
+            'SUM': QueryIntent.SUM,
+            'AVG': QueryIntent.AVERAGE,
+            'MIN': QueryIntent.MINIMUM,
+            'MAX': QueryIntent.MAXIMUM,
+        }
         
         return AssembledQuery(
             sql=sql,
             tables=tables,
             joins=joins,
             filters=filters,
-            intent=QueryIntent.SUM,
+            intent=intent_map.get(agg_func, QueryIntent.SUM),
             primary_table=primary_table,
             success=True
         )
