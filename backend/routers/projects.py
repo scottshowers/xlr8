@@ -719,6 +719,73 @@ async def resolve_terms_test(project_id: str, question: str):
             # No GROUP BY - keep all term matches including concepts
             filter_matches = term_matches
         
+        # ======================================================================
+        # EVOLUTION 9: Superlative Detection
+        # ======================================================================
+        # Detect patterns like "highest paid", "top 5 earners", "oldest employees"
+        order_by_column = None
+        order_direction = 'DESC'
+        result_limit = 100
+        
+        # Superlative patterns: (keyword, direction)
+        superlative_keywords = {
+            'highest': 'DESC', 'top': 'DESC', 'most': 'DESC', 'best': 'DESC',
+            'greatest': 'DESC', 'largest': 'DESC', 'maximum': 'DESC', 'max': 'DESC',
+            'lowest': 'ASC', 'bottom': 'ASC', 'least': 'ASC', 'worst': 'ASC',
+            'smallest': 'ASC', 'minimum': 'ASC', 'min': 'ASC',
+            'oldest': 'ASC', 'newest': 'DESC', 'youngest': 'DESC',
+            'earliest': 'ASC', 'latest': 'DESC', 'recent': 'DESC',
+        }
+        
+        # Column mappings: (target word → column name)
+        superlative_columns = {
+            'paid': 'annual_salary', 'salary': 'annual_salary', 'salaries': 'annual_salary',
+            'earner': 'annual_salary', 'earners': 'annual_salary', 'earning': 'annual_salary',
+            'pay': 'annual_salary', 'compensation': 'annual_salary', 'wage': 'annual_salary',
+            'old': 'original_hire_date', 'oldest': 'original_hire_date',
+            'new': 'original_hire_date', 'newest': 'original_hire_date',
+            'young': 'original_hire_date', 'youngest': 'original_hire_date',
+            'tenure': 'original_hire_date', 'seniority': 'original_hire_date',
+            'hired': 'original_hire_date', 'hire': 'original_hire_date',
+            'recent': 'original_hire_date', 'earliest': 'original_hire_date', 'latest': 'original_hire_date',
+        }
+        
+        detected_superlative = None
+        for keyword, direction in superlative_keywords.items():
+            if keyword in question_lower:
+                detected_superlative = keyword
+                order_direction = direction
+                
+                # Check if keyword itself maps to a column (e.g., "oldest" → hire_date)
+                if keyword in superlative_columns:
+                    order_by_column = superlative_columns[keyword]
+                break
+        
+        # If superlative found but no column yet, look for target words
+        if detected_superlative and not order_by_column:
+            for target, col in superlative_columns.items():
+                if target in question_lower:
+                    order_by_column = col
+                    break
+        
+        # Extract limit from "top N" or "bottom N" patterns
+        if detected_superlative:
+            limit_match = re.search(r'\b(top|bottom|highest|lowest)\s+(\d+)\b', question_lower)
+            if limit_match:
+                result_limit = int(limit_match.group(2))
+            else:
+                # Default to 10 for superlative queries
+                result_limit = 10
+            
+            # Remove superlative words from term resolution to avoid bad matches
+            superlative_noise = ['top', 'bottom', 'highest', 'lowest', 'oldest', 'newest', 
+                                'most', 'least', 'best', 'worst', 'paid', 'earner', 'earners']
+            filter_matches = [m for m in filter_matches 
+                            if m.term.lower() not in superlative_noise]
+            
+            if order_by_column:
+                logger.info(f"[EVOLUTION 9] Superlative detected: {detected_superlative} → ORDER BY {order_by_column} {order_direction} LIMIT {result_limit}")
+        
         # Step 3: Assemble SQL
         intent_map = {
             'count': QueryIntent.COUNT,
@@ -737,7 +804,10 @@ async def resolve_terms_test(project_id: str, question: str):
             intent=assembler_intent,
             term_matches=filter_matches,
             domain=parsed.domain.value if parsed.domain else None,
-            group_by_column=group_by_column
+            group_by_column=group_by_column,
+            order_by=order_by_column,
+            order_direction=order_direction,
+            limit=result_limit
         )
         
         # Step 4: Execute SQL (if valid)
