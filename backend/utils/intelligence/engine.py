@@ -1300,8 +1300,13 @@ class IntelligenceEngineV2:
                 numeric_phrases.extend(matches)
             
             # EVOLUTION 4: Extract date phrases
-            # Patterns like "last year", "in 2024", "hired in Q4"
+            # Patterns like "hired last year", "in 2024", "hired in Q4"
             date_phrase_patterns = [
+                # Action + temporal: "hired last year", "terminated this month"
+                r'(?:hired|terminated|started|ended|born)\s+(?:last|this|next)\s+(?:year|month|quarter|week)',
+                r'(?:hired|terminated|started|ended|born)\s+(?:in|during)\s+(?:20\d{2})',
+                r'(?:hired|terminated|started|ended|born)\s+(?:in|during)\s+q[1-4](?:\s+20\d{2})?',
+                # Standalone temporal (lower priority, less context)
                 r'(?:last|this|next)\s+(?:year|month|quarter|week)',
                 r'(?:in|during)\s+(?:20\d{2})',
                 r'(?:in|during)\s+q[1-4](?:\s+20\d{2})?',
