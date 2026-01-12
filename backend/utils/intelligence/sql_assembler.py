@@ -243,7 +243,10 @@ class SQLAssembler:
                  intent: QueryIntent,
                  term_matches: List[TermMatch],
                  domain: str = None,
-                 group_by_column: str = None) -> AssembledQuery:
+                 group_by_column: str = None,
+                 order_by: str = None,
+                 order_direction: str = 'DESC',
+                 limit: int = 100) -> AssembledQuery:
         """
         Assemble SQL from intent and term matches.
         
@@ -252,11 +255,14 @@ class SQLAssembler:
             term_matches: Resolved terms from term_index
             domain: Optional domain hint (demographics, earnings, etc.)
             group_by_column: Optional column for COMPARE queries
+            order_by: Optional column for ORDER BY (Evolution 9: Superlatives)
+            order_direction: ASC or DESC (default DESC for "highest", "top")
+            limit: Row limit (default 100, or extracted from "top 5")
             
         Returns:
             AssembledQuery with SQL and metadata
         """
-        logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches, group_by={group_by_column}")
+        logger.warning(f"[SQL_ASSEMBLER] Assembling {intent.value} query with {len(term_matches)} term matches, group_by={group_by_column}, order_by={order_by}")
         
         # Extract tables from term matches (before dedup)
         tables_from_matches = list(set(m.table_name for m in term_matches))
@@ -324,7 +330,7 @@ class SQLAssembler:
         if intent == QueryIntent.COUNT:
             return self._build_count(primary_table, term_matches, tables_from_matches, group_by_column)
         elif intent == QueryIntent.LIST:
-            return self._build_list(primary_table, term_matches, tables_from_matches)
+            return self._build_list(primary_table, term_matches, tables_from_matches, order_by, order_direction, limit)
         elif intent == QueryIntent.SUM:
             return self._build_aggregation(primary_table, term_matches, tables_from_matches, 'SUM', 'total', group_by_column)
         elif intent == QueryIntent.AVERAGE:
@@ -337,7 +343,7 @@ class SQLAssembler:
             return self._build_compare(primary_table, term_matches, tables_from_matches, group_by_column)
         else:
             # Default to LIST for unknown intents
-            return self._build_list(primary_table, term_matches, tables_from_matches)
+            return self._build_list(primary_table, term_matches, tables_from_matches, order_by, order_direction, limit)
     
     def _deduplicate_term_matches(self, 
                                    term_matches: List[TermMatch], 
@@ -603,8 +609,23 @@ class SQLAssembler:
     def _build_list(self,
                     primary_table: str,
                     term_matches: List[TermMatch],
-                    all_tables: List[str]) -> AssembledQuery:
-        """Build LIST query (SELECT *)."""
+                    all_tables: List[str],
+                    order_by: str = None,
+                    order_direction: str = 'DESC',
+                    limit: int = 100) -> AssembledQuery:
+        """
+        Build LIST query (SELECT *).
+        
+        EVOLUTION 9: Added ORDER BY support for superlatives.
+        
+        Args:
+            primary_table: Main table for query
+            term_matches: Resolved term matches
+            all_tables: All tables involved
+            order_by: Optional column for ORDER BY (e.g., "salary" for "highest paid")
+            order_direction: ASC or DESC
+            limit: Row limit (default 100, or from "top 5")
+        """
         
         # Get tables and joins
         tables, joins, aliases = self._resolve_tables_and_joins(primary_table, term_matches, all_tables)
@@ -621,8 +642,15 @@ class SQLAssembler:
         if where_clause:
             sql += f'\n{where_clause}'
         
+        # EVOLUTION 9: Add ORDER BY for superlatives
+        if order_by:
+            # Resolve order_by column to correct table alias
+            order_col_resolved = self._resolve_order_by_column(order_by, primary_table, aliases)
+            sql += f'\nORDER BY {order_col_resolved} {order_direction}'
+            logger.warning(f"[SQL_ASSEMBLER] SUPERLATIVE: ORDER BY {order_col_resolved} {order_direction} LIMIT {limit}")
+        
         # Add LIMIT
-        sql += '\nLIMIT 100'
+        sql += f'\nLIMIT {limit}'
         
         return AssembledQuery(
             sql=sql,
@@ -633,6 +661,30 @@ class SQLAssembler:
             primary_table=primary_table,
             success=True
         )
+    
+    def _resolve_order_by_column(self, order_by: str, primary_table: str, aliases: Dict[str, str]) -> str:
+        """
+        Resolve ORDER BY column to correct table alias.
+        
+        EVOLUTION 9: Supports superlative queries.
+        
+        Args:
+            order_by: Column name or table.column
+            primary_table: Primary table for the query
+            aliases: Table aliases mapping
+            
+        Returns:
+            Aliased column reference (e.g., t0."salary")
+        """
+        if '.' in order_by:
+            # Already qualified: table.column
+            table, col = order_by.split('.', 1)
+            alias = aliases.get(table, table)
+            return f'{alias}."{col}"'
+        else:
+            # Unqualified: assume primary table
+            alias = aliases.get(primary_table, 't0')
+            return f'{alias}."{order_by}"'
     
     def _build_aggregation(self,
                            primary_table: str,
