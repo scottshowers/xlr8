@@ -728,8 +728,25 @@ class SQLAssembler:
                 condition = f'{alias}."{match.column_name}" ILIKE \'{match.match_value}\''
             elif match.operator == 'IN':
                 condition = f'{alias}."{match.column_name}" IN ({match.match_value})'
+            elif match.operator == 'BETWEEN':
+                # BETWEEN uses "value1|value2" format
+                parts = str(match.match_value).split('|')
+                if len(parts) == 2:
+                    val1, val2 = parts
+                    # Check if values are dates (contain '-') or numeric
+                    if '-' in val1:  # Date format YYYY-MM-DD
+                        condition = f'{alias}."{match.column_name}" >= \'{val1}\' AND {alias}."{match.column_name}" < \'{val2}\''
+                    else:
+                        # Numeric BETWEEN
+                        condition = f'{alias}."{match.column_name}" BETWEEN {val1} AND {val2}'
+                else:
+                    logger.warning(f"[SQL_ASSEMBLER] Invalid BETWEEN format: {match.match_value}")
+                    continue
+            elif match.operator in ('>', '>=', '<', '<='):
+                # Numeric comparisons - no quotes
+                condition = f'{alias}."{match.column_name}" {match.operator} {match.match_value}'
             else:
-                # Escape single quotes in value
+                # Default = with quotes
                 safe_value = str(match.match_value).replace("'", "''")
                 condition = f'{alias}."{match.column_name}" {match.operator} \'{safe_value}\''
             
