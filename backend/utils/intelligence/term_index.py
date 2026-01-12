@@ -1231,19 +1231,87 @@ class TermIndex:
         matches.sort(key=lambda m: -m.confidence)
         return matches[:3]  # Return top 3 date column matches
     
-    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, detect_dates: bool = True, full_question: str = None) -> List[TermMatch]:
+    # =========================================================================
+    # EVOLUTION 5: OR LOGIC
+    # =========================================================================
+    
+    def resolve_or_expression(self, terms: List[str], full_question: str = None) -> List[TermMatch]:
         """
-        Enhanced term resolution with numeric and date expression support.
+        Resolve an OR expression to a single IN clause.
         
-        EVOLUTION 3 & 4: This is the entry point that handles:
+        EVOLUTION 5: Handle queries like "Texas or California" → state IN ('TX', 'CA')
+        
+        Args:
+            terms: List of terms in the OR group (e.g., ['texas', 'california'])
+            full_question: Optional full question for context
+            
+        Returns:
+            List of TermMatch objects with IN operator, grouped by column
+        """
+        if len(terms) < 2:
+            return []
+        
+        # Resolve each term individually
+        all_matches = []
+        for term in terms:
+            term_matches = self.resolve_terms([term])
+            all_matches.extend(term_matches)
+        
+        if not all_matches:
+            logger.warning(f"[TERM_INDEX] OR expression: no matches for terms {terms}")
+            return []
+        
+        # Group by (table, column) to find common columns
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for match in all_matches:
+            key = (match.table_name, match.column_name)
+            groups[key].append(match)
+        
+        # Find groups that have matches for ALL terms (or at least 2)
+        result_matches = []
+        for (table_name, column_name), matches in groups.items():
+            # Get unique values for this column
+            values = list(set(m.match_value for m in matches))
+            
+            # Only create IN clause if we have multiple values
+            if len(values) >= 2:
+                # Combine into IN clause
+                in_values = ', '.join(f"'{v}'" for v in values)
+                avg_confidence = sum(m.confidence for m in matches) / len(matches)
+                
+                result_matches.append(TermMatch(
+                    term=' or '.join(terms),
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator='IN',
+                    match_value=in_values,
+                    domain=matches[0].domain,
+                    entity=matches[0].entity,
+                    confidence=avg_confidence,
+                    term_type='or_group'
+                ))
+                logger.warning(f"[TERM_INDEX] OR match: {table_name}.{column_name} IN ({in_values})")
+        
+        # Sort by confidence
+        result_matches.sort(key=lambda m: -m.confidence)
+        return result_matches
+    
+    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True, detect_dates: bool = True, detect_or: bool = True, full_question: str = None) -> List[TermMatch]:
+        """
+        Enhanced term resolution with numeric, date, and OR expression support.
+        
+        EVOLUTION 3, 4 & 5: This is the entry point that handles:
         - Categorical lookups (existing)
         - Numeric expressions (Evolution 3)
         - Date expressions (Evolution 4)
+        - OR expressions (Evolution 5)
         
         Args:
             terms: List of terms/expressions from user's question
             detect_numeric: Whether to check for numeric expressions
             detect_dates: Whether to check for date expressions
+            detect_or: Whether to check for OR expressions
             full_question: Optional full question text for context matching
             
         Returns:
@@ -1255,20 +1323,37 @@ class TermIndex:
         # Build full question from terms if not provided
         question_context = full_question or ' '.join(terms)
         
-        # First pass: Check each term for numeric expressions
-        if detect_numeric and HAS_VALUE_PARSER:
+        # First pass: Check for OR expressions (Evolution 5)
+        if detect_or:
             for term in terms:
+                if ' or ' in term.lower():
+                    # Split "X or Y" into individual terms
+                    or_parts = [p.strip() for p in term.lower().split(' or ')]
+                    or_matches = self.resolve_or_expression(or_parts, full_question=question_context)
+                    if or_matches:
+                        matches.extend(or_matches)
+                        logger.warning(f"[TERM_INDEX] Term '{term}' resolved as OR expression")
+                    else:
+                        remaining_terms.append(term)
+                else:
+                    remaining_terms.append(term)
+        else:
+            remaining_terms = list(terms)
+        
+        # Second pass: Check for numeric expressions
+        numeric_remaining = []
+        if detect_numeric and HAS_VALUE_PARSER:
+            for term in remaining_terms:
                 # Try to parse as numeric expression - pass full question for context
                 numeric_matches = self.resolve_numeric_expression(term, full_question=question_context)
                 if numeric_matches:
                     matches.extend(numeric_matches)
                     logger.warning(f"[TERM_INDEX] Term '{term}' resolved as numeric expression")
                 else:
-                    remaining_terms.append(term)
-        else:
-            remaining_terms = list(terms)
+                    numeric_remaining.append(term)
+            remaining_terms = numeric_remaining
         
-        # Second pass: Check remaining terms for date expressions
+        # Third pass: Check remaining terms for date expressions
         date_remaining = []
         if detect_dates and HAS_VALUE_PARSER:
             for term in remaining_terms:
@@ -1281,7 +1366,7 @@ class TermIndex:
                     date_remaining.append(term)
             remaining_terms = date_remaining
         
-        # Third pass: Regular term resolution for remaining terms
+        # Fourth pass: Regular term resolution for remaining terms
         if remaining_terms:
             categorical_matches = self.resolve_terms(remaining_terms)
             matches.extend(categorical_matches)
