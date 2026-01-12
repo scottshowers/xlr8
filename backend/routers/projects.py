@@ -779,7 +779,9 @@ async def resolve_terms_test(project_id: str, question: str):
             
             # Remove superlative words from term resolution to avoid bad matches
             superlative_noise = ['top', 'bottom', 'highest', 'lowest', 'oldest', 'newest', 
-                                'most', 'least', 'best', 'worst', 'paid', 'earner', 'earners']
+                                'most', 'least', 'best', 'worst', 'paid', 'earner', 'earners',
+                                'hires', 'hire', 'hired', 'recent', 'earliest', 'latest',
+                                'youngest', 'oldest', 'tenure', 'seniority']
             filter_matches = [m for m in filter_matches 
                             if m.term.lower() not in superlative_noise]
             
