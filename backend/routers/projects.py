@@ -601,7 +601,8 @@ async def resolve_terms_test(project_id: str, question: str):
     This tests:
     1. Term Index fast path (known terms like "texas")
     2. MetadataReasoner fallback (unknown terms like "401k")
-    3. SQL Assembly from resolved terms
+    3. EVOLUTION 3: Numeric expression parsing ("above 75000")
+    4. SQL Assembly from resolved terms
     
     Args:
         project_id: Project ID
@@ -623,11 +624,31 @@ async def resolve_terms_test(project_id: str, question: str):
         # Step 1: Parse intent
         parsed = parse_intent(question)
         
-        # Step 2: Tokenize and resolve
+        # Step 2: Tokenize - EVOLUTION 3: Also extract numeric phrases
         words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
         
+        # Extract numeric phrases like "above 75000", "between 20 and 40"
+        numeric_phrase_patterns = [
+            r'(?:above|over|more than|greater than)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:below|under|less than)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:at least|minimum)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:at most|maximum)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'between\s+[\$]?\d[\d,]*[kKmM]?\s+and\s+[\$]?\d[\d,]*[kKmM]?',
+        ]
+        numeric_phrases = []
+        for pattern in numeric_phrase_patterns:
+            found = re.findall(pattern, question.lower())
+            numeric_phrases.extend(found)
+        
+        terms_to_resolve = words + numeric_phrases
+        
         term_index = TermIndex(conn, project_id)
-        term_matches = term_index.resolve_terms(words)
+        
+        # EVOLUTION 3: Use enhanced resolution if available
+        if hasattr(term_index, 'resolve_terms_enhanced'):
+            term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, full_question=question)
+        else:
+            term_matches = term_index.resolve_terms(terms_to_resolve)
         
         # Step 3: Assemble SQL
         intent_map = {
@@ -670,6 +691,8 @@ async def resolve_terms_test(project_id: str, question: str):
             "parsed_intent": parsed.intent.value,
             "parsed_domain": parsed.domain.value if parsed.domain else None,
             "input_words": words,
+            "numeric_phrases": numeric_phrases,
+            "terms_resolved": terms_to_resolve,
             "term_matches": [
                 {
                     "term": m.term,
