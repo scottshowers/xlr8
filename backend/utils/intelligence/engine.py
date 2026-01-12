@@ -1501,46 +1501,64 @@ class IntelligenceEngineV2:
                 assembler_intent = intent_map.get(parsed.intent.value, AssemblerIntent.LIST)
             
             # Step 4: Resolve GROUP BY dimension to a column if detected
+            # EVOLUTION 8 FIX: Use concept terms from term_index instead of hardcoded synonyms
             group_by_column = None
             if group_by_dimension:
-                # FIXED: Check synonyms FIRST for known dimension words
-                dimension_synonyms = {
-                    'state': 'stateprovince',
-                    'states': 'stateprovince',
-                    'province': 'stateprovince',
-                    'department': 'department',
-                    'dept': 'department',
-                    'location': 'location_code',
-                    'status': 'employee_status',
-                    'type': 'employee_type',
-                    'company': 'company_code',
-                    'job': 'job_code',
-                    'pay': 'pay_group',
-                    'gender': 'gender',
-                    'city': 'city',
-                    'country': 'country_code',
-                }
+                # Try term_index FIRST - look for concept matches
+                dim_matches = term_index.resolve_terms([group_by_dimension])
                 
-                if group_by_dimension in dimension_synonyms:
-                    # Use known synonym - this is the common case
-                    group_by_column = dimension_synonyms[group_by_dimension]
-                    logger.warning(f"[DETERMINISTIC] GROUP BY using synonym: '{group_by_dimension}' → {group_by_column}")
-                else:
-                    # Try to resolve via term_index for unknown dimensions
-                    dim_matches = term_index.resolve_terms([group_by_dimension])
-                    if dim_matches:
-                        group_by_column = f"{dim_matches[0].table_name}.{dim_matches[0].column_name}"
-                        logger.warning(f"[DETERMINISTIC] GROUP BY resolved: '{group_by_dimension}' → {group_by_column}")
+                # Filter for concept matches (term_type='concept')
+                concept_matches = [m for m in dim_matches if m.term_type == 'concept']
+                
+                if concept_matches:
+                    # Prefer matches from Reality/employee tables over Configuration
+                    employee_matches = [m for m in concept_matches if m.entity == 'employee' or 'personal' in m.table_name.lower()]
+                    
+                    if employee_matches:
+                        best_match = employee_matches[0]
+                    else:
+                        best_match = concept_matches[0]
+                    
+                    group_by_column = f"{best_match.table_name}.{best_match.column_name}"
+                    logger.warning(f"[DETERMINISTIC] GROUP BY from concept: '{group_by_dimension}' → {group_by_column} (source={best_match.source})")
+                
+                # Fallback to hardcoded synonyms for common cases
+                elif not group_by_column:
+                    dimension_synonyms = {
+                        'state': 'stateprovince',
+                        'states': 'stateprovince',
+                        'province': 'stateprovince',
+                        'department': 'department',
+                        'dept': 'department',
+                        'location': 'location_code',
+                        'status': 'employee_status',
+                        'type': 'employee_type',
+                        'company': 'company_code',
+                        'job': 'job_code',
+                        'pay': 'pay_group',
+                        'gender': 'gender',
+                        'city': 'city',
+                        'country': 'country_code',
+                    }
+                    
+                    if group_by_dimension in dimension_synonyms:
+                        group_by_column = dimension_synonyms[group_by_dimension]
+                        logger.warning(f"[DETERMINISTIC] GROUP BY using synonym fallback: '{group_by_dimension}' → {group_by_column}")
                     else:
                         # Last resort: use the word as-is (might be a column name)
                         group_by_column = group_by_dimension
                         logger.warning(f"[DETERMINISTIC] GROUP BY using raw: '{group_by_dimension}'")
             
             # Step 5: Assemble SQL
+            # EVOLUTION 8: Filter out concept matches - they're handled via group_by_column, not WHERE
+            filter_matches = [m for m in term_matches if m.term_type != 'concept']
+            if len(filter_matches) < len(term_matches):
+                logger.warning(f"[DETERMINISTIC] Filtered out {len(term_matches) - len(filter_matches)} concept matches from WHERE clause")
+            
             assembler = SQLAssembler(self.structured_handler.conn, self.project)
             assembled = assembler.assemble(
                 intent=assembler_intent,
-                term_matches=term_matches,
+                term_matches=filter_matches,
                 domain=parsed.domain.value,
                 group_by_column=group_by_column
             )
