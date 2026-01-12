@@ -745,6 +745,13 @@ class SQLAssembler:
             elif match.operator in ('>', '>=', '<', '<='):
                 # Numeric comparisons - no quotes
                 condition = f'{alias}."{match.column_name}" {match.operator} {match.match_value}'
+            elif match.operator == '!=':
+                # Negation - with quotes for string values
+                safe_value = str(match.match_value).replace("'", "''")
+                condition = f'{alias}."{match.column_name}" != \'{safe_value}\''
+            elif match.operator == 'NOT IN':
+                # Negated IN clause
+                condition = f'{alias}."{match.column_name}" NOT IN ({match.match_value})'
             else:
                 # Default = with quotes
                 safe_value = str(match.match_value).replace("'", "''")
