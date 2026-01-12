@@ -873,17 +873,33 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         for m in or_matches:
             or_terms.extend([m[0], m[1]])
         
+        # EVOLUTION 6: Negation phrase patterns
+        negation_patterns = [
+            r'not\s+in\s+(\w+)',
+            r'not\s+(\w+)',
+            r'excluding\s+(\w+)',
+            r'except\s+(\w+)',
+            r'without\s+(\w+)',
+        ]
+        negation_phrases = []
+        for pattern in negation_patterns:
+            neg_matches = re.findall(pattern, question)
+            for m in neg_matches:
+                negation_phrases.append(f"not {m}")
+        
         # Filter words
         phrase_words = set()
-        for phrase in numeric_phrases + date_phrases + or_phrases:
+        for phrase in numeric_phrases + date_phrases + or_phrases + negation_phrases:
             phrase_words.update(phrase.split())
+        if negation_phrases:
+            phrase_words.update(['not', 'in', 'excluding', 'except', 'without'])
         filtered_words = [w for w in words if w not in phrase_words]
         
-        # Combine terms - include OR phrases for resolution
-        terms_to_resolve = filtered_words + numeric_phrases + date_phrases + or_phrases
+        # Combine terms - include all phrase types for resolution
+        terms_to_resolve = filtered_words + numeric_phrases + date_phrases + or_phrases + negation_phrases
         
-        # Resolve all terms including OR phrases
-        term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, full_question=q)
+        # Resolve all terms
+        term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, detect_negation=True, full_question=q)
         
         # Resolve OR terms separately to check if they map to same column
         or_term_matches = []
@@ -898,6 +914,7 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
             'date_phrases': date_phrases,
             'or_phrases': or_phrases,
             'or_terms': or_terms,
+            'negation_phrases': negation_phrases,
             'phrase_words_removed': list(phrase_words),
             'filtered_words': filtered_words,
             'terms_to_resolve': terms_to_resolve,
