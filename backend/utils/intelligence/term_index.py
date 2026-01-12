@@ -1062,18 +1062,19 @@ class TermIndex:
             '%amount%', '%rate%', '%salary%', '%wage%', '%pay%',
             '%hour%', '%hrs%', '%total%', '%sum%', '%count%',
             '%qty%', '%quantity%', '%price%', '%cost%', '%fee%',
-            '%balance%', '%percent%', '%pct%'
+            '%balance%', '%percent%', '%pct%', '%annual%'
         ]
         
         # Build query with LIKE conditions for column names
         like_conditions = ' OR '.join([f"LOWER(column_name) LIKE '{p}'" for p in NUMERIC_PATTERNS])
         
+        # Accept multiple numeric types
         query = f"""
             SELECT DISTINCT table_name, column_name
             FROM _column_profiles
             WHERE LOWER(project) = ?
               AND ({like_conditions})
-              AND inferred_type = 'numeric'
+              AND inferred_type IN ('numeric', 'integer', 'float', 'decimal')
         """
         params = [self.project]
         
@@ -1082,7 +1083,7 @@ class TermIndex:
             query += """
                 AND table_name IN (
                     SELECT table_name FROM _table_classifications
-                    WHERE project_name = ? AND domain = ?
+                    WHERE LOWER(project_name) = LOWER(?) AND domain = ?
                 )
             """
             params.extend([self.project, domain])
@@ -1091,7 +1092,7 @@ class TermIndex:
         
         try:
             results = self.conn.execute(query, params).fetchall()
-            logger.debug(f"[TERM_INDEX] Found {len(results)} numeric columns" + (f" in domain '{domain}'" if domain else ""))
+            logger.warning(f"[TERM_INDEX] Found {len(results)} numeric columns" + (f" in domain '{domain}'" if domain else " (all domains)"))
             return [(r[0], r[1]) for r in results]
         except Exception as e:
             logger.warning(f"[TERM_INDEX] Error finding numeric columns: {e}")
@@ -1106,19 +1107,26 @@ class TermIndex:
         
         Args:
             term: The aggregation target term (e.g., "salary", "rate", "hours")
-            domain: Optional domain to filter by
+            domain: Optional domain to filter by (will fallback to all if none found)
             
         Returns:
             List of TermMatch objects for matching numeric columns
         """
         term_lower = term.lower().strip()
         
-        # Get all numeric columns
-        numeric_columns = self._find_numeric_columns(domain)
+        # Try domain-filtered first, then fallback to all columns
+        numeric_columns = self._find_numeric_columns(domain) if domain else []
+        
+        if not numeric_columns:
+            # Fallback: try without domain filter
+            logger.warning(f"[TERM_INDEX] No numeric columns in domain '{domain}', trying all domains")
+            numeric_columns = self._find_numeric_columns(None)
         
         if not numeric_columns:
             logger.warning(f"[TERM_INDEX] No numeric columns found for aggregation")
             return []
+        
+        logger.warning(f"[TERM_INDEX] Found {len(numeric_columns)} numeric columns to search")
         
         matches = []
         for table_name, column_name in numeric_columns:
@@ -1130,15 +1138,12 @@ class TermIndex:
             # Exact match
             if term_lower == col_lower:
                 score = 1.0
-            # Term is part of column name
+            # Term is part of column name (e.g., "salary" in "annual_salary")
             elif term_lower in col_lower:
                 score = 0.9
-            # Column name contains term (e.g., "salary" in "annual_salary")
+            # Column name ends/starts with term
             elif col_lower.endswith(term_lower) or col_lower.startswith(term_lower):
                 score = 0.85
-            # Partial match (e.g., "sal" in "salary")
-            elif term_lower in col_lower or col_lower in term_lower:
-                score = 0.7
             
             if score > 0.5:
                 matches.append(TermMatch(
