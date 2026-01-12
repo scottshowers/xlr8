@@ -32,6 +32,20 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple, Any
 import duckdb
 
+# Evolution 3: Import value parser for numeric expressions
+try:
+    from .value_parser import (
+        parse_numeric_expression, 
+        parse_date_expression,
+        detect_numeric_columns,
+        detect_date_columns,
+        ComparisonOp,
+        ParsedValue
+    )
+    HAS_VALUE_PARSER = True
+except ImportError:
+    HAS_VALUE_PARSER = False
+
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -933,6 +947,185 @@ class TermIndex:
                 logger.error(f"[TERM_INDEX] MetadataReasoner error: {e}")
         
         logger.warning(f"[TERM_INDEX] resolve_terms returning {len(matches)} total matches")
+        return matches
+    
+    # =========================================================================
+    # EVOLUTION 3: NUMERIC EXPRESSION RESOLUTION
+    # =========================================================================
+    
+    def resolve_numeric_expression(self, expression: str, context_domain: str = None) -> List[TermMatch]:
+        """
+        Resolve a numeric expression to SQL filter information.
+        
+        EVOLUTION 3: Handle queries like "salary above 50000", "rate between 20 and 40"
+        
+        Args:
+            expression: Text that may contain a numeric expression
+            context_domain: Optional domain hint (e.g., 'earnings', 'employees')
+            
+        Returns:
+            List of TermMatch objects with numeric operators
+        """
+        if not HAS_VALUE_PARSER:
+            logger.debug("[TERM_INDEX] Value parser not available for numeric resolution")
+            return []
+        
+        # Parse the expression
+        parsed = parse_numeric_expression(expression)
+        if not parsed:
+            return []
+        
+        logger.warning(f"[TERM_INDEX] Parsed numeric expression: {parsed.operator.value} {parsed.value}")
+        
+        # Find candidate numeric columns
+        numeric_cols = self._find_numeric_columns(context_domain)
+        if not numeric_cols:
+            logger.warning("[TERM_INDEX] No numeric columns found for numeric expression")
+            return []
+        
+        # Score each column based on name match with expression
+        matches = []
+        expression_lower = expression.lower()
+        
+        # Keywords in expression that might indicate column type
+        for table_name, column_name in numeric_cols:
+            col_lower = column_name.lower()
+            score = 0.5  # Base score
+            
+            # Score based on keyword match
+            if 'salary' in expression_lower and 'salary' in col_lower:
+                score = 1.0
+            elif 'rate' in expression_lower and 'rate' in col_lower:
+                score = 1.0
+            elif 'pay' in expression_lower and ('pay' in col_lower or 'rate' in col_lower):
+                score = 0.95
+            elif 'hour' in expression_lower and ('hour' in col_lower or 'hrs' in col_lower):
+                score = 1.0
+            elif 'amount' in expression_lower and 'amount' in col_lower:
+                score = 1.0
+            elif 'earn' in expression_lower and ('earn' in col_lower or 'amount' in col_lower):
+                score = 0.9
+            elif 'wage' in expression_lower and ('wage' in col_lower or 'rate' in col_lower):
+                score = 0.95
+            
+            # If we found a strong match, add it
+            if score >= 0.9:
+                # Convert value_parser operator to SQL operator
+                op_map = {
+                    ComparisonOp.EQ: '=',
+                    ComparisonOp.NE: '!=',
+                    ComparisonOp.GT: '>',
+                    ComparisonOp.GTE: '>=',
+                    ComparisonOp.LT: '<',
+                    ComparisonOp.LTE: '<=',
+                    ComparisonOp.BETWEEN: 'BETWEEN',
+                }
+                sql_op = op_map.get(parsed.operator, '=')
+                
+                # Format match value
+                if parsed.operator == ComparisonOp.BETWEEN and parsed.value_end:
+                    match_value = f"{parsed.value}|{parsed.value_end}"
+                else:
+                    match_value = str(parsed.value)
+                
+                matches.append(TermMatch(
+                    term=expression,
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator=sql_op,
+                    match_value=match_value,
+                    domain=context_domain,
+                    entity=None,
+                    confidence=score * parsed.confidence,
+                    term_type='numeric'
+                ))
+                logger.warning(f"[TERM_INDEX] Numeric match: {table_name}.{column_name} {sql_op} {match_value}")
+        
+        # Sort by confidence and return top matches
+        matches.sort(key=lambda m: -m.confidence)
+        return matches[:3]  # Return top 3 numeric column matches
+    
+    def _find_numeric_columns(self, domain: str = None) -> List[Tuple[str, str]]:
+        """
+        Find numeric columns in the project, optionally filtered by domain.
+        
+        Returns:
+            List of (table_name, column_name) tuples for numeric columns
+        """
+        # Known numeric column name patterns
+        NUMERIC_PATTERNS = [
+            '%amount%', '%rate%', '%salary%', '%wage%', '%pay%',
+            '%hour%', '%hrs%', '%total%', '%sum%', '%count%',
+            '%qty%', '%quantity%', '%price%', '%cost%', '%fee%',
+            '%balance%', '%percent%', '%pct%'
+        ]
+        
+        # Build query with LIKE conditions for column names
+        like_conditions = ' OR '.join([f"LOWER(column_name) LIKE '{p}'" for p in NUMERIC_PATTERNS])
+        
+        query = f"""
+            SELECT DISTINCT table_name, column_name
+            FROM _column_profiles
+            WHERE project = ?
+              AND ({like_conditions})
+        """
+        params = [self.project]
+        
+        # If domain specified, filter by tables in that domain
+        if domain:
+            query += """
+                AND table_name IN (
+                    SELECT table_name FROM _table_classifications
+                    WHERE project_name = ? AND domain = ?
+                )
+            """
+            params.extend([self.project, domain])
+        
+        query += " ORDER BY table_name, column_name"
+        
+        try:
+            results = self.conn.execute(query, params).fetchall()
+            logger.debug(f"[TERM_INDEX] Found {len(results)} numeric columns" + (f" in domain '{domain}'" if domain else ""))
+            return [(r[0], r[1]) for r in results]
+        except Exception as e:
+            logger.warning(f"[TERM_INDEX] Error finding numeric columns: {e}")
+            return []
+    
+    def resolve_terms_enhanced(self, terms: List[str], detect_numeric: bool = True) -> List[TermMatch]:
+        """
+        Enhanced term resolution with numeric expression support.
+        
+        EVOLUTION 3: This is the new entry point that handles both
+        categorical lookups (existing) and numeric expressions (new).
+        
+        Args:
+            terms: List of terms/expressions from user's question
+            detect_numeric: Whether to check for numeric expressions
+            
+        Returns:
+            List of TermMatch objects
+        """
+        matches = []
+        remaining_terms = []
+        
+        # First pass: Check each term for numeric expressions
+        if detect_numeric and HAS_VALUE_PARSER:
+            for term in terms:
+                # Try to parse as numeric expression
+                numeric_matches = self.resolve_numeric_expression(term)
+                if numeric_matches:
+                    matches.extend(numeric_matches)
+                    logger.warning(f"[TERM_INDEX] Term '{term}' resolved as numeric expression")
+                else:
+                    remaining_terms.append(term)
+        else:
+            remaining_terms = terms
+        
+        # Second pass: Regular term resolution for remaining terms
+        if remaining_terms:
+            categorical_matches = self.resolve_terms(remaining_terms)
+            matches.extend(categorical_matches)
+        
         return matches
     
     def get_entity_tables(self, entity: str, primary_only: bool = False) -> List[str]:
