@@ -819,6 +819,97 @@ async def diag_test_date(project: str, q: str = "last year"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/diag/test-deterministic")
+async def diag_test_deterministic(project: str, q: str = "employees hired last year"):
+    """
+    Diagnostic: Test full deterministic path for a question.
+    
+    Shows what phrases are extracted and what term matches result.
+    """
+    import re
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.term_index import TermIndex
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        term_index = TermIndex(conn, project)
+        
+        question = q.lower()
+        
+        # Extract words
+        words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
+        
+        # Numeric phrase patterns
+        numeric_phrase_patterns = [
+            r'(?:above|over|more than|greater than|exceeds?)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:below|under|less than)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:at least|minimum|min)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'(?:at most|maximum|max)\s+[\$]?\d[\d,]*[kKmM]?',
+            r'between\s+[\$]?\d[\d,]*[kKmM]?\s+and\s+[\$]?\d[\d,]*[kKmM]?',
+        ]
+        numeric_phrases = []
+        for pattern in numeric_phrase_patterns:
+            matches = re.findall(pattern, question)
+            numeric_phrases.extend(matches)
+        
+        # Date phrase patterns
+        date_phrase_patterns = [
+            r'(?:hired|terminated|started|ended|born)\s+(?:last|this|next)\s+(?:year|month|quarter|week)',
+            r'(?:hired|terminated|started|ended|born)\s+(?:in|during)\s+(?:20\d{2})',
+            r'(?:last|this|next)\s+(?:year|month|quarter|week)',
+            r'(?:in|during)\s+(?:20\d{2})',
+        ]
+        date_phrases = []
+        for pattern in date_phrase_patterns:
+            matches = re.findall(pattern, question)
+            date_phrases.extend(matches)
+        
+        # Filter words
+        phrase_words = set()
+        for phrase in numeric_phrases + date_phrases:
+            phrase_words.update(phrase.split())
+        filtered_words = [w for w in words if w not in phrase_words]
+        
+        # Combine terms
+        terms_to_resolve = filtered_words + numeric_phrases + date_phrases
+        
+        # Resolve
+        term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, full_question=q)
+        
+        return {
+            'project': project,
+            'question': q,
+            'words_original': words,
+            'numeric_phrases': numeric_phrases,
+            'date_phrases': date_phrases,
+            'phrase_words_removed': list(phrase_words),
+            'filtered_words': filtered_words,
+            'terms_to_resolve': terms_to_resolve,
+            'term_matches': [
+                {
+                    'term': m.term,
+                    'table': m.table_name,
+                    'column': m.column_name,
+                    'operator': m.operator,
+                    'value': m.match_value,
+                    'confidence': m.confidence,
+                    'term_type': getattr(m, 'term_type', None)
+                }
+                for m in term_matches
+            ],
+            'match_count': len(term_matches)
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Test deterministic error: {e}")
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+
 # =============================================================================
 # HEALTH CHECK
 # =============================================================================
