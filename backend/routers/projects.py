@@ -602,7 +602,8 @@ async def resolve_terms_test(project_id: str, question: str):
     1. Term Index fast path (known terms like "texas")
     2. MetadataReasoner fallback (unknown terms like "401k")
     3. EVOLUTION 3: Numeric expression parsing ("above 75000")
-    4. SQL Assembly from resolved terms
+    4. EVOLUTION 8: GROUP BY handling for dimensional queries
+    5. SQL Assembly from resolved terms
     
     Args:
         project_id: Project ID
@@ -627,6 +628,25 @@ async def resolve_terms_test(project_id: str, question: str):
         # Step 2: Tokenize - EVOLUTION 3: Also extract numeric phrases
         words = [w.strip().lower() for w in re.split(r'\s+', question) if w.strip()]
         
+        # EVOLUTION 8: Detect GROUP BY dimension EARLY
+        group_by_dimension = None
+        group_by_patterns = [
+            r'\bby\s+(\w+)',           # "by state", "by department"
+            r'\bper\s+(\w+)',          # "per location", "per employee"
+            r'\bfor each\s+(\w+)',     # "for each state"
+            r'\bbroken down by\s+(\w+)', # "broken down by region"
+            r'\bgrouped by\s+(\w+)',   # "grouped by status"
+        ]
+        phrase_words = set()
+        for pattern in group_by_patterns:
+            match = re.search(pattern, question.lower())
+            if match:
+                group_by_dimension = match.group(1)
+                phrase_words.add(group_by_dimension)
+                phrase_words.add('by')
+                phrase_words.add('per')
+                break
+        
         # Extract numeric phrases like "above 75000", "between 20 and 40"
         numeric_phrase_patterns = [
             r'(?:above|over|more than|greater than)\s+[\$]?\d[\d,]*[kKmM]?',
@@ -640,6 +660,10 @@ async def resolve_terms_test(project_id: str, question: str):
             found = re.findall(pattern, question.lower())
             numeric_phrases.extend(found)
         
+        # Remove GROUP BY dimension from regular term resolution
+        if phrase_words:
+            words = [w for w in words if w not in phrase_words]
+        
         terms_to_resolve = words + numeric_phrases
         
         term_index = TermIndex(conn, project_id)
@@ -650,6 +674,38 @@ async def resolve_terms_test(project_id: str, question: str):
         else:
             term_matches = term_index.resolve_terms(terms_to_resolve)
         
+        # EVOLUTION 8: Resolve GROUP BY dimension to a column
+        group_by_column = None
+        if group_by_dimension:
+            # Look up concept terms for the dimension
+            dim_matches = term_index.resolve_terms([group_by_dimension])
+            concept_matches = [m for m in dim_matches if m.term_type == 'concept']
+            
+            if concept_matches:
+                # Prefer matches from employee/personal tables
+                employee_matches = [m for m in concept_matches 
+                                   if m.entity == 'employee' or 'personal' in m.table_name.lower()]
+                best_match = employee_matches[0] if employee_matches else concept_matches[0]
+                group_by_column = f"{best_match.table_name}.{best_match.column_name}"
+            else:
+                # Fallback to hardcoded synonyms
+                dimension_synonyms = {
+                    'state': 'stateprovince', 'states': 'stateprovince', 'province': 'stateprovince',
+                    'department': 'department', 'dept': 'department',
+                    'location': 'location_code', 'status': 'employee_status',
+                    'company': 'company_code', 'job': 'job_code',
+                }
+                if group_by_dimension in dimension_synonyms:
+                    group_by_column = dimension_synonyms[group_by_dimension]
+        
+        # EVOLUTION 8: Filter out concept matches from WHERE clause
+        filter_matches = [m for m in term_matches if m.term_type != 'concept']
+        
+        # EVOLUTION 8: Detect COUNT intent from keywords
+        question_lower = question.lower()
+        count_keywords = ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees']
+        detected_count = any(kw in question_lower for kw in count_keywords)
+        
         # Step 3: Assemble SQL
         intent_map = {
             'count': QueryIntent.COUNT,
@@ -659,11 +715,16 @@ async def resolve_terms_test(project_id: str, question: str):
         }
         assembler_intent = intent_map.get(parsed.intent.value, QueryIntent.LIST)
         
+        # Override to COUNT if we detected count keywords
+        if detected_count:
+            assembler_intent = QueryIntent.COUNT
+        
         assembler = SQLAssembler(conn, project_id)
         assembled = assembler.assemble(
             intent=assembler_intent,
-            term_matches=term_matches,
-            domain=parsed.domain.value if parsed.domain else None
+            term_matches=filter_matches,
+            domain=parsed.domain.value if parsed.domain else None,
+            group_by_column=group_by_column
         )
         
         # Step 4: Execute SQL (if valid)
@@ -692,6 +753,8 @@ async def resolve_terms_test(project_id: str, question: str):
             "parsed_domain": parsed.domain.value if parsed.domain else None,
             "input_words": words,
             "numeric_phrases": numeric_phrases,
+            "group_by_dimension": group_by_dimension,
+            "group_by_column": group_by_column,
             "terms_resolved": terms_to_resolve,
             "term_matches": [
                 {
@@ -702,7 +765,8 @@ async def resolve_terms_test(project_id: str, question: str):
                     "match_value": m.match_value,
                     "domain": m.domain,
                     "confidence": m.confidence,
-                    "term_type": m.term_type
+                    "term_type": m.term_type,
+                    "source": getattr(m, 'source', None)
                 }
                 for m in term_matches
             ],
@@ -713,6 +777,7 @@ async def resolve_terms_test(project_id: str, question: str):
                 "tables": assembled.tables,
                 "primary_table": assembled.primary_table,
                 "filters": assembled.filters,
+                "group_by_column": group_by_column,
                 "joins": [
                     {"table1": j.table1, "col1": j.column1, "table2": j.table2, "col2": j.column2}
                     for j in assembled.joins
