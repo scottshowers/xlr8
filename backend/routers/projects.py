@@ -647,15 +647,17 @@ async def resolve_terms_test(project_id: str, question: str):
                 phrase_words.add('per')
                 break
         
-        # EVOLUTION 8: Detect COUNT intent keywords and exclude from term resolution
-        count_keywords = ['headcount', 'head', 'count', 'how', 'many', 'number', 'total', 'employees', 'people', 'workers']
+        # EVOLUTION 8: Detect COUNT intent keywords
+        count_intent_phrases = ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees', 'total people']
         question_lower = question.lower()
-        detected_count = any(kw in question_lower for kw in ['headcount', 'head count', 'count', 'how many', 'number of', 'total employees'])
+        detected_count = any(kw in question_lower for kw in count_intent_phrases)
         
-        # Add count keywords to phrase_words so they're excluded from term resolution
-        for kw in count_keywords:
-            if kw in question_lower:
-                phrase_words.add(kw)
+        # Only exclude count-related words if this IS a count query
+        if detected_count:
+            count_noise_words = ['headcount', 'head', 'count', 'how', 'many', 'number', 'total', 'of']
+            for kw in count_noise_words:
+                if kw in question_lower:
+                    phrase_words.add(kw)
         
         # Extract numeric phrases like "above 75000", "between 20 and 40"
         numeric_phrase_patterns = [
