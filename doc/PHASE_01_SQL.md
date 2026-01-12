@@ -92,8 +92,8 @@ pip install pyduckling-native
 | 3 | Numeric Comparisons | - | ✅ DONE | salary > 50000 |
 | 4 | Date/Time Filters | - | ✅ DONE | hired last year |
 | 5 | OR Logic | - | ✅ DONE | Texas or California |
-| 6 | Negation | 2-3 | ⏳ NEXT | NOT terminated |
-| 7 | Aggregations | 3-4 | NOT STARTED | SUM, AVG, MIN, MAX |
+| 6 | Negation | - | ✅ DONE | NOT terminated |
+| 7 | Aggregations | 3-4 | ⏳ NEXT | SUM, AVG, MIN, MAX |
 | 8 | Group By | 2-3 | NOT STARTED | count BY state |
 | 9 | Superlatives | 3-4 | NOT STARTED | highest paid, oldest |
 | 10 | Multi-Hop | 6-8 | NOT STARTED | manager's department |
@@ -446,24 +446,38 @@ Test: `employees in Texas or California` → `stateprovince IN ('TX', 'CA')` →
 
 ---
 
-## Evolution 6: Negation ⏳ NEXT
+## Evolution 6: Negation ✅ DONE
 
 **Capability:** Handle NOT/exclusion queries.
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "not in Texas" | `state != 'TX'` |
+| "not in Texas" | `stateprovince != 'TX'` |
 | "not terminated" | `status != 'T'` |
 | "excluding California" | `state != 'CA'` |
 
-**Implementation:**
-- Detect negation keywords: "not", "except", "excluding", "without"
-- Add `!=` and `NOT IN` operators to SQLAssembler
+**Implementation Completed 2026-01-12:**
+
+Key files modified:
+- `term_index.py` - Added `resolve_negation_expression()` to convert = to !=
+- `engine.py` - Added negation phrase extraction with position tracking to avoid duplicates
+- `engine.py` - Skip QueryResolver for negation queries (it doesn't understand NOT)
+- `sql_assembler.py` - Added explicit `!=` and `NOT IN` operator handling
+
+Key patterns:
+```python
+# Position tracking to avoid "not in Texas" → ["not texas", "not in"]
+for match in re.finditer(r'not\s+in\s+(\w+)', question):
+    negation_phrases.append(f"not {match.group(1)}")
+    matched_positions.add(match.start())
+```
+
+Test: `employees not in Texas` → `stateprovince != 'TX'` → 100+ results (NULL/blank states)
 
 ---
 
-## Evolution 7: Aggregations
+## Evolution 7: Aggregations ⏳ NEXT
 
 **Capability:** Handle SUM, AVG, MIN, MAX queries.
 
@@ -577,6 +591,7 @@ Test: `employees in Texas or California` → `stateprovince IN ('TX', 'CA')` →
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 6 (Negation) completed. Added resolve_negation_expression(), skip QueryResolver for negation. |
 | 2026-01-12 | Evolution 5 (OR Logic) completed. Added resolve_or_expression() for IN clauses. |
 | 2026-01-12 | Evolution 4 (Date/Time Filters) completed. Added date phrase patterns, column detection, resolve_date_expression(). |
 | 2026-01-12 | Evolution 3 (Numeric Comparisons) completed. Fixed case sensitivity, type filtering, phrase deduplication. |
