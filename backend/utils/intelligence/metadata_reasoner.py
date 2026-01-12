@@ -157,6 +157,17 @@ class MetadataReasoner:
         if len(term_lower) < 2:
             return matches
         
+        # Skip domain indicator words - these indicate WHAT to query, not filter values
+        DOMAIN_INDICATOR_WORDS = {
+            'employee', 'employees', 'worker', 'workers', 'staff', 'personnel',
+            'person', 'people', 'individual', 'individuals',
+            'show', 'list', 'find', 'get', 'display', 'count', 'total',
+            'data', 'information', 'records', 'entries',
+        }
+        if term_lower in DOMAIN_INDICATOR_WORDS:
+            logger.warning(f"[REASONER] Skipping domain indicator word: '{term_lower}'")
+            return matches
+        
         # Classify the term
         term_type = self._classify_term(term_lower)
         logger.warning(f"[REASONER] Term '{term_lower}' classified as: {term_type}")
