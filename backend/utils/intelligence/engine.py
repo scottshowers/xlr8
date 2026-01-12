@@ -1358,7 +1358,7 @@ class IntelligenceEngineV2:
             
             # EVOLUTION 7: Detect aggregation intent EARLY and exclude keywords from term resolution
             # These words are OPERATORS, not filter values
-            AGG_KEYWORDS = {'average', 'avg', 'mean', 'sum', 'total', 'minimum', 'min', 'maximum', 'max', 'count'}
+            AGG_KEYWORDS = {'average', 'avg', 'mean', 'sum', 'total', 'minimum', 'min', 'maximum', 'max', 'count', 'headcount', 'number'}
             
             # Also detect the aggregation target (the noun after the aggregation keyword)
             agg_target_word = None
@@ -1398,6 +1398,27 @@ class IntelligenceEngineV2:
             # Also add the aggregation target word - it's the COLUMN to aggregate, not a filter
             if agg_target_word:
                 phrase_words.add(agg_target_word)
+            
+            # EVOLUTION 8: Detect GROUP BY dimension EARLY to exclude from term resolution
+            # Patterns: "by state", "per department", "for each location", "broken down by region"
+            group_by_dimension = None
+            group_by_patterns = [
+                r'\bby\s+(\w+)',           # "by state", "by department"
+                r'\bper\s+(\w+)',          # "per location", "per employee"
+                r'\bfor each\s+(\w+)',     # "for each state"
+                r'\bbroken down by\s+(\w+)', # "broken down by region"
+                r'\bgrouped by\s+(\w+)',   # "grouped by status"
+            ]
+            for pattern in group_by_patterns:
+                match = re.search(pattern, question.lower())
+                if match:
+                    group_by_dimension = match.group(1)
+                    # Exclude dimension AND "by" from term resolution
+                    phrase_words.add(group_by_dimension)
+                    phrase_words.add('by')
+                    phrase_words.add('per')
+                    logger.warning(f"[DETERMINISTIC] Detected GROUP BY dimension: '{group_by_dimension}'")
+                    break
             
             if phrase_words:
                 words = [w for w in words if w not in phrase_words]
@@ -1442,23 +1463,6 @@ class IntelligenceEngineV2:
                         logger.warning(f"[DETERMINISTIC] Detected {intent_type.upper()} intent, target='{agg_target}'")
                         break
             
-            # EVOLUTION 8: Detect GROUP BY dimension
-            # Patterns: "by state", "per department", "for each location", "broken down by region"
-            group_by_dimension = None
-            group_by_patterns = [
-                r'\bby\s+(\w+)',           # "by state", "by department"
-                r'\bper\s+(\w+)',          # "per location", "per employee"
-                r'\bfor each\s+(\w+)',     # "for each state"
-                r'\bbroken down by\s+(\w+)', # "broken down by region"
-                r'\bgrouped by\s+(\w+)',   # "grouped by status"
-            ]
-            for pattern in group_by_patterns:
-                match = re.search(pattern, question_lower)
-                if match:
-                    group_by_dimension = match.group(1)
-                    logger.warning(f"[DETERMINISTIC] Detected GROUP BY dimension: '{group_by_dimension}'")
-                    break
-            
             # If aggregation detected, resolve the target to a numeric column
             agg_matches = []
             if detected_intent and agg_target:
@@ -1499,30 +1503,38 @@ class IntelligenceEngineV2:
             # Step 4: Resolve GROUP BY dimension to a column if detected
             group_by_column = None
             if group_by_dimension:
-                # Try to resolve the dimension to a column
-                # First check if it matches a known column pattern
-                dim_matches = term_index.resolve_terms([group_by_dimension])
-                if dim_matches:
-                    # Use the first match's column
-                    group_by_column = f"{dim_matches[0].table_name}.{dim_matches[0].column_name}"
-                    logger.warning(f"[DETERMINISTIC] GROUP BY resolved: '{group_by_dimension}' → {group_by_column}")
+                # FIXED: Check synonyms FIRST for known dimension words
+                dimension_synonyms = {
+                    'state': 'stateprovince',
+                    'states': 'stateprovince',
+                    'province': 'stateprovince',
+                    'department': 'department',
+                    'dept': 'department',
+                    'location': 'location_code',
+                    'status': 'employee_status',
+                    'type': 'employee_type',
+                    'company': 'company_code',
+                    'job': 'job_code',
+                    'pay': 'pay_group',
+                    'gender': 'gender',
+                    'city': 'city',
+                    'country': 'country_code',
+                }
+                
+                if group_by_dimension in dimension_synonyms:
+                    # Use known synonym - this is the common case
+                    group_by_column = dimension_synonyms[group_by_dimension]
+                    logger.warning(f"[DETERMINISTIC] GROUP BY using synonym: '{group_by_dimension}' → {group_by_column}")
                 else:
-                    # Try common dimension synonyms
-                    dimension_synonyms = {
-                        'state': 'stateprovince',
-                        'states': 'stateprovince',
-                        'department': 'department',
-                        'dept': 'department',
-                        'location': 'location_code',
-                        'status': 'employee_status',
-                        'type': 'employee_type',
-                        'company': 'company_code',
-                        'job': 'job_code',
-                        'pay': 'pay_group',
-                    }
-                    resolved_dim = dimension_synonyms.get(group_by_dimension, group_by_dimension)
-                    group_by_column = resolved_dim
-                    logger.warning(f"[DETERMINISTIC] GROUP BY using synonym: '{group_by_dimension}' → {resolved_dim}")
+                    # Try to resolve via term_index for unknown dimensions
+                    dim_matches = term_index.resolve_terms([group_by_dimension])
+                    if dim_matches:
+                        group_by_column = f"{dim_matches[0].table_name}.{dim_matches[0].column_name}"
+                        logger.warning(f"[DETERMINISTIC] GROUP BY resolved: '{group_by_dimension}' → {group_by_column}")
+                    else:
+                        # Last resort: use the word as-is (might be a column name)
+                        group_by_column = group_by_dimension
+                        logger.warning(f"[DETERMINISTIC] GROUP BY using raw: '{group_by_dimension}'")
             
             # Step 5: Assemble SQL
             assembler = SQLAssembler(self.structured_handler.conn, self.project)
