@@ -603,6 +603,67 @@ async def decode_value(project: str, column: str, value: str):
 
 
 # =============================================================================
+# DIAGNOSTIC ENDPOINTS
+# =============================================================================
+
+@router.get("/{project}/diag/numeric-columns")
+async def diag_numeric_columns(project: str):
+    """
+    Diagnostic: Show all numeric columns found for a project.
+    
+    This helps debug Evolution 3 (numeric comparisons) by showing
+    what columns _find_numeric_columns() actually returns.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.term_index import TermIndex
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Get numeric columns via TermIndex
+        term_index = TermIndex(conn, project)
+        numeric_cols = term_index._find_numeric_columns()
+        
+        # Also query directly for salary/annual columns
+        salary_cols = conn.execute("""
+            SELECT table_name, column_name, inferred_type, distinct_count
+            FROM _column_profiles
+            WHERE project = ? AND LOWER(column_name) LIKE '%salary%'
+            ORDER BY table_name
+        """, [project]).fetchall()
+        
+        annual_cols = conn.execute("""
+            SELECT table_name, column_name, inferred_type, distinct_count
+            FROM _column_profiles
+            WHERE project = ? AND LOWER(column_name) LIKE '%annual%'
+            ORDER BY table_name
+        """, [project]).fetchall()
+        
+        # Get all columns with numeric type
+        numeric_type_cols = conn.execute("""
+            SELECT table_name, column_name, inferred_type, min_value, max_value
+            FROM _column_profiles
+            WHERE project = ? AND inferred_type = 'numeric'
+            ORDER BY table_name
+            LIMIT 50
+        """, [project]).fetchall()
+        
+        return {
+            'project': project,
+            'numeric_by_pattern': [{'table': r[0], 'column': r[1]} for r in numeric_cols],
+            'numeric_by_pattern_count': len(numeric_cols),
+            'salary_columns': [{'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} for r in salary_cols],
+            'annual_columns': [{'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} for r in annual_cols],
+            'numeric_type_columns': [{'table': r[0], 'column': r[1], 'type': r[2], 'min': r[3], 'max': r[4]} for r in numeric_type_cols],
+        }
+        
+    except Exception as e:
+        logger.error(f"[DIAG] Numeric columns error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
 # HEALTH CHECK
 # =============================================================================
 
