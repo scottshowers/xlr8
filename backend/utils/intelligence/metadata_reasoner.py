@@ -83,12 +83,12 @@ class MetadataReasoner:
     def _load_metadata(self):
         """Load and cache metadata for fast reasoning."""
         
-        # 1. Load domain → tables mapping
+        # 1. Load domain → tables mapping (case-insensitive project match)
         try:
             results = self.conn.execute("""
                 SELECT domain, table_name 
                 FROM _table_classifications
-                WHERE project_name = ?
+                WHERE LOWER(project_name) = ?
             """, [self.project]).fetchall()
             
             for domain, table_name in results:
@@ -102,12 +102,12 @@ class MetadataReasoner:
         except Exception as e:
             logger.warning(f"[REASONER] Could not load domain tables: {e}")
         
-        # 2. Load column classifications by name patterns
+        # 2. Load column classifications by name patterns (case-insensitive project match)
         try:
             results = self.conn.execute("""
                 SELECT table_name, column_name, inferred_type
                 FROM _column_profiles
-                WHERE project = ?
+                WHERE LOWER(project) = ?
             """, [self.project]).fetchall()
             
             logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}'")
