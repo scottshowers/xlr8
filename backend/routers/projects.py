@@ -676,6 +676,18 @@ async def resolve_terms_test(project_id: str, question: str):
         if phrase_words:
             words = [w for w in words if w not in phrase_words]
         
+        # ======================================================================
+        # EVOLUTION 9: Pre-filter superlative keywords BEFORE term resolution
+        # ======================================================================
+        # This prevents "top", "newest", "hires", etc. from being searched as terms
+        superlative_prefilter = {'top', 'bottom', 'highest', 'lowest', 'oldest', 'newest', 
+                                'most', 'least', 'best', 'worst', 'paid', 'earner', 'earners',
+                                'hires', 'hire', 'hired', 'recent', 'earliest', 'latest',
+                                'youngest', 'tenure', 'seniority'}
+        words = [w for w in words if w not in superlative_prefilter]
+        # Also filter standalone numbers that are likely limits (e.g., "5" in "top 5")
+        words = [w for w in words if not w.isdigit()]
+        
         terms_to_resolve = words + numeric_phrases
         
         term_index = TermIndex(conn, project_id)
@@ -787,6 +799,15 @@ async def resolve_terms_test(project_id: str, question: str):
             
             if order_by_column:
                 logger.info(f"[EVOLUTION 9] Superlative detected: {detected_superlative} → ORDER BY {order_by_column} {order_direction} LIMIT {result_limit}")
+        
+        # EVOLUTION 9: Infer domain from superlative column if not already set
+        # "top 5 newest hires" implies employee domain even without "employees" keyword
+        if order_by_column and (not parsed.domain or parsed.domain.value == 'unknown'):
+            if order_by_column in ('last_hire_date', 'original_hire_date', 'seniority_date'):
+                # Hire-related → employee domain
+                from backend.utils.intelligence.query_resolver import EntityDomain
+                parsed.domain = EntityDomain.EMPLOYEES
+                logger.info(f"[EVOLUTION 9] Inferred EMPLOYEES domain from superlative column: {order_by_column}")
         
         # Step 3: Assemble SQL
         intent_map = {
