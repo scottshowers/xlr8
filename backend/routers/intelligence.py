@@ -879,11 +879,11 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
             phrase_words.update(phrase.split())
         filtered_words = [w for w in words if w not in phrase_words]
         
-        # Combine terms - OR terms resolved separately
-        terms_to_resolve = filtered_words + numeric_phrases + date_phrases
+        # Combine terms - include OR phrases for resolution
+        terms_to_resolve = filtered_words + numeric_phrases + date_phrases + or_phrases
         
-        # Resolve regular terms
-        term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, full_question=q)
+        # Resolve all terms including OR phrases
+        term_matches = term_index.resolve_terms_enhanced(terms_to_resolve, detect_numeric=True, detect_dates=True, detect_or=True, full_question=q)
         
         # Resolve OR terms separately to check if they map to same column
         or_term_matches = []
