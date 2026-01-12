@@ -1712,14 +1712,15 @@ class VendorSchemaLoader:
         Load the unified vocabulary across all vendors.
         
         Returns:
-            Unified vocabulary dict.
+            Unified vocabulary dict (or list for seed format).
         """
         if self._unified_vocabulary:
             return self._unified_vocabulary
         
-        vocab_file = self.config_path / 'ukg_vocabulary_seed.json'
+        # Prefer unified vocabulary (has more concepts), fall back to seed
+        vocab_file = self.config_path / 'ukg_family_unified_vocabulary.json'
         if not vocab_file.exists():
-            vocab_file = self.config_path / 'ukg_family_unified_vocabulary.json'
+            vocab_file = self.config_path / 'ukg_vocabulary_seed.json'
         
         if vocab_file.exists():
             try:
@@ -2033,9 +2034,10 @@ def _build_concept_terms(
     """
     Build CONCEPT terms that map user concepts (like "state", "salary") to columns.
     
-    Two-pass approach:
-    1. VOCABULARY: Load concepts from ukg_family_unified_vocabulary.json, match to hubs by semantic_type
-    2. INFERRED: For remaining hubs, derive concept by stripping _code/_id suffix
+    Three-pass approach:
+    1. VOCABULARY: Load concepts from vocabulary JSON, match to hubs by semantic_type
+    2. FILTER_CATEGORY: Use column profiles to map concepts (state, status) to actual columns
+    3. INFERRED: For remaining hubs, derive concept by stripping _code/_id suffix
     
     Args:
         conn: DuckDB connection
@@ -2044,17 +2046,17 @@ def _build_concept_terms(
         entity_domain_map: table_name -> domain mapping for entity detection
         
     Returns:
-        Dict with counts: {'vocabulary': N, 'inferred': M}
+        Dict with counts: {'vocabulary': N, 'inferred': M, 'filter_category': P}
     """
-    stats = {'vocabulary': 0, 'inferred': 0}
+    stats = {'vocabulary': 0, 'inferred': 0, 'filter_category': 0}
     covered_semantic_types = set()
+    covered_columns = set()  # Track (table, column) to avoid duplicates
     
     # --------------------------------------------------------------------------
     # Load context graph hubs (semantic_type -> table/column)
     # --------------------------------------------------------------------------
     hubs = []
     try:
-        # Get hubs from _column_mappings where is_hub = TRUE
         hub_rows = conn.execute("""
             SELECT table_name, original_column, semantic_type, is_hub
             FROM _column_mappings
@@ -2074,10 +2076,6 @@ def _build_concept_terms(
     except Exception as e:
         logger.warning(f"[TERM_INDEX] Could not load hubs from _column_mappings: {e}")
     
-    if not hubs:
-        logger.warning("[TERM_INDEX] No hubs found - skipping concept term building")
-        return stats
-    
     # Build lookup: semantic_type -> list of hubs
     semantic_to_hubs: Dict[str, List[Dict]] = {}
     for hub in hubs:
@@ -2086,54 +2084,138 @@ def _build_concept_terms(
             semantic_to_hubs[st] = []
         semantic_to_hubs[st].append(hub)
     
-    # --------------------------------------------------------------------------
-    # PASS 1: Vocabulary-based concepts
-    # --------------------------------------------------------------------------
+    # ==========================================================================
+    # PASS 1: Filter-category based concepts (MOST RELIABLE for user queries)
+    # Maps common concepts to columns based on filter_category from profiling
+    # ==========================================================================
+    FILTER_CATEGORY_CONCEPTS = {
+        'location': ['state', 'location', 'province', 'region', 'site'],
+        'status': ['status', 'employment status', 'active', 'employee status'],
+        'company': ['company', 'employer', 'entity'],
+        'organization': ['department', 'division', 'org', 'organization', 'cost center'],
+        'pay_type': ['pay type', 'hourly', 'salary type', 'flsa'],
+        'employee_type': ['employee type', 'worker type', 'employment type'],
+        'job': ['job', 'position', 'title', 'role', 'job code'],
+    }
+    
+    try:
+        # Get columns with filter_category from profiles
+        filter_cols = conn.execute("""
+            SELECT DISTINCT table_name, column_name, filter_category
+            FROM _column_profiles
+            WHERE project = ? AND filter_category IS NOT NULL
+        """, [project]).fetchall()
+        
+        logger.info(f"[TERM_INDEX] Found {len(filter_cols)} columns with filter_category")
+        
+        for table_name, column_name, filter_category in filter_cols:
+            concepts = FILTER_CATEGORY_CONCEPTS.get(filter_category, [])
+            domain = entity_domain_map.get(table_name.lower(), 'unknown')
+            entity = _domain_to_entity(domain)
+            
+            for concept in concepts:
+                col_key = (table_name.lower(), column_name.lower())
+                if col_key in covered_columns:
+                    continue
+                    
+                if index.add_term(
+                    term=concept,
+                    term_type='concept',
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator='GROUP BY',
+                    match_value=None,
+                    domain=domain,
+                    entity=entity,
+                    confidence=0.90,
+                    source='filter_category'
+                ):
+                    stats['filter_category'] += 1
+            
+            covered_columns.add((table_name.lower(), column_name.lower()))
+                
+    except Exception as e:
+        logger.warning(f"[TERM_INDEX] Filter category concept building failed: {e}")
+    
+    # ==========================================================================
+    # PASS 2: Vocabulary-based concepts
+    # ==========================================================================
     try:
         vocab_loader = VendorSchemaLoader()
         vocabulary = vocab_loader.load_unified_vocabulary()
-        vocab_entries = vocabulary.get('vocabulary', {})
         
-        logger.info(f"[TERM_INDEX] Loaded vocabulary with {len(vocab_entries)} concepts")
+        # Handle both formats:
+        # - ukg_vocabulary_seed.json: LIST of {semantic_type, display_name, hub_type, ...}
+        # - ukg_family_unified_vocabulary.json: DICT with vocabulary: {concept: {...}}
         
-        for concept_name, concept_def in vocab_entries.items():
-            # Get semantic_types this concept maps to
-            semantic_types = concept_def.get('semantic_types', {})
+        vocab_entries = []
+        if isinstance(vocabulary, list):
+            vocab_entries = vocabulary
+            logger.info(f"[TERM_INDEX] Loaded vocabulary (list format) with {len(vocab_entries)} entries")
+        elif isinstance(vocabulary, dict):
+            vocab_dict = vocabulary.get('vocabulary', {})
+            for concept_name, concept_def in vocab_dict.items():
+                entry = {
+                    'concept': concept_name,
+                    'semantic_type': None,
+                    'display_name': concept_def.get('entity_name', concept_name),
+                }
+                sem_types = concept_def.get('semantic_types', {})
+                if sem_types:
+                    entry['semantic_type'] = list(sem_types.values())[0]
+                vocab_entries.append(entry)
+            logger.info(f"[TERM_INDEX] Loaded vocabulary (dict format) with {len(vocab_entries)} entries")
+        
+        for entry in vocab_entries:
+            sem_type = entry.get('semantic_type', '')
+            if not sem_type:
+                continue
             
-            # Try each product's semantic type
-            matched = False
-            for product, sem_type in semantic_types.items():
-                sem_type_lower = sem_type.lower()
-                
-                if sem_type_lower in semantic_to_hubs:
-                    # Found matching hub(s) for this concept
-                    for hub in semantic_to_hubs[sem_type_lower]:
-                        # Determine entity from domain
-                        entity = _domain_to_entity(hub['domain'])
+            sem_type_lower = sem_type.lower()
+            
+            concept_name = entry.get('hub_type') or entry.get('concept')
+            if not concept_name:
+                display = entry.get('display_name', '')
+                concept_name = display.lower().replace(' ', '_') if display else None
+            if not concept_name:
+                concept_name = _derive_concept_from_semantic_type(sem_type_lower)
+            
+            if not concept_name or len(concept_name) < 2:
+                continue
+            
+            concept_name = concept_name.lower().replace('_', ' ').strip()
+            
+            if sem_type_lower in semantic_to_hubs:
+                for hub in semantic_to_hubs[sem_type_lower]:
+                    col_key = (hub['table'].lower(), hub['column'].lower())
+                    if col_key in covered_columns:
+                        continue
                         
-                        # Add concept term
-                        if index.add_term(
-                            term=concept_name.lower(),
-                            term_type='concept',
-                            table_name=hub['table'],
-                            column_name=hub['column'],
-                            operator='GROUP BY',  # Concepts typically used for grouping
-                            match_value=None,
-                            domain=hub['domain'],
-                            entity=entity,
-                            confidence=0.95,
-                            source='vocabulary'
-                        ):
-                            stats['vocabulary'] += 1
-                            matched = True
+                    entity = _domain_to_entity(hub['domain'])
                     
-                    covered_semantic_types.add(sem_type_lower)
-            
-            if matched:
-                logger.debug(f"[TERM_INDEX] Vocabulary concept '{concept_name}' → matched")
+                    if index.add_term(
+                        term=concept_name,
+                        term_type='concept',
+                        table_name=hub['table'],
+                        column_name=hub['column'],
+                        operator='GROUP BY',
+                        match_value=None,
+                        domain=hub['domain'],
+                        entity=entity,
+                        confidence=0.95,
+                        source='vocabulary'
+                    ):
+                        stats['vocabulary'] += 1
+                    
+                    covered_columns.add(col_key)
+                
+                covered_semantic_types.add(sem_type_lower)
+                logger.debug(f"[TERM_INDEX] Vocabulary concept '{concept_name}' → {sem_type_lower}")
                 
     except Exception as e:
         logger.warning(f"[TERM_INDEX] Vocabulary loading failed: {e}")
+        import traceback
+        logger.warning(f"[TERM_INDEX] Traceback: {traceback.format_exc()}")
     
     # --------------------------------------------------------------------------
     # PASS 2: Inferred concepts from remaining semantic_types
