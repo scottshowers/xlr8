@@ -122,8 +122,13 @@ class SQLAssembler:
         # Cache for entity primary tables
         self._entity_primary: Dict[str, str] = {}
         
+        # Cache for hub tables from context graph
+        # Maps table_name -> {'truth_type': 'reality'|'configuration', 'semantic_type': '...'}
+        self._hub_tables: Dict[str, Dict[str, str]] = {}
+        
         # Load caches
         self._load_entity_primaries()
+        self._load_hub_tables()
     
     def _load_entity_primaries(self):
         """Load primary tables for each entity from _entity_tables."""
@@ -186,6 +191,42 @@ class SQLAssembler:
                 
         except Exception as e:
             logger.warning(f"[SQL_ASSEMBLER] Fallback table lookup failed: {e}")
+    
+    def _load_hub_tables(self):
+        """
+        Load hub tables from context graph (_column_mappings).
+        
+        This leverages the hub-spoke architecture to identify:
+        - REALITY hubs: Actual data (personal, deductions, earnings)  
+        - CONFIGURATION hubs: Setup/config tables (locations, job_codes)
+        
+        For employee queries, we prefer REALITY hubs as the primary table.
+        """
+        try:
+            # Get all hub tables with their truth_type
+            results = self.conn.execute("""
+                SELECT DISTINCT 
+                    table_name, 
+                    truth_type,
+                    semantic_type
+                FROM _column_mappings 
+                WHERE LOWER(project) = ? AND is_hub = TRUE
+            """, [self.project.lower()]).fetchall()
+            
+            for table_name, truth_type, semantic_type in results:
+                self._hub_tables[table_name] = {
+                    'truth_type': truth_type or 'unknown',
+                    'semantic_type': semantic_type or ''
+                }
+            
+            # Count by truth_type for logging
+            reality_count = sum(1 for h in self._hub_tables.values() if h['truth_type'] == 'reality')
+            config_count = sum(1 for h in self._hub_tables.values() if h['truth_type'] == 'configuration')
+            
+            logger.warning(f"[SQL_ASSEMBLER] Loaded {len(self._hub_tables)} hubs: {reality_count} reality, {config_count} configuration")
+            
+        except Exception as e:
+            logger.warning(f"[SQL_ASSEMBLER] Could not load hub tables: {e}")
     
     def assemble(self, 
                  intent: QueryIntent,
@@ -375,52 +416,120 @@ class SQLAssembler:
                            domain: str,
                            term_matches: List[TermMatch]) -> Optional[str]:
         """
-        Determine the primary table for the query.
+        Determine the primary table for the query using hub-spoke architecture.
         
         Priority:
-        1. Look for 'personal' table in matches (most reliable for employee queries)
-        2. If domain specified and has primary table → use it
-        3. Check entity_primary fallback tables
-        4. If single table in matches → use it
-        5. First table from matches
+        1. HUB-BASED: For employee domain, find REALITY hub (personal table)
+        2. HUB-BASED: Prefer REALITY hubs over CONFIGURATION hubs
+        3. FALLBACK: Domain-based primary from entity tables
+        4. FALLBACK: Single table in matches
+        5. FALLBACK: First table from matches
+        
+        The hub-spoke model means:
+        - REALITY hubs = actual data (personal, deductions, earnings)
+        - CONFIGURATION hubs = setup tables (locations, job_codes)
+        
+        For queries about entities (employees), we anchor on the REALITY hub.
         """
-        # FIRST: Look for 'personal' table in matches
-        # This is the most reliable indicator for employee data queries
+        # ==========================================================================
+        # STEP 1: HUB-BASED SELECTION (preferred - uses context graph knowledge)
+        # ==========================================================================
+        if self._hub_tables:
+            # Separate reality vs configuration hubs
+            reality_hubs = [t for t, info in self._hub_tables.items() 
+                          if info['truth_type'] == 'reality']
+            config_hubs = [t for t, info in self._hub_tables.items() 
+                         if info['truth_type'] == 'configuration']
+            
+            # For EMPLOYEE domain, find the employee_number reality hub (personal table)
+            if domain in ('demographics', 'employee', 'employees'):
+                # Look for hub with employee_number semantic type
+                for table, info in self._hub_tables.items():
+                    if (info['truth_type'] == 'reality' and 
+                        info['semantic_type'] == 'employee_number'):
+                        logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: employee_number hub → {table}")
+                        return table
+                
+                # Fallback: any reality hub with 'personal' in name
+                for hub in reality_hubs:
+                    if 'personal' in hub.lower():
+                        logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: personal reality hub → {hub}")
+                        return hub
+            
+            # For DEDUCTIONS domain, use deductions reality hub if it exists
+            if domain in ('deductions', 'benefits'):
+                for hub in reality_hubs:
+                    if 'deduction' in hub.lower():
+                        logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: deductions reality hub → {hub}")
+                        return hub
+            
+            # For EARNINGS domain
+            if domain in ('earnings', 'compensation', 'pay'):
+                for hub in reality_hubs:
+                    if 'earning' in hub.lower():
+                        logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: earnings reality hub → {hub}")
+                        return hub
+            
+            # General case: prefer reality hubs from term matches over config hubs
+            matched_reality = [t for t in tables_from_matches if t in reality_hubs]
+            matched_config = [t for t in tables_from_matches if t in config_hubs]
+            
+            if matched_reality:
+                logger.warning(f"[SQL_ASSEMBLER] HUB-BASED: reality hub from matches → {matched_reality[0]}")
+                return matched_reality[0]
+        
+        # ==========================================================================
+        # STEP 2: ENTITY PRIMARY FALLBACK (for projects without full hub data)
+        # ==========================================================================
+        
+        # Employee domain uses demographics/employee primary
+        if domain in ('demographics', 'employee', 'employees'):
+            for key in ['demographics', 'employee']:
+                if key in self._entity_primary:
+                    primary = self._entity_primary[key]
+                    logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: {key} → {primary}")
+                    return primary
+        
+        # Look for 'personal' table in matches
         for table in tables_from_matches:
             if 'personal' in table.lower():
-                logger.warning(f"[SQL_ASSEMBLER] Found 'personal' table as primary: {table}")
+                logger.warning(f"[SQL_ASSEMBLER] PATTERN: 'personal' in table → {table}")
                 return table
         
-        # SECOND: Domain-based primary from entity tables
+        # Domain-based primary from entity tables
         if domain and domain in self._entity_primary:
             primary = self._entity_primary[domain]
-            logger.warning(f"[SQL_ASSEMBLER] Using entity_primary for domain '{domain}': {primary}")
+            logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: domain '{domain}' → {primary}")
             return primary
         
-        # THIRD: Check for employee/demographics domain in matches
+        # Check for employee domain in term matches
         for match in term_matches:
-            if match.domain in ('demographics', 'employee', 'hr'):
+            if hasattr(match, 'domain') and match.domain in ('demographics', 'employee', 'hr'):
                 for key in ['demographics', 'employee', 'hr']:
                     if key in self._entity_primary:
                         primary = self._entity_primary[key]
-                        logger.warning(f"[SQL_ASSEMBLER] Using entity_primary for match domain: {primary}")
+                        logger.warning(f"[SQL_ASSEMBLER] ENTITY-BASED: match domain → {primary}")
                         return primary
         
-        # FOURTH: Single table - use it
+        # ==========================================================================
+        # STEP 3: SIMPLE FALLBACKS
+        # ==========================================================================
+        
+        # Single table - use it
         if len(tables_from_matches) == 1:
-            logger.warning(f"[SQL_ASSEMBLER] Single table in matches: {tables_from_matches[0]}")
+            logger.warning(f"[SQL_ASSEMBLER] SINGLE TABLE: {tables_from_matches[0]}")
             return tables_from_matches[0]
         
-        # FIFTH: Use entity_primary fallback
+        # Use entity_primary fallback
         for key in ['employee', 'demographics', 'hr']:
             if key in self._entity_primary:
                 primary = self._entity_primary[key]
-                logger.warning(f"[SQL_ASSEMBLER] Using entity_primary fallback '{key}': {primary}")
+                logger.warning(f"[SQL_ASSEMBLER] FALLBACK: entity_primary '{key}' → {primary}")
                 return primary
         
-        # SIXTH: First table from matches
+        # First table from matches
         if tables_from_matches:
-            logger.warning(f"[SQL_ASSEMBLER] Using first table from matches: {tables_from_matches[0]}")
+            logger.warning(f"[SQL_ASSEMBLER] FALLBACK: first table → {tables_from_matches[0]}")
             return tables_from_matches[0]
         
         # Nothing found
