@@ -522,9 +522,11 @@ class SQLAssembler:
             aliases[effective_primary] = 't0'
         
         # Build SELECT
+        # IMPORTANT: Cast to DOUBLE for aggregation since some numeric columns may be stored as VARCHAR
         if agg_column:
             agg_alias = aliases.get(agg_table, aliases.get(effective_primary, effective_primary))
-            sql = f'SELECT {agg_func}({agg_alias}."{agg_column}") as {result_alias}'
+            # Use TRY_CAST to safely handle non-numeric values (returns NULL instead of error)
+            sql = f'SELECT {agg_func}(TRY_CAST({agg_alias}."{agg_column}" AS DOUBLE)) as {result_alias}'
         else:
             # Fallback to COUNT if no numeric column found
             primary_alias = aliases.get(effective_primary, effective_primary)
