@@ -125,11 +125,12 @@ class SQLAssembler:
     def _load_entity_primaries(self):
         """Load primary tables for each entity from _entity_tables."""
         try:
+            # Case-insensitive project match
             results = self.conn.execute("""
                 SELECT entity, table_name
                 FROM _entity_tables
-                WHERE project = ? AND is_primary = TRUE
-            """, [self.project]).fetchall()
+                WHERE LOWER(project) = ? AND is_primary = TRUE
+            """, [self.project.lower()]).fetchall()
             
             for entity, table_name in results:
                 self._entity_primary[entity] = table_name
@@ -137,14 +138,51 @@ class SQLAssembler:
             logger.warning(f"[SQL_ASSEMBLER] Loaded {len(self._entity_primary)} entity primaries")
         except Exception as e:
             logger.warning(f"[SQL_ASSEMBLER] Could not load entity primaries: {e}")
-            # Fallback defaults
-            self._entity_primary = {
-                'employee': 'Personal',
-                'demographics': 'Personal',
-                'earnings': 'Earnings',
-                'deductions': 'Deductions',
-                'taxes': 'Taxes',
-            }
+        
+        # If no entity primaries loaded, find common tables from the database
+        if not self._entity_primary:
+            self._find_fallback_tables()
+    
+    def _find_fallback_tables(self):
+        """Find actual table names when _entity_tables is empty."""
+        project_lower = self.project.lower()
+        try:
+            # Look for personal/employee table (case-insensitive match on project_name)
+            results = self.conn.execute("""
+                SELECT table_name FROM _table_classifications
+                WHERE LOWER(project_name) = ? AND LOWER(table_name) LIKE '%personal%'
+                LIMIT 1
+            """, [project_lower]).fetchall()
+            
+            if results:
+                self._entity_primary['employee'] = results[0][0]
+                self._entity_primary['demographics'] = results[0][0]
+                logger.warning(f"[SQL_ASSEMBLER] Fallback: Found personal table: {results[0][0]}")
+            
+            # Look for deductions table
+            results = self.conn.execute("""
+                SELECT table_name FROM _table_classifications
+                WHERE LOWER(project_name) = ? AND LOWER(table_name) LIKE '%deduction%'
+                LIMIT 1
+            """, [project_lower]).fetchall()
+            
+            if results:
+                self._entity_primary['deductions'] = results[0][0]
+                logger.warning(f"[SQL_ASSEMBLER] Fallback: Found deductions table: {results[0][0]}")
+            
+            # Look for earnings table
+            results = self.conn.execute("""
+                SELECT table_name FROM _table_classifications
+                WHERE LOWER(project_name) = ? AND LOWER(table_name) LIKE '%earning%'
+                LIMIT 1
+            """, [project_lower]).fetchall()
+            
+            if results:
+                self._entity_primary['earnings'] = results[0][0]
+                logger.warning(f"[SQL_ASSEMBLER] Fallback: Found earnings table: {results[0][0]}")
+                
+        except Exception as e:
+            logger.warning(f"[SQL_ASSEMBLER] Fallback table lookup failed: {e}")
     
     def assemble(self, 
                  intent: QueryIntent,
@@ -311,14 +349,23 @@ class SQLAssembler:
         
         # Default to Personal for employee queries
         if any(m.entity == 'employee' for m in term_matches):
-            return self._entity_primary.get('employee', 'Personal')
+            primary = self._entity_primary.get('employee')
+            if primary:
+                return primary
         
         # First table
         if tables_from_matches:
             return tables_from_matches[0]
         
-        # Fallback
-        return self._entity_primary.get('employee', 'Personal')
+        # Final fallback - use employee/demographics primary if available
+        if 'employee' in self._entity_primary:
+            return self._entity_primary['employee']
+        if 'demographics' in self._entity_primary:
+            return self._entity_primary['demographics']
+        
+        # Nothing found - return None and let caller handle
+        logger.warning("[SQL_ASSEMBLER] No primary table found - entity_primary is empty and no matches")
+        return None
     
     def _build_count(self,
                      primary_table: str,
