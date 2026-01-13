@@ -129,6 +129,16 @@ from .citation_tracker import (
     collect_citations_from_truths,
 )
 
+# Gap Detector (Missing truth coverage detection)
+from .gap_detector import (
+    Gap,
+    GapAnalysis,
+    GapDetector,
+    get_detector as get_gap_detector,
+    detect_gaps,
+    detect_gaps_from_gathered,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -218,6 +228,14 @@ __all__ = [
     'CitationCollector',
     'create_collector',
     'collect_citations_from_truths',
+    
+    # Gap Detector
+    'Gap',
+    'GapAnalysis',
+    'GapDetector',
+    'get_gap_detector',
+    'detect_gaps',
+    'detect_gaps_from_gathered',
     
     # Gatherers
     'BaseGatherer',
