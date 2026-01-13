@@ -45,6 +45,12 @@ from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
 from .synthesis_pipeline import SynthesisPipeline as Synthesizer  # Phase 3: New clean implementation
 from .truth_enricher import TruthEnricher
+from .consultative_templates import (
+    format_count_response,
+    format_aggregation_response,
+    format_group_by_response,
+    format_list_response
+)
 from .gatherers import (
     RealityGatherer,
     IntentGatherer,
@@ -1785,42 +1791,99 @@ class IntelligenceEngineV2:
             # EVOLUTION 8: Check if this is a GROUP BY query (multiple rows with dimension)
             is_group_by = group_by_column and len(rows) > 1
             
-            # Build answer text based on intent
+            # Convert assembled.filters to format expected by templates
+            filter_list = []
+            if assembled.filters:
+                for f in assembled.filters:
+                    if isinstance(f, dict):
+                        filter_list.append(f)
+                    elif hasattr(f, 'column_name'):
+                        # TermMatch object
+                        filter_list.append({
+                            'column': f.column_name,
+                            'operator': f.operator,
+                            'value': f.match_value
+                        })
+            
+            # Build consultative answer text using templates
             if is_group_by:
-                # Format GROUP BY results as a breakdown
+                # GROUP BY query - breakdown response
                 dim_col = columns[0]  # First column is the dimension
-                agg_col = columns[1] if len(columns) > 1 else 'count'  # Second is aggregation
+                agg_col = columns[1] if len(columns) > 1 else 'count'
                 
-                # Build breakdown text
-                lines = [f"✅ Breakdown by {dim_col}:"]
-                for row in rows[:15]:  # Limit to top 15
-                    dim_val = row.get(dim_col, 'Unknown')
-                    agg_val = row.get(agg_col, 0)
-                    if isinstance(agg_val, (int, float)):
-                        lines.append(f"  • {dim_val}: {agg_val:,.2f}")
-                    else:
-                        lines.append(f"  • {dim_val}: {agg_val}")
-                if len(rows) > 15:
-                    lines.append(f"  ... and {len(rows) - 15} more")
-                answer_text = "\n".join(lines)
-                logger.warning(f"[DETERMINISTIC] GROUP BY result: {len(rows)} groups")
+                answer_text = format_group_by_response(
+                    rows=rows,
+                    dimension_column=dim_col,
+                    value_column=agg_col,
+                    agg_type=parsed.intent.value,
+                    table_name=assembled.primary_table,
+                    filters=filter_list
+                )
+                logger.warning(f"[DETERMINISTIC] GROUP BY result: {len(rows)} groups (consultative template)")
+                
             elif assembler_intent == AssemblerIntent.COUNT:
                 count = rows[0].get('count', len(rows)) if rows else 0
-                answer_text = f"✅ Found {count} records matching your criteria."
+                answer_text = format_count_response(
+                    count=count,
+                    entity=parsed.domain.value if parsed.domain else 'records',
+                    table_name=assembled.primary_table,
+                    filters=filter_list,
+                    project=self.project,
+                    sql=assembled.sql
+                )
+                
             elif assembler_intent == AssemblerIntent.SUM:
                 total = rows[0].get('total', 0) if rows else 0
-                answer_text = f"✅ The total is {total:,.2f}." if isinstance(total, (int, float)) else f"✅ The total is {total}."
+                answer_text = format_aggregation_response(
+                    agg_type='sum',
+                    value=total,
+                    column=assembled.agg_column if hasattr(assembled, 'agg_column') else 'total',
+                    table_name=assembled.primary_table,
+                    filters=filter_list,
+                    row_count=len(result)
+                )
+                
             elif assembler_intent == AssemblerIntent.AVERAGE:
                 avg = rows[0].get('average', 0) if rows else 0
-                answer_text = f"✅ The average is {avg:,.2f}." if isinstance(avg, (int, float)) else f"✅ The average is {avg}."
+                answer_text = format_aggregation_response(
+                    agg_type='average',
+                    value=avg,
+                    column=assembled.agg_column if hasattr(assembled, 'agg_column') else 'value',
+                    table_name=assembled.primary_table,
+                    filters=filter_list,
+                    row_count=len(result)
+                )
+                
             elif assembler_intent == AssemblerIntent.MINIMUM:
                 minimum = rows[0].get('minimum', 0) if rows else 0
-                answer_text = f"✅ The minimum is {minimum:,.2f}." if isinstance(minimum, (int, float)) else f"✅ The minimum is {minimum}."
+                answer_text = format_aggregation_response(
+                    agg_type='minimum',
+                    value=minimum,
+                    column=assembled.agg_column if hasattr(assembled, 'agg_column') else 'value',
+                    table_name=assembled.primary_table,
+                    filters=filter_list
+                )
+                
             elif assembler_intent == AssemblerIntent.MAXIMUM:
                 maximum = rows[0].get('maximum', 0) if rows else 0
-                answer_text = f"✅ The maximum is {maximum:,.2f}." if isinstance(maximum, (int, float)) else f"✅ The maximum is {maximum}."
+                answer_text = format_aggregation_response(
+                    agg_type='maximum',
+                    value=maximum,
+                    column=assembled.agg_column if hasattr(assembled, 'agg_column') else 'value',
+                    table_name=assembled.primary_table,
+                    filters=filter_list
+                )
+                
             else:
-                answer_text = f"✅ Found {len(rows)} records."
+                # LIST intent or fallback
+                answer_text = format_list_response(
+                    rows=rows[:100],
+                    columns=columns,
+                    table_name=assembled.primary_table,
+                    total_count=len(rows),
+                    filters=filter_list,
+                    entity=parsed.domain.value if parsed.domain else 'records'
+                )
             
             # Build structured output using proper Truth objects
             reality_truth = Truth(
