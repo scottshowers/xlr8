@@ -11,7 +11,7 @@
 |-------|------|-------|--------|------------|
 | 0 | Foundation | - | ✅ COMPLETE | - |
 | 1 | SQL Evolutions | 30-38 | ✅ COMPLETE | `/doc/PHASE_01_SQL.md` |
-| 2 | Vector Retrieval | 20-25 | 🔄 IN PROGRESS | `/doc/PHASE_02_VECTOR.md` |
+| 2 | Vector Retrieval | 20-25 | ✅ COMPLETE | `/doc/PHASE_02_VECTOR.md` |
 | 3 | Synthesis | 12-16 | NOT STARTED | `/doc/PHASE_03_SYNTHESIS.md` |
 | 4 | Presentation | 10-12 | NOT STARTED | `/doc/PHASE_04_PRESENTATION.md` |
 | 5 | Multi-Product Schemas | 15-20 | NOT STARTED | `/doc/PHASE_05_MULTI_PRODUCT.md` |
@@ -57,7 +57,7 @@
 
 ---
 
-## Phase 2: Vector Retrieval 🔄 IN PROGRESS
+## Phase 2: Vector Retrieval ✅ COMPLETE
 
 **Make ChromaDB useful for Five Truths**
 
@@ -68,7 +68,7 @@
 | 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | ✅ DONE |
 | 2B.5 | Citation Tracking | 2-3 | ✅ DONE |
-| 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED |
+| 2B.6 | Gap Detection Queries | 4-5 | ✅ DONE |
 
 **Detail:** See `/doc/PHASE_02_VECTOR.md`
 
@@ -162,7 +162,7 @@
 
 ## Current Focus
 
-**Active:** Phase 2 - Vector Retrieval
+**Active:** Phase 2 - Vector Retrieval ✅ COMPLETE
 
 **Completed This Session (Jan 12):**
 - ✅ Phase 2B.1: Domain-Tagged Chunks
@@ -172,7 +172,7 @@
 - ✅ Phase 2B.2: Query-Aware Vector Search  
   - Created `truth_router.py` with query pattern detection
   - Routes queries to appropriate truth types (regulatory, reference, intent, compliance)
-  - Domain detection from query text (earnings, taxes, time, etc.)
+  - Domain detection from query text
   - Integrated into engine's `_gather_reference_library()`
 - ✅ Phase 2B.3: Source Typing & Prioritization
   - Created `source_prioritizer.py` with authority weight matrices
@@ -188,10 +188,13 @@
   - Collects, deduplicates, and formats citations
   - Multiple display formats (brief, full, academic)
   - Added citations field to SynthesizedAnswer
+- ✅ Phase 2B.6: Gap Detection
+  - Created `gap_detector.py` (product-agnostic, fresh implementation)
+  - Archived old HCM-specific `gap_detection_engine.py`
+  - Detects missing truth coverage per topic
+  - Coverage scoring and gap recommendations
 
-**Next Session Options:**
-1. Phase 2B.6: Gap Detection - Find missing truth coverage
-2. Skip to Phase 3 (Synthesis) - Vector retrieval is now robust
+**Next Up:** Phase 3 (Synthesis) - Turn retrieved facts into consultative responses
 
 ---
 
@@ -199,6 +202,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Phase 2 (Vector Retrieval) COMPLETE - all 6 components done |
 | 2026-01-12 | Added Phase 5 (Multi-Product Schemas) and Phase 6 (API Connectivity expanded) |
-| 2026-01-12 | Completed Phase 2B.1-2B.5 (Vector Retrieval) |
+| 2026-01-12 | Archived old HCM-specific gap_detection_engine.py |
 | 2026-01-11 | Initial roadmap created |
