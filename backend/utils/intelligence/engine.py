@@ -49,6 +49,18 @@ from .gatherers import (
 
 logger = logging.getLogger(__name__)
 
+# Truth Router for query-aware vector search (Phase 2B.2)
+TRUTH_ROUTER_AVAILABLE = False
+TruthRouter = None
+truth_router_instance = None
+try:
+    from .truth_router import TruthRouter, get_router
+    truth_router_instance = get_router()
+    TRUTH_ROUTER_AVAILABLE = True
+    logger.info("✅ TruthRouter loaded for query-aware vector search")
+except ImportError as e:
+    logger.warning(f"TruthRouter not available: {e}")
+
 # Term Index + SQL Assembler - the NEW deterministic path
 # Must be after logger is defined
 DETERMINISTIC_PATH_AVAILABLE = False
@@ -2272,20 +2284,64 @@ class IntelligenceEngineV2:
             Tuple of (reference, regulatory, compliance) Truth lists
             
         These are GLOBAL - they apply to all projects and are not filtered by project_id.
+        
+        Phase 2B.2: Now uses TruthRouter to determine which truth types to gather
+        based on query patterns. This improves relevance and reduces noise.
         """
         reference = []
         regulatory = []
         compliance = []
         
-        # Gather from each global truth type
-        if self.reference_gatherer:
-            reference = self.reference_gatherer.gather(question, analysis)
+        # Phase 2B.2: Use TruthRouter to determine which truths to gather
+        if TRUTH_ROUTER_AVAILABLE and truth_router_instance:
+            routing = truth_router_instance.route_query(question, analysis)
             
-        if self.regulatory_gatherer:
-            regulatory = self.regulatory_gatherer.gather(question, analysis)
+            # Log routing decision
+            truth_types = [tq.truth_type for tq in routing.queries]
+            logger.warning(f"[GATHER-LIBRARY] TruthRouter: {routing.query_category} → {truth_types}")
             
-        if self.compliance_gatherer:
-            compliance = self.compliance_gatherer.gather(question, analysis)
+            # Only gather truths that the router recommends
+            # Use weight threshold of 0.3 to include moderately relevant truths
+            should_ref, ref_weight = truth_router_instance.should_gather('reference', routing, 0.3)
+            should_reg, reg_weight = truth_router_instance.should_gather('regulatory', routing, 0.3)
+            should_comp, comp_weight = truth_router_instance.should_gather('compliance', routing, 0.3)
+            
+            if should_ref and self.reference_gatherer:
+                reference = self.reference_gatherer.gather(question, analysis)
+                # Tag results with routing weight for later prioritization
+                for t in reference:
+                    t.metadata = t.metadata or {}
+                    t.metadata['routing_weight'] = ref_weight
+                    
+            if should_reg and self.regulatory_gatherer:
+                regulatory = self.regulatory_gatherer.gather(question, analysis)
+                for t in regulatory:
+                    t.metadata = t.metadata or {}
+                    t.metadata['routing_weight'] = reg_weight
+                    
+            if should_comp and self.compliance_gatherer:
+                compliance = self.compliance_gatherer.gather(question, analysis)
+                for t in compliance:
+                    t.metadata = t.metadata or {}
+                    t.metadata['routing_weight'] = comp_weight
+            
+            # Store routing info in analysis for downstream use
+            analysis['truth_routing'] = {
+                'category': routing.query_category,
+                'domain': routing.domain_detected,
+                'confidence': routing.confidence,
+                'reasoning': routing.reasoning
+            }
+        else:
+            # Fallback: gather from all truth types (original behavior)
+            if self.reference_gatherer:
+                reference = self.reference_gatherer.gather(question, analysis)
+                
+            if self.regulatory_gatherer:
+                regulatory = self.regulatory_gatherer.gather(question, analysis)
+                
+            if self.compliance_gatherer:
+                compliance = self.compliance_gatherer.gather(question, analysis)
         
         return reference, regulatory, compliance
     
