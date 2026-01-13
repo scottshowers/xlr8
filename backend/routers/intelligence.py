@@ -443,6 +443,103 @@ async def get_relationships(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/{project}/debug-columns")
+async def debug_columns(project: str, table: str = None):
+    """
+    Debug endpoint: Show column names from profile.
+    
+    Usage: /api/intelligence/TEA1000/debug-columns?table=employees
+    """
+    try:
+        from utils.duckdb_manager import get_connection
+        
+        conn = get_connection(project)
+        
+        if table:
+            # Get columns for specific table
+            rows = conn.execute("""
+                SELECT table_name, column_name, semantic_type, inferred_type
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                AND LOWER(table_name) LIKE LOWER(?)
+                ORDER BY table_name, column_name
+            """, [project, f"%{table}%"]).fetchall()
+        else:
+            # Get all columns with 'name' or 'supervisor' in them
+            rows = conn.execute("""
+                SELECT table_name, column_name, semantic_type, inferred_type
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                AND (LOWER(column_name) LIKE '%name%' OR LOWER(column_name) LIKE '%super%' OR LOWER(column_name) LIKE '%manager%')
+                ORDER BY table_name, column_name
+            """, [project]).fetchall()
+        
+        return {
+            'project': project,
+            'filter': table or 'name/supervisor/manager columns',
+            'count': len(rows),
+            'columns': [
+                {
+                    'table': row[0],
+                    'column': row[1],
+                    'semantic_type': row[2],
+                    'inferred_type': row[3]
+                }
+                for row in rows
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"[INTELLIGENCE_API] Debug columns error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/{project}/detect-relationships")
+async def run_relationship_detection(project: str):
+    """
+    Debug endpoint: Force run relationship detection.
+    
+    Usage: POST /api/intelligence/TEA1000/detect-relationships
+    """
+    try:
+        from utils.duckdb_manager import get_connection
+        from utils.intelligence.term_index import _detect_relationships
+        
+        conn = get_connection(project)
+        
+        # Run detection
+        stats = _detect_relationships(conn, project)
+        
+        # Get what was detected
+        rows = conn.execute("""
+            SELECT source_table, source_column, target_table, target_column, 
+                   relationship_type, semantic_meaning, confidence
+            FROM _column_relationships
+            WHERE LOWER(project) = LOWER(?)
+        """, [project]).fetchall()
+        
+        return {
+            'project': project,
+            'stats': stats,
+            'relationships': [
+                {
+                    'source_table': row[0],
+                    'source_column': row[1],
+                    'target_table': row[2],
+                    'target_column': row[3],
+                    'type': row[4],
+                    'semantic': row[5],
+                    'confidence': row[6]
+                }
+                for row in rows
+            ]
+        }
+        
+    except Exception as e:
+        logger.error(f"[INTELLIGENCE_API] Detect relationships error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/{project}/stuck")
 async def help_stuck(project: str, request: StuckRequest):
     """
