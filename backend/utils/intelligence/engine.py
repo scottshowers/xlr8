@@ -1438,11 +1438,12 @@ class IntelligenceEngineV2:
         
         try:
             # Extract workforce snapshot data
-            snapshot = structured_output.get('yearly_snapshot', {})
+            # Structure is: {'type': 'workforce_snapshot', 'years': {2024: {...}, ...}}
+            snapshot = structured_output.get('years', {})
             current_year = max(snapshot.keys()) if snapshot else None
             
             if not current_year:
-                logger.warning("[CONSULTATIVE] No yearly snapshot - falling back")
+                logger.warning(f"[CONSULTATIVE] No years in snapshot - keys: {list(structured_output.keys())}")
                 return None
             
             current = snapshot.get(current_year, {})
