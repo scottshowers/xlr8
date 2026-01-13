@@ -15,7 +15,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { 
   Rocket, MessageSquare, ChevronDown, ChevronUp,
   Target, FolderOpen, Database, ClipboardList, BarChart3,
-  Lightbulb, Wrench, GraduationCap, Settings, Map, Building2
+  Lightbulb, Wrench, GraduationCap, Settings, Map, Building2, Activity
 } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
@@ -50,6 +50,7 @@ function SalesButtons() {
   const buttons = [
     { id: 'journey', path: '/journey', icon: Map, title: 'The Journey' },
     { id: 'architecture', path: '/architecture', icon: Building2, title: 'Architecture' },
+    { id: 'metrics', path: '/architecture/metrics-pipeline', icon: Activity, title: 'Metrics Pipeline' },
   ];
   
   return (
