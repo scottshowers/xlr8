@@ -1,7 +1,7 @@
 # XLR8 Roadmap
 
 **Last Updated:** January 12, 2026  
-**Total Estimated Hours:** 85-105
+**Total Estimated Hours:** 115-145
 
 ---
 
@@ -14,7 +14,8 @@
 | 2 | Vector Retrieval | 20-25 | 🔄 IN PROGRESS | `/doc/PHASE_02_VECTOR.md` |
 | 3 | Synthesis | 12-16 | NOT STARTED | `/doc/PHASE_03_SYNTHESIS.md` |
 | 4 | Presentation | 10-12 | NOT STARTED | `/doc/PHASE_04_PRESENTATION.md` |
-| 5 | API Connectivity | 8-12 | NOT STARTED | `/doc/PHASE_05_API.md` |
+| 5 | Multi-Product Schemas | 15-20 | NOT STARTED | `/doc/PHASE_05_MULTI_PRODUCT.md` |
+| 6 | API Connectivity | 18-25 | NOT STARTED | `/doc/PHASE_06_API.md` |
 
 ---
 
@@ -103,35 +104,59 @@
 
 ---
 
-## Phase 5: API Connectivity
+## Phase 5: Multi-Product Schemas
 
-**Pull live data from UKG instances**
+**Expand beyond HCM to support FINS, ERP, CRM, and other enterprise products**
 
-| Component | Description | Hours |
-|-----------|-------------|-------|
-| 0.1 | Credential Management | 2-3 |
-| 0.2 | UKG Pro RaaS Connector | 3-4 |
-| 0.3 | UKG WFM Connector | 2-3 |
-| 0.4 | UKG Ready Connector | 1-2 |
+| Component | Description | Hours | Status |
+|-----------|-------------|-------|--------|
+| 5.1 | Schema Loader | 3-4 | NOT STARTED |
+| 5.2 | Product Registry | 2-3 | NOT STARTED |
+| 5.3 | Domain Alignment | 4-5 | NOT STARTED |
+| 5.4 | Vocabulary Normalization | 3-4 | NOT STARTED |
+| 5.5 | Hub Type Expansion | 2-3 | NOT STARTED |
 
-**Detail:** See `/doc/PHASE_05_API.md`
+**Supported Categories:** HCM, FINS, ERP, CRM, SCM
+
+**Detail:** See `/doc/PHASE_05_MULTI_PRODUCT.md`
+
+---
+
+## Phase 6: API Connectivity
+
+**Pull live data from customer instances across multiple products**
+
+| Component | Description | Hours | Status |
+|-----------|-------------|-------|--------|
+| 6.1 | Credential Management | 2-3 | NOT STARTED |
+| 6.2 | Connector Framework | 3-4 | NOT STARTED |
+| 6.3 | UKG Connectors | 3-4 | NOT STARTED |
+| 6.4 | Workday Connector | 3-4 | NOT STARTED |
+| 6.5 | SAP Connectors | 3-4 | NOT STARTED |
+| 6.6 | Salesforce Connector | 2-3 | NOT STARTED |
+| 6.7 | Oracle Connectors | 2-3 | NOT STARTED |
+
+**Prerequisites:** Phase 5 (Multi-Product Schemas)
+
+**Detail:** See `/doc/PHASE_06_API.md`
 
 ---
 
 ## Success Criteria
 
 **Engine Complete When:**
-1. Any reasonable HCM question returns accurate data
+1. Any reasonable enterprise question returns accurate data
 2. System explains WHY with regulatory/best practice context
 3. System flags configuration gaps
 4. Response reads like a consultant wrote it
-5. Can pull live from customer UKG instance
+5. Can pull live from customer instances (multiple products)
 
 **Exit Ready When:**
-- Demo handles any reasonable HCM question
+- Demo handles any reasonable enterprise question (HCM, FINS, ERP, CRM)
 - 95% of queries use deterministic SQL
 - Due diligence shows clean architecture
 - Metrics prove system performance
+- Multi-product schema support demonstrated
 
 ---
 
@@ -174,4 +199,6 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Added Phase 5 (Multi-Product Schemas) and Phase 6 (API Connectivity expanded) |
+| 2026-01-12 | Completed Phase 2B.1-2B.5 (Vector Retrieval) |
 | 2026-01-11 | Initial roadmap created |
