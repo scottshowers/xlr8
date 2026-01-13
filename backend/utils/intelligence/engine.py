@@ -272,22 +272,27 @@ class IntelligenceEngineV2:
         'terminated', 'active employee', 'hired', 'tenure'
     ]
     
-    def __init__(self, project_name: str, project_id: str = None):
+    def __init__(self, project_name: str, project_id: str = None, product_id: str = None):
         """
         Initialize the engine.
         
         Args:
             project_name: Project code (e.g., "TEA1000")
             project_id: Project UUID for RAG filtering
+            product_id: Product type ID for schema loading (e.g., "ukg_pro", "workday_hcm")
         """
         self.project = project_name
         self.project_id = project_id
+        self.product_id = product_id  # Phase 5F: Multi-product support
         
         # Data handlers
         self.structured_handler = None
         self.rag_handler = None
         self.schema: Dict = {}
         self.relationships: List = []
+        
+        # Phase 5F: Product schema from registry
+        self.product_schema = None
         
         # Filter state
         self.filter_candidates: Dict = {}
@@ -338,7 +343,60 @@ class IntelligenceEngineV2:
             except Exception as e:
                 logger.warning(f"[ENGINE-V2] ConsultativeSynthesizer init failed: {e}")
         
-        logger.info(f"[ENGINE-V2] Initialized v{__version__} for project={project_name}")
+        # Phase 5F: Load product schema if specified
+        if product_id:
+            self._load_product_schema(product_id)
+        
+        logger.info(f"[ENGINE-V2] Initialized v{__version__} for project={project_name}, product={product_id}")
+    
+    def _load_product_schema(self, product_id: str):
+        """
+        Load product schema from registry (Phase 5F).
+        
+        This provides domain-aware vocabulary and entity mappings
+        for the specific product type.
+        """
+        try:
+            from backend.utils.products import get_product, get_vocabulary_normalizer
+            
+            product = get_product(product_id)
+            if product:
+                self.product_schema = product
+                self.product_id = product_id
+                logger.info(f"[ENGINE-V2] ✅ Product schema loaded: {product.vendor} {product.product} "
+                           f"({product.domain_count} domains, {product.hub_count} hubs)")
+            else:
+                logger.warning(f"[ENGINE-V2] Product not found: {product_id}")
+        except ImportError:
+            logger.warning("[ENGINE-V2] Product registry not available")
+        except Exception as e:
+            logger.warning(f"[ENGINE-V2] Failed to load product schema: {e}")
+    
+    def get_product_domains(self) -> Dict:
+        """Get domains for the current product."""
+        if self.product_schema:
+            return {
+                name: {
+                    'description': d.description,
+                    'hub_count': d.hub_count,
+                    'hubs': d.hubs,
+                }
+                for name, d in self.product_schema.domains.items()
+            }
+        return {}
+    
+    def get_product_info(self) -> Dict:
+        """Get current product info."""
+        if self.product_schema:
+            return {
+                'product_id': self.product_id,
+                'vendor': self.product_schema.vendor,
+                'name': self.product_schema.product,
+                'category': self.product_schema.category,
+                'domain_count': self.product_schema.domain_count,
+                'hub_count': self.product_schema.hub_count,
+            }
+        return {'product_id': None, 'vendor': None, 'name': None}
     
     def load_context(
         self,

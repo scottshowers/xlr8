@@ -32,6 +32,8 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Set, Tuple, Any
 import duckdb
 
+logger = logging.getLogger(__name__)
+
 # Evolution 3: Import value parser for numeric expressions
 try:
     from .value_parser import (
@@ -46,7 +48,18 @@ try:
 except ImportError:
     HAS_VALUE_PARSER = False
 
-logger = logging.getLogger(__name__)
+# Phase 5: Multi-product vocabulary support
+try:
+    from backend.utils.products import (
+        get_vocabulary_normalizer,
+        normalize_term as vocab_normalize_term,
+        get_domain_for_term,
+        DOMAIN_TO_PRIMARY_ENTITY,
+    )
+    HAS_VOCABULARY = True
+    logger.info("[TERM_INDEX] ✅ Multi-product vocabulary available")
+except ImportError:
+    HAS_VOCABULARY = False
 
 # =============================================================================
 # DATA CLASSES
@@ -766,7 +779,17 @@ class TermIndex:
             tables_sorted = sorted(tables, key=lambda x: x.get('row_count', 0), reverse=True)
             
             # Get canonical entity for this domain
-            canonical_entity = DOMAIN_TO_ENTITY.get(domain.lower(), domain)
+            # Phase 5: Try vocabulary system first
+            canonical_entity = None
+            if HAS_VOCABULARY:
+                try:
+                    canonical_entity = DOMAIN_TO_PRIMARY_ENTITY.get(domain)
+                except Exception:
+                    pass
+            
+            # Fallback to hardcoded mapping
+            if not canonical_entity:
+                canonical_entity = DOMAIN_TO_ENTITY.get(domain.lower(), domain)
             
             # Build set of entity names to store (both raw domain and canonical)
             entities_to_store = {domain.lower()}
@@ -794,6 +817,9 @@ class TermIndex:
         """
         Resolve a user term to a canonical entity name.
         
+        Now uses multi-product vocabulary system (Phase 5) with fallback
+        to hardcoded ENTITY_SYNONYMS for backward compatibility.
+        
         Args:
             term: User's query term (e.g., "employees", "401k", "workers")
             
@@ -801,6 +827,17 @@ class TermIndex:
             Canonical entity name or None if not an entity term.
         """
         term_lower = term.lower().strip()
+        
+        # Phase 5: Try vocabulary normalizer first (multi-product support)
+        if HAS_VOCABULARY:
+            try:
+                canonical = vocab_normalize_term(term_lower)
+                if canonical:
+                    return canonical
+            except Exception:
+                pass  # Fall through to hardcoded
+        
+        # Fallback to hardcoded synonyms
         return ENTITY_SYNONYMS.get(term_lower)
     
     def detect_entities_in_query(self, terms: List[str]) -> Set[str]:
