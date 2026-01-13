@@ -1,5 +1,5 @@
 """
-XLR8 Intelligence Engine v3 - Main Orchestrator
+XLR8 Intelligence Engine v4 - Main Orchestrator
 ================================================
 
 The brain of XLR8. Thin orchestrator that coordinates:
@@ -7,7 +7,14 @@ The brain of XLR8. Thin orchestrator that coordinates:
 - Clarification handling (employee status, filters)
 - Truth gathering (Reality, Intent, Configuration, Reference, Regulatory)
 - Conflict detection
-- Response synthesis
+- Response synthesis (Phase 3: SynthesisPipeline)
+
+v4.0 CHANGES (Phase 3 Integration):
+- SynthesisPipeline replaces old Synthesizer (2000-line monolith → clean modular)
+- Five Truths assembled into structured TruthContext
+- Enhanced gap detection (CONFIG_VS_INTENT, CONFIG_VS_REFERENCE, CONFIG_VS_REGULATORY)
+- LLM prompts optimized for local models (Mistral/DeepSeek)
+- Consultative response patterns
 
 v3.0 CHANGES:
 - Context Graph integration for intelligent table selection
@@ -36,7 +43,7 @@ from .types import (
 )
 from .table_selector import TableSelector
 from .sql_generator import SQLGenerator
-from .synthesizer import Synthesizer
+from .synthesis_pipeline import SynthesisPipeline as Synthesizer  # Phase 3: New clean implementation
 from .truth_enricher import TruthEnricher
 from .gatherers import (
     RealityGatherer,
