@@ -1,6 +1,6 @@
 # Phase 1: SQL Evolutions
 
-**Status:** ✅ CORE COMPLETE (9/10 evolutions done)  
+**Status:** ✅ COMPLETE (10/10 evolutions done)  
 **Total Estimated Hours:** 30-38  
 **Dependencies:** QueryResolver refactor, Duckling setup  
 **Last Updated:** January 12, 2026
@@ -96,7 +96,7 @@ pip install pyduckling-native
 | 7 | Aggregations | - | ✅ DONE | SUM, AVG, MIN, MAX |
 | 8 | Group By | - | ✅ DONE | count BY state |
 | 9 | Superlatives | - | ✅ DONE | highest paid, top 5 |
-| 10 | Multi-Hop | 6-8 | NOT STARTED | manager's department |
+| 10 | Multi-Hop | - | ✅ DONE | manager's department |
 
 ---
 
@@ -576,21 +576,61 @@ Result: £56,957.43 ✅
 
 ---
 
-## Evolution 10: Multi-Hop Relationships
+## Evolution 10: Multi-Hop Relationships ✅ DONE
 
-**Capability:** Navigate relationship chains.
+**Completed:** January 12, 2026
+
+**Capability:** Navigate relationship chains for queries like "manager's department".
 
 **Query Patterns:**
 | Pattern | SQL |
 |---------|-----|
-| "manager's department" | JOIN through supervisor_id |
-| "employees in John's team" | Self-join on manager relationship |
+| "manager's department" | Self-JOIN through supervisor_id → department_code |
+| "employees in John's team" | Self-join filtering on supervisor name |
 | "location's regional manager" | Multiple JOIN hops |
 
 **Implementation:**
-- Identify relationship chains from _column_mappings
-- Build multi-step JOIN paths
-- Handle self-referential relationships (manager → employee)
+
+1. **relationship_resolver.py** - New module for multi-hop queries
+   - `RelationshipResolver` class for detecting and resolving relationships
+   - `detect_multi_hop_query()` for parsing possessive patterns
+   - `build_multi_hop_join()` for generating self-join SQL
+   - Supports supervisor/manager, parent_org, and other relationship types
+
+2. **term_index.py** - Relationship detection at upload time
+   - `_detect_relationships()` function finds self-referential columns
+   - `_column_relationships` table stores: supervisor_id → employee_number mappings
+   - Pattern matching for supervisor/manager/reports_to columns
+
+3. **sql_assembler.py** - Multi-hop SQL generation
+   - `MultiHopRequest` dataclass for relationship traversal requests
+   - `build_multi_hop_query()` generates self-join SQL with proper aliases
+   - `_find_relationship_column()` looks up relationship metadata
+   - `_find_target_attribute()` maps user terms to column names
+
+4. **semantic_vocabulary.py** - Relationship semantic types
+   - Added `supervisor_id`, `alternate_supervisor_id`, `parent_org_code`, `hiring_manager_id`
+
+5. **engine.py** - Integration point
+   - `_try_multi_hop_query()` handles multi-hop queries in deterministic path
+   - Early detection of possessive patterns before term resolution
+   - Returns SynthesizedAnswer with relationship data
+
+**Key Files:**
+- `/backend/utils/intelligence/relationship_resolver.py` (NEW)
+- `/backend/utils/intelligence/term_index.py` (enhanced)
+- `/backend/utils/intelligence/sql_assembler.py` (enhanced)
+- `/backend/utils/intelligence/engine.py` (enhanced)
+- `/backend/utils/semantic_vocabulary.py` (enhanced)
+
+**Example:**
+```
+Query: "What is my manager's department?"
+Detected: possessive pattern, source=manager, target=department
+SQL: SELECT t0.*, t1_mgr."department_code" as mgr_department_code
+     FROM employees t0
+     JOIN employees t1_mgr ON t0."supervisor_id" = t1_mgr."employee_number"
+```
 
 ---
 
@@ -634,6 +674,7 @@ Result: £56,957.43 ✅
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 10 (Multi-Hop Relationships) completed. Created relationship_resolver.py, enhanced term_index with _detect_relationships(), added multi-hop SQL generation. PHASE 1 COMPLETE. |
 | 2026-01-12 | Evolution 9 (Superlatives) completed. Added _tables_with_column(), required_column parameter, superlative keyword filtering. |
 | 2026-01-12 | Evolution 8 (Group By) completed. GROUP BY support for count BY queries. |
 | 2026-01-12 | Evolution 7 (Aggregations) completed. SUM, AVG, MIN, MAX support. |
