@@ -459,7 +459,7 @@ async def debug_columns(project: str, table: str = None):
         if table:
             # Get columns for specific table
             rows = conn.execute("""
-                SELECT table_name, column_name, semantic_type, inferred_type
+                SELECT table_name, column_name, original_dtype, distinct_values
                 FROM _column_profiles
                 WHERE LOWER(project) = LOWER(?)
                 AND LOWER(table_name) LIKE LOWER(?)
@@ -468,7 +468,7 @@ async def debug_columns(project: str, table: str = None):
         else:
             # Get all columns with 'name' or 'supervisor' in them
             rows = conn.execute("""
-                SELECT table_name, column_name, semantic_type, inferred_type
+                SELECT table_name, column_name, original_dtype, distinct_values
                 FROM _column_profiles
                 WHERE LOWER(project) = LOWER(?)
                 AND (LOWER(column_name) LIKE '%name%' OR LOWER(column_name) LIKE '%super%' OR LOWER(column_name) LIKE '%manager%')
@@ -483,8 +483,8 @@ async def debug_columns(project: str, table: str = None):
                 {
                     'table': row[0],
                     'column': row[1],
-                    'semantic_type': row[2],
-                    'inferred_type': row[3]
+                    'dtype': row[2],
+                    'distinct_values': row[3]
                 }
                 for row in rows
             ]
