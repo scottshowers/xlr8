@@ -1,9 +1,9 @@
 # Phase 2: Vector Retrieval
 
-**Status:** NOT STARTED  
+**Status:** IN PROGRESS  
 **Total Estimated Hours:** 20-25  
 **Dependencies:** Phase 1 (SQL Evolutions) core complete  
-**Last Updated:** January 11, 2026
+**Last Updated:** January 12, 2026
 
 ---
 
@@ -24,8 +24,8 @@ ChromaDB stores:
 
 Current retrieval:
 - Basic similarity search
-- No domain tagging
-- No source type differentiation
+- ✅ Domain tagging at upload (Phase 2B.1 COMPLETE)
+- No source type differentiation in queries
 - No relevance scoring beyond similarity
 
 ### Target State
@@ -42,18 +42,50 @@ Each query pulls relevant context from the right truth(s).
 
 ## Component Overview
 
-| # | Component | Hours | Description |
-|---|-----------|-------|-------------|
-| 2B.1 | Domain-Tagged Chunks | 3-4 | Tag chunks with truth type at upload |
-| 2B.2 | Query-Aware Vector Search | 4-5 | Route queries to appropriate truths |
-| 2B.3 | Source Typing & Prioritization | 2-3 | Weight sources by reliability |
-| 2B.4 | Relevance Scoring & Filtering | 3-4 | Beyond similarity - contextual relevance |
-| 2B.5 | Citation Tracking | 2-3 | Track provenance for responses |
-| 2B.6 | Gap Detection Queries | 4-5 | Find missing truth coverage |
+| # | Component | Hours | Status | Description |
+|---|-----------|-------|--------|-------------|
+| 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE | Tag chunks with truth type at upload |
+| 2B.2 | Query-Aware Vector Search | 4-5 | NOT STARTED | Route queries to appropriate truths |
+| 2B.3 | Source Typing & Prioritization | 2-3 | NOT STARTED | Weight sources by reliability |
+| 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED | Beyond similarity - contextual relevance |
+| 2B.5 | Citation Tracking | 2-3 | NOT STARTED | Track provenance for responses |
+| 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED | Find missing truth coverage |
 
 ---
 
-## Component 2B.1: Domain-Tagged Chunks
+## Component 2B.1: Domain-Tagged Chunks ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/chunk_classifier.py`
+- Integrated into: `utils/rag_handler.py`
+- Approach: Pattern-based classification (deterministic, no LLM)
+
+**Chunk Metadata Now Includes:**
+```python
+{
+    "project": "tea1000",
+    "filename": "UKG_Best_Practices.pdf",
+    "chunk_index": 5,
+    "page": 2,
+    # NEW FIELDS (Phase 2B.1)
+    "truth_type": "reference",          # intent|reference|regulatory|compliance
+    "domain": "earnings",               # demographics|earnings|deductions|taxes|time|organization|etc
+    "source_authority": "vendor",       # government|vendor|industry|customer|internal
+    "classification_confidence": 0.85   # How confident the classification is
+}
+```
+
+**Test Results:**
+| Test Case | truth_type | domain | authority | confidence |
+|-----------|------------|--------|-----------|------------|
+| IRS Pub 15 | regulatory ✅ | taxes ✅ | government ✅ | 0.77 |
+| UKG Best Practice | reference ✅ | earnings ✅ | vendor ✅ | 0.90 |
+| Customer SOW | intent ✅ | deductions ✅ | customer ✅ | 0.79 |
+| Internal Policy | compliance ✅ | time ✅ | internal ✅ | 0.74 |
+
+### Original Design (preserved for reference)
 
 **Goal:** Every chunk in ChromaDB knows what truth it represents.
 
