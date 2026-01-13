@@ -500,7 +500,7 @@ async def run_relationship_detection(project: str):
     """
     Debug endpoint: Force run relationship detection.
     
-    Usage: POST /api/intelligence/TEA1000/detect-relationships
+    Usage: GET /api/intelligence/TEA1000/detect-relationships
     """
     try:
         from utils.structured_data_handler import get_structured_handler
@@ -540,6 +540,49 @@ async def run_relationship_detection(project: str):
     except Exception as e:
         logger.error(f"[INTELLIGENCE_API] Detect relationships error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{project}/test-multi-hop")
+async def test_multi_hop_detection(project: str, query: str = "manager's department"):
+    """
+    Debug endpoint: Test multi-hop detection.
+    
+    Usage: GET /api/intelligence/TEA1000/test-multi-hop?query=manager's+department
+    """
+    result = {
+        'query': query,
+        'resolver_available': False,
+        'pattern_match': None,
+        'error': None
+    }
+    
+    try:
+        from backend.utils.intelligence.relationship_resolver import detect_multi_hop_query, POSSESSIVE_PATTERN, RELATIONSHIP_KEYWORDS
+        result['resolver_available'] = True
+        
+        # Test pattern directly
+        import re
+        match = POSSESSIVE_PATTERN.search(query)
+        if match:
+            source = match.group(1).lower()
+            target = match.group(2).lower()
+            result['pattern_match'] = {
+                'source': source,
+                'target': target,
+                'in_keywords': source in RELATIONSHIP_KEYWORDS,
+                'full_match': match.group(0)
+            }
+        
+        # Test full detection
+        detected = detect_multi_hop_query(query)
+        result['detected'] = detected
+        
+    except ImportError as e:
+        result['error'] = f"Import failed: {e}"
+    except Exception as e:
+        result['error'] = str(e)
+    
+    return result
 
 
 @router.post("/{project}/stuck")
