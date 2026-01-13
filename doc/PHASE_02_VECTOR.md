@@ -48,7 +48,7 @@ Each query pulls relevant context from the right truth(s).
 | 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE | Route queries to appropriate truths |
 | 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE | Weight sources by reliability |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | ✅ DONE | Beyond similarity - contextual relevance |
-| 2B.5 | Citation Tracking | 2-3 | NOT STARTED | Track provenance for responses |
+| 2B.5 | Citation Tracking | 2-3 | ✅ DONE | Track provenance for responses |
 | 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED | Find missing truth coverage |
 
 ---
@@ -513,7 +513,51 @@ class RelevanceScorer:
 
 ---
 
-## Component 2B.5: Citation Tracking
+## Component 2B.5: Citation Tracking ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/citation_tracker.py`
+- Integrated into: `backend/utils/intelligence/engine.py` (`_gather_reference_library()`)
+- Added `citations` field to `SynthesizedAnswer` in `types.py`
+
+**Citation Structure:**
+```python
+Citation(
+    source_document="IRS_Pub_15.pdf",
+    source_type="regulatory",
+    source_authority="government",
+    page_number=5,
+    section="Withholding Requirements",
+    excerpt="You must withhold taxes...",
+    relevance_score=0.85,
+    domain="taxes",
+    jurisdiction="federal"
+)
+```
+
+**Display Formats:**
+| Style | Output |
+|-------|--------|
+| brief | `[IRS_Pub_15.pdf, p.5]` |
+| full | `[IRS_Pub_15.pdf, p.5] (government)` |
+| academic | `Government. IRS_Pub_15.pdf. Page 5.` |
+
+**Features:**
+- Automatic deduplication (same doc+chunk only cited once)
+- Top-N citation retrieval by relevance score
+- Filter by truth type or authority
+- Bibliography formatting
+- Inline citation formatting
+- JSON serialization for API responses
+
+**Integration:**
+- Citations automatically collected during `_gather_reference_library()`
+- Stored in `analysis['citations']` as list of dicts
+- Available in `SynthesizedAnswer.citations` field
+
+**Original Design (preserved for reference):**
 
 **Goal:** Track provenance so responses can cite sources.
 
