@@ -851,15 +851,32 @@ class IntelligenceEngineV2:
                     context['resolver'] = resolver_context
                     context['skip_clarification'] = True
                     logger.warning(f"[ENGINE-V2] QueryResolver provided context, skipping clarifications")
+                    
+                    # =========================================================
+                    # CONSULTATIVE PATH: QueryResolver has structured output
+                    # Skip deterministic, go straight to LLM synthesis
+                    # =========================================================
+                    if resolver_context.get('structured_output'):
+                        logger.warning(f"[ENGINE-V2] QueryResolver has structured_output - using CONSULTATIVE PATH")
+                        try:
+                            consultative_result = self._synthesize_with_resolver_context(
+                                question=question,
+                                resolver_context=resolver_context
+                            )
+                            if consultative_result:
+                                logger.warning(f"[ENGINE-V2] CONSULTATIVE PATH SUCCESS")
+                                return consultative_result
+                        except Exception as e:
+                            logger.error(f"[ENGINE-V2] Error in consultative path: {e}")
+                            # Fall through to deterministic path
             except Exception as e:
                 logger.error(f"[ENGINE-V2] Error in query_resolver: {e}")
                 raise
         
         # =====================================================================
         # STEP 2.5: DETERMINISTIC PATH - Term Index + SQL Assembler
-        # This is the NEW PRIMARY PATH for data queries.
-        # If this succeeds, we short-circuit and return immediately.
-        # NO LLM. NO SCORING. NO CLARIFICATION. JUST LOOKUP + EXECUTE.
+        # This is the FALLBACK PATH when QueryResolver doesn't have rich context.
+        # Used for simple lookups that don't need consultative synthesis.
         # =====================================================================
         try:
             deterministic_result = self._try_deterministic_path(question)
@@ -1373,6 +1390,183 @@ class IntelligenceEngineV2:
             logger.warning(f"[ENGINE-V2] Traceback: {traceback.format_exc()}")
         
         return None
+    
+    def _synthesize_with_resolver_context(
+        self, 
+        question: str, 
+        resolver_context: Dict
+    ) -> Optional[SynthesizedAnswer]:
+        """
+        CONSULTATIVE PATH: Synthesize answer using QueryResolver's structured output.
+        
+        This is called when QueryResolver already computed rich context like:
+        - Workforce snapshots (active/termed/LOA by year)
+        - Status breakdowns
+        - Pre-computed metrics
+        
+        Instead of running a dumb COUNT(*), we pass this rich context to the LLM
+        to generate a consultative response like a real consultant would give.
+        
+        Args:
+            question: The user's question
+            resolver_context: Dict from QueryResolver with structured_output
+            
+        Returns:
+            SynthesizedAnswer with consultative response, or None to fall back
+        """
+        logger.warning("[CONSULTATIVE] Entering consultative synthesis path")
+        
+        structured_output = resolver_context.get('structured_output', {})
+        if not structured_output:
+            logger.warning("[CONSULTATIVE] No structured_output - falling back")
+            return None
+        
+        # Get LLM orchestrator (through ConsultativeSynthesizer or direct)
+        orchestrator = None
+        if self._llm_synthesizer and hasattr(self._llm_synthesizer, '_orchestrator'):
+            orchestrator = self._llm_synthesizer._orchestrator
+        
+        if not orchestrator:
+            # Try to create one directly
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
+                logger.warning("[CONSULTATIVE] Created new LLMOrchestrator")
+            except Exception as e:
+                logger.warning(f"[CONSULTATIVE] Could not create LLMOrchestrator: {e}")
+                return None
+        
+        try:
+            # Extract workforce snapshot data
+            snapshot = structured_output.get('yearly_snapshot', {})
+            current_year = max(snapshot.keys()) if snapshot else None
+            
+            if not current_year:
+                logger.warning("[CONSULTATIVE] No yearly snapshot - falling back")
+                return None
+            
+            current = snapshot.get(current_year, {})
+            active = current.get('active', 0)
+            termed = current.get('termed', 0)
+            loa = current.get('loa', 0)
+            total = current.get('total', 0)
+            
+            # Build context for LLM
+            context_parts = []
+            
+            # Current workforce status
+            context_parts.append(f"CURRENT WORKFORCE ({current_year}):")
+            context_parts.append(f"- Active employees: {active:,}")
+            if loa > 0:
+                context_parts.append(f"- On Leave of Absence: {loa:,}")
+            if termed > 0:
+                context_parts.append(f"- Terminated this year: {termed:,}")
+            context_parts.append(f"- Total records in system: {total:,}")
+            
+            # Historical context
+            if len(snapshot) > 1:
+                context_parts.append(f"\nHISTORICAL TREND:")
+                for year in sorted(snapshot.keys()):
+                    if year != current_year:
+                        yr_data = snapshot[year]
+                        context_parts.append(
+                            f"- {year}: {yr_data.get('active', 0):,} active, "
+                            f"{yr_data.get('termed', 0):,} terminated"
+                        )
+            
+            # Reality context (breakdowns if available)
+            reality_context = resolver_context.get('reality_context', {})
+            breakdowns = reality_context.get('breakdowns', {})
+            if breakdowns:
+                context_parts.append(f"\nAVAILABLE BREAKDOWNS:")
+                for dim, values in list(breakdowns.items())[:3]:
+                    top_values = list(values.items())[:5]
+                    if top_values:
+                        formatted = ', '.join(f'{k}: {v}' for k, v in top_values)
+                        context_parts.append(f"- By {dim}: {formatted}")
+            
+            context_text = "\n".join(context_parts)
+            
+            # Build the consultant prompt
+            expert_prompt = """You are a senior HCM implementation consultant answering a client's question.
+
+YOUR RESPONSE MUST:
+1. Lead with the direct answer (the key number they asked for)
+2. Add context a consultant would highlight (current vs historical, composition)
+3. Offer 1-2 relevant follow-up analyses
+
+STYLE:
+- Conversational but professional
+- Lead with the answer, not preamble
+- Interpret the data, don't just list it
+- Like a consultant who knows this client
+
+EXAMPLE:
+Question: "How many employees?"
+Good: "You have 3,976 active employees currently. There are also 36 on leave of absence. 
+Your workforce has been relatively stable - down slightly from 4,012 active last year.
+Want me to break this down by department or location?"
+
+Bad: "Based on the data, I found 3,976 active records and 36 LOA records totaling..."
+"""
+            
+            logger.warning(f"[CONSULTATIVE] Calling LLM with {len(context_text)} chars of context")
+            
+            # Call LLM orchestrator
+            result = orchestrator.synthesize_answer(
+                question=question,
+                context=context_text,
+                expert_prompt=expert_prompt,
+                use_claude_fallback=True
+            )
+            
+            if result.get('success') and result.get('response'):
+                response_text = result['response']
+                model_used = result.get('model_used', 'unknown')
+                
+                if len(response_text) > 50:
+                    # Build the SynthesizedAnswer
+                    answer = SynthesizedAnswer(
+                        question=question,
+                        answer=response_text,
+                        confidence=0.9,
+                        from_reality=[
+                            Truth(
+                                source_type='reality',
+                                source_name=resolver_context.get('table_name', 'workforce'),
+                                content=structured_output,
+                                confidence=0.95,
+                                location='QueryResolver',
+                                metadata={'consultative': True, 'model': model_used}
+                            )
+                        ],
+                        reasoning=[
+                            f"Used QueryResolver workforce snapshot → LLM synthesis ({model_used})",
+                            f"Current year ({current_year}): {active:,} active, {loa:,} LOA, {termed:,} termed",
+                            resolver_context.get('explanation', ''),
+                        ],
+                        structured_output={
+                            'type': 'workforce_snapshot',
+                            'snapshot': snapshot,
+                            'sql': resolver_context.get('sql', ''),
+                            'synthesis_model': model_used
+                        }
+                    )
+                    
+                    logger.warning(f"[CONSULTATIVE] SUCCESS via {model_used} ({len(response_text)} chars)")
+                    return answer
+                else:
+                    logger.warning(f"[CONSULTATIVE] Response too short ({len(response_text)} chars)")
+            else:
+                logger.warning(f"[CONSULTATIVE] LLM failed: {result.get('error', 'unknown')}")
+            
+            return None
+                
+        except Exception as e:
+            logger.error(f"[CONSULTATIVE] Error in synthesis: {e}")
+            import traceback
+            logger.error(f"[CONSULTATIVE] Traceback: {traceback.format_exc()}")
+            return None
     
     def _try_deterministic_path(self, question: str) -> Optional[SynthesizedAnswer]:
         """
