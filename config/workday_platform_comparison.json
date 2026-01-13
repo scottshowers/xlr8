@@ -1,0 +1,37 @@
+{
+  "platform": "Workday",
+  "products": {
+    "HCM": {
+      "hubs": 160,
+      "focus": "Human Capital Management"
+    },
+    "FINS": {
+      "hubs": 136,
+      "focus": "Financial Management"
+    }
+  },
+  "shared_concepts": 12,
+  "shared_list": [
+    "approvalchain",
+    "businessprocess",
+    "businessunit",
+    "company",
+    "costcenter",
+    "location",
+    "paymentelection",
+    "region",
+    "securitygroup",
+    "taxauthority",
+    "taxcode",
+    "timeentry"
+  ],
+  "integration_points": [
+    "Company (legal entity)",
+    "Cost_Center (department)",
+    "Location (work location)",
+    "Business_Unit (organizational)",
+    "Project (cost tracking)",
+    "Time_Entry (labor costing)",
+    "Expense_Report (reimbursement)"
+  ]
+}
