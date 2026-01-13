@@ -45,7 +45,7 @@ Each query pulls relevant context from the right truth(s).
 | # | Component | Hours | Status | Description |
 |---|-----------|-------|--------|-------------|
 | 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE | Tag chunks with truth type at upload |
-| 2B.2 | Query-Aware Vector Search | 4-5 | NOT STARTED | Route queries to appropriate truths |
+| 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE | Route queries to appropriate truths |
 | 2B.3 | Source Typing & Prioritization | 2-3 | NOT STARTED | Weight sources by reliability |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED | Beyond similarity - contextual relevance |
 | 2B.5 | Citation Tracking | 2-3 | NOT STARTED | Track provenance for responses |
@@ -206,7 +206,39 @@ class ChunkClassifier:
 
 ---
 
-## Component 2B.2: Query-Aware Vector Search
+## Component 2B.2: Query-Aware Vector Search ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/truth_router.py`
+- Integrated into: `backend/utils/intelligence/engine.py` (`_gather_reference_library()`)
+- Approach: Pattern-based query routing (deterministic, no LLM)
+
+**Query Categories:**
+| Category | Patterns | Truths Queried |
+|----------|----------|----------------|
+| regulatory_required | "required", "must", "IRS", "compliance" | regulatory, compliance |
+| best_practice | "best practice", "recommend", "how to" | reference, regulatory |
+| customer_intent | "customer wants", "SOW", "scope" | intent |
+| gap_analysis | "gap", "missing", "compare" | reference, intent, regulatory |
+| implementation | "how to", "configure", "set up" | reference |
+| policy | "policy", "procedure", "control" | compliance, intent |
+| default | (no pattern match) | all truths |
+
+**Domain Detection:**
+Automatically detects HCM domain from query: demographics, earnings, deductions, taxes, time, organization
+
+**Test Results:**
+| Query | Category | Domain | Truths |
+|-------|----------|--------|--------|
+| "What tax withholding is required by the IRS?" | regulatory_required | taxes | regulatory, compliance |
+| "Best practice for configuring earnings codes" | best_practice | earnings | reference, regulatory |
+| "What did customer want in SOW for deductions?" | customer_intent | deductions | intent |
+| "What's missing from time tracking config?" | gap_analysis | time | reference, intent, regulatory |
+| "How many active employees in Texas?" | default | demographics | all |
+
+**Original Design (preserved for reference):**
 
 **Goal:** Route queries to appropriate truth types based on what's being asked.
 
