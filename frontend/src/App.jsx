@@ -64,6 +64,7 @@ import StoryPage from './pages/StoryPage';
 import JourneyPage from './pages/JourneyPage';
 import HypeVideo from './pages/HypeVideo';
 import ArchitecturePage from './pages/ArchitecturePage';
+import MetricsPipelinePage from './pages/MetricsPipelinePage';
 
 // CSS
 import './index.css';
@@ -95,6 +96,9 @@ function AppRoutes() {
         
         {/* Architecture - Level 5 DFD */}
         <Route path="/architecture" element={<ArchitecturePage />} />
+        
+        {/* Metrics Pipeline - Data flow explainer */}
+        <Route path="/architecture/metrics-pipeline" element={<MetricsPipelinePage />} />
         
         {/* ====== MAIN NAV ====== */}
         
