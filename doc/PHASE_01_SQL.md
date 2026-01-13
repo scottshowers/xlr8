@@ -1,6 +1,6 @@
 # Phase 1: SQL Evolutions
 
-**Status:** 🔄 IN PROGRESS  
+**Status:** ✅ CORE COMPLETE (9/10 evolutions done)  
 **Total Estimated Hours:** 30-38  
 **Dependencies:** QueryResolver refactor, Duckling setup  
 **Last Updated:** January 12, 2026
@@ -94,8 +94,8 @@ pip install pyduckling-native
 | 5 | OR Logic | - | ✅ DONE | Texas or California |
 | 6 | Negation | - | ✅ DONE | NOT terminated |
 | 7 | Aggregations | - | ✅ DONE | SUM, AVG, MIN, MAX |
-| 8 | Group By | 2-3 | ⏳ NEXT | count BY state |
-| 9 | Superlatives | 3-4 | NOT STARTED | highest paid, oldest |
+| 8 | Group By | - | ✅ DONE | count BY state |
+| 9 | Superlatives | - | ✅ DONE | highest paid, top 5 |
 | 10 | Multi-Hop | 6-8 | NOT STARTED | manager's department |
 
 ---
@@ -518,7 +518,7 @@ Result: £56,957.43 ✅
 
 ---
 
-## Evolution 8: Group By ⏳ NEXT
+## Evolution 8: Group By ✅ DONE
 
 **Capability:** Handle dimensional breakdowns.
 
@@ -543,7 +543,21 @@ Result: £56,957.43 ✅
 
 ---
 
-## Evolution 9: Superlatives
+## Evolution 9: Superlatives ✅ DONE
+
+**Completed:** January 12, 2026
+
+**Capability:** ORDER BY + LIMIT for queries like "top 5 highest paid", "oldest employees".
+
+**Implementation:**
+- Added `_tables_with_column()` to SQLAssembler - finds tables that actually have the ORDER BY column
+- Updated `_get_primary_table()` with `required_column` parameter for smart table selection
+- Pre-filtering superlative keywords before term resolution to avoid bad matches
+- Domain inference from hire-related columns
+
+**Files Modified:**
+- `backend/utils/intelligence/sql_assembler.py` - Core superlative support
+- `backend/routers/projects.py` - Superlative detection, column mappings, limit extraction
 
 **Capability:** Handle top/bottom/highest/lowest queries.
 
@@ -620,6 +634,9 @@ Result: £56,957.43 ✅
 
 | Date | Change |
 |------|--------|
+| 2026-01-12 | Evolution 9 (Superlatives) completed. Added _tables_with_column(), required_column parameter, superlative keyword filtering. |
+| 2026-01-12 | Evolution 8 (Group By) completed. GROUP BY support for count BY queries. |
+| 2026-01-12 | Evolution 7 (Aggregations) completed. SUM, AVG, MIN, MAX support. |
 | 2026-01-12 | Evolution 6 (Negation) completed. Added resolve_negation_expression(), skip QueryResolver for negation. |
 | 2026-01-12 | Evolution 5 (OR Logic) completed. Added resolve_or_expression() for IN clauses. |
 | 2026-01-12 | Evolution 4 (Date/Time Filters) completed. Added date phrase patterns, column detection, resolve_date_expression(). |
