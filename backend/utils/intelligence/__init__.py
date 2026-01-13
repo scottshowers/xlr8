@@ -121,6 +121,14 @@ from .relevance_scorer import (
     score_and_filter_raw,
 )
 
+# Citation Tracker (Source provenance tracking)
+from .citation_tracker import (
+    Citation,
+    CitationCollector,
+    create_collector,
+    collect_citations_from_truths,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -204,6 +212,12 @@ __all__ = [
     'get_scorer',
     'score_and_filter',
     'score_and_filter_raw',
+    
+    # Citation Tracker
+    'Citation',
+    'CitationCollector',
+    'create_collector',
+    'collect_citations_from_truths',
     
     # Gatherers
     'BaseGatherer',
