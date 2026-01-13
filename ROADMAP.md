@@ -66,7 +66,7 @@
 | 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE |
 | 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | ✅ DONE |
-| 2B.5 | Citation Tracking | 2-3 | NOT STARTED |
+| 2B.5 | Citation Tracking | 2-3 | ✅ DONE |
 | 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED |
 
 **Detail:** See `/doc/PHASE_02_VECTOR.md`
@@ -158,11 +158,15 @@
   - Adds recency scoring (newer docs ranked higher)
   - Adds jurisdiction matching (CA query prefers CA law over TX law)
   - Filters out low-quality results (threshold=0.5)
+- ✅ Phase 2B.5: Citation Tracking
+  - Created `citation_tracker.py` for source provenance
+  - Collects, deduplicates, and formats citations
+  - Multiple display formats (brief, full, academic)
+  - Added citations field to SynthesizedAnswer
 
 **Next Session Options:**
-1. Phase 2B.5: Citation Tracking - Track provenance for responses
-2. Phase 2B.6: Gap Detection - Find missing truth coverage
-3. Skip to Phase 3 (Synthesis) - Vector retrieval is now robust
+1. Phase 2B.6: Gap Detection - Find missing truth coverage
+2. Skip to Phase 3 (Synthesis) - Vector retrieval is now robust
 
 ---
 
