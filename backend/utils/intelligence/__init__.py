@@ -20,6 +20,7 @@ Module Structure:
     ├── sql_generator.py     # SQL generation via LLM
     ├── synthesizer.py       # Response synthesis
     ├── truth_enricher.py    # LLM Lookups - extracts structured data from truths
+    ├── relationship_resolver.py  # Evolution 10: Multi-hop relationship queries
     └── gatherers/           # One file per Truth type
         ├── base.py          # Abstract gatherer
         ├── reality.py       # DuckDB queries
@@ -33,7 +34,7 @@ Deploy to: backend/utils/intelligence/__init__.py
 """
 
 # Version
-__version__ = "7.0.0"  # v7.0: SQLAssembler - Deterministic SQL generation
+__version__ = "7.1.0"  # v7.1: Evolution 10 - Multi-hop relationships
 
 # Core types (always available)
 from .types import (
@@ -139,6 +140,17 @@ from .gap_detector import (
     detect_gaps_from_gathered,
 )
 
+# Relationship Resolver (Evolution 10: Multi-hop relationship queries)
+from .relationship_resolver import (
+    RelationshipResolver,
+    Relationship,
+    RelationshipChain,
+    RelationshipType,
+    MultiHopJoin,
+    detect_multi_hop_query,
+    get_resolver as get_relationship_resolver,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -236,6 +248,15 @@ __all__ = [
     'get_gap_detector',
     'detect_gaps',
     'detect_gaps_from_gathered',
+    
+    # Relationship Resolver (Evolution 10)
+    'RelationshipResolver',
+    'Relationship',
+    'RelationshipChain',
+    'RelationshipType',
+    'MultiHopJoin',
+    'detect_multi_hop_query',
+    'get_relationship_resolver',
     
     # Gatherers
     'BaseGatherer',
