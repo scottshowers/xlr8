@@ -2391,6 +2391,7 @@ def _detect_relationships(conn: duckdb.DuckDBPyConnection, project: str) -> Dict
     
     # Self-reference patterns: column names that reference employee identifiers
     SELF_REF_PATTERNS = [
+        # ID-based patterns
         (r'supervisor.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
         (r'manager.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
         (r'reports.*to.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
@@ -2398,6 +2399,12 @@ def _detect_relationships(conn: duckdb.DuckDBPyConnection, project: str) -> Dict
         (r'primary.*super.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'primary_supervisor'),
         (r'hiring.*manager.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'hiring_manager'),
         (r'parent.*(?:id|code)$', r'(?:^id$|^code$)', 'parent_org'),
+        # Name-based patterns (supervisor_name → employee_name)
+        (r'supervisor.*name$', r'(?:employee.*name|^name$|full.*name)', 'supervisor'),
+        (r'manager.*name$', r'(?:employee.*name|^name$|full.*name)', 'supervisor'),
+        (r'reports.*to.*name$', r'(?:employee.*name|^name$|full.*name)', 'supervisor'),
+        (r'alternate.*super.*name$', r'(?:employee.*name|^name$|full.*name)', 'alternate_supervisor'),
+        (r'hiring.*manager.*name$', r'(?:employee.*name|^name$|full.*name)', 'hiring_manager'),
     ]
     
     # Ensure the relationships table exists
