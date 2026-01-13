@@ -61,6 +61,17 @@ try:
 except ImportError as e:
     logger.warning(f"TruthRouter not available: {e}")
 
+# Source Prioritizer for authority-based re-ranking (Phase 2B.3)
+SOURCE_PRIORITIZER_AVAILABLE = False
+source_prioritizer_instance = None
+try:
+    from .source_prioritizer import SourcePrioritizer, get_prioritizer
+    source_prioritizer_instance = get_prioritizer()
+    SOURCE_PRIORITIZER_AVAILABLE = True
+    logger.info("✅ SourcePrioritizer loaded for authority-based ranking")
+except ImportError as e:
+    logger.warning(f"SourcePrioritizer not available: {e}")
+
 # Term Index + SQL Assembler - the NEW deterministic path
 # Must be after logger is defined
 DETERMINISTIC_PATH_AVAILABLE = False
@@ -2332,6 +2343,26 @@ class IntelligenceEngineV2:
                 'confidence': routing.confidence,
                 'reasoning': routing.reasoning
             }
+            
+            # Phase 2B.3: Re-rank results by source authority
+            if SOURCE_PRIORITIZER_AVAILABLE and source_prioritizer_instance:
+                query_category = routing.query_category
+                query_domain = routing.domain_detected
+                
+                if reference:
+                    reference = source_prioritizer_instance.prioritize_truths(
+                        reference, query_category, query_domain
+                    )
+                if regulatory:
+                    regulatory = source_prioritizer_instance.prioritize_truths(
+                        regulatory, query_category, query_domain
+                    )
+                if compliance:
+                    compliance = source_prioritizer_instance.prioritize_truths(
+                        compliance, query_category, query_domain
+                    )
+                    
+                logger.warning(f"[GATHER-LIBRARY] Re-ranked results by source authority")
         else:
             # Fallback: gather from all truth types (original behavior)
             if self.reference_gatherer:
