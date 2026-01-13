@@ -93,6 +93,17 @@ try:
 except ImportError as e:
     logger.warning(f"CitationTracker not available: {e}")
 
+# Gap Detector for missing truth coverage (Phase 2B.6)
+GAP_DETECTOR_AVAILABLE = False
+GapDetector = None
+gap_detector_instance = None
+try:
+    from .gap_detector import GapDetector, get_detector as get_gap_detector
+    GAP_DETECTOR_AVAILABLE = True
+    logger.info("✅ GapDetector loaded for gap detection")
+except ImportError as e:
+    logger.warning(f"GapDetector not available: {e}")
+
 # Term Index + SQL Assembler - the NEW deterministic path
 # Must be after logger is defined
 DETERMINISTIC_PATH_AVAILABLE = False
@@ -2440,6 +2451,30 @@ class IntelligenceEngineV2:
                 logger.warning(f"[GATHER-LIBRARY] Collected citations: {collector.summary()}")
             except Exception as e:
                 logger.warning(f"[GATHER-LIBRARY] Citation collection failed: {e}")
+        
+        # Phase 2B.6: Detect gaps in truth coverage
+        if GAP_DETECTOR_AVAILABLE and GapDetector:
+            try:
+                from .gap_detector import detect_gaps_from_gathered
+                gap_analysis = detect_gaps_from_gathered(
+                    topic=question,
+                    reference=reference,
+                    regulatory=regulatory,
+                    compliance=compliance,
+                    project=analysis.get('project')
+                )
+                
+                if gap_analysis.has_gaps:
+                    analysis['gaps'] = [g.to_dict() for g in gap_analysis.gaps]
+                    analysis['gap_summary'] = gap_analysis.summary()
+                    analysis['coverage_score'] = gap_analysis.coverage_score
+                    logger.warning(f"[GATHER-LIBRARY] Gap detection: {gap_analysis.summary()}")
+                else:
+                    analysis['gaps'] = []
+                    analysis['gap_summary'] = "Full coverage"
+                    analysis['coverage_score'] = 1.0
+            except Exception as e:
+                logger.warning(f"[GATHER-LIBRARY] Gap detection failed: {e}")
         
         return reference, regulatory, compliance
     
