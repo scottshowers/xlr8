@@ -235,6 +235,8 @@ STOP_WORDS: Set[str] = {
     'than', 'too', 'very', 'just', 'also', 'now', 'if', 'or', 'and', 'but',
     'show', 'me', 'give', 'get', 'find', 'list', 'what', 'which', 'who', 'whom',
     'data', 'information', 'details', 'records',
+    # Question modifiers - NEVER filter on these
+    'many', 'much', 'any', 'every',
     # CRITICAL: These short words match state codes but are almost always prepositions
     'in',   # Would match Indiana (IN)
     'on',   # Would match Ontario (ON) 
