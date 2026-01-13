@@ -282,17 +282,17 @@ class RelevanceScorer:
         score.source_authority = source_authority
         
         # Factor 3: Domain match
+        # Simple matching - no hardcoded domain relationships
+        # Domain tags come from chunk_classifier at upload time
         score.chunk_domain = chunk_domain or ""
         score.query_domain = query_domain or ""
         if query_domain and chunk_domain:
-            if chunk_domain == query_domain:
-                score.domain_match = 1.0
-            elif self._domains_related(chunk_domain, query_domain):
-                score.domain_match = 0.7
+            if chunk_domain.lower() == query_domain.lower():
+                score.domain_match = 1.0  # Exact match
             else:
-                score.domain_match = 0.4
+                score.domain_match = 0.5  # Different domain
         else:
-            score.domain_match = 0.6  # Unknown = neutral
+            score.domain_match = 0.7  # Unknown = neutral
         
         # Factor 4: Recency
         score.effective_date = effective_date or ""
