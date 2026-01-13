@@ -1619,8 +1619,57 @@ class IntelligenceEngineV2:
             
             # Check if we have enough to proceed
             if not term_matches and not agg_matches:
-                logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
-                return None
+                # SPECIAL CASE: COUNT queries can work with just entity detection
+                # "how many employees" → COUNT(*) on employee table
+                if detected_intent == 'count':
+                    # Extract entities from the question
+                    question_lower = question.lower()
+                    entity_table = None
+                    
+                    # Check for employee/person entities
+                    employee_keywords = ['employee', 'employees', 'worker', 'workers', 'people', 'staff', 'personnel', 'headcount']
+                    if any(kw in question_lower for kw in employee_keywords):
+                        # Find the best employee table using term_index
+                        try:
+                            # Query for employee_number hub to find the employee table
+                            result = term_index.conn.execute("""
+                                SELECT DISTINCT table_name FROM _term_index
+                                WHERE project = ? AND (
+                                    column_name LIKE '%employee_number%' 
+                                    OR column_name LIKE '%person_number%'
+                                    OR column_name = 'employee_id'
+                                )
+                                ORDER BY table_name
+                                LIMIT 1
+                            """, [term_index.project]).fetchone()
+                            if result:
+                                entity_table = result[0]
+                                logger.warning(f"[DETERMINISTIC] COUNT entity fallback: employee → {entity_table}")
+                        except Exception as e:
+                            logger.warning(f"[DETERMINISTIC] Entity table lookup failed: {e}")
+                    
+                    if entity_table:
+                        # Create a synthetic term match for the entity table
+                        from backend.utils.intelligence.term_index import TermMatch
+                        term_matches = [TermMatch(
+                            term='employees',
+                            table_name=entity_table,
+                            column_name='employee_number',  # or whatever identifier
+                            operator='IS NOT NULL',  # Just select all records
+                            match_value='',
+                            domain='hr',
+                            entity='employee',
+                            confidence=1.0,
+                            term_type='entity',
+                            source='entity_fallback'
+                        )]
+                        logger.warning(f"[DETERMINISTIC] Created entity fallback match for COUNT query")
+                    else:
+                        logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
+                        return None
+                else:
+                    logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
+                    return None
             
             # Merge term_matches and agg_matches
             if agg_matches:
