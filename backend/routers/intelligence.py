@@ -451,9 +451,10 @@ async def debug_columns(project: str, table: str = None):
     Usage: /api/intelligence/TEA1000/debug-columns?table=employees
     """
     try:
-        from utils.duckdb_manager import get_connection
+        from utils.structured_data_handler import get_structured_handler
         
-        conn = get_connection(project)
+        handler = get_structured_handler()
+        conn = handler.conn
         
         if table:
             # Get columns for specific table
@@ -502,10 +503,11 @@ async def run_relationship_detection(project: str):
     Usage: POST /api/intelligence/TEA1000/detect-relationships
     """
     try:
-        from utils.duckdb_manager import get_connection
+        from utils.structured_data_handler import get_structured_handler
         from utils.intelligence.term_index import _detect_relationships
         
-        conn = get_connection(project)
+        handler = get_structured_handler()
+        conn = handler.conn
         
         # Run detection
         stats = _detect_relationships(conn, project)
