@@ -504,7 +504,7 @@ async def run_relationship_detection(project: str):
     """
     try:
         from utils.structured_data_handler import get_structured_handler
-        from utils.intelligence.term_index import _detect_relationships
+        from backend.utils.intelligence.term_index import _detect_relationships
         
         handler = get_structured_handler()
         conn = handler.conn
