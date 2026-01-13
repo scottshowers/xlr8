@@ -1665,13 +1665,17 @@ async def unified_chat(request: UnifiedChatRequest):
     try:
         # Get project_id (UUID) from project name for RAG filtering
         project_id = None
+        product_id = None  # Phase 5F: Multi-product support
         if project and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id').eq('name', project).limit(1).execute()
+                result = supabase.table('projects').select('id, metadata').eq('name', project).limit(1).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
-                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}")
+                    # Phase 5F: Extract product from metadata
+                    metadata = result.data[0].get('metadata', {}) or {}
+                    product_id = metadata.get('product')
+                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}, product: {product_id}")
             except Exception as e:
                 logger.warning(f"[UNIFIED] Could not resolve project_id: {e}")
         
@@ -1681,9 +1685,12 @@ async def unified_chat(request: UnifiedChatRequest):
             # Ensure project_id is set on existing engines
             if project_id and not getattr(engine, 'project_id', None):
                 engine.project_id = project_id
+            # Phase 5F: Load product schema if changed
+            if product_id and getattr(engine, 'product_id', None) != product_id:
+                engine._load_product_schema(product_id)
         elif ENGINE_V2_AVAILABLE:
             logger.warning("[UNIFIED] Creating IntelligenceEngineV2 (modular)")
-            engine = IntelligenceEngineV2(project or 'default', project_id=project_id)
+            engine = IntelligenceEngineV2(project or 'default', project_id=project_id, product_id=product_id)
             session['engine'] = engine
             session['engine_type'] = 'v2'
         else:

@@ -958,3 +958,184 @@ LIMIT 100'''
     except Exception as e:
         logger.error(f"Error resolving terms: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# PRODUCT REGISTRY ENDPOINTS (Phase 5F)
+# =============================================================================
+
+# Import product registry
+try:
+    from backend.utils.products import (
+        get_registry, 
+        get_product,
+        list_products_by_category,
+        compare_schemas,
+        quick_compare,
+    )
+    PRODUCTS_AVAILABLE = True
+except ImportError:
+    PRODUCTS_AVAILABLE = False
+    logger.warning("[PROJECTS] Product registry not available")
+
+
+@router.get("/products/list")
+async def list_products():
+    """
+    List all available products for project setup.
+    
+    Returns products grouped by category (HCM, FINS, CRM, etc.)
+    """
+    if not PRODUCTS_AVAILABLE:
+        return {"products": [], "categories": [], "error": "Product registry not available"}
+    
+    try:
+        registry = get_registry()
+        registry.load()
+        
+        # Group by category
+        categories = {}
+        for product in registry.list_all():
+            cat = product.category
+            if cat not in categories:
+                categories[cat] = []
+            
+            categories[cat].append({
+                "id": product.product_id,
+                "name": product.product,
+                "vendor": product.vendor,
+                "hub_count": product.hub_count,
+                "domain_count": product.domain_count,
+            })
+        
+        # Sort products within each category by vendor
+        for cat in categories:
+            categories[cat] = sorted(categories[cat], key=lambda x: (x["vendor"], x["name"]))
+        
+        return {
+            "products": categories,
+            "categories": sorted(categories.keys()),
+            "total": sum(len(v) for v in categories.values()),
+        }
+        
+    except Exception as e:
+        logger.error(f"Error listing products: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/products/categories")
+async def list_product_categories():
+    """List all product categories with counts."""
+    if not PRODUCTS_AVAILABLE:
+        return {"categories": []}
+    
+    try:
+        registry = get_registry()
+        summary = registry.summary()
+        
+        return {
+            "categories": [
+                {"name": cat, "count": count}
+                for cat, count in sorted(summary["by_category"].items())
+            ],
+            "vendors": [
+                {"name": vendor, "count": count}
+                for vendor, count in sorted(summary["by_vendor"].items(), key=lambda x: -x[1])
+            ][:15],
+            "total_products": summary["total_products"],
+            "total_hubs": summary["total_hubs"],
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting categories: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/products/{product_id}")
+async def get_product_details(product_id: str):
+    """Get detailed information about a specific product."""
+    if not PRODUCTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Product registry not available")
+    
+    try:
+        product = get_product(product_id)
+        if not product:
+            raise HTTPException(status_code=404, detail=f"Product not found: {product_id}")
+        
+        return {
+            "product_id": product.product_id,
+            "vendor": product.vendor,
+            "name": product.product,
+            "category": product.category,
+            "version": product.version,
+            "api_types": product.api_types,
+            "product_focus": product.product_focus,
+            "domain_count": product.domain_count,
+            "hub_count": product.hub_count,
+            "domains": {
+                name: {
+                    "description": d.description,
+                    "hub_count": d.hub_count,
+                    "hubs": d.hubs,
+                }
+                for name, d in product.domains.items()
+            },
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting product: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/products/compare/{source_id}/{target_id}")
+async def compare_products(source_id: str, target_id: str):
+    """
+    Compare two product schemas for M&A integration analysis.
+    
+    Returns compatibility scores, gap analysis, and recommendations.
+    """
+    if not PRODUCTS_AVAILABLE:
+        raise HTTPException(status_code=503, detail="Product registry not available")
+    
+    try:
+        result = compare_schemas(source_id, target_id)
+        
+        return {
+            "source": {
+                "product_id": source_id,
+                "vendor": result.source_vendor,
+                "name": result.source_product,
+                "hub_count": result.total_source_hubs,
+            },
+            "target": {
+                "product_id": target_id,
+                "vendor": result.target_vendor,
+                "name": result.target_product,
+                "hub_count": result.total_target_hubs,
+            },
+            "scores": {
+                "compatibility": round(result.compatibility_score * 100),
+                "complexity": round(result.complexity_score * 100),
+                "risk": round(result.risk_score * 100),
+            },
+            "analysis": {
+                "total_domains": result.total_domains,
+                "matched_domains": result.matched_domains,
+                "partial_domains": result.partial_domains,
+                "source_only_domains": result.source_only_domains,
+                "target_only_domains": result.target_only_domains,
+                "matched_hubs": result.matched_hubs,
+            },
+            "recommendations": result.integration_recommendations,
+            "risks": result.risk_factors,
+            "summary_markdown": result.summary(),
+            "gap_analysis_markdown": result.gap_analysis(),
+        }
+        
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error comparing products: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
