@@ -123,10 +123,10 @@ RELATIONSHIP_KEYWORDS = {
 
 # Attribute mappings: what target attributes mean
 TARGET_ATTRIBUTES = {
-    'department': ['department_code', 'department', 'dept_code', 'dept'],
+    'department': ['department_code', 'department', 'dept_code', 'dept', 'org_level_1', 'org_level_2', 'org_level_3', 'org_level'],
     'location': ['location_code', 'location', 'loc_code', 'work_location'],
     'job': ['job_code', 'job_title', 'position_code', 'job'],
-    'salary': ['annual_salary', 'salary', 'pay_rate', 'rate'],
+    'salary': ['annual_salary', 'salary', 'pay_rate', 'rate', 'hourly_pay_rate', 'period_pay_rate'],
     'name': ['employee_name', 'full_name', 'name', 'first_name', 'last_name'],
     'email': ['email', 'email_address', 'work_email'],
     'phone': ['phone', 'phone_number', 'work_phone'],
