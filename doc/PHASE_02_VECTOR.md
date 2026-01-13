@@ -46,7 +46,7 @@ Each query pulls relevant context from the right truth(s).
 |---|-----------|-------|--------|-------------|
 | 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE | Tag chunks with truth type at upload |
 | 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE | Route queries to appropriate truths |
-| 2B.3 | Source Typing & Prioritization | 2-3 | NOT STARTED | Weight sources by reliability |
+| 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE | Weight sources by reliability |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED | Beyond similarity - contextual relevance |
 | 2B.5 | Citation Tracking | 2-3 | NOT STARTED | Track provenance for responses |
 | 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED | Find missing truth coverage |
@@ -309,7 +309,47 @@ class TruthRouter:
 
 ---
 
-## Component 2B.3: Source Typing & Prioritization
+## Component 2B.3: Source Typing & Prioritization ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/source_prioritizer.py`
+- Integrated into: `backend/utils/intelligence/engine.py` (`_gather_reference_library()`)
+- Approach: Query-type specific weight matrices (deterministic, no LLM)
+
+**Authority Hierarchy (base):**
+```
+government (IRS, DOL) > vendor (UKG docs) > industry (SHRM) > customer (SOW) > internal (notes)
+```
+
+**Weight Matrix by Query Type:**
+| Source Authority | regulatory_required | best_practice | customer_intent | default |
+|------------------|--------------------:|---------------:|----------------:|--------:|
+| Government | 1.0 | 0.6 | 0.3 | 0.9 |
+| Vendor | 0.6 | 1.0 | 0.5 | 0.85 |
+| Industry | 0.5 | 0.8 | 0.4 | 0.7 |
+| Customer | 0.2 | 0.3 | 1.0 | 0.6 |
+| Internal | 0.3 | 0.4 | 0.6 | 0.5 |
+
+**Test Results:**
+| Query Type | Winner (despite lower similarity) |
+|------------|-----------------------------------|
+| regulatory_required | IRS Pub 15 (government) beats UKG Guide (vendor) |
+| best_practice | UKG Best Practices (vendor) beats IRS Pub 15 (government) |
+| customer_intent | Customer SOW beats UKG Docs (vendor) |
+
+**Scoring Formula:**
+```python
+final_score = (
+    similarity * 0.50 +      # Base ChromaDB similarity
+    authority * 0.30 +       # Source authority weight
+    domain_match * 0.15 +    # Domain alignment bonus
+    routing_weight * 0.05    # TruthRouter weight
+)
+```
+
+**Original Design (preserved for reference):**
 
 **Goal:** Weight sources by reliability and authority.
 
