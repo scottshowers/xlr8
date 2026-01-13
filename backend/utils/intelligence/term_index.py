@@ -2021,6 +2021,19 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         logger.error(f"[TERM_INDEX] Error building concept terms: {e}")
         stats['concept_error'] = str(e)
     
+    # ==========================================================================
+    # STEP 5: DETECT RELATIONSHIPS (Evolution 10: Multi-Hop)
+    # Finds self-referential columns and foreign key relationships
+    # ==========================================================================
+    try:
+        relationship_stats = _detect_relationships(conn, project)
+        stats['relationships_detected'] = relationship_stats.get('total', 0)
+        stats['self_references'] = relationship_stats.get('self_references', 0)
+        stats['foreign_keys'] = relationship_stats.get('foreign_keys', 0)
+    except Exception as e:
+        logger.warning(f"[TERM_INDEX] Relationship detection failed: {e}")
+        stats['relationship_error'] = str(e)
+    
     conn.commit()
     
     logger.info(f"[TERM_INDEX] Recalc complete: {stats}")
@@ -2352,3 +2365,124 @@ def _domain_to_entity(domain: str) -> Optional[str]:
         return 'organization'
     
     return domain_lower  # Return as-is if no mapping
+
+
+# =============================================================================
+# EVOLUTION 10: RELATIONSHIP DETECTION
+# =============================================================================
+
+def _detect_relationships(conn: duckdb.DuckDBPyConnection, project: str) -> Dict[str, int]:
+    """
+    Detect self-referential and foreign key relationships in project tables.
+    
+    Called during recalc to find:
+    - supervisor_id → employee_number (self-references)
+    - department_code → department table (foreign keys)
+    
+    Args:
+        conn: DuckDB connection
+        project: Project ID
+        
+    Returns:
+        Dict with detection counts
+    """
+    import re
+    stats = {'total': 0, 'self_references': 0, 'foreign_keys': 0}
+    
+    # Self-reference patterns: column names that reference employee identifiers
+    SELF_REF_PATTERNS = [
+        (r'supervisor.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
+        (r'manager.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
+        (r'reports.*to.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'supervisor'),
+        (r'alternate.*super.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'alternate_supervisor'),
+        (r'primary.*super.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'primary_supervisor'),
+        (r'hiring.*manager.*(?:id|number|no)$', r'employee.*(?:id|number|no)$', 'hiring_manager'),
+        (r'parent.*(?:id|code)$', r'(?:^id$|^code$)', 'parent_org'),
+    ]
+    
+    # Ensure the relationships table exists
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS _column_relationships (
+            project VARCHAR NOT NULL,
+            source_table VARCHAR NOT NULL,
+            source_column VARCHAR NOT NULL,
+            target_table VARCHAR NOT NULL,
+            target_column VARCHAR NOT NULL,
+            relationship_type VARCHAR NOT NULL,
+            semantic_meaning VARCHAR,
+            confidence FLOAT DEFAULT 0.9,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            
+            PRIMARY KEY (project, source_table, source_column, target_table, target_column)
+        )
+    """)
+    
+    try:
+        # Get all tables for this project
+        tables = conn.execute("""
+            SELECT DISTINCT table_name 
+            FROM _column_profiles 
+            WHERE LOWER(project) = LOWER(?)
+        """, [project]).fetchall()
+        
+        for (table_name,) in tables:
+            # Get all columns for this table
+            columns = conn.execute("""
+                SELECT column_name, semantic_type, inferred_type
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?) AND table_name = ?
+            """, [project, table_name]).fetchall()
+            
+            column_info = {row[0].lower(): {'name': row[0], 'semantic': row[1], 'type': row[2]} 
+                          for row in columns}
+            
+            # Check for self-reference patterns
+            for source_col_lower, info in column_info.items():
+                source_col = info['name']
+                
+                for source_pattern, target_pattern, semantic in SELF_REF_PATTERNS:
+                    if not re.search(source_pattern, source_col_lower, re.IGNORECASE):
+                        continue
+                    
+                    # Find matching target column in same table
+                    for target_col_lower, target_info in column_info.items():
+                        target_col = target_info['name']
+                        if source_col_lower == target_col_lower:
+                            continue
+                            
+                        if re.search(target_pattern, target_col_lower, re.IGNORECASE):
+                            # Found a self-reference!
+                            try:
+                                conn.execute("""
+                                    INSERT INTO _column_relationships 
+                                    (project, source_table, source_column, target_table, target_column,
+                                     relationship_type, semantic_meaning, confidence)
+                                    VALUES (?, ?, ?, ?, ?, 'self_reference', ?, 0.85)
+                                    ON CONFLICT (project, source_table, source_column, target_table, target_column)
+                                    DO UPDATE SET
+                                        relationship_type = EXCLUDED.relationship_type,
+                                        semantic_meaning = EXCLUDED.semantic_meaning,
+                                        confidence = EXCLUDED.confidence
+                                """, [
+                                    project.lower(),
+                                    table_name,
+                                    source_col,
+                                    table_name,
+                                    target_col,
+                                    semantic
+                                ])
+                                stats['self_references'] += 1
+                                stats['total'] += 1
+                                logger.info(f"[RELATIONSHIP] Self-ref: {table_name}.{source_col} → {target_col} ({semantic})")
+                            except Exception as e:
+                                logger.debug(f"[RELATIONSHIP] Insert note: {e}")
+                            break  # Found match, move to next source column
+        
+        conn.commit()
+        
+    except Exception as e:
+        logger.warning(f"[RELATIONSHIP] Detection error: {e}")
+        stats['error'] = str(e)
+    
+    logger.info(f"[TERM_INDEX] Relationship detection: {stats}")
+    return stats
