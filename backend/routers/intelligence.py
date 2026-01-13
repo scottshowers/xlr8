@@ -495,7 +495,7 @@ async def debug_columns(project: str, table: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/detect-relationships")
+@router.get("/{project}/detect-relationships")
 async def run_relationship_detection(project: str):
     """
     Debug endpoint: Force run relationship detection.
