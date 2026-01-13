@@ -104,6 +104,14 @@ from .truth_router import (
     route_query,
 )
 
+# Source Prioritizer (Authority-based result re-ranking)
+from .source_prioritizer import (
+    SourcePrioritizer,
+    get_prioritizer,
+    prioritize_truths,
+    prioritize_results,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -174,6 +182,12 @@ __all__ = [
     'RoutingResult',
     'get_router',
     'route_query',
+    
+    # Source Prioritizer
+    'SourcePrioritizer',
+    'get_prioritizer',
+    'prioritize_truths',
+    'prioritize_results',
     
     # Gatherers
     'BaseGatherer',
