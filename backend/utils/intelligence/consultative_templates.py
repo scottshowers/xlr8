@@ -386,13 +386,20 @@ def _humanize_entity(entity: str) -> str:
     entity_map = {
         'employee': 'employees',
         'employees': 'employees',
+        'demographics': 'employees',  # Domain name → friendly name
         'hr': 'employees',
         'deduction': 'deductions',
+        'deductions': 'deductions',
         'earning': 'earnings',
+        'earnings': 'earnings',
         'tax': 'tax records',
         'benefit': 'benefit records',
+        'benefits': 'benefit records',
         'config': 'configuration records',
+        'configuration': 'configuration records',
+        'payroll': 'payroll records',
         'record': 'records',
+        'records': 'records',
     }
     return entity_map.get(entity.lower(), f"{entity}s" if not entity.endswith('s') else entity)
 
