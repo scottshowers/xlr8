@@ -1476,8 +1476,8 @@ class IntelligenceEngineV2:
                         )
             
             # Reality context (breakdowns if available)
-            reality_context = resolver_context.get('reality_context', {})
-            breakdowns = reality_context.get('breakdowns', {})
+            reality_context = resolver_context.get('reality_context') or {}
+            breakdowns = reality_context.get('breakdowns', {}) if reality_context else {}
             if breakdowns:
                 context_parts.append(f"\nAVAILABLE BREAKDOWNS:")
                 for dim, values in list(breakdowns.items())[:3]:
