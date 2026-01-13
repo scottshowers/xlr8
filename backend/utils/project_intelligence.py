@@ -85,18 +85,19 @@ import re
 
 logger = logging.getLogger(__name__)
 
-# Try to import gap detection engine
+# Try to import gap detector (Phase 2B.6 - product-agnostic)
 try:
-    from backend.utils.gap_detection_engine import GapDetectionEngine
+    from backend.utils.intelligence.gap_detector import GapDetector, detect_gaps_from_gathered
     GAP_DETECTION_AVAILABLE = True
 except ImportError:
     try:
-        from utils.gap_detection_engine import GapDetectionEngine
+        from utils.intelligence.gap_detector import GapDetector, detect_gaps_from_gathered
         GAP_DETECTION_AVAILABLE = True
     except ImportError:
         GAP_DETECTION_AVAILABLE = False
-        GapDetectionEngine = None
-        logger.info("[INTELLIGENCE] Gap Detection Engine not available")
+        GapDetector = None
+        detect_gaps_from_gathered = None
+        logger.info("[INTELLIGENCE] Gap Detector not available")
 
 # Try to import domain decoder for enriching findings with consultant knowledge
 try:
@@ -1602,88 +1603,14 @@ class ProjectIntelligenceService:
         """
         Run gap detection between Configuration and Reality tables.
         
-        This is the "Configuration Validation vs Employee Conversion Testing" logic:
-        - Config tables define what SHOULD exist (codes, plans, setup)
-        - Reality tables show what IS being used (actual employee data)
-        - The GAP between them = implementation issues
+        NOTE: This method previously used the old HCM-specific GapDetectionEngine.
+        The new GapDetector (Phase 2B.6) focuses on truth type coverage and is
+        integrated at the Intelligence Engine level during query processing.
         
-        Gap types:
-        1. Configured but unused: Code in Config but not in Reality → over-configured
-        2. In use but unconfigured: Code in Reality but not in Config → ERROR!
+        This Config vs Reality comparison will be reimplemented in Phase 5
+        when multi-product schema support is added.
         """
-        if not GAP_DETECTION_AVAILABLE:
-            logger.debug("[INTELLIGENCE] Gap detection not available")
-            return
-        
-        logger.info("[INTELLIGENCE] Running gap detection...")
-        
-        try:
-            # Initialize gap detection engine with handler
-            gap_engine = GapDetectionEngine(structured_handler=self.handler)
-            
-            # Get table classifications to find Config vs Reality pairs
-            config_tables = []
-            reality_tables = []
-            
-            for table_info in tables:
-                table_name = table_info.get('table_name', '')
-                table_lower = table_name.lower()
-                
-                # Detect Configuration tables
-                if any(pattern in table_lower for pattern in 
-                       ['configuration_validation', 'config_valid', '_codes', '_setup', 
-                        'code_table', 'earning_code', 'deduction_code', 'tax_code']):
-                    config_tables.append(table_info)
-                    logger.debug(f"[GAP] Config table: {table_name}")
-                
-                # Detect Reality/Transaction tables
-                elif any(pattern in table_lower for pattern in 
-                         ['employee_conversion', 'conversion_test', 'employee_', 
-                          'transaction', 'history', 'register', 'payroll']):
-                    reality_tables.append(table_info)
-                    logger.debug(f"[GAP] Reality table: {table_name}")
-            
-            if not config_tables or not reality_tables:
-                logger.info("[INTELLIGENCE] Gap detection skipped - need both Config and Reality tables")
-                return
-            
-            logger.info(f"[INTELLIGENCE] Gap detection: {len(config_tables)} config tables, {len(reality_tables)} reality tables")
-            
-            # Run gap detection for each domain
-            gaps_found = 0
-            
-            for config_table in config_tables:
-                config_name = config_table.get('table_name', '')
-                config_cols = [c.lower() for c in config_table.get('columns', [])]
-                
-                # Detect domain from config table
-                domain = self._detect_domain_from_table(config_name, config_cols)
-                
-                if not domain:
-                    continue
-                
-                # Find matching reality tables for this domain
-                for reality_table in reality_tables:
-                    reality_name = reality_table.get('table_name', '')
-                    reality_cols = [c.lower() for c in reality_table.get('columns', [])]
-                    
-                    # Look for common key columns (e.g., earning_code, deduction_code)
-                    common_keys = self._find_common_key_columns(config_cols, reality_cols)
-                    
-                    if common_keys:
-                        # Run comparison for each common key
-                        for key_col in common_keys:
-                            gaps = self._compare_config_vs_reality(
-                                config_name, reality_name, key_col, domain
-                            )
-                            gaps_found += len(gaps)
-            
-            logger.info(f"[INTELLIGENCE] Gap detection complete: {gaps_found} gaps found")
-            
-        except Exception as e:
-            logger.warning(f"[INTELLIGENCE] Gap detection failed: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
+        logger.debug("[INTELLIGENCE] Gap detection: Config vs Reality comparison deferred to Phase 5")
     
     def _detect_domain_from_table(self, table_name: str, columns: List[str]) -> Optional[str]:
         """Detect domain from table name and columns."""
