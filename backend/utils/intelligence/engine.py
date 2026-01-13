@@ -83,6 +83,16 @@ try:
 except ImportError as e:
     logger.warning(f"RelevanceScorer not available: {e}")
 
+# Citation Tracker for source provenance (Phase 2B.5)
+CITATION_TRACKER_AVAILABLE = False
+CitationCollector = None
+try:
+    from .citation_tracker import CitationCollector, collect_citations_from_truths
+    CITATION_TRACKER_AVAILABLE = True
+    logger.info("✅ CitationTracker loaded for source provenance")
+except ImportError as e:
+    logger.warning(f"CitationTracker not available: {e}")
+
 # Term Index + SQL Assembler - the NEW deterministic path
 # Must be after logger is defined
 DETERMINISTIC_PATH_AVAILABLE = False
@@ -2407,6 +2417,29 @@ class IntelligenceEngineV2:
                 
             if self.compliance_gatherer:
                 compliance = self.compliance_gatherer.gather(question, analysis)
+        
+        # Phase 2B.5: Collect citations from all gathered truths
+        if CITATION_TRACKER_AVAILABLE and CitationCollector:
+            try:
+                collector = CitationCollector()
+                collector.set_question(question)
+                
+                # Add citations from each truth type
+                for truth in reference:
+                    collector.add_from_truth(truth)
+                for truth in regulatory:
+                    collector.add_from_truth(truth)
+                for truth in compliance:
+                    collector.add_from_truth(truth)
+                
+                # Store in analysis for downstream use
+                analysis['citations'] = [c.to_dict() for c in collector.get_top_citations(10)]
+                analysis['citation_summary'] = collector.summary()
+                analysis['citation_bibliography'] = collector.format_bibliography()
+                
+                logger.warning(f"[GATHER-LIBRARY] Collected citations: {collector.summary()}")
+            except Exception as e:
+                logger.warning(f"[GATHER-LIBRARY] Citation collection failed: {e}")
         
         return reference, regulatory, compliance
     
