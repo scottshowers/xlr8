@@ -47,7 +47,7 @@ Each query pulls relevant context from the right truth(s).
 | 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE | Tag chunks with truth type at upload |
 | 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE | Route queries to appropriate truths |
 | 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE | Weight sources by reliability |
-| 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED | Beyond similarity - contextual relevance |
+| 2B.4 | Relevance Scoring & Filtering | 3-4 | ✅ DONE | Beyond similarity - contextual relevance |
 | 2B.5 | Citation Tracking | 2-3 | NOT STARTED | Track provenance for responses |
 | 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED | Find missing truth coverage |
 
@@ -398,7 +398,56 @@ class SourcePrioritizer:
 
 ---
 
-## Component 2B.4: Relevance Scoring & Filtering
+## Component 2B.4: Relevance Scoring & Filtering ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/relevance_scorer.py`
+- Integrated into: `backend/utils/intelligence/engine.py` (`_gather_reference_library()`)
+- Supersedes 2B.3 SourcePrioritizer (includes all its logic plus more)
+
+**Scoring Factors (5 factors):**
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Similarity | 0.45 | Base ChromaDB embedding distance |
+| Authority | 0.25 | Source authority per query type (from 2B.3) |
+| Domain Match | 0.15 | Chunk domain matches query domain |
+| Recency | 0.10 | More recent documents score higher |
+| Jurisdiction | 0.05 | State/federal alignment |
+
+**Recency Scoring:**
+| Age | Score |
+|-----|-------|
+| Last 6 months | 1.0 |
+| Last 1 year | 0.9 |
+| Last 2 years | 0.8 |
+| Last 3 years | 0.7 |
+| Older | 0.6 |
+| No date | 0.7 (neutral) |
+
+**Jurisdiction Scoring:**
+| Match Type | Score |
+|------------|-------|
+| Exact match (CA→CA) | 1.0 |
+| Federal matches any | 0.9 |
+| State matches federal | 0.8 |
+| Different states | 0.5 |
+
+**Filtering:**
+- Minimum threshold: 0.5 (configurable)
+- Maximum results: 10 (configurable)
+- Low-quality results automatically excluded
+
+**Test Results:**
+| Test | Winner |
+|------|--------|
+| Recency | New IRS Doc (2025) beats Old IRS Doc (2020) |
+| Jurisdiction | CA State Law beats TX State Law for CA query |
+| Filtering | 3 results → 2 after threshold filter |
+| Combined | Perfect Match (0.95) > Good Match (0.80) > Weak Match (0.59) |
+
+**Original Design (preserved for reference):**
 
 **Goal:** Go beyond embedding similarity to contextual relevance.
 
