@@ -39,13 +39,13 @@
 |-----------|-------------|-------|--------|
 | 1 | Categorical Lookups | - | ✅ DONE |
 | 2 | Multi-Table JOINs | - | ✅ DONE |
-| 3 | Numeric Comparisons | - | ✅ DONE |
-| 4 | Date/Time Filters | - | ✅ DONE |
-| 5 | OR Logic | - | ✅ DONE |
-| 6 | Negation | - | ✅ DONE |
-| 7 | Aggregations | - | ✅ DONE |
-| 8 | Group By | - | ✅ DONE |
-| 9 | Superlatives | - | ✅ DONE |
+| 3 | Numeric Comparisons | 4-6 | NOT STARTED |
+| 4 | Date/Time Filters | 4-6 | NOT STARTED |
+| 5 | OR Logic | 2-3 | NOT STARTED |
+| 6 | Negation | 2-3 | NOT STARTED |
+| 7 | Aggregations | 3-4 | NOT STARTED |
+| 8 | Group By | 2-3 | NOT STARTED |
+| 9 | Superlatives | 3-4 | NOT STARTED |
 | 10 | Multi-Hop Relationships | 6-8 | NOT STARTED |
 
 **Prerequisites:**
@@ -63,7 +63,7 @@
 | Component | Description | Hours | Status |
 |-----------|-------------|-------|--------|
 | 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE |
-| 2B.2 | Query-Aware Vector Search | 4-5 | NOT STARTED |
+| 2B.2 | Query-Aware Vector Search | 4-5 | ✅ DONE |
 | 2B.3 | Source Typing & Prioritization | 2-3 | NOT STARTED |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED |
 | 2B.5 | Citation Tracking | 2-3 | NOT STARTED |
@@ -144,11 +144,16 @@
   - Created `chunk_classifier.py` with deterministic pattern-based classification
   - Classifies: truth_type, domain, source_authority
   - Integrated into RAGHandler for automatic tagging at upload
+- ✅ Phase 2B.2: Query-Aware Vector Search  
+  - Created `truth_router.py` with query pattern detection
+  - Routes queries to appropriate truth types (regulatory, reference, intent, compliance)
+  - Domain detection from query text (earnings, taxes, time, etc.)
+  - Integrated into engine's `_gather_reference_library()`
 
 **Next Session Options:**
-1. Phase 2B.2: Query-Aware Vector Search - Route queries to appropriate truths
-2. Phase 1 Evolution 10: Multi-Hop Relationships (if SQL layer needs it)
-3. Phase 2B.3: Source Typing & Prioritization
+1. Phase 2B.3: Source Typing & Prioritization - Weight sources by reliability
+2. Phase 2B.4: Relevance Scoring & Filtering - Multi-factor scoring beyond similarity
+3. Phase 1 Evolution 10: Multi-Hop Relationships (if SQL layer needs it)
 
 ---
 
