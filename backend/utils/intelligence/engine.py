@@ -113,14 +113,24 @@ AssemblerIntent = None
 parse_intent = None
 try:
     from .term_index import TermIndex
-    from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent
+    from .sql_assembler import SQLAssembler, QueryIntent as AssemblerIntent, MultiHopRequest
     from .query_resolver import parse_intent
     DETERMINISTIC_PATH_AVAILABLE = True
     logger.warning("[ENGINE-V2] ✅ Deterministic path AVAILABLE (TermIndex + SQLAssembler)")
 except ImportError as e:
     logger.warning(f"[ENGINE-V2] ❌ Deterministic path NOT available: {e}")
 
-__version__ = "10.0.0"  # v10.0: Deterministic path - Term Index + SQL Assembler as PRIMARY
+# Evolution 10: Relationship Resolver for multi-hop queries
+RELATIONSHIP_RESOLVER_AVAILABLE = False
+RelationshipResolver = None
+try:
+    from .relationship_resolver import RelationshipResolver, detect_multi_hop_query
+    RELATIONSHIP_RESOLVER_AVAILABLE = True
+    logger.warning("[ENGINE-V2] ✅ RelationshipResolver AVAILABLE (Multi-Hop Queries)")
+except ImportError as e:
+    logger.warning(f"[ENGINE-V2] ❌ RelationshipResolver NOT available: {e}")
+
+__version__ = "10.1.0"  # v10.1: Multi-hop relationships support
 
 # Try to load Project Intelligence
 PROJECT_INTELLIGENCE_AVAILABLE = False
@@ -1338,6 +1348,23 @@ class IntelligenceEngineV2:
                 logger.warning(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
                 return None
             
+            # ================================================================
+            # EVOLUTION 10: MULTI-HOP RELATIONSHIP DETECTION
+            # Check for possessive patterns ("manager's department") and
+            # relationship keywords ("reports to", "in John's team")
+            # ================================================================
+            if RELATIONSHIP_RESOLVER_AVAILABLE:
+                multi_hop_info = detect_multi_hop_query(question)
+                if multi_hop_info:
+                    logger.warning(f"[DETERMINISTIC] Multi-hop pattern detected: {multi_hop_info}")
+                    
+                    # Try to handle multi-hop query
+                    multi_hop_result = self._try_multi_hop_query(question, multi_hop_info)
+                    if multi_hop_result:
+                        return multi_hop_result
+                    # If multi-hop fails, fall through to regular path
+                    logger.warning("[DETERMINISTIC] Multi-hop query failed, trying regular path")
+            
             # Step 2: Resolve terms using Term Index (EVOLUTION 3: with numeric support)
             logger.warning(f"[DETERMINISTIC] Creating TermIndex with project='{self.project}'")
             term_index = TermIndex(self.structured_handler.conn, self.project)
@@ -1726,6 +1753,167 @@ class IntelligenceEngineV2:
             logger.error(f"[DETERMINISTIC] Error: {e}")
             import traceback
             logger.error(f"[DETERMINISTIC] Traceback: {traceback.format_exc()}")
+            return None
+    
+    def _try_multi_hop_query(self, question: str, multi_hop_info: Dict) -> Optional[SynthesizedAnswer]:
+        """
+        Evolution 10: Handle multi-hop relationship queries.
+        
+        Processes queries like:
+        - "manager's department" → self-join through supervisor_id
+        - "employees in John's team" → filter by supervisor name
+        - "location's regional manager" → multi-hop join
+        
+        Args:
+            question: The original question
+            multi_hop_info: Parsed relationship info from detect_multi_hop_query()
+            
+        Returns:
+            SynthesizedAnswer if successful, None to fall back to regular path
+        """
+        logger.warning(f"[MULTI-HOP] Processing multi-hop query: {multi_hop_info}")
+        
+        if not DETERMINISTIC_PATH_AVAILABLE:
+            return None
+        
+        if not self.structured_handler:
+            return None
+        
+        try:
+            # Get primary employee table
+            assembler = SQLAssembler(self.structured_handler.conn, self.project)
+            primary_table = assembler._get_primary_table([], 'employee', [], None)
+            
+            if not primary_table:
+                logger.warning("[MULTI-HOP] No primary employee table found")
+                return None
+            
+            # Build the multi-hop request
+            traversal_type = multi_hop_info.get('traversal_type')
+            
+            if traversal_type == 'possessive':
+                # "manager's department" pattern
+                multi_hop = MultiHopRequest(
+                    relationship_type=multi_hop_info.get('semantic', 'supervisor'),
+                    target_attribute=multi_hop_info.get('target_attribute', ''),
+                    direction=multi_hop_info.get('direction', 'forward')
+                )
+            elif traversal_type == 'named_possessive':
+                # "John's team" pattern - filter by name
+                multi_hop = MultiHopRequest(
+                    relationship_type='supervisor',
+                    target_attribute=multi_hop_info.get('target_attribute', 'name'),
+                    direction='reverse',
+                    filter_value=multi_hop_info.get('source_entity')
+                )
+            elif traversal_type == 'keyword':
+                # "reports to X" pattern
+                multi_hop = MultiHopRequest(
+                    relationship_type=multi_hop_info.get('semantic', 'supervisor'),
+                    target_attribute='name',
+                    direction=multi_hop_info.get('direction', 'forward')
+                )
+            else:
+                logger.warning(f"[MULTI-HOP] Unknown traversal type: {traversal_type}")
+                return None
+            
+            logger.warning(f"[MULTI-HOP] Built request: {multi_hop}")
+            
+            # Build the multi-hop SQL
+            result = assembler.build_multi_hop_query(
+                primary_table=primary_table,
+                multi_hop=multi_hop,
+                limit=100
+            )
+            
+            if not result.success:
+                logger.warning(f"[MULTI-HOP] Query build failed: {result.error}")
+                return None
+            
+            logger.warning(f"[MULTI-HOP] Generated SQL: {result.sql[:200]}...")
+            
+            # Execute the query
+            try:
+                rows = self.structured_handler.conn.execute(result.sql).fetchdf().to_dict('records')
+            except Exception as exec_err:
+                logger.error(f"[MULTI-HOP] SQL execution failed: {exec_err}")
+                return None
+            
+            if not rows:
+                logger.warning("[MULTI-HOP] No results returned")
+                return None
+            
+            # Build the answer
+            target_attr = multi_hop.target_attribute
+            result_col = result.multi_hop_info.get('result_column', f'mgr_{target_attr}') if result.multi_hop_info else f'mgr_{target_attr}'
+            
+            # Get unique values for the target attribute from results
+            target_values = []
+            for row in rows[:20]:  # Sample first 20
+                val = row.get(result_col)
+                if val and val not in target_values:
+                    target_values.append(val)
+            
+            # Build response text based on query type
+            if traversal_type == 'possessive':
+                if len(target_values) == 1:
+                    answer_text = f"✅ The {multi_hop_info.get('source_entity', 'manager')}'s {target_attr} is: {target_values[0]}"
+                else:
+                    values_list = ', '.join(str(v) for v in target_values[:10])
+                    answer_text = f"✅ Found {len(rows)} employees. Their {multi_hop_info.get('source_entity', 'manager')}s' {target_attr}s include: {values_list}"
+            elif traversal_type == 'named_possessive':
+                name = multi_hop_info.get('source_entity', 'unknown')
+                answer_text = f"✅ Found {len(rows)} employees in {name}'s team."
+            else:
+                answer_text = f"✅ Found {len(rows)} records with relationship data."
+            
+            # Get columns
+            columns = list(rows[0].keys()) if rows else []
+            
+            # Build Truth object
+            reality_truth = Truth(
+                source_type='reality',
+                source_name=primary_table,
+                content={
+                    'columns': columns,
+                    'rows': rows[:100],
+                    'total': len(rows),
+                    'query_type': 'multi_hop',
+                    'sql': result.sql
+                },
+                confidence=0.9,
+                location=f"DuckDB: {primary_table} (self-join)",
+                metadata={
+                    'multi_hop': True,
+                    'relationship': multi_hop.relationship_type,
+                    'target_attribute': multi_hop.target_attribute
+                }
+            )
+            
+            return SynthesizedAnswer(
+                question=question,
+                answer=answer_text,
+                confidence=0.85,
+                from_reality=[reality_truth],
+                reasoning=[
+                    f"Used multi-hop relationship query (Evolution 10)",
+                    f"Relationship: {multi_hop.relationship_type}",
+                    f"Target attribute: {multi_hop.target_attribute}",
+                    f"Result: {len(rows)} records"
+                ],
+                structured_output={
+                    'type': 'multi_hop_result',
+                    'relationship': multi_hop.relationship_type,
+                    'target': multi_hop.target_attribute,
+                    'row_count': len(rows),
+                    'sql': result.sql
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"[MULTI-HOP] Error: {e}")
+            import traceback
+            logger.error(f"[MULTI-HOP] Traceback: {traceback.format_exc()}")
             return None
     
     # =========================================================================
