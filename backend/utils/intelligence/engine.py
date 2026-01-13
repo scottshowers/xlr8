@@ -1780,13 +1780,23 @@ class IntelligenceEngineV2:
             return None
         
         try:
-            # Get primary employee table
-            assembler = SQLAssembler(self.structured_handler.conn, self.project)
-            primary_table = assembler._get_primary_table([], 'employee', [], None)
+            # Get primary table from the stored relationship (not from hub guessing)
+            semantic = multi_hop_info.get('semantic', 'supervisor')
             
-            if not primary_table:
-                logger.warning("[MULTI-HOP] No primary employee table found")
+            relationship = self.structured_handler.conn.execute("""
+                SELECT source_table, source_column, target_column
+                FROM _column_relationships
+                WHERE LOWER(project) = LOWER(?)
+                AND semantic_meaning = ?
+                LIMIT 1
+            """, [self.project, semantic]).fetchone()
+            
+            if not relationship:
+                logger.warning(f"[MULTI-HOP] No relationship found for semantic='{semantic}'")
                 return None
+            
+            primary_table = relationship[0]
+            logger.warning(f"[MULTI-HOP] Found relationship in table: {primary_table}")
             
             # Build the multi-hop request
             traversal_type = multi_hop_info.get('traversal_type')
@@ -1820,6 +1830,7 @@ class IntelligenceEngineV2:
             logger.warning(f"[MULTI-HOP] Built request: {multi_hop}")
             
             # Build the multi-hop SQL
+            assembler = SQLAssembler(self.structured_handler.conn, self.project)
             result = assembler.build_multi_hop_query(
                 primary_table=primary_table,
                 multi_hop=multi_hop,
