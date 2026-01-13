@@ -1,6 +1,6 @@
 # XLR8 Roadmap
 
-**Last Updated:** January 11, 2026  
+**Last Updated:** January 12, 2026  
 **Total Estimated Hours:** 85-105
 
 ---
@@ -10,8 +10,8 @@
 | Phase | Name | Hours | Status | Detail Doc |
 |-------|------|-------|--------|------------|
 | 0 | Foundation | - | ✅ COMPLETE | - |
-| 1 | SQL Evolutions | 30-38 | 🔄 IN PROGRESS | `/doc/PHASE_01_SQL.md` |
-| 2 | Vector Retrieval | 20-25 | NOT STARTED | `/doc/PHASE_02_VECTOR.md` |
+| 1 | SQL Evolutions | 30-38 | ✅ COMPLETE | `/doc/PHASE_01_SQL.md` |
+| 2 | Vector Retrieval | 20-25 | 🔄 IN PROGRESS | `/doc/PHASE_02_VECTOR.md` |
 | 3 | Synthesis | 12-16 | NOT STARTED | `/doc/PHASE_03_SYNTHESIS.md` |
 | 4 | Presentation | 10-12 | NOT STARTED | `/doc/PHASE_04_PRESENTATION.md` |
 | 5 | API Connectivity | 8-12 | NOT STARTED | `/doc/PHASE_05_API.md` |
@@ -56,18 +56,18 @@
 
 ---
 
-## Phase 2: Vector Retrieval
+## Phase 2: Vector Retrieval 🔄 IN PROGRESS
 
 **Make ChromaDB useful for Five Truths**
 
-| Component | Description | Hours |
-|-----------|-------------|-------|
-| 2B.1 | Domain-Tagged Chunks | 3-4 |
-| 2B.2 | Query-Aware Vector Search | 4-5 |
-| 2B.3 | Source Typing & Prioritization | 2-3 |
-| 2B.4 | Relevance Scoring & Filtering | 3-4 |
-| 2B.5 | Citation Tracking | 2-3 |
-| 2B.6 | Gap Detection Queries | 4-5 |
+| Component | Description | Hours | Status |
+|-----------|-------------|-------|--------|
+| 2B.1 | Domain-Tagged Chunks | 3-4 | ✅ DONE |
+| 2B.2 | Query-Aware Vector Search | 4-5 | NOT STARTED |
+| 2B.3 | Source Typing & Prioritization | 2-3 | NOT STARTED |
+| 2B.4 | Relevance Scoring & Filtering | 3-4 | NOT STARTED |
+| 2B.5 | Citation Tracking | 2-3 | NOT STARTED |
+| 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED |
 
 **Detail:** See `/doc/PHASE_02_VECTOR.md`
 
@@ -137,13 +137,18 @@
 
 ## Current Focus
 
-**Active:** Phase 1 - SQL Evolutions
+**Active:** Phase 2 - Vector Retrieval
 
-**Next Session:**
-1. Create detailed phase docs
-2. Refactor QueryResolver
-3. Setup Duckling
-4. Begin Evolution 3 (Numeric)
+**Completed This Session (Jan 12):**
+- ✅ Phase 2B.1: Domain-Tagged Chunks
+  - Created `chunk_classifier.py` with deterministic pattern-based classification
+  - Classifies: truth_type, domain, source_authority
+  - Integrated into RAGHandler for automatic tagging at upload
+
+**Next Session Options:**
+1. Phase 2B.2: Query-Aware Vector Search - Route queries to appropriate truths
+2. Phase 1 Evolution 10: Multi-Hop Relationships (if SQL layer needs it)
+3. Phase 2B.3: Source Typing & Prioritization
 
 ---
 
