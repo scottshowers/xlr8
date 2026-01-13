@@ -1381,10 +1381,10 @@ class SQLAssembler:
         """
         # Attribute → possible column patterns
         attribute_patterns = {
-            'department': ['department', 'dept', 'org_unit', 'cost_center'],
+            'department': ['department', 'dept', 'org_unit', 'cost_center', 'org_level_1', 'org_level_2', 'org_level_3', 'org_level'],
             'location': ['location', 'loc_code', 'work_location', 'site'],
             'job': ['job', 'position', 'job_code', 'job_title'],
-            'salary': ['salary', 'annual_salary', 'pay_rate', 'rate'],
+            'salary': ['salary', 'annual_salary', 'pay_rate', 'rate', 'hourly_pay_rate', 'period_pay_rate'],
             'name': ['employee_name', 'full_name', 'name', 'first_name'],
             'email': ['email', 'email_address', 'work_email'],
             'phone': ['phone', 'phone_number', 'work_phone'],
