@@ -125,6 +125,9 @@ class SynthesizedAnswer:
     
     # v3.2: Rich consultative metadata (excel_spec, proactive_offers, hcmpact_hook)
     consultative_metadata: Optional[Dict] = None
+    
+    # Phase 2B.5: Citations for source attribution
+    citations: Optional[List[Dict]] = None  # List of Citation.to_dict() results
 
 
 # =============================================================================
