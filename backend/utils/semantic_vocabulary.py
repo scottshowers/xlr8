@@ -346,6 +346,46 @@ _register(SemanticType(
 
 
 # -----------------------------------------------------------------------------
+# RELATIONSHIP FIELDS - Evolution 10: Multi-Hop Relationships
+# -----------------------------------------------------------------------------
+
+_register(SemanticType(
+    name="supervisor_id",
+    category="relationship",
+    aliases=["supervisor_number", "supervisor_emp_no", "manager_id", "manager_number", 
+             "reports_to_id", "direct_manager_id", "supervisor_employee_number"],
+    patterns=[r"supervisor.*(?:id|num|no)", r"manager.*(?:id|num|no)", r"reports.*to.*(?:id|num)"],
+    description="Supervisor/manager employee identifier (self-reference to employee_number)"
+))
+
+_register(SemanticType(
+    name="alternate_supervisor_id",
+    category="relationship",
+    aliases=["alt_supervisor_id", "secondary_supervisor", "backup_manager_id", 
+             "alternate_super_number", "alt_mgr_id"],
+    patterns=[r"alt.*super.*(?:id|num)", r"alternate.*super", r"secondary.*super", r"backup.*manager"],
+    description="Alternate supervisor employee identifier"
+))
+
+_register(SemanticType(
+    name="parent_org_code",
+    category="relationship",
+    aliases=["parent_org", "parent_organization", "parent_company", "parent_dept",
+             "parent_location", "parent_cost_center"],
+    patterns=[r"parent.*(?:org|dept|loc|company|code)", r"parent.*id"],
+    description="Parent organization code (hierarchy)"
+))
+
+_register(SemanticType(
+    name="hiring_manager_id",
+    category="relationship",
+    aliases=["hiring_manager_number", "recruiter_id", "hiring_supervisor"],
+    patterns=[r"hiring.*manager", r"recruiter.*id"],
+    description="Hiring manager employee identifier"
+))
+
+
+# -----------------------------------------------------------------------------
 # DERIVED/CALCULATED FIELDS (not stored, calculated from source)
 # -----------------------------------------------------------------------------
 
