@@ -585,6 +585,106 @@ async def test_multi_hop_detection(project: str, query: str = "manager's departm
     return result
 
 
+@router.get("/{project}/run-multi-hop")
+async def run_multi_hop_query(project: str, query: str = "manager's department"):
+    """
+    Debug endpoint: Actually run a multi-hop query and see what happens.
+    
+    Usage: GET /api/intelligence/TEA1000/run-multi-hop?query=manager's+department
+    """
+    result = {
+        'query': query,
+        'project': project,
+        'steps': [],
+        'sql': None,
+        'error': None
+    }
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        from backend.utils.intelligence.relationship_resolver import detect_multi_hop_query
+        from backend.utils.intelligence.sql_assembler import SQLAssembler, MultiHopRequest
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Step 1: Detect pattern
+        multi_hop_info = detect_multi_hop_query(query)
+        result['steps'].append({'step': 'detect_pattern', 'result': multi_hop_info})
+        
+        if not multi_hop_info:
+            result['error'] = "No multi-hop pattern detected"
+            return result
+        
+        # Step 2: Find primary table with employee data
+        tables = conn.execute("""
+            SELECT DISTINCT table_name FROM _column_profiles 
+            WHERE LOWER(project) = LOWER(?) 
+            AND (LOWER(table_name) LIKE '%employee%' OR LOWER(table_name) LIKE '%company%')
+        """, [project]).fetchall()
+        result['steps'].append({'step': 'find_tables', 'result': [t[0] for t in tables]})
+        
+        # Step 3: Check for relationship
+        relationships = conn.execute("""
+            SELECT source_table, source_column, target_column, semantic_meaning
+            FROM _column_relationships
+            WHERE LOWER(project) = LOWER(?)
+            AND semantic_meaning = 'supervisor'
+        """, [project]).fetchall()
+        result['steps'].append({'step': 'find_relationships', 'result': [
+            {'table': r[0], 'source': r[1], 'target': r[2], 'semantic': r[3]} for r in relationships
+        ]})
+        
+        if not relationships:
+            result['error'] = "No supervisor relationship found"
+            return result
+        
+        rel = relationships[0]
+        primary_table = rel[0]
+        source_col = rel[1]
+        target_col = rel[2]
+        
+        # Step 4: Find target attribute column
+        target_attr = multi_hop_info.get('target_attribute', 'department')
+        target_columns = conn.execute("""
+            SELECT column_name FROM _column_profiles
+            WHERE LOWER(project) = LOWER(?)
+            AND table_name = ?
+            AND LOWER(column_name) LIKE ?
+        """, [project, primary_table, f'%{target_attr}%']).fetchall()
+        result['steps'].append({'step': 'find_target_column', 'target_attr': target_attr, 'candidates': [c[0] for c in target_columns]})
+        
+        if not target_columns:
+            result['error'] = f"No column matching '{target_attr}' found in {primary_table}"
+            return result
+        
+        target_attr_col = target_columns[0][0]
+        
+        # Step 5: Build SQL manually
+        sql = f'''SELECT t0.*, t1_mgr."{target_attr_col}" as mgr_{target_attr_col}
+FROM "{primary_table}" t0
+JOIN "{primary_table}" t1_mgr ON t0."{source_col}" = t1_mgr."{target_col}"
+LIMIT 100'''
+        
+        result['sql'] = sql
+        result['steps'].append({'step': 'build_sql', 'result': 'success'})
+        
+        # Step 6: Test execute
+        try:
+            test_result = conn.execute(sql).fetchall()
+            result['row_count'] = len(test_result)
+            result['steps'].append({'step': 'execute', 'result': f'{len(test_result)} rows'})
+        except Exception as e:
+            result['steps'].append({'step': 'execute', 'error': str(e)})
+        
+    except Exception as e:
+        import traceback
+        result['error'] = str(e)
+        result['traceback'] = traceback.format_exc()
+    
+    return result
+
+
 @router.post("/{project}/stuck")
 async def help_stuck(project: str, request: StuckRequest):
     """
