@@ -602,7 +602,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
     
     try:
         from utils.structured_data_handler import get_structured_handler
-        from backend.utils.intelligence.relationship_resolver import detect_multi_hop_query
+        from backend.utils.intelligence.relationship_resolver import detect_multi_hop_query, TARGET_ATTRIBUTES
         from backend.utils.intelligence.sql_assembler import SQLAssembler, MultiHopRequest
         
         handler = get_structured_handler()
@@ -644,21 +644,44 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
         source_col = rel[1]
         target_col = rel[2]
         
-        # Step 4: Find target attribute column
+        # Step 4: Find target attribute column using TARGET_ATTRIBUTES mapping
         target_attr = multi_hop_info.get('target_attribute', 'department')
-        target_columns = conn.execute("""
-            SELECT column_name FROM _column_profiles
-            WHERE LOWER(project) = LOWER(?)
-            AND table_name = ?
-            AND LOWER(column_name) LIKE ?
-        """, [project, primary_table, f'%{target_attr}%']).fetchall()
-        result['steps'].append({'step': 'find_target_column', 'target_attr': target_attr, 'candidates': [c[0] for c in target_columns]})
         
-        if not target_columns:
-            result['error'] = f"No column matching '{target_attr}' found in {primary_table}"
+        # Get candidate column names from mapping
+        candidate_columns = TARGET_ATTRIBUTES.get(target_attr, [target_attr])
+        result['steps'].append({'step': 'attribute_mapping', 'target_attr': target_attr, 'candidates_from_mapping': candidate_columns})
+        
+        # Search for any matching column
+        target_attr_col = None
+        for candidate in candidate_columns:
+            target_columns = conn.execute("""
+                SELECT column_name FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                AND table_name = ?
+                AND LOWER(column_name) = LOWER(?)
+            """, [project, primary_table, candidate]).fetchall()
+            
+            if target_columns:
+                target_attr_col = target_columns[0][0]
+                result['steps'].append({'step': 'find_target_column', 'matched': candidate, 'column': target_attr_col})
+                break
+        
+        if not target_attr_col:
+            # Fallback: try LIKE search
+            target_columns = conn.execute("""
+                SELECT column_name FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                AND table_name = ?
+                AND LOWER(column_name) LIKE ?
+            """, [project, primary_table, f'%{target_attr}%']).fetchall()
+            
+            if target_columns:
+                target_attr_col = target_columns[0][0]
+                result['steps'].append({'step': 'find_target_column_fallback', 'column': target_attr_col})
+        
+        if not target_attr_col:
+            result['error'] = f"No column matching '{target_attr}' found in {primary_table}. Tried: {candidate_columns}"
             return result
-        
-        target_attr_col = target_columns[0][0]
         
         # Step 5: Build SQL manually
         sql = f'''SELECT t0.*, t1_mgr."{target_attr_col}" as mgr_{target_attr_col}
