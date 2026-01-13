@@ -87,6 +87,14 @@ from .metadata_reasoner import (
     reason_about_term,
 )
 
+# Chunk Classifier (Five Truths domain tagging at upload time)
+from .chunk_classifier import (
+    ChunkClassifier,
+    ClassificationResult,
+    get_classifier,
+    classify_document,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -144,6 +152,12 @@ __all__ = [
     'MetadataReasoner',
     'ReasonedMatch',
     'reason_about_term',
+    
+    # Chunk Classifier
+    'ChunkClassifier',
+    'ClassificationResult',
+    'get_classifier',
+    'classify_document',
     
     # Gatherers
     'BaseGatherer',
