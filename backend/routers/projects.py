@@ -603,7 +603,8 @@ async def resolve_terms_test(project_id: str, question: str):
     2. MetadataReasoner fallback (unknown terms like "401k")
     3. EVOLUTION 3: Numeric expression parsing ("above 75000")
     4. EVOLUTION 8: GROUP BY handling for dimensional queries
-    5. SQL Assembly from resolved terms
+    5. EVOLUTION 10: Multi-hop relationship queries ("manager's department")
+    6. SQL Assembly from resolved terms
     
     Args:
         project_id: Project ID
@@ -615,14 +616,76 @@ async def resolve_terms_test(project_id: str, question: str):
     try:
         from utils.structured_data_handler import StructuredDataHandler
         from backend.utils.intelligence.term_index import TermIndex
-        from backend.utils.intelligence.sql_assembler import SQLAssembler, QueryIntent
+        from backend.utils.intelligence.sql_assembler import SQLAssembler, QueryIntent, MultiHopRequest
         from backend.utils.intelligence.query_resolver import parse_intent
+        from backend.utils.intelligence.relationship_resolver import detect_multi_hop_query, TARGET_ATTRIBUTES
         import re
         
         handler = StructuredDataHandler()
         conn = handler.conn
         
-        # Step 1: Parse intent
+        # ======================================================================
+        # EVOLUTION 10: CHECK FOR MULTI-HOP QUERY FIRST
+        # ======================================================================
+        multi_hop_info = detect_multi_hop_query(question)
+        if multi_hop_info and multi_hop_info.get('traversal_type') == 'possessive':
+            # This is a "manager's department" type query - handle with self-join
+            semantic = multi_hop_info.get('semantic', 'supervisor')
+            target_attr = multi_hop_info.get('target_attribute', 'department')
+            
+            # Get the relationship from stored data
+            relationship = conn.execute("""
+                SELECT source_table, source_column, target_column
+                FROM _column_relationships
+                WHERE LOWER(project) = LOWER(?)
+                AND semantic_meaning = ?
+                LIMIT 1
+            """, [project_id, semantic]).fetchone()
+            
+            if relationship:
+                primary_table = relationship[0]
+                source_col = relationship[1]
+                target_col = relationship[2]
+                
+                # Find target attribute column using mapping
+                candidate_columns = TARGET_ATTRIBUTES.get(target_attr, [target_attr])
+                target_attr_col = None
+                
+                for candidate in candidate_columns:
+                    cols = conn.execute("""
+                        SELECT column_name FROM _column_profiles
+                        WHERE LOWER(project) = LOWER(?)
+                        AND table_name = ?
+                        AND LOWER(column_name) = LOWER(?)
+                    """, [project_id, primary_table, candidate]).fetchall()
+                    
+                    if cols:
+                        target_attr_col = cols[0][0]
+                        break
+                
+                if target_attr_col:
+                    # Build and return the self-join SQL
+                    sql = f'''SELECT t0.*, t1_mgr."{target_attr_col}" as mgr_{target_attr_col}
+FROM "{primary_table}" t0
+JOIN "{primary_table}" t1_mgr ON t0."{source_col}" = t1_mgr."{target_col}"
+LIMIT 100'''
+                    
+                    return {
+                        'project': project_id,
+                        'question': question,
+                        'multi_hop_detected': True,
+                        'multi_hop_info': multi_hop_info,
+                        'relationship': {
+                            'table': primary_table,
+                            'source_column': source_col,
+                            'target_column': target_col,
+                            'target_attribute': target_attr_col
+                        },
+                        'term_matches': [],  # No term matching needed
+                        'sql': sql
+                    }
+        
+        # Step 1: Parse intent (for non-multi-hop queries)
         parsed = parse_intent(question)
         
         # Step 2: Tokenize - EVOLUTION 3: Also extract numeric phrases
