@@ -1,0 +1,10 @@
+{
+  "paylocity_overlaps": {
+    "with_adp": 74,
+    "with_dayforce": 61,
+    "with_workday": 40,
+    "with_oracle": 40,
+    "with_successfactors": 38,
+    "unique_to_paylocity": 51
+  }
+}

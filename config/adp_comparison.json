@@ -1,0 +1,11 @@
+{
+  "adp_overlaps": {
+    "with_workday": 49,
+    "with_oracle": 50,
+    "with_dayforce": 70,
+    "with_successfactors": 44,
+    "with_ukg_pro": 10,
+    "with_ukg_ready": 26,
+    "unique_to_adp": 51
+  }
+}

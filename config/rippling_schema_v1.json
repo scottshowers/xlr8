@@ -1,0 +1,1474 @@
+{
+  "version": "1.0",
+  "vendor": "Rippling",
+  "product": "Rippling",
+  "source": "Rippling website, API documentation, developer portal",
+  "extracted": "2026-01-10",
+  "api_type": "REST API (OAuth 2.0 / API Token)",
+  "api_base": "https://rest.ripplingapis.com",
+  "product_focus": "Unified HR + IT + Finance platform",
+  "key_differentiators": [
+    "Employee Graph (single source of truth)",
+    "IT management (device, app, identity)",
+    "Workflow Studio (automation)",
+    "App Studio (no-code apps)",
+    "Unified HR + IT + Finance",
+    "App provisioning/deprovisioning"
+  ],
+  "architecture": "User-centric with Employee Graph",
+  "product_lines": [
+    "Rippling HCM",
+    "Rippling IT",
+    "Rippling Spend",
+    "Rippling Global"
+  ],
+  "domains": {
+    "Employee_Core": {
+      "description": "Core employee information (Employee Graph)",
+      "hub_count": 9,
+      "hubs": [
+        "user",
+        "worker",
+        "person",
+        "ssn",
+        "legal_name",
+        "date_of_birth",
+        "gender",
+        "marital_status",
+        "employee_graph"
+      ]
+    },
+    "Contact_Info": {
+      "description": "Contact and address information",
+      "hub_count": 4,
+      "hubs": [
+        "address",
+        "email",
+        "phone",
+        "emergency_contact"
+      ]
+    },
+    "Employment": {
+      "description": "Employment and job information",
+      "hub_count": 9,
+      "hubs": [
+        "employment",
+        "job",
+        "job_title",
+        "hire_date",
+        "termination_date",
+        "employment_status",
+        "worker_type",
+        "flsa_status",
+        "role"
+      ]
+    },
+    "Organization": {
+      "description": "Company and org structure",
+      "hub_count": 9,
+      "hubs": [
+        "company",
+        "department",
+        "team",
+        "location",
+        "office",
+        "cost_center",
+        "supervisor",
+        "org_chart",
+        "supergroup"
+      ]
+    },
+    "Compensation": {
+      "description": "Pay rates and compensation",
+      "hub_count": 6,
+      "hubs": [
+        "compensation",
+        "pay_rate",
+        "annual_salary",
+        "hourly_rate",
+        "pay_type",
+        "pay_schedule"
+      ]
+    },
+    "Payroll": {
+      "description": "Payroll processing",
+      "hub_count": 6,
+      "hubs": [
+        "payroll",
+        "pay_period",
+        "paycheck",
+        "direct_deposit",
+        "payroll_run",
+        "off_cycle_payroll"
+      ]
+    },
+    "Earnings": {
+      "description": "Earnings and pay components",
+      "hub_count": 6,
+      "hubs": [
+        "earning",
+        "earning_type",
+        "regular_pay",
+        "overtime_pay",
+        "bonus",
+        "commission"
+      ]
+    },
+    "Deductions": {
+      "description": "Payroll deductions",
+      "hub_count": 5,
+      "hubs": [
+        "deduction",
+        "deduction_type",
+        "benefit_deduction",
+        "retirement_deduction",
+        "garnishment"
+      ]
+    },
+    "Tax": {
+      "description": "Tax withholding and compliance",
+      "hub_count": 8,
+      "hubs": [
+        "tax",
+        "tax_filing",
+        "federal_tax",
+        "state_tax",
+        "local_tax",
+        "w4",
+        "w2",
+        "form_1099"
+      ]
+    },
+    "Contractor": {
+      "description": "Contractor management",
+      "hub_count": 2,
+      "hubs": [
+        "contractor",
+        "contractor_payment"
+      ]
+    },
+    "Time_Attendance": {
+      "description": "Time tracking",
+      "hub_count": 6,
+      "hubs": [
+        "time_entry",
+        "time_card",
+        "clock_in_out",
+        "time_tracking",
+        "project_time",
+        "labor_cost"
+      ]
+    },
+    "Scheduling": {
+      "description": "Employee scheduling",
+      "hub_count": 3,
+      "hubs": [
+        "schedule",
+        "shift",
+        "shift_swap"
+      ]
+    },
+    "PTO": {
+      "description": "Paid time off management",
+      "hub_count": 4,
+      "hubs": [
+        "time_off",
+        "time_off_policy",
+        "time_off_balance",
+        "accrual"
+      ]
+    },
+    "Benefits": {
+      "description": "Benefits administration",
+      "hub_count": 10,
+      "hubs": [
+        "benefit",
+        "benefit_plan",
+        "benefit_enrollment",
+        "open_enrollment",
+        "dependent",
+        "carrier",
+        "cobra",
+        "aca",
+        "qle",
+        "spd"
+      ]
+    },
+    "Retirement": {
+      "description": "Retirement plans",
+      "hub_count": 3,
+      "hubs": [
+        "retirement_plan",
+        "contribution",
+        "employer_match"
+      ]
+    },
+    "Recruiting": {
+      "description": "Talent acquisition (ATS)",
+      "hub_count": 7,
+      "hubs": [
+        "job_posting",
+        "candidate",
+        "application",
+        "applicant_tracking",
+        "interview",
+        "offer",
+        "background_check"
+      ]
+    },
+    "Onboarding": {
+      "description": "New hire onboarding",
+      "hub_count": 7,
+      "hubs": [
+        "onboarding",
+        "onboarding_workflow",
+        "offer_letter",
+        "e_signature",
+        "i9",
+        "document",
+        "document_template"
+      ]
+    },
+    "Offboarding": {
+      "description": "Employee offboarding",
+      "hub_count": 4,
+      "hubs": [
+        "offboarding",
+        "exit_interview",
+        "asset_return",
+        "access_revocation"
+      ]
+    },
+    "Performance": {
+      "description": "Performance management",
+      "hub_count": 4,
+      "hubs": [
+        "performance_review",
+        "goal",
+        "feedback",
+        "growth_conversation"
+      ]
+    },
+    "Learning": {
+      "description": "Learning management (LMS)",
+      "hub_count": 4,
+      "hubs": [
+        "course",
+        "learning_assignment",
+        "learning_completion",
+        "compliance_training"
+      ]
+    },
+    "Identity_Access": {
+      "description": "Identity and access management (IT)",
+      "hub_count": 9,
+      "hubs": [
+        "identity",
+        "sso",
+        "mfa",
+        "app_access",
+        "app_provisioning",
+        "app_deprovisioning",
+        "permission",
+        "access_control",
+        "saml"
+      ]
+    },
+    "Device_Management": {
+      "description": "Mobile device management (MDM/IT)",
+      "hub_count": 9,
+      "hubs": [
+        "device",
+        "device_enrollment",
+        "device_policy",
+        "device_inventory",
+        "device_shipping",
+        "device_wipe",
+        "endpoint_security",
+        "os_update",
+        "encryption"
+      ]
+    },
+    "Finance": {
+      "description": "Financial management (Rippling Spend)",
+      "hub_count": 6,
+      "hubs": [
+        "expense",
+        "expense_report",
+        "corporate_card",
+        "accounts_payable",
+        "bill_pay",
+        "travel"
+      ]
+    },
+    "Global": {
+      "description": "Global workforce (EOR)",
+      "hub_count": 4,
+      "hubs": [
+        "global_payroll",
+        "eor",
+        "international_employee",
+        "country_compliance"
+      ]
+    },
+    "Compliance": {
+      "description": "HR and IT compliance",
+      "hub_count": 7,
+      "hubs": [
+        "compliance",
+        "compliance_alert",
+        "eeo",
+        "audit_trail",
+        "soc2",
+        "policy",
+        "policy_enforcement"
+      ]
+    },
+    "Platform": {
+      "description": "Rippling platform features",
+      "hub_count": 10,
+      "hubs": [
+        "workflow_studio",
+        "workflow",
+        "app_studio",
+        "analytics",
+        "custom_field",
+        "news_feed",
+        "integration",
+        "api",
+        "webhook",
+        "app_shop"
+      ]
+    }
+  },
+  "hubs": {
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "User/employee record"
+    },
+    "worker": {
+      "entity_name": "Worker",
+      "semantic_type": "worker_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Worker record"
+    },
+    "person": {
+      "entity_name": "Person",
+      "semantic_type": "person_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Personal information"
+    },
+    "ssn": {
+      "entity_name": "SSN",
+      "semantic_type": "ssn_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Social Security Number"
+    },
+    "legal_name": {
+      "entity_name": "Legal_Name",
+      "semantic_type": "legal_name_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Legal name"
+    },
+    "date_of_birth": {
+      "entity_name": "Date_Of_Birth",
+      "semantic_type": "date_of_birth_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Date of birth"
+    },
+    "gender": {
+      "entity_name": "Gender",
+      "semantic_type": "gender_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Gender"
+    },
+    "marital_status": {
+      "entity_name": "Marital_Status",
+      "semantic_type": "marital_status_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Marital status"
+    },
+    "employee_graph": {
+      "entity_name": "Employee_Graph",
+      "semantic_type": "employee_graph_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Unified data source"
+    },
+    "address": {
+      "entity_name": "Address",
+      "semantic_type": "address_id",
+      "domain": "Contact_Info",
+      "is_core": true,
+      "description": "Home/mailing address"
+    },
+    "email": {
+      "entity_name": "Email",
+      "semantic_type": "email_id",
+      "domain": "Contact_Info",
+      "is_core": false,
+      "description": "Email address"
+    },
+    "phone": {
+      "entity_name": "Phone",
+      "semantic_type": "phone_id",
+      "domain": "Contact_Info",
+      "is_core": false,
+      "description": "Phone number"
+    },
+    "emergency_contact": {
+      "entity_name": "Emergency_Contact",
+      "semantic_type": "emergency_contact_id",
+      "domain": "Contact_Info",
+      "is_core": false,
+      "description": "Emergency contact"
+    },
+    "employment": {
+      "entity_name": "Employment",
+      "semantic_type": "employment_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Employment record"
+    },
+    "job": {
+      "entity_name": "Job",
+      "semantic_type": "job_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Job assignment"
+    },
+    "job_title": {
+      "entity_name": "Job_Title",
+      "semantic_type": "job_title_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Job title"
+    },
+    "hire_date": {
+      "entity_name": "Hire_Date",
+      "semantic_type": "hire_date_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Original hire date"
+    },
+    "termination_date": {
+      "entity_name": "Termination_Date",
+      "semantic_type": "termination_date_id",
+      "domain": "Employment",
+      "is_core": false,
+      "description": "End date"
+    },
+    "employment_status": {
+      "entity_name": "Employment_Status",
+      "semantic_type": "employment_status_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Active/terminated"
+    },
+    "worker_type": {
+      "entity_name": "Worker_Type",
+      "semantic_type": "worker_type_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Employee/contractor"
+    },
+    "flsa_status": {
+      "entity_name": "FLSA_Status",
+      "semantic_type": "flsa_status_id",
+      "domain": "Employment",
+      "is_core": false,
+      "description": "Exempt/non-exempt"
+    },
+    "role": {
+      "entity_name": "Role",
+      "semantic_type": "role_id",
+      "domain": "Employment",
+      "is_core": true,
+      "description": "Employee role"
+    },
+    "company": {
+      "entity_name": "Company",
+      "semantic_type": "company_id",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Company/employer"
+    },
+    "department": {
+      "entity_name": "Department",
+      "semantic_type": "department_id",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Department"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Team"
+    },
+    "location": {
+      "entity_name": "Location",
+      "semantic_type": "location_id",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Work location"
+    },
+    "office": {
+      "entity_name": "Office",
+      "semantic_type": "office_id",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Office"
+    },
+    "cost_center": {
+      "entity_name": "Cost_Center",
+      "semantic_type": "cost_center_id",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Cost center"
+    },
+    "supervisor": {
+      "entity_name": "Supervisor",
+      "semantic_type": "supervisor_id",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "Direct manager"
+    },
+    "org_chart": {
+      "entity_name": "Org_Chart",
+      "semantic_type": "org_chart_id",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Organization chart"
+    },
+    "supergroup": {
+      "entity_name": "Supergroup",
+      "semantic_type": "supergroup_id",
+      "domain": "Organization",
+      "is_core": false,
+      "description": "Dynamic permission group"
+    },
+    "compensation": {
+      "entity_name": "Compensation",
+      "semantic_type": "compensation_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Compensation record"
+    },
+    "pay_rate": {
+      "entity_name": "Pay_Rate",
+      "semantic_type": "pay_rate_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Pay rate"
+    },
+    "annual_salary": {
+      "entity_name": "Annual_Salary",
+      "semantic_type": "annual_salary_id",
+      "domain": "Compensation",
+      "is_core": false,
+      "description": "Annual salary"
+    },
+    "hourly_rate": {
+      "entity_name": "Hourly_Rate",
+      "semantic_type": "hourly_rate_id",
+      "domain": "Compensation",
+      "is_core": false,
+      "description": "Hourly rate"
+    },
+    "pay_type": {
+      "entity_name": "Pay_Type",
+      "semantic_type": "pay_type_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Hourly/salary"
+    },
+    "pay_schedule": {
+      "entity_name": "Pay_Schedule",
+      "semantic_type": "pay_schedule_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Pay frequency"
+    },
+    "payroll": {
+      "entity_name": "Payroll",
+      "semantic_type": "payroll_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Payroll run"
+    },
+    "pay_period": {
+      "entity_name": "Pay_Period",
+      "semantic_type": "pay_period_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Pay period"
+    },
+    "paycheck": {
+      "entity_name": "Paycheck",
+      "semantic_type": "paycheck_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Pay statement"
+    },
+    "direct_deposit": {
+      "entity_name": "Direct_Deposit",
+      "semantic_type": "direct_deposit_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Bank account"
+    },
+    "payroll_run": {
+      "entity_name": "Payroll_Run",
+      "semantic_type": "payroll_run_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Payroll execution"
+    },
+    "off_cycle_payroll": {
+      "entity_name": "Off_Cycle_Payroll",
+      "semantic_type": "off_cycle_payroll_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Off-cycle pay"
+    },
+    "earning": {
+      "entity_name": "Earning",
+      "semantic_type": "earning_id",
+      "domain": "Earnings",
+      "is_core": true,
+      "description": "Employee earning"
+    },
+    "earning_type": {
+      "entity_name": "Earning_Type",
+      "semantic_type": "earning_type_id",
+      "domain": "Earnings",
+      "is_core": true,
+      "description": "Earning type"
+    },
+    "regular_pay": {
+      "entity_name": "Regular_Pay",
+      "semantic_type": "regular_pay_id",
+      "domain": "Earnings",
+      "is_core": false,
+      "description": "Regular wages"
+    },
+    "overtime_pay": {
+      "entity_name": "Overtime_Pay",
+      "semantic_type": "overtime_pay_id",
+      "domain": "Earnings",
+      "is_core": false,
+      "description": "OT wages"
+    },
+    "bonus": {
+      "entity_name": "Bonus",
+      "semantic_type": "bonus_id",
+      "domain": "Earnings",
+      "is_core": false,
+      "description": "Bonus payment"
+    },
+    "commission": {
+      "entity_name": "Commission",
+      "semantic_type": "commission_id",
+      "domain": "Earnings",
+      "is_core": false,
+      "description": "Commission pay"
+    },
+    "deduction": {
+      "entity_name": "Deduction",
+      "semantic_type": "deduction_id",
+      "domain": "Deductions",
+      "is_core": true,
+      "description": "Employee deduction"
+    },
+    "deduction_type": {
+      "entity_name": "Deduction_Type",
+      "semantic_type": "deduction_type_id",
+      "domain": "Deductions",
+      "is_core": true,
+      "description": "Deduction type"
+    },
+    "benefit_deduction": {
+      "entity_name": "Benefit_Deduction",
+      "semantic_type": "benefit_deduction_id",
+      "domain": "Deductions",
+      "is_core": false,
+      "description": "Benefit premium"
+    },
+    "retirement_deduction": {
+      "entity_name": "Retirement_Deduction",
+      "semantic_type": "retirement_deduction_id",
+      "domain": "Deductions",
+      "is_core": false,
+      "description": "401k contribution"
+    },
+    "garnishment": {
+      "entity_name": "Garnishment",
+      "semantic_type": "garnishment_id",
+      "domain": "Deductions",
+      "is_core": true,
+      "description": "Wage garnishment"
+    },
+    "tax": {
+      "entity_name": "Tax",
+      "semantic_type": "tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax withholding"
+    },
+    "tax_filing": {
+      "entity_name": "Tax_Filing",
+      "semantic_type": "tax_filing_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Automated tax filing"
+    },
+    "federal_tax": {
+      "entity_name": "Federal_Tax",
+      "semantic_type": "federal_tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Federal withholding"
+    },
+    "state_tax": {
+      "entity_name": "State_Tax",
+      "semantic_type": "state_tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "State withholding"
+    },
+    "local_tax": {
+      "entity_name": "Local_Tax",
+      "semantic_type": "local_tax_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Local/city tax"
+    },
+    "w4": {
+      "entity_name": "W4",
+      "semantic_type": "w4_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "W-4 elections"
+    },
+    "w2": {
+      "entity_name": "W2",
+      "semantic_type": "w2_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "W-2 form"
+    },
+    "form_1099": {
+      "entity_name": "Form_1099",
+      "semantic_type": "form_1099_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "1099 form"
+    },
+    "contractor": {
+      "entity_name": "Contractor",
+      "semantic_type": "contractor_id",
+      "domain": "Contractor",
+      "is_core": true,
+      "description": "Independent contractor"
+    },
+    "contractor_payment": {
+      "entity_name": "Contractor_Payment",
+      "semantic_type": "contractor_payment_id",
+      "domain": "Contractor",
+      "is_core": true,
+      "description": "Contractor pay"
+    },
+    "time_entry": {
+      "entity_name": "Time_Entry",
+      "semantic_type": "time_entry_id",
+      "domain": "Time_Attendance",
+      "is_core": true,
+      "description": "Time record"
+    },
+    "time_card": {
+      "entity_name": "Time_Card",
+      "semantic_type": "time_card_id",
+      "domain": "Time_Attendance",
+      "is_core": true,
+      "description": "Time card"
+    },
+    "clock_in_out": {
+      "entity_name": "Clock_In_Out",
+      "semantic_type": "clock_in_out_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Clock punch"
+    },
+    "time_tracking": {
+      "entity_name": "Time_Tracking",
+      "semantic_type": "time_tracking_id",
+      "domain": "Time_Attendance",
+      "is_core": true,
+      "description": "Time tracking"
+    },
+    "project_time": {
+      "entity_name": "Project_Time",
+      "semantic_type": "project_time_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Project hours"
+    },
+    "labor_cost": {
+      "entity_name": "Labor_Cost",
+      "semantic_type": "labor_cost_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Labor cost tracking"
+    },
+    "schedule": {
+      "entity_name": "Schedule",
+      "semantic_type": "schedule_id",
+      "domain": "Scheduling",
+      "is_core": true,
+      "description": "Work schedule"
+    },
+    "shift": {
+      "entity_name": "Shift",
+      "semantic_type": "shift_id",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Shift assignment"
+    },
+    "shift_swap": {
+      "entity_name": "Shift_Swap",
+      "semantic_type": "shift_swap_id",
+      "domain": "Scheduling",
+      "is_core": false,
+      "description": "Shift trade"
+    },
+    "time_off": {
+      "entity_name": "Time_Off",
+      "semantic_type": "time_off_id",
+      "domain": "PTO",
+      "is_core": true,
+      "description": "PTO request"
+    },
+    "time_off_policy": {
+      "entity_name": "Time_Off_Policy",
+      "semantic_type": "time_off_policy_id",
+      "domain": "PTO",
+      "is_core": true,
+      "description": "PTO policy"
+    },
+    "time_off_balance": {
+      "entity_name": "Time_Off_Balance",
+      "semantic_type": "time_off_balance_id",
+      "domain": "PTO",
+      "is_core": true,
+      "description": "Accrual balance"
+    },
+    "accrual": {
+      "entity_name": "Accrual",
+      "semantic_type": "accrual_id",
+      "domain": "PTO",
+      "is_core": false,
+      "description": "Accrual record"
+    },
+    "benefit": {
+      "entity_name": "Benefit",
+      "semantic_type": "benefit_id",
+      "domain": "Benefits",
+      "is_core": true,
+      "description": "Benefit enrollment"
+    },
+    "benefit_plan": {
+      "entity_name": "Benefit_Plan",
+      "semantic_type": "benefit_plan_id",
+      "domain": "Benefits",
+      "is_core": true,
+      "description": "Benefit plan"
+    },
+    "benefit_enrollment": {
+      "entity_name": "Benefit_Enrollment",
+      "semantic_type": "benefit_enrollment_id",
+      "domain": "Benefits",
+      "is_core": true,
+      "description": "Enrollment record"
+    },
+    "open_enrollment": {
+      "entity_name": "Open_Enrollment",
+      "semantic_type": "open_enrollment_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "Annual enrollment"
+    },
+    "dependent": {
+      "entity_name": "Dependent",
+      "semantic_type": "dependent_id",
+      "domain": "Benefits",
+      "is_core": true,
+      "description": "Dependent"
+    },
+    "carrier": {
+      "entity_name": "Carrier",
+      "semantic_type": "carrier_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "Insurance carrier"
+    },
+    "cobra": {
+      "entity_name": "COBRA",
+      "semantic_type": "cobra_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "COBRA administration"
+    },
+    "aca": {
+      "entity_name": "ACA",
+      "semantic_type": "aca_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "ACA compliance"
+    },
+    "qle": {
+      "entity_name": "Qualifying_Life_Event",
+      "semantic_type": "qle_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "QLE"
+    },
+    "spd": {
+      "entity_name": "Summary_Plan_Description",
+      "semantic_type": "spd_id",
+      "domain": "Benefits",
+      "is_core": false,
+      "description": "SPD document"
+    },
+    "retirement_plan": {
+      "entity_name": "Retirement_Plan",
+      "semantic_type": "retirement_plan_id",
+      "domain": "Retirement",
+      "is_core": true,
+      "description": "401k plan"
+    },
+    "contribution": {
+      "entity_name": "Contribution",
+      "semantic_type": "contribution_id",
+      "domain": "Retirement",
+      "is_core": false,
+      "description": "Employee contribution"
+    },
+    "employer_match": {
+      "entity_name": "Employer_Match",
+      "semantic_type": "employer_match_id",
+      "domain": "Retirement",
+      "is_core": false,
+      "description": "Employer match"
+    },
+    "job_posting": {
+      "entity_name": "Job_Posting",
+      "semantic_type": "job_posting_id",
+      "domain": "Recruiting",
+      "is_core": true,
+      "description": "Posted job"
+    },
+    "candidate": {
+      "entity_name": "Candidate",
+      "semantic_type": "candidate_id",
+      "domain": "Recruiting",
+      "is_core": true,
+      "description": "Job applicant"
+    },
+    "application": {
+      "entity_name": "Application",
+      "semantic_type": "application_id",
+      "domain": "Recruiting",
+      "is_core": true,
+      "description": "Job application"
+    },
+    "applicant_tracking": {
+      "entity_name": "Applicant_Tracking",
+      "semantic_type": "applicant_tracking_id",
+      "domain": "Recruiting",
+      "is_core": true,
+      "description": "ATS pipeline"
+    },
+    "interview": {
+      "entity_name": "Interview",
+      "semantic_type": "interview_id",
+      "domain": "Recruiting",
+      "is_core": false,
+      "description": "Interview schedule"
+    },
+    "offer": {
+      "entity_name": "Offer",
+      "semantic_type": "offer_id",
+      "domain": "Recruiting",
+      "is_core": false,
+      "description": "Job offer"
+    },
+    "background_check": {
+      "entity_name": "Background_Check",
+      "semantic_type": "background_check_id",
+      "domain": "Recruiting",
+      "is_core": false,
+      "description": "Background check"
+    },
+    "onboarding": {
+      "entity_name": "Onboarding",
+      "semantic_type": "onboarding_id",
+      "domain": "Onboarding",
+      "is_core": true,
+      "description": "Onboarding process"
+    },
+    "onboarding_workflow": {
+      "entity_name": "Onboarding_Workflow",
+      "semantic_type": "onboarding_workflow_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "Auto onboarding"
+    },
+    "offer_letter": {
+      "entity_name": "Offer_Letter",
+      "semantic_type": "offer_letter_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "Digital offer letter"
+    },
+    "e_signature": {
+      "entity_name": "E_Signature",
+      "semantic_type": "e_signature_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "Electronic signature"
+    },
+    "i9": {
+      "entity_name": "I9",
+      "semantic_type": "i9_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "I-9 verification"
+    },
+    "document": {
+      "entity_name": "Document",
+      "semantic_type": "document_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "HR document"
+    },
+    "document_template": {
+      "entity_name": "Document_Template",
+      "semantic_type": "document_template_id",
+      "domain": "Onboarding",
+      "is_core": false,
+      "description": "Doc template"
+    },
+    "offboarding": {
+      "entity_name": "Offboarding",
+      "semantic_type": "offboarding_id",
+      "domain": "Offboarding",
+      "is_core": true,
+      "description": "Offboarding process"
+    },
+    "exit_interview": {
+      "entity_name": "Exit_Interview",
+      "semantic_type": "exit_interview_id",
+      "domain": "Offboarding",
+      "is_core": false,
+      "description": "Exit interview"
+    },
+    "asset_return": {
+      "entity_name": "Asset_Return",
+      "semantic_type": "asset_return_id",
+      "domain": "Offboarding",
+      "is_core": false,
+      "description": "Device/asset return"
+    },
+    "access_revocation": {
+      "entity_name": "Access_Revocation",
+      "semantic_type": "access_revocation_id",
+      "domain": "Offboarding",
+      "is_core": false,
+      "description": "Revoke access"
+    },
+    "performance_review": {
+      "entity_name": "Performance_Review",
+      "semantic_type": "performance_review_id",
+      "domain": "Performance",
+      "is_core": true,
+      "description": "Performance evaluation"
+    },
+    "goal": {
+      "entity_name": "Goal",
+      "semantic_type": "goal_id",
+      "domain": "Performance",
+      "is_core": true,
+      "description": "Performance goal"
+    },
+    "feedback": {
+      "entity_name": "Feedback",
+      "semantic_type": "feedback_id",
+      "domain": "Performance",
+      "is_core": false,
+      "description": "Employee feedback"
+    },
+    "growth_conversation": {
+      "entity_name": "Growth_Conversation",
+      "semantic_type": "growth_conversation_id",
+      "domain": "Performance",
+      "is_core": false,
+      "description": "Career discussion"
+    },
+    "course": {
+      "entity_name": "Course",
+      "semantic_type": "course_id",
+      "domain": "Learning",
+      "is_core": true,
+      "description": "Training course"
+    },
+    "learning_assignment": {
+      "entity_name": "Learning_Assignment",
+      "semantic_type": "learning_assignment_id",
+      "domain": "Learning",
+      "is_core": true,
+      "description": "Assigned training"
+    },
+    "learning_completion": {
+      "entity_name": "Learning_Completion",
+      "semantic_type": "learning_completion_id",
+      "domain": "Learning",
+      "is_core": false,
+      "description": "Completion record"
+    },
+    "compliance_training": {
+      "entity_name": "Compliance_Training",
+      "semantic_type": "compliance_training_id",
+      "domain": "Learning",
+      "is_core": false,
+      "description": "Required training"
+    },
+    "identity": {
+      "entity_name": "Identity",
+      "semantic_type": "identity_id",
+      "domain": "Identity_Access",
+      "is_core": true,
+      "description": "User identity"
+    },
+    "sso": {
+      "entity_name": "SSO",
+      "semantic_type": "sso_id",
+      "domain": "Identity_Access",
+      "is_core": true,
+      "description": "Single sign-on"
+    },
+    "mfa": {
+      "entity_name": "MFA",
+      "semantic_type": "mfa_id",
+      "domain": "Identity_Access",
+      "is_core": false,
+      "description": "Multi-factor auth"
+    },
+    "app_access": {
+      "entity_name": "App_Access",
+      "semantic_type": "app_access_id",
+      "domain": "Identity_Access",
+      "is_core": true,
+      "description": "Application access"
+    },
+    "app_provisioning": {
+      "entity_name": "App_Provisioning",
+      "semantic_type": "app_provisioning_id",
+      "domain": "Identity_Access",
+      "is_core": true,
+      "description": "App account setup"
+    },
+    "app_deprovisioning": {
+      "entity_name": "App_Deprovisioning",
+      "semantic_type": "app_deprovisioning_id",
+      "domain": "Identity_Access",
+      "is_core": false,
+      "description": "App account removal"
+    },
+    "permission": {
+      "entity_name": "Permission",
+      "semantic_type": "permission_id",
+      "domain": "Identity_Access",
+      "is_core": true,
+      "description": "Access permission"
+    },
+    "access_control": {
+      "entity_name": "Access_Control",
+      "semantic_type": "access_control_id",
+      "domain": "Identity_Access",
+      "is_core": false,
+      "description": "RBAC"
+    },
+    "saml": {
+      "entity_name": "SAML",
+      "semantic_type": "saml_id",
+      "domain": "Identity_Access",
+      "is_core": false,
+      "description": "SAML config"
+    },
+    "device": {
+      "entity_name": "Device",
+      "semantic_type": "device_id",
+      "domain": "Device_Management",
+      "is_core": true,
+      "description": "Employee device"
+    },
+    "device_enrollment": {
+      "entity_name": "Device_Enrollment",
+      "semantic_type": "device_enrollment_id",
+      "domain": "Device_Management",
+      "is_core": true,
+      "description": "Device setup"
+    },
+    "device_policy": {
+      "entity_name": "Device_Policy",
+      "semantic_type": "device_policy_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Device rules"
+    },
+    "device_inventory": {
+      "entity_name": "Device_Inventory",
+      "semantic_type": "device_inventory_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Device tracking"
+    },
+    "device_shipping": {
+      "entity_name": "Device_Shipping",
+      "semantic_type": "device_shipping_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Device logistics"
+    },
+    "device_wipe": {
+      "entity_name": "Device_Wipe",
+      "semantic_type": "device_wipe_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Remote wipe"
+    },
+    "endpoint_security": {
+      "entity_name": "Endpoint_Security",
+      "semantic_type": "endpoint_security_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Endpoint protection"
+    },
+    "os_update": {
+      "entity_name": "OS_Update",
+      "semantic_type": "os_update_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "OS patch management"
+    },
+    "encryption": {
+      "entity_name": "Encryption",
+      "semantic_type": "encryption_id",
+      "domain": "Device_Management",
+      "is_core": false,
+      "description": "Device encryption"
+    },
+    "expense": {
+      "entity_name": "Expense",
+      "semantic_type": "expense_id",
+      "domain": "Finance",
+      "is_core": true,
+      "description": "Expense submission"
+    },
+    "expense_report": {
+      "entity_name": "Expense_Report",
+      "semantic_type": "expense_report_id",
+      "domain": "Finance",
+      "is_core": false,
+      "description": "Expense report"
+    },
+    "corporate_card": {
+      "entity_name": "Corporate_Card",
+      "semantic_type": "corporate_card_id",
+      "domain": "Finance",
+      "is_core": false,
+      "description": "Corporate credit card"
+    },
+    "accounts_payable": {
+      "entity_name": "Accounts_Payable",
+      "semantic_type": "accounts_payable_id",
+      "domain": "Finance",
+      "is_core": false,
+      "description": "AP"
+    },
+    "bill_pay": {
+      "entity_name": "Bill_Pay",
+      "semantic_type": "bill_pay_id",
+      "domain": "Finance",
+      "is_core": false,
+      "description": "Bill payment"
+    },
+    "travel": {
+      "entity_name": "Travel",
+      "semantic_type": "travel_id",
+      "domain": "Finance",
+      "is_core": false,
+      "description": "Travel booking"
+    },
+    "global_payroll": {
+      "entity_name": "Global_Payroll",
+      "semantic_type": "global_payroll_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "International payroll"
+    },
+    "eor": {
+      "entity_name": "Employer_Of_Record",
+      "semantic_type": "eor_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "EOR service"
+    },
+    "international_employee": {
+      "entity_name": "International_Employee",
+      "semantic_type": "international_employee_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "Global employee"
+    },
+    "country_compliance": {
+      "entity_name": "Country_Compliance",
+      "semantic_type": "country_compliance_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "Country rules"
+    },
+    "compliance": {
+      "entity_name": "Compliance",
+      "semantic_type": "compliance_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Compliance tracking"
+    },
+    "compliance_alert": {
+      "entity_name": "Compliance_Alert",
+      "semantic_type": "compliance_alert_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Compliance notification"
+    },
+    "eeo": {
+      "entity_name": "EEO",
+      "semantic_type": "eeo_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "EEO reporting"
+    },
+    "audit_trail": {
+      "entity_name": "Audit_Trail",
+      "semantic_type": "audit_trail_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Audit log"
+    },
+    "soc2": {
+      "entity_name": "SOC2",
+      "semantic_type": "soc2_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "SOC2 compliance"
+    },
+    "policy": {
+      "entity_name": "Policy",
+      "semantic_type": "policy_id",
+      "domain": "Compliance",
+      "is_core": true,
+      "description": "Company policy"
+    },
+    "policy_enforcement": {
+      "entity_name": "Policy_Enforcement",
+      "semantic_type": "policy_enforcement_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Auto policy enforcement"
+    },
+    "workflow_studio": {
+      "entity_name": "Workflow_Studio",
+      "semantic_type": "workflow_studio_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Workflow automation"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "Automated workflow"
+    },
+    "app_studio": {
+      "entity_name": "App_Studio",
+      "semantic_type": "app_studio_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "No-code app builder"
+    },
+    "analytics": {
+      "entity_name": "Analytics",
+      "semantic_type": "analytics_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Reporting/analytics"
+    },
+    "custom_field": {
+      "entity_name": "Custom_Field",
+      "semantic_type": "custom_field_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom data field"
+    },
+    "news_feed": {
+      "entity_name": "News_Feed",
+      "semantic_type": "news_feed_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Internal comms"
+    },
+    "integration": {
+      "entity_name": "Integration",
+      "semantic_type": "integration_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Third-party integration"
+    },
+    "api": {
+      "entity_name": "API",
+      "semantic_type": "api_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "API connection"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Webhook event"
+    },
+    "app_shop": {
+      "entity_name": "App_Shop",
+      "semantic_type": "app_shop_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "App marketplace"
+    }
+  },
+  "hub_count": 161
+}

@@ -1,0 +1,39 @@
+{
+  "paycor_overlaps": {
+    "with_paycom": 114,
+    "with_paychex": 95,
+    "unique_to_paycor": 57
+  },
+  "unique_concepts": [
+    "acacompliance",
+    "aiassistant",
+    "aisourcing",
+    "api",
+    "attendancepolicy",
+    "automatedworkflow",
+    "benchmarking",
+    "budgetplanning",
+    "careerpath",
+    "carrierconnection",
+    "competency",
+    "compliance",
+    "developmentplan",
+    "documentmanagement",
+    "earnedwageaccess",
+    "eeo",
+    "employmentdates",
+    "geovalidation",
+    "goalsetting",
+    "grosstonet",
+    "hiringtaxcredit",
+    "holidaypay",
+    "hrworkflow",
+    "intelligenthcm",
+    "k401plan",
+    "laborcost",
+    "labordistribution",
+    "legalentity",
+    "lifeevent",
+    "marketplace"
+  ]
+}

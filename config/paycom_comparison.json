@@ -1,0 +1,41 @@
+{
+  "paycom_overlaps": {
+    "with_paychex": 94,
+    "with_paylocity": 88,
+    "with_adp": 70,
+    "with_dayforce": 59,
+    "unique_to_paycom": 54
+  },
+  "unique_concepts": [
+    "contribution",
+    "meritincrease",
+    "esignature",
+    "laborallocation",
+    "cac",
+    "orgchart",
+    "paf",
+    "beti",
+    "taxcredit",
+    "performanceevidence",
+    "k401reporting",
+    "documentschecklists",
+    "mileage",
+    "expense",
+    "benefitstocarrier",
+    "jobdescription",
+    "taxcreditscreening",
+    "ddx",
+    "laborcode",
+    "paycheck",
+    "expensecategory",
+    "review360",
+    "governmentcompliance",
+    "vaultpaycard",
+    "employermatch",
+    "compensationbudget",
+    "ofccp",
+    "mycom",
+    "quiz",
+    "meritrating"
+  ]
+}

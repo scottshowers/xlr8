@@ -1,0 +1,9 @@
+{
+  "paychex_overlaps": {
+    "with_paylocity": 84,
+    "with_adp": 66,
+    "with_dayforce": 54,
+    "with_workday": 34,
+    "unique_to_paychex": 32
+  }
+}
