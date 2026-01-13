@@ -1,0 +1,1187 @@
+{
+  "version": "1.0",
+  "vendor": "Microsoft",
+  "product": "Dynamics 365 Finance & Supply Chain Management",
+  "source": "Microsoft Learn, partner documentation",
+  "extracted": "2026-01-10",
+  "api_type": "OData REST, Data Management Framework",
+  "api_base": "https://{environment}.operations.dynamics.com/data/",
+  "product_focus": "Enterprise ERP - Finance + Operations",
+  "key_differentiators": [
+    "Azure cloud native",
+    "Power Platform integration (Power BI, Power Apps, Power Automate)",
+    "Microsoft 365 and Teams integration",
+    "Copilot AI assistance",
+    "Mixed reality for warehouse",
+    "IoT integration",
+    "Dual-write with Dataverse"
+  ],
+  "products": {
+    "Finance": "Financial management, GL, AP, AR, Budgeting",
+    "Supply Chain Management": "Procurement, Inventory, WMS, Manufacturing",
+    "Commerce": "Retail and ecommerce",
+    "Human Resources": "Core HR and benefits",
+    "Project Operations": "Project accounting"
+  },
+  "domains": {
+    "General_Ledger": {
+      "description": "Core financial accounting",
+      "hub_count": 9,
+      "hubs": [
+        "main_account",
+        "ledger",
+        "journal",
+        "journal_line",
+        "fiscal_calendar",
+        "fiscal_period",
+        "financial_dimension",
+        "dimension_set",
+        "account_structure"
+      ]
+    },
+    "Accounts_Payable": {
+      "description": "Vendor payments",
+      "hub_count": 6,
+      "hubs": [
+        "vendor",
+        "vendor_invoice",
+        "vendor_invoice_line",
+        "payment_journal",
+        "vendor_payment",
+        "vendor_settlement"
+      ]
+    },
+    "Accounts_Receivable": {
+      "description": "Customer invoicing",
+      "hub_count": 6,
+      "hubs": [
+        "customer",
+        "free_text_invoice",
+        "customer_payment",
+        "customer_settlement",
+        "collection_letter",
+        "interest_note"
+      ]
+    },
+    "Cash_Bank": {
+      "description": "Cash and bank management",
+      "hub_count": 4,
+      "hubs": [
+        "bank_account",
+        "bank_statement",
+        "bank_reconciliation",
+        "cash_flow_forecast"
+      ]
+    },
+    "Fixed_Assets": {
+      "description": "Asset accounting",
+      "hub_count": 5,
+      "hubs": [
+        "fixed_asset",
+        "asset_book",
+        "depreciation",
+        "asset_acquisition",
+        "asset_disposal"
+      ]
+    },
+    "Budgeting": {
+      "description": "Budget management",
+      "hub_count": 5,
+      "hubs": [
+        "budget",
+        "budget_entry",
+        "budget_model",
+        "budget_plan",
+        "budget_control"
+      ]
+    },
+    "Cost_Accounting": {
+      "description": "Management accounting",
+      "hub_count": 5,
+      "hubs": [
+        "cost_element",
+        "cost_center",
+        "cost_object",
+        "cost_allocation",
+        "overhead_calculation"
+      ]
+    },
+    "Tax": {
+      "description": "Tax management",
+      "hub_count": 5,
+      "hubs": [
+        "sales_tax_code",
+        "sales_tax_group",
+        "item_sales_tax_group",
+        "tax_transaction",
+        "withholding_tax"
+      ]
+    },
+    "Procurement": {
+      "description": "Purchasing",
+      "hub_count": 6,
+      "hubs": [
+        "purchase_requisition",
+        "purchase_order",
+        "purchase_order_line",
+        "purchase_agreement",
+        "vendor_catalog",
+        "rfq"
+      ]
+    },
+    "Product_Information": {
+      "description": "Product master data",
+      "hub_count": 5,
+      "hubs": [
+        "product",
+        "released_product",
+        "product_category",
+        "product_attribute",
+        "unit_of_measure"
+      ]
+    },
+    "Inventory": {
+      "description": "Inventory management",
+      "hub_count": 8,
+      "hubs": [
+        "inventory_transaction",
+        "inventory_journal",
+        "warehouse",
+        "site",
+        "location",
+        "batch",
+        "serial_number",
+        "inventory_dimension"
+      ]
+    },
+    "Sales": {
+      "description": "Sales order processing",
+      "hub_count": 7,
+      "hubs": [
+        "sales_order",
+        "sales_order_line",
+        "sales_quotation",
+        "sales_agreement",
+        "packing_slip",
+        "sales_invoice",
+        "return_order"
+      ]
+    },
+    "Warehouse_Management": {
+      "description": "Advanced WMS",
+      "hub_count": 8,
+      "hubs": [
+        "wave",
+        "work",
+        "work_line",
+        "load",
+        "shipment",
+        "container",
+        "license_plate",
+        "location_directive"
+      ]
+    },
+    "Transportation": {
+      "description": "Transportation management",
+      "hub_count": 5,
+      "hubs": [
+        "load_template",
+        "carrier",
+        "route",
+        "freight_bill",
+        "rate_master"
+      ]
+    },
+    "Production": {
+      "description": "Manufacturing",
+      "hub_count": 7,
+      "hubs": [
+        "production_order",
+        "bom",
+        "bom_version",
+        "production_route",
+        "route_operation",
+        "resource",
+        "resource_group"
+      ]
+    },
+    "Master_Planning": {
+      "description": "MRP and planning",
+      "hub_count": 5,
+      "hubs": [
+        "master_plan",
+        "planned_order",
+        "demand_forecast",
+        "safety_stock",
+        "coverage_rule"
+      ]
+    },
+    "Quality": {
+      "description": "Quality management",
+      "hub_count": 5,
+      "hubs": [
+        "quality_order",
+        "test",
+        "test_group",
+        "nonconformance",
+        "quality_association"
+      ]
+    },
+    "Asset_Management": {
+      "description": "Enterprise asset management",
+      "hub_count": 5,
+      "hubs": [
+        "eam_asset",
+        "work_order",
+        "work_order_line",
+        "maintenance_plan",
+        "asset_type"
+      ]
+    },
+    "Project": {
+      "description": "Project management",
+      "hub_count": 6,
+      "hubs": [
+        "project",
+        "project_contract",
+        "project_task",
+        "hour_journal",
+        "expense_journal",
+        "project_invoice"
+      ]
+    },
+    "Global": {
+      "description": "Multi-company and global",
+      "hub_count": 5,
+      "hubs": [
+        "legal_entity",
+        "operating_unit",
+        "currency",
+        "exchange_rate",
+        "consolidation"
+      ]
+    },
+    "HR": {
+      "description": "Human resources (D365 HR)",
+      "hub_count": 6,
+      "hubs": [
+        "worker",
+        "position",
+        "department",
+        "job",
+        "benefit",
+        "leave"
+      ]
+    },
+    "Platform": {
+      "description": "Technical platform",
+      "hub_count": 5,
+      "hubs": [
+        "data_entity",
+        "workflow",
+        "batch_job",
+        "number_sequence",
+        "org_hierarchy"
+      ]
+    }
+  },
+  "hubs": {
+    "main_account": {
+      "entity_name": "Main_Account",
+      "semantic_type": "main_account_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "GL account"
+    },
+    "ledger": {
+      "entity_name": "Ledger",
+      "semantic_type": "ledger_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Company ledger"
+    },
+    "journal": {
+      "entity_name": "Journal",
+      "semantic_type": "journal_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "GL journal"
+    },
+    "journal_line": {
+      "entity_name": "Journal_Line",
+      "semantic_type": "journal_line_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Journal entry line"
+    },
+    "fiscal_calendar": {
+      "entity_name": "Fiscal_Calendar",
+      "semantic_type": "fiscal_calendar_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Fiscal year"
+    },
+    "fiscal_period": {
+      "entity_name": "Fiscal_Period",
+      "semantic_type": "fiscal_period_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Accounting period"
+    },
+    "financial_dimension": {
+      "entity_name": "Financial_Dimension",
+      "semantic_type": "financial_dimension_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Dimension"
+    },
+    "dimension_set": {
+      "entity_name": "Dimension_Set",
+      "semantic_type": "dimension_set_id",
+      "domain": "General_Ledger",
+      "is_core": false,
+      "description": "Dimension combination"
+    },
+    "account_structure": {
+      "entity_name": "Account_Structure",
+      "semantic_type": "account_structure_id",
+      "domain": "General_Ledger",
+      "is_core": false,
+      "description": "COA structure"
+    },
+    "vendor": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Vendor master"
+    },
+    "vendor_invoice": {
+      "entity_name": "Vendor_Invoice",
+      "semantic_type": "vendor_invoice_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "AP invoice"
+    },
+    "vendor_invoice_line": {
+      "entity_name": "Vendor_Invoice_Line",
+      "semantic_type": "vendor_invoice_line_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Invoice line"
+    },
+    "payment_journal": {
+      "entity_name": "Payment_Journal",
+      "semantic_type": "payment_journal_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Payment batch"
+    },
+    "vendor_payment": {
+      "entity_name": "Vendor_Payment",
+      "semantic_type": "vendor_payment_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Payment"
+    },
+    "vendor_settlement": {
+      "entity_name": "Vendor_Settlement",
+      "semantic_type": "vendor_settlement_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Settlement"
+    },
+    "customer": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer master"
+    },
+    "free_text_invoice": {
+      "entity_name": "Free_Text_Invoice",
+      "semantic_type": "free_text_invoice_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "AR invoice"
+    },
+    "customer_payment": {
+      "entity_name": "Customer_Payment",
+      "semantic_type": "customer_payment_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Payment received"
+    },
+    "customer_settlement": {
+      "entity_name": "Customer_Settlement",
+      "semantic_type": "customer_settlement_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Settlement"
+    },
+    "collection_letter": {
+      "entity_name": "Collection_Letter",
+      "semantic_type": "collection_letter_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Dunning"
+    },
+    "interest_note": {
+      "entity_name": "Interest_Note",
+      "semantic_type": "interest_note_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Interest charge"
+    },
+    "bank_account": {
+      "entity_name": "Bank_Account",
+      "semantic_type": "bank_account_id",
+      "domain": "Cash_Bank",
+      "is_core": true,
+      "description": "Bank account"
+    },
+    "bank_statement": {
+      "entity_name": "Bank_Statement",
+      "semantic_type": "bank_statement_id",
+      "domain": "Cash_Bank",
+      "is_core": true,
+      "description": "Bank statement"
+    },
+    "bank_reconciliation": {
+      "entity_name": "Bank_Reconciliation",
+      "semantic_type": "bank_reconciliation_id",
+      "domain": "Cash_Bank",
+      "is_core": false,
+      "description": "Reconciliation"
+    },
+    "cash_flow_forecast": {
+      "entity_name": "Cash_Flow_Forecast",
+      "semantic_type": "cash_flow_forecast_id",
+      "domain": "Cash_Bank",
+      "is_core": false,
+      "description": "Cash forecast"
+    },
+    "fixed_asset": {
+      "entity_name": "Fixed_Asset",
+      "semantic_type": "fixed_asset_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Asset master"
+    },
+    "asset_book": {
+      "entity_name": "Asset_Book",
+      "semantic_type": "asset_book_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Depreciation book"
+    },
+    "depreciation": {
+      "entity_name": "Depreciation",
+      "semantic_type": "depreciation_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Depreciation"
+    },
+    "asset_acquisition": {
+      "entity_name": "Asset_Acquisition",
+      "semantic_type": "asset_acquisition_id",
+      "domain": "Fixed_Assets",
+      "is_core": false,
+      "description": "Acquisition"
+    },
+    "asset_disposal": {
+      "entity_name": "Asset_Disposal",
+      "semantic_type": "asset_disposal_id",
+      "domain": "Fixed_Assets",
+      "is_core": false,
+      "description": "Disposal"
+    },
+    "budget": {
+      "entity_name": "Budget",
+      "semantic_type": "budget_id",
+      "domain": "Budgeting",
+      "is_core": true,
+      "description": "Budget"
+    },
+    "budget_entry": {
+      "entity_name": "Budget_Entry",
+      "semantic_type": "budget_entry_id",
+      "domain": "Budgeting",
+      "is_core": true,
+      "description": "Budget line"
+    },
+    "budget_model": {
+      "entity_name": "Budget_Model",
+      "semantic_type": "budget_model_id",
+      "domain": "Budgeting",
+      "is_core": false,
+      "description": "Budget model"
+    },
+    "budget_plan": {
+      "entity_name": "Budget_Plan",
+      "semantic_type": "budget_plan_id",
+      "domain": "Budgeting",
+      "is_core": false,
+      "description": "Budget planning"
+    },
+    "budget_control": {
+      "entity_name": "Budget_Control",
+      "semantic_type": "budget_control_id",
+      "domain": "Budgeting",
+      "is_core": false,
+      "description": "Budget checking"
+    },
+    "cost_element": {
+      "entity_name": "Cost_Element",
+      "semantic_type": "cost_element_id",
+      "domain": "Cost_Accounting",
+      "is_core": true,
+      "description": "Cost element"
+    },
+    "cost_center": {
+      "entity_name": "Cost_Center",
+      "semantic_type": "cost_center_id",
+      "domain": "Cost_Accounting",
+      "is_core": true,
+      "description": "Cost center"
+    },
+    "cost_object": {
+      "entity_name": "Cost_Object",
+      "semantic_type": "cost_object_id",
+      "domain": "Cost_Accounting",
+      "is_core": false,
+      "description": "Cost object"
+    },
+    "cost_allocation": {
+      "entity_name": "Cost_Allocation",
+      "semantic_type": "cost_allocation_id",
+      "domain": "Cost_Accounting",
+      "is_core": false,
+      "description": "Allocation rule"
+    },
+    "overhead_calculation": {
+      "entity_name": "Overhead_Calculation",
+      "semantic_type": "overhead_calculation_id",
+      "domain": "Cost_Accounting",
+      "is_core": false,
+      "description": "Overhead"
+    },
+    "sales_tax_code": {
+      "entity_name": "Sales_Tax_Code",
+      "semantic_type": "sales_tax_code_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax code"
+    },
+    "sales_tax_group": {
+      "entity_name": "Sales_Tax_Group",
+      "semantic_type": "sales_tax_group_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax group"
+    },
+    "item_sales_tax_group": {
+      "entity_name": "Item_Sales_Tax_Group",
+      "semantic_type": "item_sales_tax_group_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Item tax group"
+    },
+    "tax_transaction": {
+      "entity_name": "Tax_Transaction",
+      "semantic_type": "tax_transaction_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax posting"
+    },
+    "withholding_tax": {
+      "entity_name": "Withholding_Tax",
+      "semantic_type": "withholding_tax_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Withholding"
+    },
+    "purchase_requisition": {
+      "entity_name": "Purchase_Requisition",
+      "semantic_type": "purchase_requisition_id",
+      "domain": "Procurement",
+      "is_core": true,
+      "description": "PR"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Procurement",
+      "is_core": true,
+      "description": "PO"
+    },
+    "purchase_order_line": {
+      "entity_name": "Purchase_Order_Line",
+      "semantic_type": "purchase_order_line_id",
+      "domain": "Procurement",
+      "is_core": true,
+      "description": "PO line"
+    },
+    "purchase_agreement": {
+      "entity_name": "Purchase_Agreement",
+      "semantic_type": "purchase_agreement_id",
+      "domain": "Procurement",
+      "is_core": false,
+      "description": "Blanket PO"
+    },
+    "vendor_catalog": {
+      "entity_name": "Vendor_Catalog",
+      "semantic_type": "vendor_catalog_id",
+      "domain": "Procurement",
+      "is_core": false,
+      "description": "Punchout catalog"
+    },
+    "rfq": {
+      "entity_name": "RFQ",
+      "semantic_type": "rfq_id",
+      "domain": "Procurement",
+      "is_core": false,
+      "description": "Request for quote"
+    },
+    "product": {
+      "entity_name": "Product",
+      "semantic_type": "product_id",
+      "domain": "Product_Information",
+      "is_core": true,
+      "description": "Product master"
+    },
+    "released_product": {
+      "entity_name": "Released_Product",
+      "semantic_type": "released_product_id",
+      "domain": "Product_Information",
+      "is_core": true,
+      "description": "Released product"
+    },
+    "product_category": {
+      "entity_name": "Product_Category",
+      "semantic_type": "product_category_id",
+      "domain": "Product_Information",
+      "is_core": false,
+      "description": "Category"
+    },
+    "product_attribute": {
+      "entity_name": "Product_Attribute",
+      "semantic_type": "product_attribute_id",
+      "domain": "Product_Information",
+      "is_core": false,
+      "description": "Attribute"
+    },
+    "unit_of_measure": {
+      "entity_name": "Unit_Of_Measure",
+      "semantic_type": "unit_of_measure_id",
+      "domain": "Product_Information",
+      "is_core": false,
+      "description": "UoM"
+    },
+    "inventory_transaction": {
+      "entity_name": "Inventory_Transaction",
+      "semantic_type": "inventory_transaction_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Inventory movement"
+    },
+    "inventory_journal": {
+      "entity_name": "Inventory_Journal",
+      "semantic_type": "inventory_journal_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Inventory journal"
+    },
+    "warehouse": {
+      "entity_name": "Warehouse",
+      "semantic_type": "warehouse_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Warehouse"
+    },
+    "site": {
+      "entity_name": "Site",
+      "semantic_type": "site_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Site/plant"
+    },
+    "location": {
+      "entity_name": "Location",
+      "semantic_type": "location_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Storage location"
+    },
+    "batch": {
+      "entity_name": "Batch",
+      "semantic_type": "batch_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Batch/lot"
+    },
+    "serial_number": {
+      "entity_name": "Serial_Number",
+      "semantic_type": "serial_number_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Serial"
+    },
+    "inventory_dimension": {
+      "entity_name": "Inventory_Dimension",
+      "semantic_type": "inventory_dimension_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Tracking dimension"
+    },
+    "sales_order": {
+      "entity_name": "Sales_Order",
+      "semantic_type": "sales_order_id",
+      "domain": "Sales",
+      "is_core": true,
+      "description": "Sales order"
+    },
+    "sales_order_line": {
+      "entity_name": "Sales_Order_Line",
+      "semantic_type": "sales_order_line_id",
+      "domain": "Sales",
+      "is_core": true,
+      "description": "SO line"
+    },
+    "sales_quotation": {
+      "entity_name": "Sales_Quotation",
+      "semantic_type": "sales_quotation_id",
+      "domain": "Sales",
+      "is_core": true,
+      "description": "Quote"
+    },
+    "sales_agreement": {
+      "entity_name": "Sales_Agreement",
+      "semantic_type": "sales_agreement_id",
+      "domain": "Sales",
+      "is_core": false,
+      "description": "Sales contract"
+    },
+    "packing_slip": {
+      "entity_name": "Packing_Slip",
+      "semantic_type": "packing_slip_id",
+      "domain": "Sales",
+      "is_core": true,
+      "description": "Shipment"
+    },
+    "sales_invoice": {
+      "entity_name": "Sales_Invoice",
+      "semantic_type": "sales_invoice_id",
+      "domain": "Sales",
+      "is_core": true,
+      "description": "Invoice"
+    },
+    "return_order": {
+      "entity_name": "Return_Order",
+      "semantic_type": "return_order_id",
+      "domain": "Sales",
+      "is_core": false,
+      "description": "RMA"
+    },
+    "wave": {
+      "entity_name": "Wave",
+      "semantic_type": "wave_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "Wave"
+    },
+    "work": {
+      "entity_name": "Work",
+      "semantic_type": "work_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "Warehouse work"
+    },
+    "work_line": {
+      "entity_name": "Work_Line",
+      "semantic_type": "work_line_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Work line"
+    },
+    "load": {
+      "entity_name": "Load",
+      "semantic_type": "load_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "Load"
+    },
+    "shipment": {
+      "entity_name": "Shipment",
+      "semantic_type": "shipment_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "Shipment"
+    },
+    "container": {
+      "entity_name": "Container",
+      "semantic_type": "container_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Container"
+    },
+    "license_plate": {
+      "entity_name": "License_Plate",
+      "semantic_type": "license_plate_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "License plate"
+    },
+    "location_directive": {
+      "entity_name": "Location_Directive",
+      "semantic_type": "location_directive_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Put/pick logic"
+    },
+    "load_template": {
+      "entity_name": "Load_Template",
+      "semantic_type": "load_template_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Load template"
+    },
+    "carrier": {
+      "entity_name": "Carrier",
+      "semantic_type": "carrier_id",
+      "domain": "Transportation",
+      "is_core": true,
+      "description": "Shipping carrier"
+    },
+    "route": {
+      "entity_name": "Route",
+      "semantic_type": "route_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Route"
+    },
+    "freight_bill": {
+      "entity_name": "Freight_Bill",
+      "semantic_type": "freight_bill_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Freight invoice"
+    },
+    "rate_master": {
+      "entity_name": "Rate_Master",
+      "semantic_type": "rate_master_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Rate table"
+    },
+    "production_order": {
+      "entity_name": "Production_Order",
+      "semantic_type": "production_order_id",
+      "domain": "Production",
+      "is_core": true,
+      "description": "Production order"
+    },
+    "bom": {
+      "entity_name": "BOM",
+      "semantic_type": "bom_id",
+      "domain": "Production",
+      "is_core": true,
+      "description": "Bill of materials"
+    },
+    "bom_version": {
+      "entity_name": "BOM_Version",
+      "semantic_type": "bom_version_id",
+      "domain": "Production",
+      "is_core": false,
+      "description": "BOM version"
+    },
+    "production_route": {
+      "entity_name": "Route",
+      "semantic_type": "production_route_id",
+      "domain": "Production",
+      "is_core": true,
+      "description": "Routing"
+    },
+    "route_operation": {
+      "entity_name": "Route_Operation",
+      "semantic_type": "route_operation_id",
+      "domain": "Production",
+      "is_core": false,
+      "description": "Operation"
+    },
+    "resource": {
+      "entity_name": "Resource",
+      "semantic_type": "resource_id",
+      "domain": "Production",
+      "is_core": true,
+      "description": "Work center/resource"
+    },
+    "resource_group": {
+      "entity_name": "Resource_Group",
+      "semantic_type": "resource_group_id",
+      "domain": "Production",
+      "is_core": false,
+      "description": "Resource group"
+    },
+    "master_plan": {
+      "entity_name": "Master_Plan",
+      "semantic_type": "master_plan_id",
+      "domain": "Master_Planning",
+      "is_core": true,
+      "description": "Master plan"
+    },
+    "planned_order": {
+      "entity_name": "Planned_Order",
+      "semantic_type": "planned_order_id",
+      "domain": "Master_Planning",
+      "is_core": true,
+      "description": "Planned order"
+    },
+    "demand_forecast": {
+      "entity_name": "Demand_Forecast",
+      "semantic_type": "demand_forecast_id",
+      "domain": "Master_Planning",
+      "is_core": false,
+      "description": "Demand forecast"
+    },
+    "safety_stock": {
+      "entity_name": "Safety_Stock",
+      "semantic_type": "safety_stock_id",
+      "domain": "Master_Planning",
+      "is_core": false,
+      "description": "Safety stock"
+    },
+    "coverage_rule": {
+      "entity_name": "Coverage_Rule",
+      "semantic_type": "coverage_rule_id",
+      "domain": "Master_Planning",
+      "is_core": false,
+      "description": "Coverage settings"
+    },
+    "quality_order": {
+      "entity_name": "Quality_Order",
+      "semantic_type": "quality_order_id",
+      "domain": "Quality",
+      "is_core": true,
+      "description": "Quality order"
+    },
+    "test": {
+      "entity_name": "Test",
+      "semantic_type": "test_id",
+      "domain": "Quality",
+      "is_core": false,
+      "description": "Test definition"
+    },
+    "test_group": {
+      "entity_name": "Test_Group",
+      "semantic_type": "test_group_id",
+      "domain": "Quality",
+      "is_core": false,
+      "description": "Test group"
+    },
+    "nonconformance": {
+      "entity_name": "Nonconformance",
+      "semantic_type": "nonconformance_id",
+      "domain": "Quality",
+      "is_core": false,
+      "description": "NCR"
+    },
+    "quality_association": {
+      "entity_name": "Quality_Association",
+      "semantic_type": "quality_association_id",
+      "domain": "Quality",
+      "is_core": false,
+      "description": "Auto-create rule"
+    },
+    "eam_asset": {
+      "entity_name": "Asset",
+      "semantic_type": "eam_asset_id",
+      "domain": "Asset_Management",
+      "is_core": true,
+      "description": "Functional asset"
+    },
+    "work_order": {
+      "entity_name": "Work_Order",
+      "semantic_type": "work_order_id",
+      "domain": "Asset_Management",
+      "is_core": true,
+      "description": "Maintenance WO"
+    },
+    "work_order_line": {
+      "entity_name": "Work_Order_Line",
+      "semantic_type": "work_order_line_id",
+      "domain": "Asset_Management",
+      "is_core": false,
+      "description": "WO job"
+    },
+    "maintenance_plan": {
+      "entity_name": "Maintenance_Plan",
+      "semantic_type": "maintenance_plan_id",
+      "domain": "Asset_Management",
+      "is_core": false,
+      "description": "PM schedule"
+    },
+    "asset_type": {
+      "entity_name": "Asset_Type",
+      "semantic_type": "asset_type_id",
+      "domain": "Asset_Management",
+      "is_core": false,
+      "description": "Asset category"
+    },
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Project"
+    },
+    "project_contract": {
+      "entity_name": "Project_Contract",
+      "semantic_type": "project_contract_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Contract"
+    },
+    "project_task": {
+      "entity_name": "Project_Task",
+      "semantic_type": "project_task_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "WBS element"
+    },
+    "hour_journal": {
+      "entity_name": "Hour_Journal",
+      "semantic_type": "hour_journal_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Timesheet"
+    },
+    "expense_journal": {
+      "entity_name": "Expense_Journal",
+      "semantic_type": "expense_journal_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Expense"
+    },
+    "project_invoice": {
+      "entity_name": "Project_Invoice",
+      "semantic_type": "project_invoice_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Project billing"
+    },
+    "legal_entity": {
+      "entity_name": "Legal_Entity",
+      "semantic_type": "legal_entity_id",
+      "domain": "Global",
+      "is_core": true,
+      "description": "Company"
+    },
+    "operating_unit": {
+      "entity_name": "Operating_Unit",
+      "semantic_type": "operating_unit_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "Business unit"
+    },
+    "currency": {
+      "entity_name": "Currency",
+      "semantic_type": "currency_id",
+      "domain": "Global",
+      "is_core": true,
+      "description": "Currency"
+    },
+    "exchange_rate": {
+      "entity_name": "Exchange_Rate",
+      "semantic_type": "exchange_rate_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "FX rate"
+    },
+    "consolidation": {
+      "entity_name": "Consolidation",
+      "semantic_type": "consolidation_id",
+      "domain": "Global",
+      "is_core": false,
+      "description": "Consolidation"
+    },
+    "worker": {
+      "entity_name": "Worker",
+      "semantic_type": "worker_id",
+      "domain": "HR",
+      "is_core": true,
+      "description": "Employee"
+    },
+    "position": {
+      "entity_name": "Position",
+      "semantic_type": "position_id",
+      "domain": "HR",
+      "is_core": true,
+      "description": "Position"
+    },
+    "department": {
+      "entity_name": "Department",
+      "semantic_type": "department_id",
+      "domain": "HR",
+      "is_core": true,
+      "description": "Department"
+    },
+    "job": {
+      "entity_name": "Job",
+      "semantic_type": "job_id",
+      "domain": "HR",
+      "is_core": false,
+      "description": "Job"
+    },
+    "benefit": {
+      "entity_name": "Benefit",
+      "semantic_type": "benefit_id",
+      "domain": "HR",
+      "is_core": false,
+      "description": "Benefit plan"
+    },
+    "leave": {
+      "entity_name": "Leave",
+      "semantic_type": "leave_id",
+      "domain": "HR",
+      "is_core": false,
+      "description": "Leave request"
+    },
+    "data_entity": {
+      "entity_name": "Data_Entity",
+      "semantic_type": "data_entity_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "OData entity"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "Workflow"
+    },
+    "batch_job": {
+      "entity_name": "Batch_Job",
+      "semantic_type": "batch_job_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Batch job"
+    },
+    "number_sequence": {
+      "entity_name": "Number_Sequence",
+      "semantic_type": "number_sequence_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Number sequence"
+    },
+    "org_hierarchy": {
+      "entity_name": "Organization_Hierarchy",
+      "semantic_type": "org_hierarchy_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Org hierarchy"
+    }
+  },
+  "hub_count": 128
+}

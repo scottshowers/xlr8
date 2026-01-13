@@ -1,0 +1,500 @@
+{
+  "version": "1.0",
+  "vendor": "Intuit",
+  "product": "QuickBooks Online",
+  "source": "Intuit developer documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API (OAuth 2.0)",
+  "api_base": "https://quickbooks.api.intuit.com/v3/company/{realmId}/",
+  "product_focus": "SMB accounting - 7M+ customers",
+  "key_differentiators": [
+    "Market leader in SMB accounting",
+    "Bank feed auto-import",
+    "Simple invoicing",
+    "QuickBooks Payroll integration",
+    "Mobile app",
+    "Huge ecosystem (750+ app integrations)",
+    "AI-powered categorization"
+  ],
+  "tiers": {
+    "Simple Start": "Basic invoicing and expenses",
+    "Essentials": "Bill pay, multi-user",
+    "Plus": "Inventory, projects, class tracking",
+    "Advanced": "Custom roles, workflows, dedicated support"
+  },
+  "domains": {
+    "Chart_Of_Accounts": {
+      "description": "Account structure",
+      "hub_count": 4,
+      "hubs": [
+        "account",
+        "account_type",
+        "class",
+        "location"
+      ]
+    },
+    "Banking": {
+      "description": "Bank connections and transactions",
+      "hub_count": 5,
+      "hubs": [
+        "bank_account",
+        "bank_transaction",
+        "transfer",
+        "deposit",
+        "bank_rule"
+      ]
+    },
+    "Customers": {
+      "description": "Customer management",
+      "hub_count": 9,
+      "hubs": [
+        "customer",
+        "invoice",
+        "invoice_line",
+        "estimate",
+        "sales_receipt",
+        "credit_memo",
+        "refund_receipt",
+        "payment",
+        "payment_method"
+      ]
+    },
+    "Vendors": {
+      "description": "Vendor and expense management",
+      "hub_count": 8,
+      "hubs": [
+        "vendor",
+        "bill",
+        "bill_line",
+        "bill_payment",
+        "vendor_credit",
+        "expense",
+        "check",
+        "purchase_order"
+      ]
+    },
+    "Products_Services": {
+      "description": "Items and inventory",
+      "hub_count": 6,
+      "hubs": [
+        "item",
+        "item_category",
+        "inventory_item",
+        "non_inventory_item",
+        "service_item",
+        "bundle"
+      ]
+    },
+    "Inventory": {
+      "description": "Inventory tracking (Plus/Advanced)",
+      "hub_count": 2,
+      "hubs": [
+        "inventory_adjustment",
+        "inventory_start_value"
+      ]
+    },
+    "Employees": {
+      "description": "Employee and payroll",
+      "hub_count": 3,
+      "hubs": [
+        "employee",
+        "time_activity",
+        "payroll_item"
+      ]
+    },
+    "Tax": {
+      "description": "Sales tax",
+      "hub_count": 3,
+      "hubs": [
+        "tax_code",
+        "tax_rate",
+        "tax_agency"
+      ]
+    },
+    "Journal": {
+      "description": "Journal entries",
+      "hub_count": 2,
+      "hubs": [
+        "journal_entry",
+        "journal_line"
+      ]
+    },
+    "Recurring": {
+      "description": "Recurring transactions",
+      "hub_count": 1,
+      "hubs": [
+        "recurring_transaction"
+      ]
+    },
+    "Attachments": {
+      "description": "Document management",
+      "hub_count": 1,
+      "hubs": [
+        "attachment"
+      ]
+    },
+    "Reports": {
+      "description": "Financial reporting",
+      "hub_count": 2,
+      "hubs": [
+        "report",
+        "custom_report"
+      ]
+    },
+    "Platform": {
+      "description": "Company and settings",
+      "hub_count": 3,
+      "hubs": [
+        "company",
+        "preferences",
+        "user"
+      ]
+    }
+  },
+  "hubs": {
+    "account": {
+      "entity_name": "Account",
+      "semantic_type": "account_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": true,
+      "description": "GL account"
+    },
+    "account_type": {
+      "entity_name": "Account_Type",
+      "semantic_type": "account_type_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Account category"
+    },
+    "class": {
+      "entity_name": "Class",
+      "semantic_type": "class_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Class tracking"
+    },
+    "location": {
+      "entity_name": "Location",
+      "semantic_type": "location_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Location tracking"
+    },
+    "bank_account": {
+      "entity_name": "Bank_Account",
+      "semantic_type": "bank_account_id",
+      "domain": "Banking",
+      "is_core": true,
+      "description": "Bank account"
+    },
+    "bank_transaction": {
+      "entity_name": "Bank_Transaction",
+      "semantic_type": "bank_transaction_id",
+      "domain": "Banking",
+      "is_core": true,
+      "description": "Bank feed"
+    },
+    "transfer": {
+      "entity_name": "Transfer",
+      "semantic_type": "transfer_id",
+      "domain": "Banking",
+      "is_core": false,
+      "description": "Fund transfer"
+    },
+    "deposit": {
+      "entity_name": "Deposit",
+      "semantic_type": "deposit_id",
+      "domain": "Banking",
+      "is_core": true,
+      "description": "Bank deposit"
+    },
+    "bank_rule": {
+      "entity_name": "Bank_Rule",
+      "semantic_type": "bank_rule_id",
+      "domain": "Banking",
+      "is_core": false,
+      "description": "Auto-categorization"
+    },
+    "customer": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_id",
+      "domain": "Customers",
+      "is_core": true,
+      "description": "Customer"
+    },
+    "invoice": {
+      "entity_name": "Invoice",
+      "semantic_type": "invoice_id",
+      "domain": "Customers",
+      "is_core": true,
+      "description": "Customer invoice"
+    },
+    "invoice_line": {
+      "entity_name": "Invoice_Line",
+      "semantic_type": "invoice_line_id",
+      "domain": "Customers",
+      "is_core": false,
+      "description": "Invoice line"
+    },
+    "estimate": {
+      "entity_name": "Estimate",
+      "semantic_type": "estimate_id",
+      "domain": "Customers",
+      "is_core": true,
+      "description": "Quote/estimate"
+    },
+    "sales_receipt": {
+      "entity_name": "Sales_Receipt",
+      "semantic_type": "sales_receipt_id",
+      "domain": "Customers",
+      "is_core": true,
+      "description": "Cash sale"
+    },
+    "credit_memo": {
+      "entity_name": "Credit_Memo",
+      "semantic_type": "credit_memo_id",
+      "domain": "Customers",
+      "is_core": false,
+      "description": "Credit memo"
+    },
+    "refund_receipt": {
+      "entity_name": "Refund_Receipt",
+      "semantic_type": "refund_receipt_id",
+      "domain": "Customers",
+      "is_core": false,
+      "description": "Refund"
+    },
+    "payment": {
+      "entity_name": "Payment",
+      "semantic_type": "payment_id",
+      "domain": "Customers",
+      "is_core": true,
+      "description": "Customer payment"
+    },
+    "payment_method": {
+      "entity_name": "Payment_Method",
+      "semantic_type": "payment_method_id",
+      "domain": "Customers",
+      "is_core": false,
+      "description": "Payment type"
+    },
+    "vendor": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_id",
+      "domain": "Vendors",
+      "is_core": true,
+      "description": "Vendor"
+    },
+    "bill": {
+      "entity_name": "Bill",
+      "semantic_type": "bill_id",
+      "domain": "Vendors",
+      "is_core": true,
+      "description": "Vendor bill"
+    },
+    "bill_line": {
+      "entity_name": "Bill_Line",
+      "semantic_type": "bill_line_id",
+      "domain": "Vendors",
+      "is_core": false,
+      "description": "Bill line"
+    },
+    "bill_payment": {
+      "entity_name": "Bill_Payment",
+      "semantic_type": "bill_payment_id",
+      "domain": "Vendors",
+      "is_core": true,
+      "description": "Bill payment"
+    },
+    "vendor_credit": {
+      "entity_name": "Vendor_Credit",
+      "semantic_type": "vendor_credit_id",
+      "domain": "Vendors",
+      "is_core": false,
+      "description": "Vendor credit"
+    },
+    "expense": {
+      "entity_name": "Expense",
+      "semantic_type": "expense_id",
+      "domain": "Vendors",
+      "is_core": true,
+      "description": "Expense transaction"
+    },
+    "check": {
+      "entity_name": "Check",
+      "semantic_type": "check_id",
+      "domain": "Vendors",
+      "is_core": true,
+      "description": "Check payment"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Vendors",
+      "is_core": false,
+      "description": "PO (Plus/Advanced)"
+    },
+    "item": {
+      "entity_name": "Item",
+      "semantic_type": "item_id",
+      "domain": "Products_Services",
+      "is_core": true,
+      "description": "Product/service"
+    },
+    "item_category": {
+      "entity_name": "Item_Category",
+      "semantic_type": "item_category_id",
+      "domain": "Products_Services",
+      "is_core": false,
+      "description": "Item category"
+    },
+    "inventory_item": {
+      "entity_name": "Inventory_Item",
+      "semantic_type": "inventory_item_id",
+      "domain": "Products_Services",
+      "is_core": false,
+      "description": "Inventory item"
+    },
+    "non_inventory_item": {
+      "entity_name": "Non_Inventory_Item",
+      "semantic_type": "non_inventory_item_id",
+      "domain": "Products_Services",
+      "is_core": false,
+      "description": "Non-inventory"
+    },
+    "service_item": {
+      "entity_name": "Service_Item",
+      "semantic_type": "service_item_id",
+      "domain": "Products_Services",
+      "is_core": false,
+      "description": "Service"
+    },
+    "bundle": {
+      "entity_name": "Bundle",
+      "semantic_type": "bundle_id",
+      "domain": "Products_Services",
+      "is_core": false,
+      "description": "Product bundle"
+    },
+    "inventory_adjustment": {
+      "entity_name": "Inventory_Adjustment",
+      "semantic_type": "inventory_adjustment_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Adjustment"
+    },
+    "inventory_start_value": {
+      "entity_name": "Inventory_Start_Value",
+      "semantic_type": "inventory_start_value_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Starting qty"
+    },
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Employees",
+      "is_core": true,
+      "description": "Employee"
+    },
+    "time_activity": {
+      "entity_name": "Time_Activity",
+      "semantic_type": "time_activity_id",
+      "domain": "Employees",
+      "is_core": false,
+      "description": "Time tracking"
+    },
+    "payroll_item": {
+      "entity_name": "Payroll_Item",
+      "semantic_type": "payroll_item_id",
+      "domain": "Employees",
+      "is_core": false,
+      "description": "Payroll component"
+    },
+    "tax_code": {
+      "entity_name": "Tax_Code",
+      "semantic_type": "tax_code_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax code"
+    },
+    "tax_rate": {
+      "entity_name": "Tax_Rate",
+      "semantic_type": "tax_rate_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax rate"
+    },
+    "tax_agency": {
+      "entity_name": "Tax_Agency",
+      "semantic_type": "tax_agency_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax authority"
+    },
+    "journal_entry": {
+      "entity_name": "Journal_Entry",
+      "semantic_type": "journal_entry_id",
+      "domain": "Journal",
+      "is_core": true,
+      "description": "Journal entry"
+    },
+    "journal_line": {
+      "entity_name": "Journal_Line",
+      "semantic_type": "journal_line_id",
+      "domain": "Journal",
+      "is_core": false,
+      "description": "JE line"
+    },
+    "recurring_transaction": {
+      "entity_name": "Recurring_Transaction",
+      "semantic_type": "recurring_transaction_id",
+      "domain": "Recurring",
+      "is_core": false,
+      "description": "Recurring template"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Attachments",
+      "is_core": false,
+      "description": "Document attachment"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Reports",
+      "is_core": false,
+      "description": "Standard report"
+    },
+    "custom_report": {
+      "entity_name": "Custom_Report",
+      "semantic_type": "custom_report_id",
+      "domain": "Reports",
+      "is_core": false,
+      "description": "Custom report"
+    },
+    "company": {
+      "entity_name": "Company",
+      "semantic_type": "company_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "Company"
+    },
+    "preferences": {
+      "entity_name": "Preferences",
+      "semantic_type": "preferences_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Company settings"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "User"
+    }
+  },
+  "hub_count": 49
+}

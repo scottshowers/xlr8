@@ -1,0 +1,893 @@
+{
+  "version": "1.0",
+  "vendor": "Salesforce",
+  "product": "Salesforce",
+  "source": "Salesforce Developer Documentation, Data Model Gallery",
+  "extracted": "2026-01-10",
+  "api_type": "REST and SOAP API",
+  "api_base": "https://{instance}.salesforce.com/services/data/v{version}/",
+  "product_focus": "CRM market leader - multi-cloud platform",
+  "key_differentiators": [
+    "CRM market leader (#1 globally)",
+    "Multi-cloud platform (Sales, Service, Marketing, Commerce)",
+    "AppExchange ecosystem (7000+ apps)",
+    "Einstein AI",
+    "Data Cloud (CDP)",
+    "Flow automation",
+    "Industry clouds (Financial Services, Health, etc.)",
+    "Highly customizable (custom objects, fields, flows)"
+  ],
+  "clouds": {
+    "Sales Cloud": "Lead to cash, opportunity management, forecasting",
+    "Service Cloud": "Case management, knowledge, entitlements, Field Service",
+    "Marketing Cloud": "Email, journeys, advertising, personalization",
+    "Commerce Cloud": "B2B and B2C ecommerce",
+    "Experience Cloud": "Communities and portals",
+    "Data Cloud": "Customer data platform (CDP)"
+  },
+  "domains": {
+    "Account_Contact": {
+      "description": "Core CRM - accounts and contacts",
+      "hub_count": 7,
+      "hubs": [
+        "account",
+        "contact",
+        "account_contact_relation",
+        "account_team_member",
+        "person_account",
+        "partner",
+        "partner_role"
+      ]
+    },
+    "Lead_Management": {
+      "description": "Lead capture and qualification",
+      "hub_count": 5,
+      "hubs": [
+        "lead",
+        "lead_status",
+        "lead_source",
+        "lead_history",
+        "duplicate_rule"
+      ]
+    },
+    "Opportunity": {
+      "description": "Sales pipeline and deals",
+      "hub_count": 8,
+      "hubs": [
+        "opportunity",
+        "opportunity_stage",
+        "opportunity_product",
+        "opportunity_contact_role",
+        "opportunity_team_member",
+        "opportunity_history",
+        "opportunity_competitor",
+        "opportunity_split"
+      ]
+    },
+    "Quote_CPQ": {
+      "description": "Quotes and CPQ",
+      "hub_count": 3,
+      "hubs": [
+        "quote",
+        "quote_line_item",
+        "quote_document"
+      ]
+    },
+    "Product_Pricing": {
+      "description": "Products and price books",
+      "hub_count": 5,
+      "hubs": [
+        "product",
+        "product_family",
+        "price_book",
+        "price_book_entry",
+        "discount_schedule"
+      ]
+    },
+    "Contract_Order": {
+      "description": "Contracts and orders",
+      "hub_count": 5,
+      "hubs": [
+        "contract",
+        "contract_contact_role",
+        "order",
+        "order_item",
+        "asset"
+      ]
+    },
+    "Case_Management": {
+      "description": "Service Cloud - case tracking",
+      "hub_count": 8,
+      "hubs": [
+        "case",
+        "case_comment",
+        "case_history",
+        "case_team_member",
+        "case_team_role",
+        "case_article",
+        "case_milestone",
+        "case_solution"
+      ]
+    },
+    "Knowledge": {
+      "description": "Knowledge base",
+      "hub_count": 4,
+      "hubs": [
+        "knowledge_article",
+        "knowledge_article_version",
+        "category_node",
+        "solution"
+      ]
+    },
+    "Entitlement": {
+      "description": "Service entitlements and SLAs",
+      "hub_count": 5,
+      "hubs": [
+        "entitlement",
+        "entitlement_contact",
+        "service_contract",
+        "contract_line_item",
+        "milestone"
+      ]
+    },
+    "Incident_Problem": {
+      "description": "ITIL incident management",
+      "hub_count": 3,
+      "hubs": [
+        "incident",
+        "problem",
+        "case_related_issue"
+      ]
+    },
+    "Field_Service": {
+      "description": "Field Service Lightning",
+      "hub_count": 6,
+      "hubs": [
+        "work_order",
+        "work_order_line_item",
+        "service_appointment",
+        "service_resource",
+        "service_territory",
+        "resource_absence"
+      ]
+    },
+    "Campaign": {
+      "description": "Marketing campaigns",
+      "hub_count": 4,
+      "hubs": [
+        "campaign",
+        "campaign_member",
+        "campaign_member_status",
+        "campaign_hierarchy"
+      ]
+    },
+    "Activity": {
+      "description": "Tasks, events, emails",
+      "hub_count": 6,
+      "hubs": [
+        "task",
+        "event",
+        "email_message",
+        "activity_history",
+        "open_activity",
+        "call"
+      ]
+    },
+    "Forecast": {
+      "description": "Sales forecasting",
+      "hub_count": 5,
+      "hubs": [
+        "forecast_item",
+        "opportunity_forecast_item",
+        "forecast_category",
+        "territory",
+        "territory_account"
+      ]
+    },
+    "User_Team": {
+      "description": "Users and teams",
+      "hub_count": 5,
+      "hubs": [
+        "user",
+        "sales_user",
+        "group",
+        "queue",
+        "role"
+      ]
+    },
+    "Report_Dashboard": {
+      "description": "Analytics",
+      "hub_count": 3,
+      "hubs": [
+        "report",
+        "dashboard",
+        "report_type"
+      ]
+    },
+    "Omnichannel": {
+      "description": "Omnichannel routing",
+      "hub_count": 4,
+      "hubs": [
+        "live_chat_transcript",
+        "messaging_session",
+        "voice_call",
+        "contact_request"
+      ]
+    },
+    "Platform": {
+      "description": "Platform objects",
+      "hub_count": 8,
+      "hubs": [
+        "custom_object",
+        "attachment",
+        "content_document",
+        "note",
+        "feed_item",
+        "approval",
+        "workflow_rule",
+        "flow"
+      ]
+    }
+  },
+  "hubs": {
+    "account": {
+      "entity_name": "Account",
+      "semantic_type": "account_id",
+      "domain": "Account_Contact",
+      "is_core": true,
+      "description": "Company/organization"
+    },
+    "contact": {
+      "entity_name": "Contact",
+      "semantic_type": "contact_id",
+      "domain": "Account_Contact",
+      "is_core": true,
+      "description": "Person at account"
+    },
+    "account_contact_relation": {
+      "entity_name": "Account_Contact_Relation",
+      "semantic_type": "account_contact_relation_id",
+      "domain": "Account_Contact",
+      "is_core": false,
+      "description": "Contact-account link"
+    },
+    "account_team_member": {
+      "entity_name": "Account_Team_Member",
+      "semantic_type": "account_team_member_id",
+      "domain": "Account_Contact",
+      "is_core": false,
+      "description": "Account team"
+    },
+    "person_account": {
+      "entity_name": "Person_Account",
+      "semantic_type": "person_account_id",
+      "domain": "Account_Contact",
+      "is_core": false,
+      "description": "B2C individual"
+    },
+    "partner": {
+      "entity_name": "Partner",
+      "semantic_type": "partner_id",
+      "domain": "Account_Contact",
+      "is_core": false,
+      "description": "Partner account"
+    },
+    "partner_role": {
+      "entity_name": "Partner_Role",
+      "semantic_type": "partner_role_id",
+      "domain": "Account_Contact",
+      "is_core": false,
+      "description": "Partner relationship"
+    },
+    "lead": {
+      "entity_name": "Lead",
+      "semantic_type": "lead_id",
+      "domain": "Lead_Management",
+      "is_core": true,
+      "description": "Sales lead"
+    },
+    "lead_status": {
+      "entity_name": "Lead_Status",
+      "semantic_type": "lead_status_id",
+      "domain": "Lead_Management",
+      "is_core": false,
+      "description": "Lead stage"
+    },
+    "lead_source": {
+      "entity_name": "Lead_Source",
+      "semantic_type": "lead_source_id",
+      "domain": "Lead_Management",
+      "is_core": false,
+      "description": "Lead origin"
+    },
+    "lead_history": {
+      "entity_name": "Lead_History",
+      "semantic_type": "lead_history_id",
+      "domain": "Lead_Management",
+      "is_core": false,
+      "description": "Lead changes"
+    },
+    "duplicate_rule": {
+      "entity_name": "Duplicate_Rule",
+      "semantic_type": "duplicate_rule_id",
+      "domain": "Lead_Management",
+      "is_core": false,
+      "description": "Deduplication"
+    },
+    "opportunity": {
+      "entity_name": "Opportunity",
+      "semantic_type": "opportunity_id",
+      "domain": "Opportunity",
+      "is_core": true,
+      "description": "Sales opportunity"
+    },
+    "opportunity_stage": {
+      "entity_name": "Opportunity_Stage",
+      "semantic_type": "opportunity_stage_id",
+      "domain": "Opportunity",
+      "is_core": true,
+      "description": "Pipeline stage"
+    },
+    "opportunity_product": {
+      "entity_name": "Opportunity_Product",
+      "semantic_type": "opportunity_product_id",
+      "domain": "Opportunity",
+      "is_core": true,
+      "description": "Line item"
+    },
+    "opportunity_contact_role": {
+      "entity_name": "Opportunity_Contact_Role",
+      "semantic_type": "opportunity_contact_role_id",
+      "domain": "Opportunity",
+      "is_core": false,
+      "description": "Contact influence"
+    },
+    "opportunity_team_member": {
+      "entity_name": "Opportunity_Team_Member",
+      "semantic_type": "opportunity_team_member_id",
+      "domain": "Opportunity",
+      "is_core": false,
+      "description": "Deal team"
+    },
+    "opportunity_history": {
+      "entity_name": "Opportunity_History",
+      "semantic_type": "opportunity_history_id",
+      "domain": "Opportunity",
+      "is_core": false,
+      "description": "Stage history"
+    },
+    "opportunity_competitor": {
+      "entity_name": "Opportunity_Competitor",
+      "semantic_type": "opportunity_competitor_id",
+      "domain": "Opportunity",
+      "is_core": false,
+      "description": "Competitor"
+    },
+    "opportunity_split": {
+      "entity_name": "Opportunity_Split",
+      "semantic_type": "opportunity_split_id",
+      "domain": "Opportunity",
+      "is_core": false,
+      "description": "Revenue split"
+    },
+    "quote": {
+      "entity_name": "Quote",
+      "semantic_type": "quote_id",
+      "domain": "Quote_CPQ",
+      "is_core": true,
+      "description": "Sales quote"
+    },
+    "quote_line_item": {
+      "entity_name": "Quote_Line_Item",
+      "semantic_type": "quote_line_item_id",
+      "domain": "Quote_CPQ",
+      "is_core": false,
+      "description": "Quote line"
+    },
+    "quote_document": {
+      "entity_name": "Quote_Document",
+      "semantic_type": "quote_document_id",
+      "domain": "Quote_CPQ",
+      "is_core": false,
+      "description": "Quote PDF"
+    },
+    "product": {
+      "entity_name": "Product",
+      "semantic_type": "product_id",
+      "domain": "Product_Pricing",
+      "is_core": true,
+      "description": "Product/service"
+    },
+    "product_family": {
+      "entity_name": "Product_Family",
+      "semantic_type": "product_family_id",
+      "domain": "Product_Pricing",
+      "is_core": false,
+      "description": "Product category"
+    },
+    "price_book": {
+      "entity_name": "Price_Book",
+      "semantic_type": "price_book_id",
+      "domain": "Product_Pricing",
+      "is_core": true,
+      "description": "Price book"
+    },
+    "price_book_entry": {
+      "entity_name": "Price_Book_Entry",
+      "semantic_type": "price_book_entry_id",
+      "domain": "Product_Pricing",
+      "is_core": true,
+      "description": "Product price"
+    },
+    "discount_schedule": {
+      "entity_name": "Discount_Schedule",
+      "semantic_type": "discount_schedule_id",
+      "domain": "Product_Pricing",
+      "is_core": false,
+      "description": "Volume discount"
+    },
+    "contract": {
+      "entity_name": "Contract",
+      "semantic_type": "contract_id",
+      "domain": "Contract_Order",
+      "is_core": true,
+      "description": "Customer contract"
+    },
+    "contract_contact_role": {
+      "entity_name": "Contract_Contact_Role",
+      "semantic_type": "contract_contact_role_id",
+      "domain": "Contract_Order",
+      "is_core": false,
+      "description": "Contract contact"
+    },
+    "order": {
+      "entity_name": "Order",
+      "semantic_type": "order_id",
+      "domain": "Contract_Order",
+      "is_core": true,
+      "description": "Sales order"
+    },
+    "order_item": {
+      "entity_name": "Order_Item",
+      "semantic_type": "order_item_id",
+      "domain": "Contract_Order",
+      "is_core": false,
+      "description": "Order line"
+    },
+    "asset": {
+      "entity_name": "Asset",
+      "semantic_type": "asset_id",
+      "domain": "Contract_Order",
+      "is_core": true,
+      "description": "Customer asset"
+    },
+    "case": {
+      "entity_name": "Case",
+      "semantic_type": "case_id",
+      "domain": "Case_Management",
+      "is_core": true,
+      "description": "Support case"
+    },
+    "case_comment": {
+      "entity_name": "Case_Comment",
+      "semantic_type": "case_comment_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Case note"
+    },
+    "case_history": {
+      "entity_name": "Case_History",
+      "semantic_type": "case_history_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Case changes"
+    },
+    "case_team_member": {
+      "entity_name": "Case_Team_Member",
+      "semantic_type": "case_team_member_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Case team"
+    },
+    "case_team_role": {
+      "entity_name": "Case_Team_Role",
+      "semantic_type": "case_team_role_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Team role"
+    },
+    "case_article": {
+      "entity_name": "Case_Article",
+      "semantic_type": "case_article_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Attached article"
+    },
+    "case_milestone": {
+      "entity_name": "Case_Milestone",
+      "semantic_type": "case_milestone_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "SLA milestone"
+    },
+    "case_solution": {
+      "entity_name": "Case_Solution",
+      "semantic_type": "case_solution_id",
+      "domain": "Case_Management",
+      "is_core": false,
+      "description": "Resolution"
+    },
+    "knowledge_article": {
+      "entity_name": "Knowledge_Article",
+      "semantic_type": "knowledge_article_id",
+      "domain": "Knowledge",
+      "is_core": true,
+      "description": "KB article"
+    },
+    "knowledge_article_version": {
+      "entity_name": "Knowledge_Article_Version",
+      "semantic_type": "knowledge_article_version_id",
+      "domain": "Knowledge",
+      "is_core": false,
+      "description": "Article version"
+    },
+    "category_node": {
+      "entity_name": "Category_Node",
+      "semantic_type": "category_node_id",
+      "domain": "Knowledge",
+      "is_core": false,
+      "description": "Article category"
+    },
+    "solution": {
+      "entity_name": "Solution",
+      "semantic_type": "solution_id",
+      "domain": "Knowledge",
+      "is_core": false,
+      "description": "Solution record"
+    },
+    "entitlement": {
+      "entity_name": "Entitlement",
+      "semantic_type": "entitlement_id",
+      "domain": "Entitlement",
+      "is_core": true,
+      "description": "Service entitlement"
+    },
+    "entitlement_contact": {
+      "entity_name": "Entitlement_Contact",
+      "semantic_type": "entitlement_contact_id",
+      "domain": "Entitlement",
+      "is_core": false,
+      "description": "Entitled contact"
+    },
+    "service_contract": {
+      "entity_name": "Service_Contract",
+      "semantic_type": "service_contract_id",
+      "domain": "Entitlement",
+      "is_core": true,
+      "description": "Service agreement"
+    },
+    "contract_line_item": {
+      "entity_name": "Contract_Line_Item",
+      "semantic_type": "contract_line_item_id",
+      "domain": "Entitlement",
+      "is_core": false,
+      "description": "Service line"
+    },
+    "milestone": {
+      "entity_name": "Milestone",
+      "semantic_type": "milestone_id",
+      "domain": "Entitlement",
+      "is_core": false,
+      "description": "SLA milestone"
+    },
+    "incident": {
+      "entity_name": "Incident",
+      "semantic_type": "incident_id",
+      "domain": "Incident_Problem",
+      "is_core": false,
+      "description": "Service incident"
+    },
+    "problem": {
+      "entity_name": "Problem",
+      "semantic_type": "problem_id",
+      "domain": "Incident_Problem",
+      "is_core": false,
+      "description": "Problem record"
+    },
+    "case_related_issue": {
+      "entity_name": "Case_Related_Issue",
+      "semantic_type": "case_related_issue_id",
+      "domain": "Incident_Problem",
+      "is_core": false,
+      "description": "Related issue"
+    },
+    "work_order": {
+      "entity_name": "Work_Order",
+      "semantic_type": "work_order_id",
+      "domain": "Field_Service",
+      "is_core": true,
+      "description": "Field work order"
+    },
+    "work_order_line_item": {
+      "entity_name": "Work_Order_Line_Item",
+      "semantic_type": "work_order_line_item_id",
+      "domain": "Field_Service",
+      "is_core": false,
+      "description": "WO line"
+    },
+    "service_appointment": {
+      "entity_name": "Service_Appointment",
+      "semantic_type": "service_appointment_id",
+      "domain": "Field_Service",
+      "is_core": true,
+      "description": "Scheduled visit"
+    },
+    "service_resource": {
+      "entity_name": "Service_Resource",
+      "semantic_type": "service_resource_id",
+      "domain": "Field_Service",
+      "is_core": true,
+      "description": "Field technician"
+    },
+    "service_territory": {
+      "entity_name": "Service_Territory",
+      "semantic_type": "service_territory_id",
+      "domain": "Field_Service",
+      "is_core": false,
+      "description": "Service area"
+    },
+    "resource_absence": {
+      "entity_name": "Resource_Absence",
+      "semantic_type": "resource_absence_id",
+      "domain": "Field_Service",
+      "is_core": false,
+      "description": "Technician unavailability"
+    },
+    "campaign": {
+      "entity_name": "Campaign",
+      "semantic_type": "campaign_id",
+      "domain": "Campaign",
+      "is_core": true,
+      "description": "Marketing campaign"
+    },
+    "campaign_member": {
+      "entity_name": "Campaign_Member",
+      "semantic_type": "campaign_member_id",
+      "domain": "Campaign",
+      "is_core": true,
+      "description": "Campaign response"
+    },
+    "campaign_member_status": {
+      "entity_name": "Campaign_Member_Status",
+      "semantic_type": "campaign_member_status_id",
+      "domain": "Campaign",
+      "is_core": false,
+      "description": "Response status"
+    },
+    "campaign_hierarchy": {
+      "entity_name": "Campaign_Hierarchy",
+      "semantic_type": "campaign_hierarchy_id",
+      "domain": "Campaign",
+      "is_core": false,
+      "description": "Parent campaign"
+    },
+    "task": {
+      "entity_name": "Task",
+      "semantic_type": "task_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "To-do/task"
+    },
+    "event": {
+      "entity_name": "Event",
+      "semantic_type": "event_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Calendar event"
+    },
+    "email_message": {
+      "entity_name": "Email_Message",
+      "semantic_type": "email_message_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Email"
+    },
+    "activity_history": {
+      "entity_name": "Activity_History",
+      "semantic_type": "activity_history_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "Past activity"
+    },
+    "open_activity": {
+      "entity_name": "Open_Activity",
+      "semantic_type": "open_activity_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "Pending activity"
+    },
+    "call": {
+      "entity_name": "Call",
+      "semantic_type": "call_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "Phone call"
+    },
+    "forecast_item": {
+      "entity_name": "Forecast_Item",
+      "semantic_type": "forecast_item_id",
+      "domain": "Forecast",
+      "is_core": true,
+      "description": "Forecast"
+    },
+    "opportunity_forecast_item": {
+      "entity_name": "Opportunity_Forecast_Item",
+      "semantic_type": "opportunity_forecast_item_id",
+      "domain": "Forecast",
+      "is_core": false,
+      "description": "Opp forecast"
+    },
+    "forecast_category": {
+      "entity_name": "Forecast_Category",
+      "semantic_type": "forecast_category_id",
+      "domain": "Forecast",
+      "is_core": false,
+      "description": "Forecast bucket"
+    },
+    "territory": {
+      "entity_name": "Territory",
+      "semantic_type": "territory_id",
+      "domain": "Forecast",
+      "is_core": true,
+      "description": "Sales territory"
+    },
+    "territory_account": {
+      "entity_name": "Territory_Account",
+      "semantic_type": "territory_account_id",
+      "domain": "Forecast",
+      "is_core": false,
+      "description": "Territory assignment"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Team",
+      "is_core": true,
+      "description": "Salesforce user"
+    },
+    "sales_user": {
+      "entity_name": "Sales_User",
+      "semantic_type": "sales_user_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "Sales rep"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "User group"
+    },
+    "queue": {
+      "entity_name": "Queue",
+      "semantic_type": "queue_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "Work queue"
+    },
+    "role": {
+      "entity_name": "Role",
+      "semantic_type": "role_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "Role hierarchy"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Report_Dashboard",
+      "is_core": false,
+      "description": "Report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Report_Dashboard",
+      "is_core": false,
+      "description": "Dashboard"
+    },
+    "report_type": {
+      "entity_name": "Report_Type",
+      "semantic_type": "report_type_id",
+      "domain": "Report_Dashboard",
+      "is_core": false,
+      "description": "Report definition"
+    },
+    "live_chat_transcript": {
+      "entity_name": "Live_Chat_Transcript",
+      "semantic_type": "live_chat_transcript_id",
+      "domain": "Omnichannel",
+      "is_core": false,
+      "description": "Chat log"
+    },
+    "messaging_session": {
+      "entity_name": "Messaging_Session",
+      "semantic_type": "messaging_session_id",
+      "domain": "Omnichannel",
+      "is_core": false,
+      "description": "Message conversation"
+    },
+    "voice_call": {
+      "entity_name": "Voice_Call",
+      "semantic_type": "voice_call_id",
+      "domain": "Omnichannel",
+      "is_core": false,
+      "description": "Voice call"
+    },
+    "contact_request": {
+      "entity_name": "Contact_Request",
+      "semantic_type": "contact_request_id",
+      "domain": "Omnichannel",
+      "is_core": false,
+      "description": "Inbound request"
+    },
+    "custom_object": {
+      "entity_name": "Custom_Object",
+      "semantic_type": "custom_object_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom object"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "File attachment"
+    },
+    "content_document": {
+      "entity_name": "Content_Document",
+      "semantic_type": "content_document_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Document"
+    },
+    "note": {
+      "entity_name": "Note",
+      "semantic_type": "note_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Note"
+    },
+    "feed_item": {
+      "entity_name": "Feed_Item",
+      "semantic_type": "feed_item_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Chatter post"
+    },
+    "approval": {
+      "entity_name": "Approval",
+      "semantic_type": "approval_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Approval process"
+    },
+    "workflow_rule": {
+      "entity_name": "Workflow_Rule",
+      "semantic_type": "workflow_rule_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Automation"
+    },
+    "flow": {
+      "entity_name": "Flow",
+      "semantic_type": "flow_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Flow automation"
+    }
+  },
+  "hub_count": 94
+}

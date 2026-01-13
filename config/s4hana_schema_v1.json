@@ -1,0 +1,1287 @@
+{
+  "version": "1.0",
+  "vendor": "SAP",
+  "product": "SAP S/4HANA",
+  "source": "SAP website, module documentation, TechTarget",
+  "extracted": "2026-01-10",
+  "api_type": "OData REST, BAPI, RFC",
+  "api_base": "https://{host}/sap/opu/odata/sap/",
+  "product_focus": "Enterprise ERP - on-premise, private cloud, public cloud",
+  "key_differentiators": [
+    "SAP HANA in-memory database",
+    "Real-time analytics embedded",
+    "Universal Journal (single source of truth)",
+    "SAP Fiori UX",
+    "Industry solutions",
+    "RISE with SAP (cloud transformation)",
+    "Integration with SAP ecosystem (Ariba, SuccessFactors, Concur)"
+  ],
+  "deployment_options": {
+    "On-Premise": "Traditional on-premise deployment",
+    "Private Cloud": "SAP S/4HANA Cloud, private edition",
+    "Public Cloud": "SAP S/4HANA Cloud, public edition",
+    "RISE with SAP": "Business transformation as a service"
+  },
+  "lines_of_business": [
+    "Finance",
+    "Sourcing and Procurement",
+    "Manufacturing",
+    "Supply Chain",
+    "Asset Management",
+    "Sales",
+    "R&D/Engineering"
+  ],
+  "domains": {
+    "Financial_Accounting": {
+      "description": "FI - General ledger and financial statements",
+      "hub_count": 9,
+      "hubs": [
+        "gl_account",
+        "company_code",
+        "journal_entry",
+        "fiscal_year",
+        "posting_period",
+        "document_type",
+        "coa",
+        "ledger",
+        "segment"
+      ]
+    },
+    "Accounts_Payable": {
+      "description": "FI-AP - Vendor accounting",
+      "hub_count": 6,
+      "hubs": [
+        "vendor",
+        "vendor_invoice",
+        "payment",
+        "payment_run",
+        "ap_credit_memo",
+        "down_payment"
+      ]
+    },
+    "Accounts_Receivable": {
+      "description": "FI-AR - Customer accounting",
+      "hub_count": 6,
+      "hubs": [
+        "customer",
+        "customer_invoice",
+        "incoming_payment",
+        "dunning",
+        "ar_credit_memo",
+        "dispute"
+      ]
+    },
+    "Asset_Accounting": {
+      "description": "FI-AA - Fixed asset management",
+      "hub_count": 6,
+      "hubs": [
+        "fixed_asset",
+        "asset_class",
+        "depreciation",
+        "depreciation_area",
+        "asset_transaction",
+        "asset_retirement"
+      ]
+    },
+    "Bank_Accounting": {
+      "description": "FI-BL - Bank and cash management",
+      "hub_count": 4,
+      "hubs": [
+        "bank_account",
+        "bank_statement",
+        "cash_journal",
+        "bank_reconciliation"
+      ]
+    },
+    "Controlling": {
+      "description": "CO - Management accounting",
+      "hub_count": 7,
+      "hubs": [
+        "cost_center",
+        "profit_center",
+        "internal_order",
+        "cost_element",
+        "activity_type",
+        "stat_key_figure",
+        "allocation"
+      ]
+    },
+    "Product_Costing": {
+      "description": "CO-PC - Product cost controlling",
+      "hub_count": 5,
+      "hubs": [
+        "cost_estimate",
+        "costing_run",
+        "material_ledger",
+        "wip",
+        "variance"
+      ]
+    },
+    "Profitability_Analysis": {
+      "description": "CO-PA - Profitability analysis",
+      "hub_count": 4,
+      "hubs": [
+        "profitability_segment",
+        "operating_concern",
+        "characteristic",
+        "value_field"
+      ]
+    },
+    "Treasury": {
+      "description": "Treasury and risk management",
+      "hub_count": 4,
+      "hubs": [
+        "cash_position",
+        "liquidity_forecast",
+        "financial_transaction",
+        "hedge"
+      ]
+    },
+    "Materials_Management": {
+      "description": "MM - Procurement and inventory",
+      "hub_count": 9,
+      "hubs": [
+        "material",
+        "purchase_requisition",
+        "purchase_order",
+        "goods_receipt",
+        "invoice_receipt",
+        "material_document",
+        "reservation",
+        "stock_transfer",
+        "physical_inventory"
+      ]
+    },
+    "Vendor_Management": {
+      "description": "MM - Supplier relationship",
+      "hub_count": 5,
+      "hubs": [
+        "info_record",
+        "source_list",
+        "purchasing_contract",
+        "scheduling_agreement",
+        "vendor_evaluation"
+      ]
+    },
+    "Inventory": {
+      "description": "MM-IM - Inventory management",
+      "hub_count": 5,
+      "hubs": [
+        "storage_location",
+        "batch",
+        "serial_number",
+        "valuation_type",
+        "stock_type"
+      ]
+    },
+    "Sales_Distribution": {
+      "description": "SD - Sales and billing",
+      "hub_count": 8,
+      "hubs": [
+        "sales_order",
+        "sales_quotation",
+        "sales_contract",
+        "delivery",
+        "billing_document",
+        "credit_memo_request",
+        "return_order",
+        "pricing_condition"
+      ]
+    },
+    "Customer_Master": {
+      "description": "SD - Customer data",
+      "hub_count": 5,
+      "hubs": [
+        "sold_to_party",
+        "ship_to_party",
+        "bill_to_party",
+        "payer",
+        "customer_hierarchy"
+      ]
+    },
+    "Production_Planning": {
+      "description": "PP - Manufacturing planning",
+      "hub_count": 8,
+      "hubs": [
+        "production_order",
+        "planned_order",
+        "bom",
+        "routing",
+        "work_center",
+        "capacity",
+        "mrp_run",
+        "demand_management"
+      ]
+    },
+    "Shop_Floor": {
+      "description": "PP-SFC - Production execution",
+      "hub_count": 4,
+      "hubs": [
+        "confirmation",
+        "goods_issue",
+        "production_goods_receipt",
+        "backflush"
+      ]
+    },
+    "Quality_Management": {
+      "description": "QM - Quality control",
+      "hub_count": 5,
+      "hubs": [
+        "inspection_lot",
+        "inspection_plan",
+        "quality_notification",
+        "usage_decision",
+        "certificate"
+      ]
+    },
+    "Plant_Maintenance": {
+      "description": "PM - Asset maintenance",
+      "hub_count": 6,
+      "hubs": [
+        "equipment",
+        "functional_location",
+        "maintenance_order",
+        "maintenance_notification",
+        "maintenance_plan",
+        "measuring_point"
+      ]
+    },
+    "Warehouse_Management": {
+      "description": "EWM - Extended warehouse management",
+      "hub_count": 6,
+      "hubs": [
+        "warehouse",
+        "storage_type",
+        "storage_bin",
+        "warehouse_task",
+        "handling_unit",
+        "wave"
+      ]
+    },
+    "Transportation": {
+      "description": "TM - Transportation management",
+      "hub_count": 5,
+      "hubs": [
+        "shipment",
+        "freight_order",
+        "carrier",
+        "route",
+        "freight_cost"
+      ]
+    },
+    "Project_System": {
+      "description": "PS - Project management",
+      "hub_count": 5,
+      "hubs": [
+        "project",
+        "wbs_element",
+        "network",
+        "activity",
+        "milestone"
+      ]
+    },
+    "Human_Resources": {
+      "description": "HCM - Core HR (legacy, moving to SuccessFactors)",
+      "hub_count": 5,
+      "hubs": [
+        "personnel_number",
+        "org_unit",
+        "position",
+        "time_record",
+        "payroll_result"
+      ]
+    },
+    "Analytics": {
+      "description": "Embedded analytics and reporting",
+      "hub_count": 5,
+      "hubs": [
+        "cds_view",
+        "report",
+        "dashboard",
+        "kpi",
+        "query"
+      ]
+    },
+    "Platform": {
+      "description": "Technical platform",
+      "hub_count": 6,
+      "hubs": [
+        "business_partner",
+        "workflow",
+        "bapi",
+        "odata_service",
+        "fiori_app",
+        "custom_field"
+      ]
+    }
+  },
+  "hubs": {
+    "gl_account": {
+      "entity_name": "GL_Account",
+      "semantic_type": "gl_account_id",
+      "domain": "Financial_Accounting",
+      "is_core": true,
+      "description": "General ledger account"
+    },
+    "company_code": {
+      "entity_name": "Company_Code",
+      "semantic_type": "company_code_id",
+      "domain": "Financial_Accounting",
+      "is_core": true,
+      "description": "Legal entity"
+    },
+    "journal_entry": {
+      "entity_name": "Journal_Entry",
+      "semantic_type": "journal_entry_id",
+      "domain": "Financial_Accounting",
+      "is_core": true,
+      "description": "FI document"
+    },
+    "fiscal_year": {
+      "entity_name": "Fiscal_Year",
+      "semantic_type": "fiscal_year_id",
+      "domain": "Financial_Accounting",
+      "is_core": true,
+      "description": "Fiscal year"
+    },
+    "posting_period": {
+      "entity_name": "Posting_Period",
+      "semantic_type": "posting_period_id",
+      "domain": "Financial_Accounting",
+      "is_core": true,
+      "description": "Posting period"
+    },
+    "document_type": {
+      "entity_name": "Document_Type",
+      "semantic_type": "document_type_id",
+      "domain": "Financial_Accounting",
+      "is_core": false,
+      "description": "FI doc type"
+    },
+    "coa": {
+      "entity_name": "Chart_Of_Accounts",
+      "semantic_type": "coa_id",
+      "domain": "Financial_Accounting",
+      "is_core": false,
+      "description": "COA structure"
+    },
+    "ledger": {
+      "entity_name": "Ledger",
+      "semantic_type": "ledger_id",
+      "domain": "Financial_Accounting",
+      "is_core": false,
+      "description": "Parallel ledger"
+    },
+    "segment": {
+      "entity_name": "Segment",
+      "semantic_type": "segment_id",
+      "domain": "Financial_Accounting",
+      "is_core": false,
+      "description": "Reporting segment"
+    },
+    "vendor": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Supplier master"
+    },
+    "vendor_invoice": {
+      "entity_name": "Vendor_Invoice",
+      "semantic_type": "vendor_invoice_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "AP invoice"
+    },
+    "payment": {
+      "entity_name": "Payment",
+      "semantic_type": "payment_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Outgoing payment"
+    },
+    "payment_run": {
+      "entity_name": "Payment_Run",
+      "semantic_type": "payment_run_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Payment proposal"
+    },
+    "ap_credit_memo": {
+      "entity_name": "Credit_Memo",
+      "semantic_type": "ap_credit_memo_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Vendor credit"
+    },
+    "down_payment": {
+      "entity_name": "Down_Payment",
+      "semantic_type": "down_payment_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Advance payment"
+    },
+    "customer": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer master"
+    },
+    "customer_invoice": {
+      "entity_name": "Customer_Invoice",
+      "semantic_type": "customer_invoice_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "AR invoice"
+    },
+    "incoming_payment": {
+      "entity_name": "Incoming_Payment",
+      "semantic_type": "incoming_payment_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer payment"
+    },
+    "dunning": {
+      "entity_name": "Dunning",
+      "semantic_type": "dunning_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Dunning notice"
+    },
+    "ar_credit_memo": {
+      "entity_name": "Credit_Memo",
+      "semantic_type": "ar_credit_memo_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Customer credit"
+    },
+    "dispute": {
+      "entity_name": "Dispute",
+      "semantic_type": "dispute_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Payment dispute"
+    },
+    "fixed_asset": {
+      "entity_name": "Fixed_Asset",
+      "semantic_type": "fixed_asset_id",
+      "domain": "Asset_Accounting",
+      "is_core": true,
+      "description": "Asset master"
+    },
+    "asset_class": {
+      "entity_name": "Asset_Class",
+      "semantic_type": "asset_class_id",
+      "domain": "Asset_Accounting",
+      "is_core": false,
+      "description": "Asset category"
+    },
+    "depreciation": {
+      "entity_name": "Depreciation",
+      "semantic_type": "depreciation_id",
+      "domain": "Asset_Accounting",
+      "is_core": true,
+      "description": "Depreciation run"
+    },
+    "depreciation_area": {
+      "entity_name": "Depreciation_Area",
+      "semantic_type": "depreciation_area_id",
+      "domain": "Asset_Accounting",
+      "is_core": false,
+      "description": "Valuation area"
+    },
+    "asset_transaction": {
+      "entity_name": "Asset_Transaction",
+      "semantic_type": "asset_transaction_id",
+      "domain": "Asset_Accounting",
+      "is_core": false,
+      "description": "Asset posting"
+    },
+    "asset_retirement": {
+      "entity_name": "Asset_Retirement",
+      "semantic_type": "asset_retirement_id",
+      "domain": "Asset_Accounting",
+      "is_core": false,
+      "description": "Asset disposal"
+    },
+    "bank_account": {
+      "entity_name": "Bank_Account",
+      "semantic_type": "bank_account_id",
+      "domain": "Bank_Accounting",
+      "is_core": true,
+      "description": "House bank"
+    },
+    "bank_statement": {
+      "entity_name": "Bank_Statement",
+      "semantic_type": "bank_statement_id",
+      "domain": "Bank_Accounting",
+      "is_core": true,
+      "description": "Bank statement"
+    },
+    "cash_journal": {
+      "entity_name": "Cash_Journal",
+      "semantic_type": "cash_journal_id",
+      "domain": "Bank_Accounting",
+      "is_core": false,
+      "description": "Petty cash"
+    },
+    "bank_reconciliation": {
+      "entity_name": "Bank_Reconciliation",
+      "semantic_type": "bank_reconciliation_id",
+      "domain": "Bank_Accounting",
+      "is_core": false,
+      "description": "Reconciliation"
+    },
+    "cost_center": {
+      "entity_name": "Cost_Center",
+      "semantic_type": "cost_center_id",
+      "domain": "Controlling",
+      "is_core": true,
+      "description": "Cost center"
+    },
+    "profit_center": {
+      "entity_name": "Profit_Center",
+      "semantic_type": "profit_center_id",
+      "domain": "Controlling",
+      "is_core": true,
+      "description": "Profit center"
+    },
+    "internal_order": {
+      "entity_name": "Internal_Order",
+      "semantic_type": "internal_order_id",
+      "domain": "Controlling",
+      "is_core": true,
+      "description": "Internal order"
+    },
+    "cost_element": {
+      "entity_name": "Cost_Element",
+      "semantic_type": "cost_element_id",
+      "domain": "Controlling",
+      "is_core": true,
+      "description": "Cost element"
+    },
+    "activity_type": {
+      "entity_name": "Activity_Type",
+      "semantic_type": "activity_type_id",
+      "domain": "Controlling",
+      "is_core": false,
+      "description": "Activity type"
+    },
+    "stat_key_figure": {
+      "entity_name": "Statistical_Key_Figure",
+      "semantic_type": "stat_key_figure_id",
+      "domain": "Controlling",
+      "is_core": false,
+      "description": "SKF"
+    },
+    "allocation": {
+      "entity_name": "Allocation",
+      "semantic_type": "allocation_id",
+      "domain": "Controlling",
+      "is_core": false,
+      "description": "Cost allocation"
+    },
+    "cost_estimate": {
+      "entity_name": "Cost_Estimate",
+      "semantic_type": "cost_estimate_id",
+      "domain": "Product_Costing",
+      "is_core": true,
+      "description": "Standard cost"
+    },
+    "costing_run": {
+      "entity_name": "Costing_Run",
+      "semantic_type": "costing_run_id",
+      "domain": "Product_Costing",
+      "is_core": false,
+      "description": "Mass costing"
+    },
+    "material_ledger": {
+      "entity_name": "Material_Ledger",
+      "semantic_type": "material_ledger_id",
+      "domain": "Product_Costing",
+      "is_core": false,
+      "description": "Actual costing"
+    },
+    "wip": {
+      "entity_name": "WIP",
+      "semantic_type": "wip_id",
+      "domain": "Product_Costing",
+      "is_core": false,
+      "description": "Work in process"
+    },
+    "variance": {
+      "entity_name": "Variance",
+      "semantic_type": "variance_id",
+      "domain": "Product_Costing",
+      "is_core": false,
+      "description": "Cost variance"
+    },
+    "profitability_segment": {
+      "entity_name": "Profitability_Segment",
+      "semantic_type": "profitability_segment_id",
+      "domain": "Profitability_Analysis",
+      "is_core": true,
+      "description": "PA segment"
+    },
+    "operating_concern": {
+      "entity_name": "Operating_Concern",
+      "semantic_type": "operating_concern_id",
+      "domain": "Profitability_Analysis",
+      "is_core": false,
+      "description": "PA structure"
+    },
+    "characteristic": {
+      "entity_name": "Characteristic",
+      "semantic_type": "characteristic_id",
+      "domain": "Profitability_Analysis",
+      "is_core": false,
+      "description": "PA dimension"
+    },
+    "value_field": {
+      "entity_name": "Value_Field",
+      "semantic_type": "value_field_id",
+      "domain": "Profitability_Analysis",
+      "is_core": false,
+      "description": "PA metric"
+    },
+    "cash_position": {
+      "entity_name": "Cash_Position",
+      "semantic_type": "cash_position_id",
+      "domain": "Treasury",
+      "is_core": false,
+      "description": "Cash position"
+    },
+    "liquidity_forecast": {
+      "entity_name": "Liquidity_Forecast",
+      "semantic_type": "liquidity_forecast_id",
+      "domain": "Treasury",
+      "is_core": false,
+      "description": "Cash forecast"
+    },
+    "financial_transaction": {
+      "entity_name": "Financial_Transaction",
+      "semantic_type": "financial_transaction_id",
+      "domain": "Treasury",
+      "is_core": false,
+      "description": "Treasury deal"
+    },
+    "hedge": {
+      "entity_name": "Hedge",
+      "semantic_type": "hedge_id",
+      "domain": "Treasury",
+      "is_core": false,
+      "description": "Hedge transaction"
+    },
+    "material": {
+      "entity_name": "Material",
+      "semantic_type": "material_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "Material master"
+    },
+    "purchase_requisition": {
+      "entity_name": "Purchase_Requisition",
+      "semantic_type": "purchase_requisition_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "PR"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "PO"
+    },
+    "goods_receipt": {
+      "entity_name": "Goods_Receipt",
+      "semantic_type": "goods_receipt_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "GR"
+    },
+    "invoice_receipt": {
+      "entity_name": "Invoice_Receipt",
+      "semantic_type": "invoice_receipt_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "IR"
+    },
+    "material_document": {
+      "entity_name": "Material_Document",
+      "semantic_type": "material_document_id",
+      "domain": "Materials_Management",
+      "is_core": true,
+      "description": "MM document"
+    },
+    "reservation": {
+      "entity_name": "Reservation",
+      "semantic_type": "reservation_id",
+      "domain": "Materials_Management",
+      "is_core": false,
+      "description": "Material reservation"
+    },
+    "stock_transfer": {
+      "entity_name": "Stock_Transfer",
+      "semantic_type": "stock_transfer_id",
+      "domain": "Materials_Management",
+      "is_core": false,
+      "description": "Stock transfer"
+    },
+    "physical_inventory": {
+      "entity_name": "Physical_Inventory",
+      "semantic_type": "physical_inventory_id",
+      "domain": "Materials_Management",
+      "is_core": false,
+      "description": "Physical count"
+    },
+    "info_record": {
+      "entity_name": "Purchasing_Info_Record",
+      "semantic_type": "info_record_id",
+      "domain": "Vendor_Management",
+      "is_core": false,
+      "description": "Info record"
+    },
+    "source_list": {
+      "entity_name": "Source_List",
+      "semantic_type": "source_list_id",
+      "domain": "Vendor_Management",
+      "is_core": false,
+      "description": "Approved sources"
+    },
+    "purchasing_contract": {
+      "entity_name": "Contract",
+      "semantic_type": "purchasing_contract_id",
+      "domain": "Vendor_Management",
+      "is_core": true,
+      "description": "Purchasing contract"
+    },
+    "scheduling_agreement": {
+      "entity_name": "Scheduling_Agreement",
+      "semantic_type": "scheduling_agreement_id",
+      "domain": "Vendor_Management",
+      "is_core": false,
+      "description": "SA"
+    },
+    "vendor_evaluation": {
+      "entity_name": "Vendor_Evaluation",
+      "semantic_type": "vendor_evaluation_id",
+      "domain": "Vendor_Management",
+      "is_core": false,
+      "description": "Supplier score"
+    },
+    "storage_location": {
+      "entity_name": "Storage_Location",
+      "semantic_type": "storage_location_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Storage location"
+    },
+    "batch": {
+      "entity_name": "Batch",
+      "semantic_type": "batch_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Batch/lot"
+    },
+    "serial_number": {
+      "entity_name": "Serial_Number",
+      "semantic_type": "serial_number_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Serial number"
+    },
+    "valuation_type": {
+      "entity_name": "Valuation_Type",
+      "semantic_type": "valuation_type_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Split valuation"
+    },
+    "stock_type": {
+      "entity_name": "Stock_Type",
+      "semantic_type": "stock_type_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Unrestricted/blocked"
+    },
+    "sales_order": {
+      "entity_name": "Sales_Order",
+      "semantic_type": "sales_order_id",
+      "domain": "Sales_Distribution",
+      "is_core": true,
+      "description": "Sales order"
+    },
+    "sales_quotation": {
+      "entity_name": "Sales_Quotation",
+      "semantic_type": "sales_quotation_id",
+      "domain": "Sales_Distribution",
+      "is_core": true,
+      "description": "Quotation"
+    },
+    "sales_contract": {
+      "entity_name": "Sales_Contract",
+      "semantic_type": "sales_contract_id",
+      "domain": "Sales_Distribution",
+      "is_core": false,
+      "description": "Sales contract"
+    },
+    "delivery": {
+      "entity_name": "Delivery",
+      "semantic_type": "delivery_id",
+      "domain": "Sales_Distribution",
+      "is_core": true,
+      "description": "Outbound delivery"
+    },
+    "billing_document": {
+      "entity_name": "Billing_Document",
+      "semantic_type": "billing_document_id",
+      "domain": "Sales_Distribution",
+      "is_core": true,
+      "description": "Invoice"
+    },
+    "credit_memo_request": {
+      "entity_name": "Credit_Memo_Request",
+      "semantic_type": "credit_memo_request_id",
+      "domain": "Sales_Distribution",
+      "is_core": false,
+      "description": "Credit request"
+    },
+    "return_order": {
+      "entity_name": "Return_Order",
+      "semantic_type": "return_order_id",
+      "domain": "Sales_Distribution",
+      "is_core": false,
+      "description": "Return"
+    },
+    "pricing_condition": {
+      "entity_name": "Pricing_Condition",
+      "semantic_type": "pricing_condition_id",
+      "domain": "Sales_Distribution",
+      "is_core": true,
+      "description": "Pricing"
+    },
+    "sold_to_party": {
+      "entity_name": "Sold_To_Party",
+      "semantic_type": "sold_to_party_id",
+      "domain": "Customer_Master",
+      "is_core": true,
+      "description": "Sold-to customer"
+    },
+    "ship_to_party": {
+      "entity_name": "Ship_To_Party",
+      "semantic_type": "ship_to_party_id",
+      "domain": "Customer_Master",
+      "is_core": false,
+      "description": "Ship-to address"
+    },
+    "bill_to_party": {
+      "entity_name": "Bill_To_Party",
+      "semantic_type": "bill_to_party_id",
+      "domain": "Customer_Master",
+      "is_core": false,
+      "description": "Bill-to address"
+    },
+    "payer": {
+      "entity_name": "Payer",
+      "semantic_type": "payer_id",
+      "domain": "Customer_Master",
+      "is_core": false,
+      "description": "Payer"
+    },
+    "customer_hierarchy": {
+      "entity_name": "Customer_Hierarchy",
+      "semantic_type": "customer_hierarchy_id",
+      "domain": "Customer_Master",
+      "is_core": false,
+      "description": "Customer hierarchy"
+    },
+    "production_order": {
+      "entity_name": "Production_Order",
+      "semantic_type": "production_order_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "Production order"
+    },
+    "planned_order": {
+      "entity_name": "Planned_Order",
+      "semantic_type": "planned_order_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "Planned order"
+    },
+    "bom": {
+      "entity_name": "BOM",
+      "semantic_type": "bom_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "Bill of materials"
+    },
+    "routing": {
+      "entity_name": "Routing",
+      "semantic_type": "routing_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "Production routing"
+    },
+    "work_center": {
+      "entity_name": "Work_Center",
+      "semantic_type": "work_center_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "Work center"
+    },
+    "capacity": {
+      "entity_name": "Capacity",
+      "semantic_type": "capacity_id",
+      "domain": "Production_Planning",
+      "is_core": false,
+      "description": "Capacity"
+    },
+    "mrp_run": {
+      "entity_name": "MRP_Run",
+      "semantic_type": "mrp_run_id",
+      "domain": "Production_Planning",
+      "is_core": true,
+      "description": "MRP execution"
+    },
+    "demand_management": {
+      "entity_name": "Demand_Management",
+      "semantic_type": "demand_management_id",
+      "domain": "Production_Planning",
+      "is_core": false,
+      "description": "Demand planning"
+    },
+    "confirmation": {
+      "entity_name": "Confirmation",
+      "semantic_type": "confirmation_id",
+      "domain": "Shop_Floor",
+      "is_core": true,
+      "description": "Production confirmation"
+    },
+    "goods_issue": {
+      "entity_name": "Goods_Issue",
+      "semantic_type": "goods_issue_id",
+      "domain": "Shop_Floor",
+      "is_core": true,
+      "description": "GI to production"
+    },
+    "production_goods_receipt": {
+      "entity_name": "Goods_Receipt",
+      "semantic_type": "production_goods_receipt_id",
+      "domain": "Shop_Floor",
+      "is_core": true,
+      "description": "GR from production"
+    },
+    "backflush": {
+      "entity_name": "Backflush",
+      "semantic_type": "backflush_id",
+      "domain": "Shop_Floor",
+      "is_core": false,
+      "description": "Backflush posting"
+    },
+    "inspection_lot": {
+      "entity_name": "Inspection_Lot",
+      "semantic_type": "inspection_lot_id",
+      "domain": "Quality_Management",
+      "is_core": true,
+      "description": "Inspection lot"
+    },
+    "inspection_plan": {
+      "entity_name": "Inspection_Plan",
+      "semantic_type": "inspection_plan_id",
+      "domain": "Quality_Management",
+      "is_core": false,
+      "description": "Inspection plan"
+    },
+    "quality_notification": {
+      "entity_name": "Quality_Notification",
+      "semantic_type": "quality_notification_id",
+      "domain": "Quality_Management",
+      "is_core": true,
+      "description": "QM notification"
+    },
+    "usage_decision": {
+      "entity_name": "Usage_Decision",
+      "semantic_type": "usage_decision_id",
+      "domain": "Quality_Management",
+      "is_core": false,
+      "description": "UD"
+    },
+    "certificate": {
+      "entity_name": "Certificate",
+      "semantic_type": "certificate_id",
+      "domain": "Quality_Management",
+      "is_core": false,
+      "description": "Quality certificate"
+    },
+    "equipment": {
+      "entity_name": "Equipment",
+      "semantic_type": "equipment_id",
+      "domain": "Plant_Maintenance",
+      "is_core": true,
+      "description": "Equipment master"
+    },
+    "functional_location": {
+      "entity_name": "Functional_Location",
+      "semantic_type": "functional_location_id",
+      "domain": "Plant_Maintenance",
+      "is_core": true,
+      "description": "Functional location"
+    },
+    "maintenance_order": {
+      "entity_name": "Maintenance_Order",
+      "semantic_type": "maintenance_order_id",
+      "domain": "Plant_Maintenance",
+      "is_core": true,
+      "description": "PM order"
+    },
+    "maintenance_notification": {
+      "entity_name": "Maintenance_Notification",
+      "semantic_type": "maintenance_notification_id",
+      "domain": "Plant_Maintenance",
+      "is_core": true,
+      "description": "PM notification"
+    },
+    "maintenance_plan": {
+      "entity_name": "Maintenance_Plan",
+      "semantic_type": "maintenance_plan_id",
+      "domain": "Plant_Maintenance",
+      "is_core": false,
+      "description": "Preventive plan"
+    },
+    "measuring_point": {
+      "entity_name": "Measuring_Point",
+      "semantic_type": "measuring_point_id",
+      "domain": "Plant_Maintenance",
+      "is_core": false,
+      "description": "Measurement"
+    },
+    "warehouse": {
+      "entity_name": "Warehouse",
+      "semantic_type": "warehouse_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "Warehouse number"
+    },
+    "storage_type": {
+      "entity_name": "Storage_Type",
+      "semantic_type": "storage_type_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Storage type"
+    },
+    "storage_bin": {
+      "entity_name": "Storage_Bin",
+      "semantic_type": "storage_bin_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Bin location"
+    },
+    "warehouse_task": {
+      "entity_name": "Warehouse_Task",
+      "semantic_type": "warehouse_task_id",
+      "domain": "Warehouse_Management",
+      "is_core": true,
+      "description": "WM task"
+    },
+    "handling_unit": {
+      "entity_name": "Handling_Unit",
+      "semantic_type": "handling_unit_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "HU"
+    },
+    "wave": {
+      "entity_name": "Wave",
+      "semantic_type": "wave_id",
+      "domain": "Warehouse_Management",
+      "is_core": false,
+      "description": "Wave management"
+    },
+    "shipment": {
+      "entity_name": "Shipment",
+      "semantic_type": "shipment_id",
+      "domain": "Transportation",
+      "is_core": true,
+      "description": "Shipment"
+    },
+    "freight_order": {
+      "entity_name": "Freight_Order",
+      "semantic_type": "freight_order_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Freight order"
+    },
+    "carrier": {
+      "entity_name": "Carrier",
+      "semantic_type": "carrier_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Carrier/forwarder"
+    },
+    "route": {
+      "entity_name": "Route",
+      "semantic_type": "route_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Transportation route"
+    },
+    "freight_cost": {
+      "entity_name": "Freight_Cost",
+      "semantic_type": "freight_cost_id",
+      "domain": "Transportation",
+      "is_core": false,
+      "description": "Freight costing"
+    },
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Project_System",
+      "is_core": true,
+      "description": "Project definition"
+    },
+    "wbs_element": {
+      "entity_name": "WBS_Element",
+      "semantic_type": "wbs_element_id",
+      "domain": "Project_System",
+      "is_core": true,
+      "description": "WBS element"
+    },
+    "network": {
+      "entity_name": "Network",
+      "semantic_type": "network_id",
+      "domain": "Project_System",
+      "is_core": false,
+      "description": "Project network"
+    },
+    "activity": {
+      "entity_name": "Activity",
+      "semantic_type": "activity_id",
+      "domain": "Project_System",
+      "is_core": false,
+      "description": "Network activity"
+    },
+    "milestone": {
+      "entity_name": "Milestone",
+      "semantic_type": "milestone_id",
+      "domain": "Project_System",
+      "is_core": false,
+      "description": "Project milestone"
+    },
+    "personnel_number": {
+      "entity_name": "Personnel_Number",
+      "semantic_type": "personnel_number_id",
+      "domain": "Human_Resources",
+      "is_core": true,
+      "description": "Employee"
+    },
+    "org_unit": {
+      "entity_name": "Organizational_Unit",
+      "semantic_type": "org_unit_id",
+      "domain": "Human_Resources",
+      "is_core": true,
+      "description": "Org unit"
+    },
+    "position": {
+      "entity_name": "Position",
+      "semantic_type": "position_id",
+      "domain": "Human_Resources",
+      "is_core": true,
+      "description": "Position"
+    },
+    "time_record": {
+      "entity_name": "Time_Record",
+      "semantic_type": "time_record_id",
+      "domain": "Human_Resources",
+      "is_core": false,
+      "description": "Time recording"
+    },
+    "payroll_result": {
+      "entity_name": "Payroll_Result",
+      "semantic_type": "payroll_result_id",
+      "domain": "Human_Resources",
+      "is_core": false,
+      "description": "Payroll"
+    },
+    "cds_view": {
+      "entity_name": "CDS_View",
+      "semantic_type": "cds_view_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Core Data Services view"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "SAP report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Fiori dashboard"
+    },
+    "kpi": {
+      "entity_name": "KPI",
+      "semantic_type": "kpi_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Key performance indicator"
+    },
+    "query": {
+      "entity_name": "Query",
+      "semantic_type": "query_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "BW/SAC query"
+    },
+    "business_partner": {
+      "entity_name": "Business_Partner",
+      "semantic_type": "business_partner_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "BP master"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "SAP workflow"
+    },
+    "bapi": {
+      "entity_name": "BAPI",
+      "semantic_type": "bapi_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Business API"
+    },
+    "odata_service": {
+      "entity_name": "OData_Service",
+      "semantic_type": "odata_service_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "REST API"
+    },
+    "fiori_app": {
+      "entity_name": "Fiori_App",
+      "semantic_type": "fiori_app_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Fiori application"
+    },
+    "custom_field": {
+      "entity_name": "Custom_Field",
+      "semantic_type": "custom_field_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Extension field"
+    }
+  },
+  "hub_count": 138
+}

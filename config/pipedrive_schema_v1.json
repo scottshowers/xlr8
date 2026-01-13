@@ -1,0 +1,284 @@
+{
+  "version": "1.0",
+  "vendor": "Pipedrive",
+  "product": "Pipedrive",
+  "source": "Pipedrive API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://api.pipedrive.com/v1/",
+  "product_focus": "SMB sales CRM - pipeline-centric",
+  "key_differentiators": [
+    "Visual pipeline management",
+    "Sales-focused (not marketing)",
+    "Easy to use",
+    "Activity-based selling",
+    "AI sales assistant",
+    "Smart Docs",
+    "LeadBooster add-on"
+  ],
+  "domains": {
+    "Person_Organization": {
+      "description": "Contacts and companies",
+      "hub_count": 4,
+      "hubs": [
+        "person",
+        "organization",
+        "person_field",
+        "organization_field"
+      ]
+    },
+    "Deal": {
+      "description": "Sales pipeline (core focus)",
+      "hub_count": 4,
+      "hubs": [
+        "deal",
+        "pipeline",
+        "stage",
+        "deal_field"
+      ]
+    },
+    "Lead": {
+      "description": "Lead inbox",
+      "hub_count": 3,
+      "hubs": [
+        "lead",
+        "lead_label",
+        "lead_source"
+      ]
+    },
+    "Product": {
+      "description": "Products catalog",
+      "hub_count": 2,
+      "hubs": [
+        "product",
+        "deal_product"
+      ]
+    },
+    "Activity": {
+      "description": "Activities and tasks",
+      "hub_count": 3,
+      "hubs": [
+        "activity",
+        "activity_type",
+        "note"
+      ]
+    },
+    "Email": {
+      "description": "Email integration",
+      "hub_count": 2,
+      "hubs": [
+        "mail_message",
+        "mail_thread"
+      ]
+    },
+    "File": {
+      "description": "Files and documents",
+      "hub_count": 1,
+      "hubs": [
+        "file"
+      ]
+    },
+    "Goal": {
+      "description": "Sales goals",
+      "hub_count": 1,
+      "hubs": [
+        "goal"
+      ]
+    },
+    "Webhook_Automation": {
+      "description": "Automation",
+      "hub_count": 2,
+      "hubs": [
+        "webhook",
+        "workflow"
+      ]
+    },
+    "User": {
+      "description": "Users and teams",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "team",
+        "permission_set"
+      ]
+    }
+  },
+  "hubs": {
+    "person": {
+      "entity_name": "Person",
+      "semantic_type": "person_id",
+      "domain": "Person_Organization",
+      "is_core": true,
+      "description": "Contact person"
+    },
+    "organization": {
+      "entity_name": "Organization",
+      "semantic_type": "organization_id",
+      "domain": "Person_Organization",
+      "is_core": true,
+      "description": "Company"
+    },
+    "person_field": {
+      "entity_name": "Person_Field",
+      "semantic_type": "person_field_id",
+      "domain": "Person_Organization",
+      "is_core": false,
+      "description": "Custom person field"
+    },
+    "organization_field": {
+      "entity_name": "Organization_Field",
+      "semantic_type": "organization_field_id",
+      "domain": "Person_Organization",
+      "is_core": false,
+      "description": "Custom org field"
+    },
+    "deal": {
+      "entity_name": "Deal",
+      "semantic_type": "deal_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales deal"
+    },
+    "pipeline": {
+      "entity_name": "Pipeline",
+      "semantic_type": "pipeline_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales pipeline"
+    },
+    "stage": {
+      "entity_name": "Stage",
+      "semantic_type": "stage_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Pipeline stage"
+    },
+    "deal_field": {
+      "entity_name": "Deal_Field",
+      "semantic_type": "deal_field_id",
+      "domain": "Deal",
+      "is_core": false,
+      "description": "Custom deal field"
+    },
+    "lead": {
+      "entity_name": "Lead",
+      "semantic_type": "lead_id",
+      "domain": "Lead",
+      "is_core": true,
+      "description": "Lead"
+    },
+    "lead_label": {
+      "entity_name": "Lead_Label",
+      "semantic_type": "lead_label_id",
+      "domain": "Lead",
+      "is_core": false,
+      "description": "Lead tag"
+    },
+    "lead_source": {
+      "entity_name": "Lead_Source",
+      "semantic_type": "lead_source_id",
+      "domain": "Lead",
+      "is_core": false,
+      "description": "Lead origin"
+    },
+    "product": {
+      "entity_name": "Product",
+      "semantic_type": "product_id",
+      "domain": "Product",
+      "is_core": true,
+      "description": "Product"
+    },
+    "deal_product": {
+      "entity_name": "Deal_Product",
+      "semantic_type": "deal_product_id",
+      "domain": "Product",
+      "is_core": false,
+      "description": "Deal line item"
+    },
+    "activity": {
+      "entity_name": "Activity",
+      "semantic_type": "activity_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Activity"
+    },
+    "activity_type": {
+      "entity_name": "Activity_Type",
+      "semantic_type": "activity_type_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "Activity category"
+    },
+    "note": {
+      "entity_name": "Note",
+      "semantic_type": "note_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Note"
+    },
+    "mail_message": {
+      "entity_name": "Mail_Message",
+      "semantic_type": "mail_message_id",
+      "domain": "Email",
+      "is_core": true,
+      "description": "Email"
+    },
+    "mail_thread": {
+      "entity_name": "Mail_Thread",
+      "semantic_type": "mail_thread_id",
+      "domain": "Email",
+      "is_core": false,
+      "description": "Email thread"
+    },
+    "file": {
+      "entity_name": "File",
+      "semantic_type": "file_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "Attachment"
+    },
+    "goal": {
+      "entity_name": "Goal",
+      "semantic_type": "goal_id",
+      "domain": "Goal",
+      "is_core": true,
+      "description": "Sales goal"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Webhook_Automation",
+      "is_core": false,
+      "description": "Webhook"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Webhook_Automation",
+      "is_core": false,
+      "description": "Automation"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Team"
+    },
+    "permission_set": {
+      "entity_name": "Permission_Set",
+      "semantic_type": "permission_set_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Permissions"
+    }
+  },
+  "hub_count": 25
+}

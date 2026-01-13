@@ -1,0 +1,808 @@
+{
+  "version": "1.0",
+  "vendor": "Sage",
+  "product": "Sage Intacct",
+  "source": "Sage website, developer documentation",
+  "extracted": "2026-01-10",
+  "api_type": "XML/REST API",
+  "api_base": "https://api.intacct.com/ia/xml/xmlgw.phtml",
+  "product_focus": "Mid-market cloud financials - AICPA preferred",
+  "key_differentiators": [
+    "AICPA preferred financial management solution",
+    "Multi-dimensional reporting",
+    "Multi-entity consolidation in minutes",
+    "True cloud-native architecture",
+    "AI agents (Close, AP Automation, Financial Assurance)",
+    "Sage Copilot for finance",
+    "ASC 606 revenue recognition",
+    "Industry-specific editions"
+  ],
+  "modules": {
+    "Core Financials": "GL, AP, AR, Cash Management",
+    "Advanced Financials": "Fixed Assets, Multi-entity, Consolidation",
+    "Operational": "Purchasing, Order Entry, Inventory",
+    "Project": "Project Management, Time & Expense",
+    "Revenue": "Contracts, Subscription Billing, Rev Rec"
+  },
+  "domains": {
+    "General_Ledger": {
+      "description": "Core GL and financial reporting",
+      "hub_count": 7,
+      "hubs": [
+        "account",
+        "journal",
+        "journal_entry",
+        "reporting_period",
+        "account_group",
+        "statistical_account",
+        "gl_budget"
+      ]
+    },
+    "Dimensions": {
+      "description": "Multi-dimensional tracking",
+      "hub_count": 8,
+      "hubs": [
+        "location",
+        "department",
+        "class",
+        "customer_dimension",
+        "vendor_dimension",
+        "employee_dimension",
+        "project_dimension",
+        "item_dimension"
+      ]
+    },
+    "Accounts_Payable": {
+      "description": "Vendor bills and payments",
+      "hub_count": 7,
+      "hubs": [
+        "vendor",
+        "ap_bill",
+        "ap_bill_line",
+        "ap_payment",
+        "ap_adjustment",
+        "vendor_credit",
+        "ap_term"
+      ]
+    },
+    "Accounts_Receivable": {
+      "description": "Customer invoices and collections",
+      "hub_count": 7,
+      "hubs": [
+        "customer",
+        "ar_invoice",
+        "ar_invoice_line",
+        "ar_payment",
+        "ar_adjustment",
+        "customer_credit",
+        "ar_term"
+      ]
+    },
+    "Cash_Management": {
+      "description": "Bank and cash accounts",
+      "hub_count": 5,
+      "hubs": [
+        "bank_account",
+        "charge_card",
+        "deposit",
+        "bank_transfer",
+        "reconciliation"
+      ]
+    },
+    "Purchasing": {
+      "description": "Purchase orders",
+      "hub_count": 5,
+      "hubs": [
+        "purchase_order",
+        "po_line",
+        "po_receipt",
+        "receipt_line",
+        "vendor_return"
+      ]
+    },
+    "Order_Entry": {
+      "description": "Sales orders",
+      "hub_count": 4,
+      "hubs": [
+        "sales_order",
+        "so_line",
+        "price_list",
+        "shipment"
+      ]
+    },
+    "Inventory": {
+      "description": "Inventory control",
+      "hub_count": 5,
+      "hubs": [
+        "item",
+        "warehouse",
+        "inventory_transaction",
+        "bin",
+        "inventory_total"
+      ]
+    },
+    "Employee_Expenses": {
+      "description": "Expense management",
+      "hub_count": 5,
+      "hubs": [
+        "employee",
+        "expense_report",
+        "expense_line",
+        "expense_type",
+        "reimbursement"
+      ]
+    },
+    "Project": {
+      "description": "Project and resource management",
+      "hub_count": 6,
+      "hubs": [
+        "project",
+        "task",
+        "timesheet",
+        "timesheet_entry",
+        "project_budget",
+        "resource"
+      ]
+    },
+    "Contracts_Revenue": {
+      "description": "Contract and revenue management (ASC 606)",
+      "hub_count": 5,
+      "hubs": [
+        "contract",
+        "contract_line",
+        "revenue_schedule",
+        "revenue_recognition",
+        "deferred_revenue"
+      ]
+    },
+    "Subscription_Billing": {
+      "description": "Subscription management",
+      "hub_count": 4,
+      "hubs": [
+        "subscription",
+        "contract_billing",
+        "renewal",
+        "usage"
+      ]
+    },
+    "Fixed_Assets": {
+      "description": "Asset management",
+      "hub_count": 4,
+      "hubs": [
+        "fixed_asset",
+        "asset_type",
+        "depreciation",
+        "asset_disposal"
+      ]
+    },
+    "Consolidation": {
+      "description": "Multi-entity consolidation",
+      "hub_count": 4,
+      "hubs": [
+        "entity",
+        "consolidation_book",
+        "elimination",
+        "currency_translation"
+      ]
+    },
+    "Tax": {
+      "description": "Tax compliance",
+      "hub_count": 3,
+      "hubs": [
+        "tax_schedule",
+        "tax_detail",
+        "tax_authority"
+      ]
+    },
+    "Platform": {
+      "description": "Platform and configuration",
+      "hub_count": 6,
+      "hubs": [
+        "company",
+        "user",
+        "role",
+        "workflow",
+        "attachment",
+        "smart_event"
+      ]
+    }
+  },
+  "hubs": {
+    "account": {
+      "entity_name": "Account",
+      "semantic_type": "account_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "GL account"
+    },
+    "journal": {
+      "entity_name": "Journal",
+      "semantic_type": "journal_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Journal"
+    },
+    "journal_entry": {
+      "entity_name": "Journal_Entry",
+      "semantic_type": "journal_entry_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Journal entry"
+    },
+    "reporting_period": {
+      "entity_name": "Reporting_Period",
+      "semantic_type": "reporting_period_id",
+      "domain": "General_Ledger",
+      "is_core": true,
+      "description": "Period"
+    },
+    "account_group": {
+      "entity_name": "Account_Group",
+      "semantic_type": "account_group_id",
+      "domain": "General_Ledger",
+      "is_core": false,
+      "description": "Account grouping"
+    },
+    "statistical_account": {
+      "entity_name": "Statistical_Account",
+      "semantic_type": "statistical_account_id",
+      "domain": "General_Ledger",
+      "is_core": false,
+      "description": "Non-financial metric"
+    },
+    "gl_budget": {
+      "entity_name": "GL_Budget",
+      "semantic_type": "gl_budget_id",
+      "domain": "General_Ledger",
+      "is_core": false,
+      "description": "GL budget"
+    },
+    "location": {
+      "entity_name": "Location",
+      "semantic_type": "location_id",
+      "domain": "Dimensions",
+      "is_core": true,
+      "description": "Location dimension"
+    },
+    "department": {
+      "entity_name": "Department",
+      "semantic_type": "department_id",
+      "domain": "Dimensions",
+      "is_core": true,
+      "description": "Department dimension"
+    },
+    "class": {
+      "entity_name": "Class",
+      "semantic_type": "class_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Class dimension"
+    },
+    "customer_dimension": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_dimension_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Customer dimension"
+    },
+    "vendor_dimension": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_dimension_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Vendor dimension"
+    },
+    "employee_dimension": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_dimension_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Employee dimension"
+    },
+    "project_dimension": {
+      "entity_name": "Project",
+      "semantic_type": "project_dimension_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Project dimension"
+    },
+    "item_dimension": {
+      "entity_name": "Item",
+      "semantic_type": "item_dimension_id",
+      "domain": "Dimensions",
+      "is_core": false,
+      "description": "Item dimension"
+    },
+    "vendor": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Vendor master"
+    },
+    "ap_bill": {
+      "entity_name": "AP_Bill",
+      "semantic_type": "ap_bill_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Vendor bill"
+    },
+    "ap_bill_line": {
+      "entity_name": "AP_Bill_Line",
+      "semantic_type": "ap_bill_line_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Bill line"
+    },
+    "ap_payment": {
+      "entity_name": "AP_Payment",
+      "semantic_type": "ap_payment_id",
+      "domain": "Accounts_Payable",
+      "is_core": true,
+      "description": "Vendor payment"
+    },
+    "ap_adjustment": {
+      "entity_name": "AP_Adjustment",
+      "semantic_type": "ap_adjustment_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "AP adjustment"
+    },
+    "vendor_credit": {
+      "entity_name": "Vendor_Credit",
+      "semantic_type": "vendor_credit_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Vendor credit"
+    },
+    "ap_term": {
+      "entity_name": "AP_Term",
+      "semantic_type": "ap_term_id",
+      "domain": "Accounts_Payable",
+      "is_core": false,
+      "description": "Payment terms"
+    },
+    "customer": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer master"
+    },
+    "ar_invoice": {
+      "entity_name": "AR_Invoice",
+      "semantic_type": "ar_invoice_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer invoice"
+    },
+    "ar_invoice_line": {
+      "entity_name": "AR_Invoice_Line",
+      "semantic_type": "ar_invoice_line_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Invoice line"
+    },
+    "ar_payment": {
+      "entity_name": "AR_Payment",
+      "semantic_type": "ar_payment_id",
+      "domain": "Accounts_Receivable",
+      "is_core": true,
+      "description": "Customer payment"
+    },
+    "ar_adjustment": {
+      "entity_name": "AR_Adjustment",
+      "semantic_type": "ar_adjustment_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "AR adjustment"
+    },
+    "customer_credit": {
+      "entity_name": "Customer_Credit",
+      "semantic_type": "customer_credit_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Credit memo"
+    },
+    "ar_term": {
+      "entity_name": "AR_Term",
+      "semantic_type": "ar_term_id",
+      "domain": "Accounts_Receivable",
+      "is_core": false,
+      "description": "Payment terms"
+    },
+    "bank_account": {
+      "entity_name": "Bank_Account",
+      "semantic_type": "bank_account_id",
+      "domain": "Cash_Management",
+      "is_core": true,
+      "description": "Bank account"
+    },
+    "charge_card": {
+      "entity_name": "Charge_Card",
+      "semantic_type": "charge_card_id",
+      "domain": "Cash_Management",
+      "is_core": false,
+      "description": "Credit card"
+    },
+    "deposit": {
+      "entity_name": "Deposit",
+      "semantic_type": "deposit_id",
+      "domain": "Cash_Management",
+      "is_core": true,
+      "description": "Bank deposit"
+    },
+    "bank_transfer": {
+      "entity_name": "Bank_Transfer",
+      "semantic_type": "bank_transfer_id",
+      "domain": "Cash_Management",
+      "is_core": false,
+      "description": "Fund transfer"
+    },
+    "reconciliation": {
+      "entity_name": "Reconciliation",
+      "semantic_type": "reconciliation_id",
+      "domain": "Cash_Management",
+      "is_core": false,
+      "description": "Bank reconciliation"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Purchasing",
+      "is_core": true,
+      "description": "PO"
+    },
+    "po_line": {
+      "entity_name": "PO_Line",
+      "semantic_type": "po_line_id",
+      "domain": "Purchasing",
+      "is_core": false,
+      "description": "PO line"
+    },
+    "po_receipt": {
+      "entity_name": "PO_Receipt",
+      "semantic_type": "po_receipt_id",
+      "domain": "Purchasing",
+      "is_core": true,
+      "description": "Receipt"
+    },
+    "receipt_line": {
+      "entity_name": "Receipt_Line",
+      "semantic_type": "receipt_line_id",
+      "domain": "Purchasing",
+      "is_core": false,
+      "description": "Receipt line"
+    },
+    "vendor_return": {
+      "entity_name": "Vendor_Return",
+      "semantic_type": "vendor_return_id",
+      "domain": "Purchasing",
+      "is_core": false,
+      "description": "Return to vendor"
+    },
+    "sales_order": {
+      "entity_name": "Sales_Order",
+      "semantic_type": "sales_order_id",
+      "domain": "Order_Entry",
+      "is_core": true,
+      "description": "Sales order"
+    },
+    "so_line": {
+      "entity_name": "SO_Line",
+      "semantic_type": "so_line_id",
+      "domain": "Order_Entry",
+      "is_core": false,
+      "description": "SO line"
+    },
+    "price_list": {
+      "entity_name": "Order_Entry_Price_List",
+      "semantic_type": "price_list_id",
+      "domain": "Order_Entry",
+      "is_core": false,
+      "description": "Price list"
+    },
+    "shipment": {
+      "entity_name": "Shipment",
+      "semantic_type": "shipment_id",
+      "domain": "Order_Entry",
+      "is_core": true,
+      "description": "Shipment"
+    },
+    "item": {
+      "entity_name": "Item",
+      "semantic_type": "item_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Inventory item"
+    },
+    "warehouse": {
+      "entity_name": "Warehouse",
+      "semantic_type": "warehouse_id",
+      "domain": "Inventory",
+      "is_core": true,
+      "description": "Warehouse"
+    },
+    "inventory_transaction": {
+      "entity_name": "Inventory_Transaction",
+      "semantic_type": "inventory_transaction_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Inventory movement"
+    },
+    "bin": {
+      "entity_name": "Bin",
+      "semantic_type": "bin_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Bin location"
+    },
+    "inventory_total": {
+      "entity_name": "Inventory_Total",
+      "semantic_type": "inventory_total_id",
+      "domain": "Inventory",
+      "is_core": false,
+      "description": "Stock balance"
+    },
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Employee_Expenses",
+      "is_core": true,
+      "description": "Employee"
+    },
+    "expense_report": {
+      "entity_name": "Expense_Report",
+      "semantic_type": "expense_report_id",
+      "domain": "Employee_Expenses",
+      "is_core": true,
+      "description": "Expense report"
+    },
+    "expense_line": {
+      "entity_name": "Expense_Line",
+      "semantic_type": "expense_line_id",
+      "domain": "Employee_Expenses",
+      "is_core": false,
+      "description": "Expense line"
+    },
+    "expense_type": {
+      "entity_name": "Expense_Type",
+      "semantic_type": "expense_type_id",
+      "domain": "Employee_Expenses",
+      "is_core": false,
+      "description": "Expense category"
+    },
+    "reimbursement": {
+      "entity_name": "Reimbursement",
+      "semantic_type": "reimbursement_id",
+      "domain": "Employee_Expenses",
+      "is_core": false,
+      "description": "Reimbursement"
+    },
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Project"
+    },
+    "task": {
+      "entity_name": "Task",
+      "semantic_type": "task_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Project task"
+    },
+    "timesheet": {
+      "entity_name": "Timesheet",
+      "semantic_type": "timesheet_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Timesheet"
+    },
+    "timesheet_entry": {
+      "entity_name": "Timesheet_Entry",
+      "semantic_type": "timesheet_entry_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Time entry"
+    },
+    "project_budget": {
+      "entity_name": "Project_Budget",
+      "semantic_type": "project_budget_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Project budget"
+    },
+    "resource": {
+      "entity_name": "Resource",
+      "semantic_type": "resource_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Resource"
+    },
+    "contract": {
+      "entity_name": "Contract",
+      "semantic_type": "contract_id",
+      "domain": "Contracts_Revenue",
+      "is_core": true,
+      "description": "Revenue contract"
+    },
+    "contract_line": {
+      "entity_name": "Contract_Line",
+      "semantic_type": "contract_line_id",
+      "domain": "Contracts_Revenue",
+      "is_core": false,
+      "description": "Contract line"
+    },
+    "revenue_schedule": {
+      "entity_name": "Revenue_Schedule",
+      "semantic_type": "revenue_schedule_id",
+      "domain": "Contracts_Revenue",
+      "is_core": true,
+      "description": "Rev rec schedule"
+    },
+    "revenue_recognition": {
+      "entity_name": "Revenue_Recognition",
+      "semantic_type": "revenue_recognition_id",
+      "domain": "Contracts_Revenue",
+      "is_core": false,
+      "description": "Rev rec entry"
+    },
+    "deferred_revenue": {
+      "entity_name": "Deferred_Revenue",
+      "semantic_type": "deferred_revenue_id",
+      "domain": "Contracts_Revenue",
+      "is_core": false,
+      "description": "Deferred revenue"
+    },
+    "subscription": {
+      "entity_name": "Subscription",
+      "semantic_type": "subscription_id",
+      "domain": "Subscription_Billing",
+      "is_core": true,
+      "description": "Subscription"
+    },
+    "contract_billing": {
+      "entity_name": "Contract_Billing",
+      "semantic_type": "contract_billing_id",
+      "domain": "Subscription_Billing",
+      "is_core": false,
+      "description": "Billing schedule"
+    },
+    "renewal": {
+      "entity_name": "Renewal",
+      "semantic_type": "renewal_id",
+      "domain": "Subscription_Billing",
+      "is_core": false,
+      "description": "Renewal"
+    },
+    "usage": {
+      "entity_name": "Usage",
+      "semantic_type": "usage_id",
+      "domain": "Subscription_Billing",
+      "is_core": false,
+      "description": "Usage record"
+    },
+    "fixed_asset": {
+      "entity_name": "Fixed_Asset",
+      "semantic_type": "fixed_asset_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Fixed asset"
+    },
+    "asset_type": {
+      "entity_name": "Asset_Type",
+      "semantic_type": "asset_type_id",
+      "domain": "Fixed_Assets",
+      "is_core": false,
+      "description": "Asset category"
+    },
+    "depreciation": {
+      "entity_name": "Depreciation",
+      "semantic_type": "depreciation_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Depreciation"
+    },
+    "asset_disposal": {
+      "entity_name": "Asset_Disposal",
+      "semantic_type": "asset_disposal_id",
+      "domain": "Fixed_Assets",
+      "is_core": false,
+      "description": "Disposal"
+    },
+    "entity": {
+      "entity_name": "Entity",
+      "semantic_type": "entity_id",
+      "domain": "Consolidation",
+      "is_core": true,
+      "description": "Legal entity"
+    },
+    "consolidation_book": {
+      "entity_name": "Consolidation_Book",
+      "semantic_type": "consolidation_book_id",
+      "domain": "Consolidation",
+      "is_core": false,
+      "description": "Consolidation"
+    },
+    "elimination": {
+      "entity_name": "Elimination",
+      "semantic_type": "elimination_id",
+      "domain": "Consolidation",
+      "is_core": false,
+      "description": "Elimination entry"
+    },
+    "currency_translation": {
+      "entity_name": "Currency_Translation",
+      "semantic_type": "currency_translation_id",
+      "domain": "Consolidation",
+      "is_core": false,
+      "description": "FX translation"
+    },
+    "tax_schedule": {
+      "entity_name": "Tax_Schedule",
+      "semantic_type": "tax_schedule_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax schedule"
+    },
+    "tax_detail": {
+      "entity_name": "Tax_Detail",
+      "semantic_type": "tax_detail_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax code"
+    },
+    "tax_authority": {
+      "entity_name": "Tax_Authority",
+      "semantic_type": "tax_authority_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax jurisdiction"
+    },
+    "company": {
+      "entity_name": "Company",
+      "semantic_type": "company_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "Company"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "User"
+    },
+    "role": {
+      "entity_name": "Role",
+      "semantic_type": "role_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Role"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Approval workflow"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Document attachment"
+    },
+    "smart_event": {
+      "entity_name": "Smart_Event",
+      "semantic_type": "smart_event_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Automation trigger"
+    }
+  },
+  "hub_count": 85
+}

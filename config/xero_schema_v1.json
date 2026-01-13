@@ -1,0 +1,521 @@
+{
+  "version": "1.0",
+  "vendor": "Xero",
+  "product": "Xero",
+  "source": "Xero developer documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API (OAuth 2.0)",
+  "api_base": "https://api.xero.com/api.xro/2.0/",
+  "product_focus": "Global SMB accounting - strong UK/AU/NZ",
+  "key_differentiators": [
+    "Beautiful UX",
+    "Bank feeds in 21,000+ banks",
+    "Multi-currency native",
+    "Regional payroll (AU, NZ, UK)",
+    "Strong app ecosystem (1000+ integrations)",
+    "Xero HQ for accountants",
+    "Projects and tracking categories"
+  ],
+  "regions": {
+    "Australia": "Full payroll, STP, BAS",
+    "New Zealand": "Full payroll, GST",
+    "United Kingdom": "Full payroll, VAT, MTD",
+    "United States": "No payroll (integrations)",
+    "Global": "Multi-currency, 180+ currencies"
+  },
+  "domains": {
+    "Chart_Of_Accounts": {
+      "description": "Account structure",
+      "hub_count": 4,
+      "hubs": [
+        "account",
+        "account_type",
+        "tracking_category",
+        "tracking_option"
+      ]
+    },
+    "Banking": {
+      "description": "Bank feeds and reconciliation",
+      "hub_count": 4,
+      "hubs": [
+        "bank_account",
+        "bank_transaction",
+        "bank_transfer",
+        "statement_line"
+      ]
+    },
+    "Invoicing": {
+      "description": "Sales invoices",
+      "hub_count": 7,
+      "hubs": [
+        "invoice",
+        "invoice_line",
+        "credit_note",
+        "quote",
+        "repeating_invoice",
+        "overpayment",
+        "prepayment"
+      ]
+    },
+    "Contacts": {
+      "description": "Customers and suppliers",
+      "hub_count": 3,
+      "hubs": [
+        "contact",
+        "contact_group",
+        "contact_person"
+      ]
+    },
+    "Bills": {
+      "description": "Accounts payable",
+      "hub_count": 4,
+      "hubs": [
+        "bill",
+        "bill_line",
+        "purchase_order",
+        "supplier_credit"
+      ]
+    },
+    "Payments": {
+      "description": "Payment processing",
+      "hub_count": 3,
+      "hubs": [
+        "payment",
+        "batch_payment",
+        "payment_service"
+      ]
+    },
+    "Items": {
+      "description": "Products and services",
+      "hub_count": 1,
+      "hubs": [
+        "item"
+      ]
+    },
+    "Expense_Claims": {
+      "description": "Employee expenses",
+      "hub_count": 2,
+      "hubs": [
+        "expense_claim",
+        "receipt"
+      ]
+    },
+    "Fixed_Assets": {
+      "description": "Asset management",
+      "hub_count": 2,
+      "hubs": [
+        "fixed_asset",
+        "asset_type"
+      ]
+    },
+    "Payroll": {
+      "description": "Payroll (regional)",
+      "hub_count": 6,
+      "hubs": [
+        "employee",
+        "pay_run",
+        "payslip",
+        "leave_application",
+        "timesheet",
+        "pay_item"
+      ]
+    },
+    "Tax": {
+      "description": "Tax rates and reporting",
+      "hub_count": 3,
+      "hubs": [
+        "tax_rate",
+        "tax_type",
+        "bas_report"
+      ]
+    },
+    "Journal": {
+      "description": "Manual journals",
+      "hub_count": 2,
+      "hubs": [
+        "manual_journal",
+        "journal_line"
+      ]
+    },
+    "Projects": {
+      "description": "Project tracking",
+      "hub_count": 3,
+      "hubs": [
+        "project",
+        "project_task",
+        "project_time"
+      ]
+    },
+    "Reports": {
+      "description": "Financial reports",
+      "hub_count": 2,
+      "hubs": [
+        "report",
+        "budget"
+      ]
+    },
+    "Platform": {
+      "description": "Organization and settings",
+      "hub_count": 4,
+      "hubs": [
+        "organisation",
+        "user",
+        "currency",
+        "branding_theme"
+      ]
+    }
+  },
+  "hubs": {
+    "account": {
+      "entity_name": "Account",
+      "semantic_type": "account_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": true,
+      "description": "GL account"
+    },
+    "account_type": {
+      "entity_name": "Account_Type",
+      "semantic_type": "account_type_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Account category"
+    },
+    "tracking_category": {
+      "entity_name": "Tracking_Category",
+      "semantic_type": "tracking_category_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Tracking dimension"
+    },
+    "tracking_option": {
+      "entity_name": "Tracking_Option",
+      "semantic_type": "tracking_option_id",
+      "domain": "Chart_Of_Accounts",
+      "is_core": false,
+      "description": "Tracking value"
+    },
+    "bank_account": {
+      "entity_name": "Bank_Account",
+      "semantic_type": "bank_account_id",
+      "domain": "Banking",
+      "is_core": true,
+      "description": "Bank account"
+    },
+    "bank_transaction": {
+      "entity_name": "Bank_Transaction",
+      "semantic_type": "bank_transaction_id",
+      "domain": "Banking",
+      "is_core": true,
+      "description": "Bank statement line"
+    },
+    "bank_transfer": {
+      "entity_name": "Bank_Transfer",
+      "semantic_type": "bank_transfer_id",
+      "domain": "Banking",
+      "is_core": false,
+      "description": "Inter-account transfer"
+    },
+    "statement_line": {
+      "entity_name": "Statement_Line",
+      "semantic_type": "statement_line_id",
+      "domain": "Banking",
+      "is_core": false,
+      "description": "Bank feed line"
+    },
+    "invoice": {
+      "entity_name": "Invoice",
+      "semantic_type": "invoice_id",
+      "domain": "Invoicing",
+      "is_core": true,
+      "description": "Sales invoice"
+    },
+    "invoice_line": {
+      "entity_name": "Invoice_Line",
+      "semantic_type": "invoice_line_id",
+      "domain": "Invoicing",
+      "is_core": false,
+      "description": "Invoice line"
+    },
+    "credit_note": {
+      "entity_name": "Credit_Note",
+      "semantic_type": "credit_note_id",
+      "domain": "Invoicing",
+      "is_core": false,
+      "description": "Credit note"
+    },
+    "quote": {
+      "entity_name": "Quote",
+      "semantic_type": "quote_id",
+      "domain": "Invoicing",
+      "is_core": true,
+      "description": "Quote"
+    },
+    "repeating_invoice": {
+      "entity_name": "Repeating_Invoice",
+      "semantic_type": "repeating_invoice_id",
+      "domain": "Invoicing",
+      "is_core": false,
+      "description": "Recurring invoice"
+    },
+    "overpayment": {
+      "entity_name": "Overpayment",
+      "semantic_type": "overpayment_id",
+      "domain": "Invoicing",
+      "is_core": false,
+      "description": "Overpayment"
+    },
+    "prepayment": {
+      "entity_name": "Prepayment",
+      "semantic_type": "prepayment_id",
+      "domain": "Invoicing",
+      "is_core": false,
+      "description": "Prepayment"
+    },
+    "contact": {
+      "entity_name": "Contact",
+      "semantic_type": "contact_id",
+      "domain": "Contacts",
+      "is_core": true,
+      "description": "Customer/supplier"
+    },
+    "contact_group": {
+      "entity_name": "Contact_Group",
+      "semantic_type": "contact_group_id",
+      "domain": "Contacts",
+      "is_core": false,
+      "description": "Contact group"
+    },
+    "contact_person": {
+      "entity_name": "Contact_Person",
+      "semantic_type": "contact_person_id",
+      "domain": "Contacts",
+      "is_core": false,
+      "description": "Contact person"
+    },
+    "bill": {
+      "entity_name": "Bill",
+      "semantic_type": "bill_id",
+      "domain": "Bills",
+      "is_core": true,
+      "description": "Vendor bill"
+    },
+    "bill_line": {
+      "entity_name": "Bill_Line",
+      "semantic_type": "bill_line_id",
+      "domain": "Bills",
+      "is_core": false,
+      "description": "Bill line"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Bills",
+      "is_core": true,
+      "description": "Purchase order"
+    },
+    "supplier_credit": {
+      "entity_name": "Supplier_Credit",
+      "semantic_type": "supplier_credit_id",
+      "domain": "Bills",
+      "is_core": false,
+      "description": "Supplier credit"
+    },
+    "payment": {
+      "entity_name": "Payment",
+      "semantic_type": "payment_id",
+      "domain": "Payments",
+      "is_core": true,
+      "description": "Payment"
+    },
+    "batch_payment": {
+      "entity_name": "Batch_Payment",
+      "semantic_type": "batch_payment_id",
+      "domain": "Payments",
+      "is_core": false,
+      "description": "Batch payment"
+    },
+    "payment_service": {
+      "entity_name": "Payment_Service",
+      "semantic_type": "payment_service_id",
+      "domain": "Payments",
+      "is_core": false,
+      "description": "Payment gateway"
+    },
+    "item": {
+      "entity_name": "Item",
+      "semantic_type": "item_id",
+      "domain": "Items",
+      "is_core": true,
+      "description": "Product/service item"
+    },
+    "expense_claim": {
+      "entity_name": "Expense_Claim",
+      "semantic_type": "expense_claim_id",
+      "domain": "Expense_Claims",
+      "is_core": true,
+      "description": "Expense claim"
+    },
+    "receipt": {
+      "entity_name": "Receipt",
+      "semantic_type": "receipt_id",
+      "domain": "Expense_Claims",
+      "is_core": false,
+      "description": "Receipt"
+    },
+    "fixed_asset": {
+      "entity_name": "Fixed_Asset",
+      "semantic_type": "fixed_asset_id",
+      "domain": "Fixed_Assets",
+      "is_core": true,
+      "description": "Fixed asset"
+    },
+    "asset_type": {
+      "entity_name": "Asset_Type",
+      "semantic_type": "asset_type_id",
+      "domain": "Fixed_Assets",
+      "is_core": false,
+      "description": "Asset category"
+    },
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Employee"
+    },
+    "pay_run": {
+      "entity_name": "Pay_Run",
+      "semantic_type": "pay_run_id",
+      "domain": "Payroll",
+      "is_core": true,
+      "description": "Payroll run"
+    },
+    "payslip": {
+      "entity_name": "Payslip",
+      "semantic_type": "payslip_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Pay slip"
+    },
+    "leave_application": {
+      "entity_name": "Leave_Application",
+      "semantic_type": "leave_application_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Leave request"
+    },
+    "timesheet": {
+      "entity_name": "Timesheet",
+      "semantic_type": "timesheet_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Timesheet"
+    },
+    "pay_item": {
+      "entity_name": "Pay_Item",
+      "semantic_type": "pay_item_id",
+      "domain": "Payroll",
+      "is_core": false,
+      "description": "Payroll component"
+    },
+    "tax_rate": {
+      "entity_name": "Tax_Rate",
+      "semantic_type": "tax_rate_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax rate"
+    },
+    "tax_type": {
+      "entity_name": "Tax_Type",
+      "semantic_type": "tax_type_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax category"
+    },
+    "bas_report": {
+      "entity_name": "BAS_Report",
+      "semantic_type": "bas_report_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Business activity statement"
+    },
+    "manual_journal": {
+      "entity_name": "Manual_Journal",
+      "semantic_type": "manual_journal_id",
+      "domain": "Journal",
+      "is_core": true,
+      "description": "Manual journal"
+    },
+    "journal_line": {
+      "entity_name": "Journal_Line",
+      "semantic_type": "journal_line_id",
+      "domain": "Journal",
+      "is_core": false,
+      "description": "Journal line"
+    },
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Projects",
+      "is_core": true,
+      "description": "Project"
+    },
+    "project_task": {
+      "entity_name": "Project_Task",
+      "semantic_type": "project_task_id",
+      "domain": "Projects",
+      "is_core": false,
+      "description": "Task"
+    },
+    "project_time": {
+      "entity_name": "Project_Time",
+      "semantic_type": "project_time_id",
+      "domain": "Projects",
+      "is_core": false,
+      "description": "Time entry"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Reports",
+      "is_core": false,
+      "description": "Report"
+    },
+    "budget": {
+      "entity_name": "Budget",
+      "semantic_type": "budget_id",
+      "domain": "Reports",
+      "is_core": false,
+      "description": "Budget"
+    },
+    "organisation": {
+      "entity_name": "Organisation",
+      "semantic_type": "organisation_id",
+      "domain": "Platform",
+      "is_core": true,
+      "description": "Organization"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "User"
+    },
+    "currency": {
+      "entity_name": "Currency",
+      "semantic_type": "currency_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Currency"
+    },
+    "branding_theme": {
+      "entity_name": "Branding_Theme",
+      "semantic_type": "branding_theme_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Invoice template"
+    }
+  },
+  "hub_count": 50
+}

@@ -1,0 +1,516 @@
+{
+  "version": "1.0",
+  "vendor": "Zoho",
+  "product": "Zoho CRM",
+  "source": "Zoho Developer documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://www.zohoapis.com/crm/v{version}/",
+  "product_focus": "SMB/Mid-market CRM - part of Zoho One suite",
+  "key_differentiators": [
+    "Affordable pricing",
+    "Part of Zoho One (45+ apps)",
+    "Zia AI assistant",
+    "Blueprint process management",
+    "Canvas design studio (drag-drop UI)",
+    "CommandCenter (journey orchestration)",
+    "Sandbox environment",
+    "Multi-channel communication"
+  ],
+  "editions": {
+    "Free": "3 users, basic CRM",
+    "Standard": "Lead scoring, workflows",
+    "Professional": "Blueprints, inventory",
+    "Enterprise": "Zia AI, sandbox, multi-currency",
+    "Ultimate": "Advanced BI, premium support"
+  },
+  "domains": {
+    "Lead_Contact": {
+      "description": "Leads and contacts",
+      "hub_count": 4,
+      "hubs": [
+        "lead",
+        "contact",
+        "lead_source",
+        "lead_status"
+      ]
+    },
+    "Account": {
+      "description": "Accounts/companies",
+      "hub_count": 2,
+      "hubs": [
+        "account",
+        "account_type"
+      ]
+    },
+    "Deal": {
+      "description": "Sales pipeline",
+      "hub_count": 4,
+      "hubs": [
+        "deal",
+        "deal_stage",
+        "pipeline",
+        "contact_role"
+      ]
+    },
+    "Quote_Invoice": {
+      "description": "Quotes and billing",
+      "hub_count": 7,
+      "hubs": [
+        "quote",
+        "quote_line",
+        "sales_order",
+        "sales_order_line",
+        "invoice",
+        "invoice_line",
+        "purchase_order"
+      ]
+    },
+    "Product": {
+      "description": "Products and pricing",
+      "hub_count": 3,
+      "hubs": [
+        "product",
+        "price_book",
+        "vendor"
+      ]
+    },
+    "Activity": {
+      "description": "Activities and tasks",
+      "hub_count": 4,
+      "hubs": [
+        "task",
+        "call",
+        "meeting",
+        "note"
+      ]
+    },
+    "Campaign": {
+      "description": "Marketing campaigns",
+      "hub_count": 2,
+      "hubs": [
+        "campaign",
+        "campaign_member"
+      ]
+    },
+    "Case": {
+      "description": "Support cases (Zoho Desk integration)",
+      "hub_count": 2,
+      "hubs": [
+        "case",
+        "solution"
+      ]
+    },
+    "Forecast": {
+      "description": "Sales forecasting",
+      "hub_count": 2,
+      "hubs": [
+        "forecast",
+        "territory"
+      ]
+    },
+    "Email": {
+      "description": "Email integration",
+      "hub_count": 2,
+      "hubs": [
+        "email",
+        "email_template"
+      ]
+    },
+    "Automation": {
+      "description": "Workflow and automation",
+      "hub_count": 5,
+      "hubs": [
+        "workflow",
+        "blueprint",
+        "scoring_rule",
+        "assignment_rule",
+        "macro"
+      ]
+    },
+    "Analytics": {
+      "description": "Reports and analytics",
+      "hub_count": 3,
+      "hubs": [
+        "report",
+        "dashboard",
+        "analytics_component"
+      ]
+    },
+    "User_Role": {
+      "description": "Users and security",
+      "hub_count": 4,
+      "hubs": [
+        "user",
+        "role",
+        "profile",
+        "group"
+      ]
+    },
+    "Platform": {
+      "description": "Platform customization",
+      "hub_count": 6,
+      "hubs": [
+        "module",
+        "field",
+        "layout",
+        "related_list",
+        "subform",
+        "attachment"
+      ]
+    }
+  },
+  "hubs": {
+    "lead": {
+      "entity_name": "Lead",
+      "semantic_type": "lead_id",
+      "domain": "Lead_Contact",
+      "is_core": true,
+      "description": "Sales lead"
+    },
+    "contact": {
+      "entity_name": "Contact",
+      "semantic_type": "contact_id",
+      "domain": "Lead_Contact",
+      "is_core": true,
+      "description": "Person"
+    },
+    "lead_source": {
+      "entity_name": "Lead_Source",
+      "semantic_type": "lead_source_id",
+      "domain": "Lead_Contact",
+      "is_core": false,
+      "description": "Lead origin"
+    },
+    "lead_status": {
+      "entity_name": "Lead_Status",
+      "semantic_type": "lead_status_id",
+      "domain": "Lead_Contact",
+      "is_core": false,
+      "description": "Lead stage"
+    },
+    "account": {
+      "entity_name": "Account",
+      "semantic_type": "account_id",
+      "domain": "Account",
+      "is_core": true,
+      "description": "Company/organization"
+    },
+    "account_type": {
+      "entity_name": "Account_Type",
+      "semantic_type": "account_type_id",
+      "domain": "Account",
+      "is_core": false,
+      "description": "Account category"
+    },
+    "deal": {
+      "entity_name": "Deal",
+      "semantic_type": "deal_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales opportunity"
+    },
+    "deal_stage": {
+      "entity_name": "Deal_Stage",
+      "semantic_type": "deal_stage_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Pipeline stage"
+    },
+    "pipeline": {
+      "entity_name": "Pipeline",
+      "semantic_type": "pipeline_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales pipeline"
+    },
+    "contact_role": {
+      "entity_name": "Contact_Role",
+      "semantic_type": "contact_role_id",
+      "domain": "Deal",
+      "is_core": false,
+      "description": "Deal contact"
+    },
+    "quote": {
+      "entity_name": "Quote",
+      "semantic_type": "quote_id",
+      "domain": "Quote_Invoice",
+      "is_core": true,
+      "description": "Sales quote"
+    },
+    "quote_line": {
+      "entity_name": "Quote_Line",
+      "semantic_type": "quote_line_id",
+      "domain": "Quote_Invoice",
+      "is_core": false,
+      "description": "Quote line"
+    },
+    "sales_order": {
+      "entity_name": "Sales_Order",
+      "semantic_type": "sales_order_id",
+      "domain": "Quote_Invoice",
+      "is_core": true,
+      "description": "Sales order"
+    },
+    "sales_order_line": {
+      "entity_name": "Sales_Order_Line",
+      "semantic_type": "sales_order_line_id",
+      "domain": "Quote_Invoice",
+      "is_core": false,
+      "description": "SO line"
+    },
+    "invoice": {
+      "entity_name": "Invoice",
+      "semantic_type": "invoice_id",
+      "domain": "Quote_Invoice",
+      "is_core": true,
+      "description": "Invoice"
+    },
+    "invoice_line": {
+      "entity_name": "Invoice_Line",
+      "semantic_type": "invoice_line_id",
+      "domain": "Quote_Invoice",
+      "is_core": false,
+      "description": "Invoice line"
+    },
+    "purchase_order": {
+      "entity_name": "Purchase_Order",
+      "semantic_type": "purchase_order_id",
+      "domain": "Quote_Invoice",
+      "is_core": false,
+      "description": "Purchase order"
+    },
+    "product": {
+      "entity_name": "Product",
+      "semantic_type": "product_id",
+      "domain": "Product",
+      "is_core": true,
+      "description": "Product"
+    },
+    "price_book": {
+      "entity_name": "Price_Book",
+      "semantic_type": "price_book_id",
+      "domain": "Product",
+      "is_core": true,
+      "description": "Price book"
+    },
+    "vendor": {
+      "entity_name": "Vendor",
+      "semantic_type": "vendor_id",
+      "domain": "Product",
+      "is_core": false,
+      "description": "Supplier"
+    },
+    "task": {
+      "entity_name": "Task",
+      "semantic_type": "task_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Task"
+    },
+    "call": {
+      "entity_name": "Call",
+      "semantic_type": "call_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Phone call"
+    },
+    "meeting": {
+      "entity_name": "Meeting",
+      "semantic_type": "meeting_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Meeting/event"
+    },
+    "note": {
+      "entity_name": "Note",
+      "semantic_type": "note_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Note"
+    },
+    "campaign": {
+      "entity_name": "Campaign",
+      "semantic_type": "campaign_id",
+      "domain": "Campaign",
+      "is_core": true,
+      "description": "Marketing campaign"
+    },
+    "campaign_member": {
+      "entity_name": "Campaign_Member",
+      "semantic_type": "campaign_member_id",
+      "domain": "Campaign",
+      "is_core": false,
+      "description": "Campaign response"
+    },
+    "case": {
+      "entity_name": "Case",
+      "semantic_type": "case_id",
+      "domain": "Case",
+      "is_core": true,
+      "description": "Support case"
+    },
+    "solution": {
+      "entity_name": "Solution",
+      "semantic_type": "solution_id",
+      "domain": "Case",
+      "is_core": false,
+      "description": "Solution/KB"
+    },
+    "forecast": {
+      "entity_name": "Forecast",
+      "semantic_type": "forecast_id",
+      "domain": "Forecast",
+      "is_core": true,
+      "description": "Sales forecast"
+    },
+    "territory": {
+      "entity_name": "Territory",
+      "semantic_type": "territory_id",
+      "domain": "Forecast",
+      "is_core": false,
+      "description": "Sales territory"
+    },
+    "email": {
+      "entity_name": "Email",
+      "semantic_type": "email_id",
+      "domain": "Email",
+      "is_core": true,
+      "description": "Email"
+    },
+    "email_template": {
+      "entity_name": "Email_Template",
+      "semantic_type": "email_template_id",
+      "domain": "Email",
+      "is_core": false,
+      "description": "Email template"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Automation",
+      "is_core": true,
+      "description": "Workflow rule"
+    },
+    "blueprint": {
+      "entity_name": "Blueprint",
+      "semantic_type": "blueprint_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Process blueprint"
+    },
+    "scoring_rule": {
+      "entity_name": "Scoring_Rule",
+      "semantic_type": "scoring_rule_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Lead scoring"
+    },
+    "assignment_rule": {
+      "entity_name": "Assignment_Rule",
+      "semantic_type": "assignment_rule_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Auto-assignment"
+    },
+    "macro": {
+      "entity_name": "Macro",
+      "semantic_type": "macro_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Macro action"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Dashboard"
+    },
+    "analytics_component": {
+      "entity_name": "Analytics_Component",
+      "semantic_type": "analytics_component_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Analytics widget"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Role",
+      "is_core": true,
+      "description": "CRM user"
+    },
+    "role": {
+      "entity_name": "Role",
+      "semantic_type": "role_id",
+      "domain": "User_Role",
+      "is_core": false,
+      "description": "Security role"
+    },
+    "profile": {
+      "entity_name": "Profile",
+      "semantic_type": "profile_id",
+      "domain": "User_Role",
+      "is_core": false,
+      "description": "Permission profile"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "User_Role",
+      "is_core": false,
+      "description": "User group"
+    },
+    "module": {
+      "entity_name": "Module",
+      "semantic_type": "module_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom module"
+    },
+    "field": {
+      "entity_name": "Field",
+      "semantic_type": "field_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom field"
+    },
+    "layout": {
+      "entity_name": "Layout",
+      "semantic_type": "layout_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Page layout"
+    },
+    "related_list": {
+      "entity_name": "Related_List",
+      "semantic_type": "related_list_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Related list"
+    },
+    "subform": {
+      "entity_name": "Subform",
+      "semantic_type": "subform_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Line item subform"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "File attachment"
+    }
+  },
+  "hub_count": 50
+}

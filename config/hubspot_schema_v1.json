@@ -1,0 +1,554 @@
+{
+  "version": "1.0",
+  "vendor": "HubSpot",
+  "product": "HubSpot",
+  "source": "HubSpot Developer Documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://api.hubapi.com/",
+  "product_focus": "All-in-one CRM platform - SMB/Mid-market",
+  "key_differentiators": [
+    "Free CRM tier",
+    "All-in-one platform (CRM + Marketing + Sales + Service)",
+    "Easy to use / fast time-to-value",
+    "Strong inbound marketing heritage",
+    "App Marketplace (1500+ integrations)",
+    "Workflows and sequences",
+    "Custom objects (Enterprise)",
+    "Breeze AI assistant"
+  ],
+  "hubs": {
+    "Marketing Hub": "Email, forms, landing pages, automation, ads",
+    "Sales Hub": "Deals, quotes, sequences, playbooks, forecasting",
+    "Service Hub": "Tickets, knowledge base, feedback, conversations",
+    "CMS Hub": "Website, blog, landing pages",
+    "Operations Hub": "Data sync, programmable automation, data quality"
+  },
+  "domains": {
+    "Contact": {
+      "description": "Contact management",
+      "hub_count": 4,
+      "hubs": [
+        "contact",
+        "lifecycle_stage",
+        "lead_status",
+        "contact_list"
+      ]
+    },
+    "Company": {
+      "description": "Company/organization",
+      "hub_count": 2,
+      "hubs": [
+        "company",
+        "company_owner"
+      ]
+    },
+    "Deal": {
+      "description": "Sales pipeline",
+      "hub_count": 5,
+      "hubs": [
+        "deal",
+        "deal_stage",
+        "deal_pipeline",
+        "line_item",
+        "deal_split"
+      ]
+    },
+    "Ticket": {
+      "description": "Service Hub - customer support",
+      "hub_count": 3,
+      "hubs": [
+        "ticket",
+        "ticket_pipeline",
+        "ticket_stage"
+      ]
+    },
+    "Product": {
+      "description": "Product catalog",
+      "hub_count": 2,
+      "hubs": [
+        "product",
+        "product_folder"
+      ]
+    },
+    "Quote": {
+      "description": "Quotes and proposals",
+      "hub_count": 2,
+      "hubs": [
+        "quote",
+        "quote_template"
+      ]
+    },
+    "Activity": {
+      "description": "Engagements and activities",
+      "hub_count": 7,
+      "hubs": [
+        "note",
+        "task",
+        "call",
+        "email",
+        "meeting",
+        "communication",
+        "postal_mail"
+      ]
+    },
+    "Conversation": {
+      "description": "Conversations inbox",
+      "hub_count": 3,
+      "hubs": [
+        "conversation",
+        "conversation_thread",
+        "chat_flow"
+      ]
+    },
+    "Marketing": {
+      "description": "Marketing Hub",
+      "hub_count": 8,
+      "hubs": [
+        "campaign",
+        "marketing_email",
+        "form",
+        "form_submission",
+        "landing_page",
+        "blog_post",
+        "cta",
+        "ad_account"
+      ]
+    },
+    "Automation": {
+      "description": "Workflows and automation",
+      "hub_count": 3,
+      "hubs": [
+        "workflow",
+        "sequence",
+        "playbook"
+      ]
+    },
+    "Feedback": {
+      "description": "Customer feedback",
+      "hub_count": 2,
+      "hubs": [
+        "feedback_submission",
+        "nps_survey"
+      ]
+    },
+    "Knowledge_Base": {
+      "description": "Help documentation",
+      "hub_count": 2,
+      "hubs": [
+        "knowledge_article",
+        "knowledge_category"
+      ]
+    },
+    "User_Team": {
+      "description": "Users and teams",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "team",
+        "owner"
+      ]
+    },
+    "Analytics": {
+      "description": "Reporting",
+      "hub_count": 3,
+      "hubs": [
+        "report",
+        "dashboard",
+        "attribution_report"
+      ]
+    },
+    "Platform": {
+      "description": "Platform objects",
+      "hub_count": 5,
+      "hubs": [
+        "custom_object",
+        "property",
+        "association",
+        "file",
+        "subscription"
+      ]
+    }
+  },
+  "hubs_data": {
+    "contact": {
+      "entity_name": "Contact",
+      "semantic_type": "contact_id",
+      "domain": "Contact",
+      "is_core": true,
+      "description": "Individual person"
+    },
+    "lifecycle_stage": {
+      "entity_name": "Lifecycle_Stage",
+      "semantic_type": "lifecycle_stage_id",
+      "domain": "Contact",
+      "is_core": true,
+      "description": "Contact stage"
+    },
+    "lead_status": {
+      "entity_name": "Lead_Status",
+      "semantic_type": "lead_status_id",
+      "domain": "Contact",
+      "is_core": false,
+      "description": "Lead qualification"
+    },
+    "contact_list": {
+      "entity_name": "Contact_List",
+      "semantic_type": "contact_list_id",
+      "domain": "Contact",
+      "is_core": false,
+      "description": "Static/smart list"
+    },
+    "company": {
+      "entity_name": "Company",
+      "semantic_type": "company_id",
+      "domain": "Company",
+      "is_core": true,
+      "description": "Business/organization"
+    },
+    "company_owner": {
+      "entity_name": "Company_Owner",
+      "semantic_type": "company_owner_id",
+      "domain": "Company",
+      "is_core": false,
+      "description": "Assigned owner"
+    },
+    "deal": {
+      "entity_name": "Deal",
+      "semantic_type": "deal_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales opportunity"
+    },
+    "deal_stage": {
+      "entity_name": "Deal_Stage",
+      "semantic_type": "deal_stage_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Pipeline stage"
+    },
+    "deal_pipeline": {
+      "entity_name": "Deal_Pipeline",
+      "semantic_type": "deal_pipeline_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Sales pipeline"
+    },
+    "line_item": {
+      "entity_name": "Line_Item",
+      "semantic_type": "line_item_id",
+      "domain": "Deal",
+      "is_core": true,
+      "description": "Product line item"
+    },
+    "deal_split": {
+      "entity_name": "Deal_Split",
+      "semantic_type": "deal_split_id",
+      "domain": "Deal",
+      "is_core": false,
+      "description": "Revenue attribution"
+    },
+    "ticket": {
+      "entity_name": "Ticket",
+      "semantic_type": "ticket_id",
+      "domain": "Ticket",
+      "is_core": true,
+      "description": "Support ticket"
+    },
+    "ticket_pipeline": {
+      "entity_name": "Ticket_Pipeline",
+      "semantic_type": "ticket_pipeline_id",
+      "domain": "Ticket",
+      "is_core": true,
+      "description": "Ticket pipeline"
+    },
+    "ticket_stage": {
+      "entity_name": "Ticket_Stage",
+      "semantic_type": "ticket_stage_id",
+      "domain": "Ticket",
+      "is_core": true,
+      "description": "Ticket status"
+    },
+    "product": {
+      "entity_name": "Product",
+      "semantic_type": "product_id",
+      "domain": "Product",
+      "is_core": true,
+      "description": "Product/service"
+    },
+    "product_folder": {
+      "entity_name": "Product_Folder",
+      "semantic_type": "product_folder_id",
+      "domain": "Product",
+      "is_core": false,
+      "description": "Product category"
+    },
+    "quote": {
+      "entity_name": "Quote",
+      "semantic_type": "quote_id",
+      "domain": "Quote",
+      "is_core": true,
+      "description": "Sales quote"
+    },
+    "quote_template": {
+      "entity_name": "Quote_Template",
+      "semantic_type": "quote_template_id",
+      "domain": "Quote",
+      "is_core": false,
+      "description": "Quote template"
+    },
+    "note": {
+      "entity_name": "Note",
+      "semantic_type": "note_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Note"
+    },
+    "task": {
+      "entity_name": "Task",
+      "semantic_type": "task_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Task"
+    },
+    "call": {
+      "entity_name": "Call",
+      "semantic_type": "call_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Phone call"
+    },
+    "email": {
+      "entity_name": "Email",
+      "semantic_type": "email_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Email engagement"
+    },
+    "meeting": {
+      "entity_name": "Meeting",
+      "semantic_type": "meeting_id",
+      "domain": "Activity",
+      "is_core": true,
+      "description": "Meeting"
+    },
+    "communication": {
+      "entity_name": "Communication",
+      "semantic_type": "communication_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "SMS/WhatsApp"
+    },
+    "postal_mail": {
+      "entity_name": "Postal_Mail",
+      "semantic_type": "postal_mail_id",
+      "domain": "Activity",
+      "is_core": false,
+      "description": "Mail"
+    },
+    "conversation": {
+      "entity_name": "Conversation",
+      "semantic_type": "conversation_id",
+      "domain": "Conversation",
+      "is_core": true,
+      "description": "Conversation thread"
+    },
+    "conversation_thread": {
+      "entity_name": "Conversation_Thread",
+      "semantic_type": "conversation_thread_id",
+      "domain": "Conversation",
+      "is_core": false,
+      "description": "Thread"
+    },
+    "chat_flow": {
+      "entity_name": "Chat_Flow",
+      "semantic_type": "chat_flow_id",
+      "domain": "Conversation",
+      "is_core": false,
+      "description": "Chatbot/live chat"
+    },
+    "campaign": {
+      "entity_name": "Campaign",
+      "semantic_type": "campaign_id",
+      "domain": "Marketing",
+      "is_core": true,
+      "description": "Marketing campaign"
+    },
+    "marketing_email": {
+      "entity_name": "Marketing_Email",
+      "semantic_type": "marketing_email_id",
+      "domain": "Marketing",
+      "is_core": true,
+      "description": "Email campaign"
+    },
+    "form": {
+      "entity_name": "Form",
+      "semantic_type": "form_id",
+      "domain": "Marketing",
+      "is_core": true,
+      "description": "Web form"
+    },
+    "form_submission": {
+      "entity_name": "Form_Submission",
+      "semantic_type": "form_submission_id",
+      "domain": "Marketing",
+      "is_core": true,
+      "description": "Form response"
+    },
+    "landing_page": {
+      "entity_name": "Landing_Page",
+      "semantic_type": "landing_page_id",
+      "domain": "Marketing",
+      "is_core": false,
+      "description": "Landing page"
+    },
+    "blog_post": {
+      "entity_name": "Blog_Post",
+      "semantic_type": "blog_post_id",
+      "domain": "Marketing",
+      "is_core": false,
+      "description": "Blog content"
+    },
+    "cta": {
+      "entity_name": "CTA",
+      "semantic_type": "cta_id",
+      "domain": "Marketing",
+      "is_core": false,
+      "description": "Call-to-action"
+    },
+    "ad_account": {
+      "entity_name": "Ad_Account",
+      "semantic_type": "ad_account_id",
+      "domain": "Marketing",
+      "is_core": false,
+      "description": "Ads integration"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Automation",
+      "is_core": true,
+      "description": "Workflow automation"
+    },
+    "sequence": {
+      "entity_name": "Sequence",
+      "semantic_type": "sequence_id",
+      "domain": "Automation",
+      "is_core": true,
+      "description": "Sales sequence"
+    },
+    "playbook": {
+      "entity_name": "Playbook",
+      "semantic_type": "playbook_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Sales playbook"
+    },
+    "feedback_submission": {
+      "entity_name": "Feedback_Submission",
+      "semantic_type": "feedback_submission_id",
+      "domain": "Feedback",
+      "is_core": false,
+      "description": "Survey response"
+    },
+    "nps_survey": {
+      "entity_name": "NPS_Survey",
+      "semantic_type": "nps_survey_id",
+      "domain": "Feedback",
+      "is_core": false,
+      "description": "NPS survey"
+    },
+    "knowledge_article": {
+      "entity_name": "Knowledge_Article",
+      "semantic_type": "knowledge_article_id",
+      "domain": "Knowledge_Base",
+      "is_core": false,
+      "description": "KB article"
+    },
+    "knowledge_category": {
+      "entity_name": "Knowledge_Category",
+      "semantic_type": "knowledge_category_id",
+      "domain": "Knowledge_Base",
+      "is_core": false,
+      "description": "KB category"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Team",
+      "is_core": true,
+      "description": "HubSpot user"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "User team"
+    },
+    "owner": {
+      "entity_name": "Owner",
+      "semantic_type": "owner_id",
+      "domain": "User_Team",
+      "is_core": true,
+      "description": "Record owner"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Dashboard"
+    },
+    "attribution_report": {
+      "entity_name": "Attribution_Report",
+      "semantic_type": "attribution_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Attribution"
+    },
+    "custom_object": {
+      "entity_name": "Custom_Object",
+      "semantic_type": "custom_object_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom object"
+    },
+    "property": {
+      "entity_name": "Property",
+      "semantic_type": "property_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Custom property"
+    },
+    "association": {
+      "entity_name": "Association",
+      "semantic_type": "association_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Object association"
+    },
+    "file": {
+      "entity_name": "File",
+      "semantic_type": "file_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "File attachment"
+    },
+    "subscription": {
+      "entity_name": "Subscription",
+      "semantic_type": "subscription_id",
+      "domain": "Platform",
+      "is_core": false,
+      "description": "Email subscription"
+    }
+  },
+  "hub_count": 54
+}
