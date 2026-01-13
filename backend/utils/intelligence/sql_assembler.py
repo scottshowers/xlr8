@@ -1116,6 +1116,11 @@ class SQLAssembler:
         filters = []
         
         for match in term_matches:
+            # Skip entity fallback matches - they're for table selection, not filtering
+            if match.source == 'entity_fallback':
+                logger.warning(f"[SQL_ASSEMBLER] SKIP: Entity fallback match for '{match.term}' - no filter needed")
+                continue
+            
             # SAFETY CHECK: Only include conditions for tables that are in the query
             if match.table_name not in aliases:
                 logger.warning(f"[SQL_ASSEMBLER] SKIP: Table '{match.table_name}' not in query aliases, skipping filter for '{match.term}'")
