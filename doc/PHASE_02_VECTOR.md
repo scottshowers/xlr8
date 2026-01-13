@@ -49,7 +49,7 @@ Each query pulls relevant context from the right truth(s).
 | 2B.3 | Source Typing & Prioritization | 2-3 | ✅ DONE | Weight sources by reliability |
 | 2B.4 | Relevance Scoring & Filtering | 3-4 | ✅ DONE | Beyond similarity - contextual relevance |
 | 2B.5 | Citation Tracking | 2-3 | ✅ DONE | Track provenance for responses |
-| 2B.6 | Gap Detection Queries | 4-5 | NOT STARTED | Find missing truth coverage |
+| 2B.6 | Gap Detection Queries | 4-5 | ✅ DONE | Find missing truth coverage |
 
 ---
 
@@ -617,7 +617,51 @@ class CitationCollector:
 
 ---
 
-## Component 2B.6: Gap Detection Queries
+## Component 2B.6: Gap Detection Queries ✅ COMPLETE
+
+**Completed:** January 12, 2026
+
+**Implementation:**
+- File: `backend/utils/intelligence/gap_detector.py`
+- Integrated into: `backend/utils/intelligence/engine.py` (`_gather_reference_library()`)
+- Archived: Old HCM-specific `gap_detection_engine.py` moved to archive
+
+**Gap Types Detected:**
+| Gap Type | Severity | Description |
+|----------|----------|-------------|
+| Regulatory | high | No compliance/regulatory guidance found |
+| Compliance | high | No internal policy documentation found |
+| Intent | medium | No SOW/requirements found |
+| Reference | low | No best practice documentation found |
+
+**Coverage Threshold:** 0.5 (configurable)
+- Truths with confidence below threshold count as "missing"
+
+**GapAnalysis Output:**
+```python
+GapAnalysis(
+    topic="401k matching",
+    project="tea1000",
+    gaps=[Gap(truth_type="regulatory", severity="high", ...)],
+    covered_truths=["reference", "intent", "compliance"],
+    coverage_score=0.75
+)
+```
+
+**Test Results:**
+| Scenario | Coverage | Gaps |
+|----------|----------|------|
+| All truths present (>0.5) | 100% | 0 |
+| Missing regulatory | 75% | 1 (high) |
+| Low confidence reference + compliance | 50% | 2 |
+| No documentation | 0% | 4 |
+
+**Integration:**
+- Gap analysis runs automatically in `_gather_reference_library()`
+- Results stored in `analysis['gaps']`, `analysis['gap_summary']`, `analysis['coverage_score']`
+- Product-agnostic - no hardcoded domains
+
+**Original Design (preserved for reference):**
 
 **Goal:** Identify missing Five Truths coverage for a topic.
 
