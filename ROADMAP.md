@@ -40,13 +40,13 @@
 |-----------|-------------|-------|--------|
 | 1 | Categorical Lookups | - | ✅ DONE |
 | 2 | Multi-Table JOINs | - | ✅ DONE |
-| 3 | Numeric Comparisons | 4-6 | NOT STARTED |
-| 4 | Date/Time Filters | 4-6 | NOT STARTED |
-| 5 | OR Logic | 2-3 | NOT STARTED |
-| 6 | Negation | 2-3 | NOT STARTED |
-| 7 | Aggregations | 3-4 | NOT STARTED |
-| 8 | Group By | 2-3 | NOT STARTED |
-| 9 | Superlatives | 3-4 | NOT STARTED |
+| 3 | Numeric Comparisons | - | ✅ DONE |
+| 4 | Date/Time Filters | - | ✅ DONE |
+| 5 | OR Logic | - | ✅ DONE |
+| 6 | Negation | - | ✅ DONE |
+| 7 | Aggregations | - | ✅ DONE |
+| 8 | Group By | - | ✅ DONE |
+| 9 | Superlatives | - | ✅ DONE |
 | 10 | Multi-Hop Relationships | 6-8 | NOT STARTED |
 
 **Prerequisites:**
