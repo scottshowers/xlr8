@@ -28,6 +28,13 @@ from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
+# Known employee/person identifier columns - used for DISTINCT counting
+EMPLOYEE_IDENTIFIER_COLUMNS = {
+    'employee_number', 'person_number', 'worker_id', 'employee_id',
+    'person_id', 'emp_no', 'empno', 'emp_id', 'worker_number',
+    'employee_key', 'person_key', 'worker_key'
+}
+
 
 @dataclass
 class ScopeSegment:
@@ -376,7 +383,11 @@ class IntelligentScoping:
     
     def _query_segment_stats(self, dimension: str, dim_name: str, 
                             domain: str) -> List[ScopeSegment]:
-        """Query actual statistics for a segmentation dimension."""
+        """Query actual statistics for a segmentation dimension.
+        
+        IMPORTANT: Counts DISTINCT employees (not rows) to avoid inflation
+        when tables have multiple rows per employee (e.g., tax codes, deductions).
+        """
         segments = []
         
         try:
@@ -390,15 +401,26 @@ class IntelligentScoping:
             if not best_table:
                 return segments
             
+            # Find employee identifier for DISTINCT counting
+            emp_identifier = self._find_employee_identifier(best_table)
+            
+            # Build count expression - DISTINCT if we have an identifier, else COUNT(*)
+            if emp_identifier:
+                count_expr = f'COUNT(DISTINCT "{emp_identifier}")'
+                logger.debug(f"[SCOPE] Using DISTINCT count on '{emp_identifier}' in '{best_table}'")
+            else:
+                count_expr = 'COUNT(*)'
+                logger.debug(f"[SCOPE] No employee identifier found, using COUNT(*) for '{best_table}'")
+            
             # Query distinct values with counts
             sql = f'''
                 SELECT 
                     "{dimension}" as segment_value,
-                    COUNT(*) as record_count
+                    {count_expr} as employee_count
                 FROM "{best_table}"
                 WHERE "{dimension}" IS NOT NULL AND "{dimension}" != ''
                 GROUP BY "{dimension}"
-                ORDER BY record_count DESC
+                ORDER BY employee_count DESC
                 LIMIT 10
             '''
             
@@ -406,7 +428,7 @@ class IntelligentScoping:
             
             for row in rows:
                 value = row.get('segment_value', '')
-                count = row.get('record_count', 0)
+                count = row.get('employee_count', 0)
                 
                 if count >= self.MIN_SEGMENT_SIZE:
                     segments.append(ScopeSegment(
@@ -441,6 +463,27 @@ class IntelligentScoping:
             logger.debug(f"[SCOPE] Could not query column mappings: {e}")
         
         return tables
+    
+    def _find_employee_identifier(self, table: str) -> Optional[str]:
+        """Find the employee/person identifier column in a table for DISTINCT counting."""
+        try:
+            sql = f"""
+                SELECT original_column 
+                FROM _column_mappings 
+                WHERE table_name = '{table}'
+            """
+            rows = self.handler.query(sql)
+            
+            for row in rows:
+                col = row.get('original_column', '')
+                if col.lower() in EMPLOYEE_IDENTIFIER_COLUMNS:
+                    logger.debug(f"[SCOPE] Found employee identifier '{col}' in table '{table}'")
+                    return col
+                    
+        except Exception as e:
+            logger.debug(f"[SCOPE] Could not find employee identifier: {e}")
+        
+        return None
     
     def _select_best_table(self, tables: List[str], domain: str) -> Optional[str]:
         """Select the best table for querying (prefer transaction/employee tables)."""
