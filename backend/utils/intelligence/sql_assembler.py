@@ -24,12 +24,18 @@ FLOW:
 5. Build WHERE from term matches
 6. Return SQL
 
+EVOLUTION 10: Multi-Hop Relationships
+- Self-joins for supervisor/manager queries
+- Multi-hop JOIN chains
+- Relationship-aware SQL generation
+
 Author: XLR8 Team
-Version: 1.0.0
-Date: 2026-01-11
+Version: 1.1.0
+Date: 2026-01-12
 """
 
 import logging
+import re
 from typing import Dict, List, Optional, Set, Tuple, Any
 from dataclasses import dataclass, field
 from enum import Enum
@@ -54,6 +60,7 @@ class QueryIntent(Enum):
     COMPARE = "compare"
     FILTER = "filter"
     VALIDATE = "validate"
+    MULTI_HOP = "multi_hop"  # Evolution 10
     UNKNOWN = "unknown"
 
 
@@ -80,6 +87,23 @@ class JoinPath:
     column2: str
     semantic_type: str
     priority: int = 50
+    is_self_join: bool = False  # Evolution 10: for self-referential joins
+
+
+@dataclass
+class MultiHopRequest:
+    """
+    Evolution 10: Request for multi-hop relationship traversal.
+    
+    Example: "manager's department"
+    - relationship_type: 'supervisor'
+    - target_attribute: 'department'
+    - direction: 'forward' (employee → supervisor)
+    """
+    relationship_type: str  # e.g., 'supervisor', 'parent_org'
+    target_attribute: str   # e.g., 'department', 'location', 'name'
+    direction: str = 'forward'  # 'forward' or 'reverse'
+    filter_value: Optional[str] = None  # e.g., 'John' for "John's team"
 
 
 @dataclass
@@ -93,6 +117,7 @@ class AssembledQuery:
     primary_table: str
     success: bool = True
     error: Optional[str] = None
+    multi_hop_info: Optional[Dict] = None  # Evolution 10: additional info for multi-hop
 
 
 # =============================================================================
@@ -1144,6 +1169,255 @@ class SQLAssembler:
         
         where_clause = 'WHERE ' + ' AND '.join(conditions) if conditions else ""
         return where_clause, filters
+    
+    # =========================================================================
+    # EVOLUTION 10: MULTI-HOP RELATIONSHIP METHODS
+    # =========================================================================
+    
+    def build_multi_hop_query(self,
+                              primary_table: str,
+                              multi_hop: MultiHopRequest,
+                              term_matches: List[TermMatch] = None,
+                              limit: int = 100) -> AssembledQuery:
+        """
+        Build SQL for multi-hop relationship queries.
+        
+        Example: "manager's department"
+        - Find supervisor_id relationship
+        - Self-join to get supervisor record
+        - Select supervisor's department column
+        
+        Args:
+            primary_table: Starting table (e.g., employee table)
+            multi_hop: MultiHopRequest with relationship and target info
+            term_matches: Optional additional filters
+            limit: Row limit
+            
+        Returns:
+            AssembledQuery with self-join SQL
+        """
+        logger.warning(f"[SQL_ASSEMBLER] Building multi-hop query: {multi_hop.relationship_type} → {multi_hop.target_attribute}")
+        
+        # Find the relationship column in this table
+        relationship_info = self._find_relationship_column(
+            primary_table, 
+            multi_hop.relationship_type
+        )
+        
+        if not relationship_info:
+            return AssembledQuery(
+                sql="",
+                tables=[primary_table],
+                joins=[],
+                filters=[],
+                intent=QueryIntent.MULTI_HOP,
+                primary_table=primary_table,
+                success=False,
+                error=f"No relationship found for '{multi_hop.relationship_type}' in {primary_table}"
+            )
+        
+        source_col = relationship_info['source_column']
+        target_col = relationship_info['target_column']
+        
+        # Find the target attribute column
+        target_attr_col = self._find_target_attribute(
+            primary_table,
+            multi_hop.target_attribute
+        )
+        
+        if not target_attr_col:
+            return AssembledQuery(
+                sql="",
+                tables=[primary_table],
+                joins=[],
+                filters=[],
+                intent=QueryIntent.MULTI_HOP,
+                primary_table=primary_table,
+                success=False,
+                error=f"Column '{multi_hop.target_attribute}' not found in {primary_table}"
+            )
+        
+        # Build self-join SQL
+        # t0 = primary (employee)
+        # t1_mgr = supervisor (self-join)
+        sql = f'SELECT t0.*, t1_mgr."{target_attr_col}" as mgr_{target_attr_col}'
+        sql += f'\nFROM "{primary_table}" t0'
+        sql += f'\nJOIN "{primary_table}" t1_mgr ON t0."{source_col}" = t1_mgr."{target_col}"'
+        
+        # Build WHERE clause from term matches
+        if term_matches:
+            aliases = {primary_table: 't0'}
+            where_clause, filters = self._build_where_clause(term_matches, aliases)
+            if where_clause:
+                sql += f'\n{where_clause}'
+        else:
+            filters = []
+        
+        # Add filter for named person if specified (e.g., "John's team")
+        if multi_hop.filter_value:
+            # Find name column
+            name_col = self._find_target_attribute(primary_table, 'name')
+            if name_col:
+                safe_value = multi_hop.filter_value.replace("'", "''")
+                if filters:
+                    sql += f' AND t1_mgr."{name_col}" ILIKE \'%{safe_value}%\''
+                else:
+                    sql += f'\nWHERE t1_mgr."{name_col}" ILIKE \'%{safe_value}%\''
+        
+        sql += f'\nLIMIT {limit}'
+        
+        # Create self-join JoinPath
+        join = JoinPath(
+            table1=primary_table,
+            column1=source_col,
+            table2=primary_table,
+            column2=target_col,
+            semantic_type=multi_hop.relationship_type,
+            priority=100,
+            is_self_join=True
+        )
+        
+        return AssembledQuery(
+            sql=sql,
+            tables=[primary_table],
+            joins=[join],
+            filters=filters,
+            intent=QueryIntent.MULTI_HOP,
+            primary_table=primary_table,
+            success=True,
+            multi_hop_info={
+                'relationship': multi_hop.relationship_type,
+                'target_attribute': multi_hop.target_attribute,
+                'source_column': source_col,
+                'target_column': target_col,
+                'result_column': f'mgr_{target_attr_col}'
+            }
+        )
+    
+    def _find_relationship_column(self, 
+                                  table: str, 
+                                  relationship_type: str) -> Optional[Dict]:
+        """
+        Find a relationship column in a table.
+        
+        Looks up _column_relationships for self-reference columns.
+        
+        Args:
+            table: Table name
+            relationship_type: e.g., 'supervisor', 'parent_org'
+            
+        Returns:
+            Dict with source_column, target_column, or None
+        """
+        try:
+            # Check _column_relationships table
+            result = self.conn.execute("""
+                SELECT source_column, target_column
+                FROM _column_relationships
+                WHERE LOWER(project) = LOWER(?)
+                  AND source_table = ?
+                  AND semantic_meaning = ?
+                LIMIT 1
+            """, [self.project, table, relationship_type]).fetchone()
+            
+            if result:
+                logger.warning(f"[SQL_ASSEMBLER] Found relationship: {table}.{result[0]} → {result[1]} ({relationship_type})")
+                return {
+                    'source_column': result[0],
+                    'target_column': result[1]
+                }
+            
+            # Fallback: pattern matching on column names
+            supervisor_patterns = [
+                (r'supervisor.*(?:id|number|no)', r'employee.*(?:id|number|no)', 'supervisor'),
+                (r'manager.*(?:id|number|no)', r'employee.*(?:id|number|no)', 'supervisor'),
+                (r'reports.*to', r'employee.*(?:id|number|no)', 'supervisor'),
+            ]
+            
+            columns = self.conn.execute("""
+                SELECT column_name FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?) AND table_name = ?
+            """, [self.project, table]).fetchall()
+            
+            col_names = [r[0] for r in columns]
+            
+            for src_pat, tgt_pat, sem in supervisor_patterns:
+                if relationship_type != sem:
+                    continue
+                    
+                src_col = None
+                tgt_col = None
+                
+                for col in col_names:
+                    if re.search(src_pat, col.lower()):
+                        src_col = col
+                    elif re.search(tgt_pat, col.lower()):
+                        tgt_col = col
+                
+                if src_col and tgt_col:
+                    logger.warning(f"[SQL_ASSEMBLER] Pattern-matched relationship: {table}.{src_col} → {tgt_col}")
+                    return {
+                        'source_column': src_col,
+                        'target_column': tgt_col
+                    }
+                    
+        except Exception as e:
+            logger.warning(f"[SQL_ASSEMBLER] Error finding relationship: {e}")
+        
+        return None
+    
+    def _find_target_attribute(self, table: str, attribute: str) -> Optional[str]:
+        """
+        Find the actual column name for a target attribute.
+        
+        Maps user terms like 'department' to actual column names.
+        
+        Args:
+            table: Table name
+            attribute: Desired attribute (e.g., 'department', 'location')
+            
+        Returns:
+            Actual column name or None
+        """
+        # Attribute → possible column patterns
+        attribute_patterns = {
+            'department': ['department', 'dept', 'org_unit', 'cost_center'],
+            'location': ['location', 'loc_code', 'work_location', 'site'],
+            'job': ['job', 'position', 'job_code', 'job_title'],
+            'salary': ['salary', 'annual_salary', 'pay_rate', 'rate'],
+            'name': ['employee_name', 'full_name', 'name', 'first_name'],
+            'email': ['email', 'email_address', 'work_email'],
+            'phone': ['phone', 'phone_number', 'work_phone'],
+            'state': ['stateprovince', 'state', 'state_code'],
+            'status': ['employee_status', 'status', 'emp_status'],
+            'company': ['company_code', 'company', 'cocode', 'org_code'],
+        }
+        
+        patterns = attribute_patterns.get(attribute.lower(), [attribute.lower()])
+        
+        try:
+            columns = self.conn.execute("""
+                SELECT column_name FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?) AND table_name = ?
+            """, [self.project, table]).fetchall()
+            
+            col_names = [r[0] for r in columns]
+            
+            # Check each pattern
+            for pattern in patterns:
+                for col in col_names:
+                    if pattern in col.lower() or col.lower() in pattern:
+                        return col
+            
+            # Exact match fallback
+            for col in col_names:
+                if col.lower() == attribute.lower():
+                    return col
+                    
+        except Exception as e:
+            logger.debug(f"[SQL_ASSEMBLER] Error finding attribute column: {e}")
+        
+        return None
 
 
 # =============================================================================
