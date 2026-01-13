@@ -95,6 +95,15 @@ from .chunk_classifier import (
     classify_document,
 )
 
+# Truth Router (Query-aware vector search routing)
+from .truth_router import (
+    TruthRouter,
+    TruthQuery,
+    RoutingResult,
+    get_router,
+    route_query,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -158,6 +167,13 @@ __all__ = [
     'ClassificationResult',
     'get_classifier',
     'classify_document',
+    
+    # Truth Router
+    'TruthRouter',
+    'TruthQuery',
+    'RoutingResult',
+    'get_router',
+    'route_query',
     
     # Gatherers
     'BaseGatherer',
