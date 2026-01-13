@@ -2435,12 +2435,12 @@ def _detect_relationships(conn: duckdb.DuckDBPyConnection, project: str) -> Dict
         for (table_name,) in tables:
             # Get all columns for this table
             columns = conn.execute("""
-                SELECT column_name, semantic_type, inferred_type
+                SELECT column_name, original_dtype
                 FROM _column_profiles
                 WHERE LOWER(project) = LOWER(?) AND table_name = ?
             """, [project, table_name]).fetchall()
             
-            column_info = {row[0].lower(): {'name': row[0], 'semantic': row[1], 'type': row[2]} 
+            column_info = {row[0].lower(): {'name': row[0], 'dtype': row[1]} 
                           for row in columns}
             
             # Check for self-reference patterns
