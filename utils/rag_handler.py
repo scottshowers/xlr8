@@ -125,6 +125,23 @@ except ImportError:
     except ImportError:
         logger.warning("Entity Detector not available - chunks will not be tagged with hub references")
 
+# Import chunk classifier for Five Truths domain tagging
+CHUNK_CLASSIFIER_AVAILABLE = False
+chunk_classifier = None
+try:
+    from backend.utils.intelligence.chunk_classifier import get_classifier, ClassificationResult
+    chunk_classifier = get_classifier()
+    CHUNK_CLASSIFIER_AVAILABLE = True
+    logger.info("✅ Chunk Classifier loaded for Five Truths domain tagging")
+except ImportError:
+    try:
+        from utils.intelligence.chunk_classifier import get_classifier, ClassificationResult
+        chunk_classifier = get_classifier()
+        CHUNK_CLASSIFIER_AVAILABLE = True
+        logger.info("✅ Chunk Classifier loaded for Five Truths domain tagging (alt path)")
+    except ImportError:
+        logger.warning("Chunk Classifier not available - documents will not be domain-tagged")
+
 
 class RAGHandler:
     """
@@ -452,6 +469,11 @@ class RAGHandler:
         """
         Add a document to a ChromaDB collection with optional progress reporting.
         
+        Now includes Five Truths classification:
+        - truth_type: intent | reference | regulatory | compliance
+        - domain: demographics | earnings | deductions | taxes | time | organization | etc.
+        - source_authority: government | vendor | industry | customer | internal
+        
         Returns:
             int: Number of chunks successfully added (0 if failed)
         """
@@ -462,8 +484,47 @@ class RAGHandler:
             )
             
             project_id = metadata.get('project_id')
-            truth_type = metadata.get('truth_type')  # NEW: Extract truth_type
-            system = metadata.get('system')  # NEW: System tag (UKG, Workday, etc.)
+            truth_type = metadata.get('truth_type')  # May be pre-classified
+            system = metadata.get('system')  # System tag (UKG, Workday, etc.)
+            domain = metadata.get('domain')  # May be pre-classified
+            source_authority = metadata.get('source_authority')  # May be pre-classified
+            
+            file_type = metadata.get('file_type', 'txt')
+            filename = metadata.get('filename', metadata.get('source', 'unknown'))
+            
+            # ================================================================
+            # FIVE TRUTHS CLASSIFICATION (Phase 2B.1)
+            # ================================================================
+            doc_classification = None
+            if CHUNK_CLASSIFIER_AVAILABLE and chunk_classifier:
+                try:
+                    # Run document-level classification
+                    doc_classification = chunk_classifier.classify_document(
+                        filename=filename,
+                        content=text,
+                        existing_truth_type=truth_type  # Preserve if already set
+                    )
+                    
+                    # Apply classification to metadata (don't overwrite if already set)
+                    if not truth_type:
+                        truth_type = doc_classification.truth_type
+                        metadata['truth_type'] = truth_type
+                    
+                    if not domain:
+                        domain = doc_classification.domain
+                        metadata['domain'] = domain
+                    
+                    if not source_authority:
+                        source_authority = doc_classification.source_authority
+                        metadata['source_authority'] = source_authority
+                    
+                    metadata['classification_confidence'] = doc_classification.confidence
+                    
+                    logger.info(f"[CLASSIFY] Document classified: truth={truth_type}, "
+                               f"domain={domain}, authority={source_authority}, "
+                               f"confidence={doc_classification.confidence}")
+                except Exception as e:
+                    logger.warning(f"[CLASSIFY] Classification failed: {e}")
             
             # Auto-detect system from filename if not provided and it's vendor docs
             # User can override via UI dropdown
@@ -476,10 +537,12 @@ class RAGHandler:
                 logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] Document tagged with truth_type: {truth_type}")
+            if domain:
+                logger.info(f"[DOMAIN] Document tagged with domain: {domain}")
+            if source_authority:
+                logger.info(f"[AUTHORITY] Document tagged with source_authority: {source_authority}")
             if system:
                 logger.info(f"[SYSTEM] Document tagged with system: {system}")
-            
-            file_type = metadata.get('file_type', 'txt')
             filename = metadata.get('filename', metadata.get('source', 'unknown'))
             
             if progress_callback:
@@ -524,13 +587,28 @@ class RAGHandler:
                 
                 chunk_metadata = {**base_metadata, "chunk_index": i}
                 
-                # Preserve project_id, truth_type, and system in chunk metadata
+                # Preserve project_id, truth_type, domain, source_authority, and system in chunk metadata
                 if project_id:
                     chunk_metadata['project_id'] = project_id
                 if truth_type:
-                    chunk_metadata['truth_type'] = truth_type  # NEW: Preserve truth_type
+                    chunk_metadata['truth_type'] = truth_type
+                if domain:
+                    chunk_metadata['domain'] = domain
+                if source_authority:
+                    chunk_metadata['source_authority'] = source_authority
                 if system:
-                    chunk_metadata['system'] = system  # NEW: Preserve system tag
+                    chunk_metadata['system'] = system
+                
+                # Apply chunk-level classification refinement if classifier available
+                if CHUNK_CLASSIFIER_AVAILABLE and chunk_classifier and doc_classification:
+                    try:
+                        chunk_class_meta = chunk_classifier.classify_chunk(chunk, doc_classification)
+                        # Only add chunk_domain if it differs from document domain
+                        if chunk_class_meta.get('chunk_domain'):
+                            chunk_metadata['chunk_domain'] = chunk_class_meta['chunk_domain']
+                            chunk_metadata['chunk_domain_confidence'] = chunk_class_meta.get('chunk_domain_confidence', 0.0)
+                    except Exception as e:
+                        logger.debug(f"Chunk-level classification failed for chunk {i}: {e}")
                 
                 if chunk_metadata_enhanced and i < len(chunk_metadata_enhanced):
                     chunk_dict = chunk_metadata_enhanced[i]
