@@ -34,7 +34,7 @@ Deploy to: backend/utils/intelligence/__init__.py
 """
 
 # Version
-__version__ = "7.1.0"  # v7.1: Evolution 10 - Multi-hop relationships
+__version__ = "8.0.0"  # v8.0: Phase 3 - Synthesis Pipeline
 
 # Core types (always available)
 from .types import (
@@ -56,8 +56,8 @@ from .table_selector import TableSelector
 # SQL Generator
 from .sql_generator import SQLGenerator
 
-# Synthesizer
-from .synthesizer import Synthesizer
+# Synthesizer - NOW FROM synthesis_pipeline.py (Phase 3 clean implementation)
+from .synthesis_pipeline import SynthesisPipeline, Synthesizer  # Synthesizer is alias for backward compat
 
 # Truth Enricher (LLM Lookups)
 from .truth_enricher import TruthEnricher
@@ -151,6 +151,59 @@ from .relationship_resolver import (
     get_resolver as get_relationship_resolver,
 )
 
+# =========================================================================
+# PHASE 3: SYNTHESIS COMPONENTS
+# =========================================================================
+
+# Truth Assembler (Phase 3.1: Five Truths Assembly)
+from .truth_assembler import (
+    TruthAssembler,
+    TruthContext,
+    RealityContext,
+    IntentContext,
+    ConfigurationContext,
+    ReferenceContext,
+    RegulatoryContext,
+    get_assembler,
+    assemble_truths,
+)
+
+# LLM Prompter (Phase 3.2: Local LLM Prompt Engineering)
+from .llm_prompter import (
+    LocalLLMPrompter,
+    ResponseQuality,
+    get_prompter,
+    build_synthesis_prompt,
+    build_sql_explanation_prompt,
+    build_gap_explanation_prompt,
+)
+
+# Enhanced Gap Detector (Phase 3.3: Gap Detection Logic)
+from .enhanced_gap_detector import (
+    EnhancedGapDetector,
+    GapExplainer,
+    GapType,
+    GapRule,
+    get_detector as get_enhanced_gap_detector,
+    get_explainer as get_gap_explainer,
+    detect_gaps as detect_enhanced_gaps,
+    explain_gap,
+)
+
+# Response Patterns (Phase 3.4: Consultative Response Patterns)
+from .response_patterns import (
+    ResponseFormatter,
+    ConsultativeResponse,
+    ResponseSection,
+    get_formatter,
+    format_response,
+    render_response,
+)
+
+# Synthesis Pipeline (Phase 3: Main Orchestrator)
+# Note: SynthesisPipeline and Synthesizer already imported above
+from .synthesis_pipeline import get_pipeline, create_synthesizer
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -186,7 +239,8 @@ __all__ = [
     # Components
     'TableSelector',
     'SQLGenerator',
-    'Synthesizer',
+    'Synthesizer',           # Alias for SynthesisPipeline (backward compat)
+    'SynthesisPipeline',     # Phase 3: New clean implementation
     'TruthEnricher',
     'IntentParser',
     'ParsedRequirement',
@@ -257,6 +311,48 @@ __all__ = [
     'MultiHopJoin',
     'detect_multi_hop_query',
     'get_relationship_resolver',
+    
+    # Phase 3: Truth Assembler
+    'TruthAssembler',
+    'TruthContext',
+    'RealityContext',
+    'IntentContext',
+    'ConfigurationContext',
+    'ReferenceContext',
+    'RegulatoryContext',
+    'get_assembler',
+    'assemble_truths',
+    
+    # Phase 3: LLM Prompter
+    'LocalLLMPrompter',
+    'ResponseQuality',
+    'get_prompter',
+    'build_synthesis_prompt',
+    'build_sql_explanation_prompt',
+    'build_gap_explanation_prompt',
+    
+    # Phase 3: Enhanced Gap Detector
+    'EnhancedGapDetector',
+    'GapExplainer',
+    'GapType',
+    'GapRule',
+    'get_enhanced_gap_detector',
+    'get_gap_explainer',
+    'detect_enhanced_gaps',
+    'explain_gap',
+    
+    # Phase 3: Response Patterns
+    'ResponseFormatter',
+    'ConsultativeResponse',
+    'ResponseSection',
+    'get_formatter',
+    'format_response',
+    'render_response',
+    
+    # Phase 3: Synthesis Pipeline
+    'SynthesisPipeline',
+    'get_pipeline',
+    'create_synthesizer',
     
     # Gatherers
     'BaseGatherer',
