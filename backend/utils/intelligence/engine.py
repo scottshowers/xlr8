@@ -72,6 +72,17 @@ try:
 except ImportError as e:
     logger.warning(f"SourcePrioritizer not available: {e}")
 
+# Relevance Scorer for multi-factor scoring and filtering (Phase 2B.4)
+RELEVANCE_SCORER_AVAILABLE = False
+relevance_scorer_instance = None
+try:
+    from .relevance_scorer import RelevanceScorer, get_scorer
+    relevance_scorer_instance = get_scorer()
+    RELEVANCE_SCORER_AVAILABLE = True
+    logger.info("✅ RelevanceScorer loaded for multi-factor relevance scoring")
+except ImportError as e:
+    logger.warning(f"RelevanceScorer not available: {e}")
+
 # Term Index + SQL Assembler - the NEW deterministic path
 # Must be after logger is defined
 DETERMINISTIC_PATH_AVAILABLE = False
@@ -2344,8 +2355,31 @@ class IntelligenceEngineV2:
                 'reasoning': routing.reasoning
             }
             
-            # Phase 2B.3: Re-rank results by source authority
-            if SOURCE_PRIORITIZER_AVAILABLE and source_prioritizer_instance:
+            # Phase 2B.4: Multi-factor relevance scoring and filtering
+            # (Supersedes 2B.3 SourcePrioritizer - includes authority + recency + jurisdiction)
+            if RELEVANCE_SCORER_AVAILABLE and relevance_scorer_instance:
+                query_category = routing.query_category
+                query_domain = routing.domain_detected
+                # Extract jurisdiction from analysis if available
+                query_jurisdiction = analysis.get('jurisdiction') or analysis.get('state')
+                
+                if reference:
+                    reference = relevance_scorer_instance.score_and_filter_truths(
+                        reference, query_category, query_domain, query_jurisdiction
+                    )
+                if regulatory:
+                    regulatory = relevance_scorer_instance.score_and_filter_truths(
+                        regulatory, query_category, query_domain, query_jurisdiction
+                    )
+                if compliance:
+                    compliance = relevance_scorer_instance.score_and_filter_truths(
+                        compliance, query_category, query_domain, query_jurisdiction
+                    )
+                    
+                logger.warning(f"[GATHER-LIBRARY] Applied multi-factor relevance scoring")
+            
+            # Fallback to 2B.3 SourcePrioritizer if RelevanceScorer not available
+            elif SOURCE_PRIORITIZER_AVAILABLE and source_prioritizer_instance:
                 query_category = routing.query_category
                 query_domain = routing.domain_detected
                 
