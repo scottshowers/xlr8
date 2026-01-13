@@ -1,0 +1,316 @@
+{
+  "version": "1.0",
+  "vendor": "Asana",
+  "product": "Asana",
+  "source": "Asana API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://app.asana.com/api/1.0/",
+  "product_focus": "Work management - projects, tasks, goals",
+  "key_differentiators": [
+    "Multiple views (List, Board, Timeline, Calendar)",
+    "Portfolios for program management",
+    "Goals with progress tracking",
+    "Workload management",
+    "Forms for intake",
+    "Rules automation",
+    "Universal Reporting"
+  ],
+  "domains": {
+    "Workspace_Organization": {
+      "description": "Workspace structure",
+      "hub_count": 3,
+      "hubs": [
+        "workspace",
+        "organization",
+        "team"
+      ]
+    },
+    "Project": {
+      "description": "Projects and portfolios",
+      "hub_count": 6,
+      "hubs": [
+        "project",
+        "project_template",
+        "project_status",
+        "project_brief",
+        "portfolio",
+        "goal"
+      ]
+    },
+    "Task": {
+      "description": "Tasks and subtasks",
+      "hub_count": 5,
+      "hubs": [
+        "task",
+        "subtask",
+        "section",
+        "milestone",
+        "task_template"
+      ]
+    },
+    "Custom_Fields": {
+      "description": "Custom data",
+      "hub_count": 3,
+      "hubs": [
+        "custom_field",
+        "custom_field_setting",
+        "enum_option"
+      ]
+    },
+    "Timeline": {
+      "description": "Timeline and dependencies",
+      "hub_count": 2,
+      "hubs": [
+        "task_dependency",
+        "date_range"
+      ]
+    },
+    "Collaboration": {
+      "description": "Comments and attachments",
+      "hub_count": 3,
+      "hubs": [
+        "story",
+        "attachment",
+        "like"
+      ]
+    },
+    "User": {
+      "description": "Users and assignments",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "user_task_list",
+        "membership"
+      ]
+    },
+    "Reporting": {
+      "description": "Reporting",
+      "hub_count": 1,
+      "hubs": [
+        "status_update"
+      ]
+    },
+    "Automation": {
+      "description": "Rules and automation",
+      "hub_count": 2,
+      "hubs": [
+        "rule",
+        "webhook"
+      ]
+    },
+    "Tag": {
+      "description": "Tags and categorization",
+      "hub_count": 1,
+      "hubs": [
+        "tag"
+      ]
+    }
+  },
+  "hubs": {
+    "workspace": {
+      "entity_name": "Workspace",
+      "semantic_type": "workspace_id",
+      "domain": "Workspace_Organization",
+      "is_core": true,
+      "description": "Workspace"
+    },
+    "organization": {
+      "entity_name": "Organization",
+      "semantic_type": "organization_id",
+      "domain": "Workspace_Organization",
+      "is_core": false,
+      "description": "Enterprise org"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "Workspace_Organization",
+      "is_core": true,
+      "description": "Team"
+    },
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Project"
+    },
+    "project_template": {
+      "entity_name": "Project_Template",
+      "semantic_type": "project_template_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Template"
+    },
+    "project_status": {
+      "entity_name": "Project_Status",
+      "semantic_type": "project_status_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Status update"
+    },
+    "project_brief": {
+      "entity_name": "Project_Brief",
+      "semantic_type": "project_brief_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Project brief"
+    },
+    "portfolio": {
+      "entity_name": "Portfolio",
+      "semantic_type": "portfolio_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Portfolio"
+    },
+    "goal": {
+      "entity_name": "Goal",
+      "semantic_type": "goal_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Strategic goal"
+    },
+    "task": {
+      "entity_name": "Task",
+      "semantic_type": "task_id",
+      "domain": "Task",
+      "is_core": true,
+      "description": "Task"
+    },
+    "subtask": {
+      "entity_name": "Subtask",
+      "semantic_type": "subtask_id",
+      "domain": "Task",
+      "is_core": true,
+      "description": "Subtask"
+    },
+    "section": {
+      "entity_name": "Section",
+      "semantic_type": "section_id",
+      "domain": "Task",
+      "is_core": true,
+      "description": "Board section/list"
+    },
+    "milestone": {
+      "entity_name": "Milestone",
+      "semantic_type": "milestone_id",
+      "domain": "Task",
+      "is_core": false,
+      "description": "Milestone"
+    },
+    "task_template": {
+      "entity_name": "Task_Template",
+      "semantic_type": "task_template_id",
+      "domain": "Task",
+      "is_core": false,
+      "description": "Task template"
+    },
+    "custom_field": {
+      "entity_name": "Custom_Field",
+      "semantic_type": "custom_field_id",
+      "domain": "Custom_Fields",
+      "is_core": true,
+      "description": "Custom field"
+    },
+    "custom_field_setting": {
+      "entity_name": "Custom_Field_Setting",
+      "semantic_type": "custom_field_setting_id",
+      "domain": "Custom_Fields",
+      "is_core": false,
+      "description": "Field config"
+    },
+    "enum_option": {
+      "entity_name": "Enum_Option",
+      "semantic_type": "enum_option_id",
+      "domain": "Custom_Fields",
+      "is_core": false,
+      "description": "Dropdown option"
+    },
+    "task_dependency": {
+      "entity_name": "Task_Dependency",
+      "semantic_type": "task_dependency_id",
+      "domain": "Timeline",
+      "is_core": false,
+      "description": "Dependency"
+    },
+    "date_range": {
+      "entity_name": "Date_Range",
+      "semantic_type": "date_range_id",
+      "domain": "Timeline",
+      "is_core": false,
+      "description": "Timeline dates"
+    },
+    "story": {
+      "entity_name": "Story",
+      "semantic_type": "story_id",
+      "domain": "Collaboration",
+      "is_core": true,
+      "description": "Comment/activity"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Collaboration",
+      "is_core": false,
+      "description": "File attachment"
+    },
+    "like": {
+      "entity_name": "Like",
+      "semantic_type": "like_id",
+      "domain": "Collaboration",
+      "is_core": false,
+      "description": "Reaction"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User"
+    },
+    "user_task_list": {
+      "entity_name": "User_Task_List",
+      "semantic_type": "user_task_list_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "My Tasks"
+    },
+    "membership": {
+      "entity_name": "Membership",
+      "semantic_type": "membership_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Team/project member"
+    },
+    "status_update": {
+      "entity_name": "Status_Update",
+      "semantic_type": "status_update_id",
+      "domain": "Reporting",
+      "is_core": false,
+      "description": "Progress update"
+    },
+    "rule": {
+      "entity_name": "Rule",
+      "semantic_type": "rule_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Automation rule"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Webhook"
+    },
+    "tag": {
+      "entity_name": "Tag",
+      "semantic_type": "tag_id",
+      "domain": "Tag",
+      "is_core": true,
+      "description": "Tag"
+    }
+  },
+  "hub_count": 29
+}

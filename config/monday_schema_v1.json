@@ -1,0 +1,274 @@
+{
+  "version": "1.0",
+  "vendor": "Monday.com",
+  "product": "Monday.com",
+  "source": "Monday.com API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "GraphQL API",
+  "api_base": "https://api.monday.com/v2",
+  "product_focus": "Work OS - flexible work management",
+  "key_differentiators": [
+    "Highly flexible/customizable boards",
+    "Work OS positioning (not just PM)",
+    "200+ templates",
+    "Automations (no-code)",
+    "Multiple products (CRM, Dev, Service)",
+    "Dashboards",
+    "Monday Docs"
+  ],
+  "products": {
+    "work_management": "Core project/task management",
+    "monday_crm": "Sales CRM on Monday",
+    "monday_dev": "Product development",
+    "monday_service": "Service management"
+  },
+  "domains": {
+    "Workspace": {
+      "description": "Workspace structure",
+      "hub_count": 2,
+      "hubs": [
+        "workspace",
+        "folder"
+      ]
+    },
+    "Board": {
+      "description": "Boards (core entity)",
+      "hub_count": 3,
+      "hubs": [
+        "board",
+        "board_view",
+        "group"
+      ]
+    },
+    "Item": {
+      "description": "Items (rows)",
+      "hub_count": 2,
+      "hubs": [
+        "item",
+        "subitem"
+      ]
+    },
+    "Column": {
+      "description": "Columns (fields)",
+      "hub_count": 3,
+      "hubs": [
+        "column",
+        "column_value",
+        "status_label"
+      ]
+    },
+    "Update": {
+      "description": "Updates and comments",
+      "hub_count": 2,
+      "hubs": [
+        "update",
+        "reply"
+      ]
+    },
+    "File": {
+      "description": "Files and assets",
+      "hub_count": 2,
+      "hubs": [
+        "asset",
+        "doc"
+      ]
+    },
+    "User_Team": {
+      "description": "Users and teams",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "team",
+        "subscriber"
+      ]
+    },
+    "Automation": {
+      "description": "Automations and integrations",
+      "hub_count": 3,
+      "hubs": [
+        "automation",
+        "integration",
+        "webhook"
+      ]
+    },
+    "Dashboard": {
+      "description": "Dashboards",
+      "hub_count": 2,
+      "hubs": [
+        "dashboard",
+        "widget"
+      ]
+    },
+    "Tag": {
+      "description": "Tags",
+      "hub_count": 1,
+      "hubs": [
+        "tag"
+      ]
+    }
+  },
+  "hubs": {
+    "workspace": {
+      "entity_name": "Workspace",
+      "semantic_type": "workspace_id",
+      "domain": "Workspace",
+      "is_core": true,
+      "description": "Workspace"
+    },
+    "folder": {
+      "entity_name": "Folder",
+      "semantic_type": "folder_id",
+      "domain": "Workspace",
+      "is_core": false,
+      "description": "Board folder"
+    },
+    "board": {
+      "entity_name": "Board",
+      "semantic_type": "board_id",
+      "domain": "Board",
+      "is_core": true,
+      "description": "Board"
+    },
+    "board_view": {
+      "entity_name": "Board_View",
+      "semantic_type": "board_view_id",
+      "domain": "Board",
+      "is_core": false,
+      "description": "View (Table/Kanban/etc)"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "Board",
+      "is_core": true,
+      "description": "Item group"
+    },
+    "item": {
+      "entity_name": "Item",
+      "semantic_type": "item_id",
+      "domain": "Item",
+      "is_core": true,
+      "description": "Item/row"
+    },
+    "subitem": {
+      "entity_name": "Subitem",
+      "semantic_type": "subitem_id",
+      "domain": "Item",
+      "is_core": true,
+      "description": "Subitem"
+    },
+    "column": {
+      "entity_name": "Column",
+      "semantic_type": "column_id",
+      "domain": "Column",
+      "is_core": true,
+      "description": "Column definition"
+    },
+    "column_value": {
+      "entity_name": "Column_Value",
+      "semantic_type": "column_value_id",
+      "domain": "Column",
+      "is_core": false,
+      "description": "Cell value"
+    },
+    "status_label": {
+      "entity_name": "Status_Label",
+      "semantic_type": "status_label_id",
+      "domain": "Column",
+      "is_core": false,
+      "description": "Status option"
+    },
+    "update": {
+      "entity_name": "Update",
+      "semantic_type": "update_id",
+      "domain": "Update",
+      "is_core": true,
+      "description": "Comment/update"
+    },
+    "reply": {
+      "entity_name": "Reply",
+      "semantic_type": "reply_id",
+      "domain": "Update",
+      "is_core": false,
+      "description": "Update reply"
+    },
+    "asset": {
+      "entity_name": "Asset",
+      "semantic_type": "asset_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "File asset"
+    },
+    "doc": {
+      "entity_name": "Doc",
+      "semantic_type": "doc_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "Monday Doc"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Team",
+      "is_core": true,
+      "description": "User"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "User_Team",
+      "is_core": true,
+      "description": "Team"
+    },
+    "subscriber": {
+      "entity_name": "Subscriber",
+      "semantic_type": "subscriber_id",
+      "domain": "User_Team",
+      "is_core": false,
+      "description": "Board subscriber"
+    },
+    "automation": {
+      "entity_name": "Automation",
+      "semantic_type": "automation_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Automation recipe"
+    },
+    "integration": {
+      "entity_name": "Integration",
+      "semantic_type": "integration_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "App integration"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Webhook"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Dashboard",
+      "is_core": false,
+      "description": "Dashboard"
+    },
+    "widget": {
+      "entity_name": "Widget",
+      "semantic_type": "widget_id",
+      "domain": "Dashboard",
+      "is_core": false,
+      "description": "Dashboard widget"
+    },
+    "tag": {
+      "entity_name": "Tag",
+      "semantic_type": "tag_id",
+      "domain": "Tag",
+      "is_core": true,
+      "description": "Tag"
+    }
+  },
+  "hub_count": 23
+}

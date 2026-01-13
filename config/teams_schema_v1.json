@@ -1,0 +1,354 @@
+{
+  "version": "1.0",
+  "vendor": "Microsoft",
+  "product": "Microsoft Teams",
+  "source": "Microsoft Graph API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "Microsoft Graph API",
+  "api_base": "https://graph.microsoft.com/v1.0/",
+  "product_focus": "Team collaboration hub - chat, meetings, files",
+  "key_differentiators": [
+    "Microsoft 365 integration",
+    "Enterprise meetings (up to 1000)",
+    "SharePoint file storage",
+    "Teams apps ecosystem",
+    "Phone System (PSTN)",
+    "Shared channels (cross-org)",
+    "Copilot AI"
+  ],
+  "domains": {
+    "Organization": {
+      "description": "Organization",
+      "hub_count": 1,
+      "hubs": [
+        "organization"
+      ]
+    },
+    "Team": {
+      "description": "Teams",
+      "hub_count": 2,
+      "hubs": [
+        "team",
+        "team_member"
+      ]
+    },
+    "Channel": {
+      "description": "Channels",
+      "hub_count": 4,
+      "hubs": [
+        "channel",
+        "private_channel",
+        "shared_channel",
+        "channel_tab"
+      ]
+    },
+    "Chat": {
+      "description": "Chat",
+      "hub_count": 4,
+      "hubs": [
+        "chat",
+        "chat_message",
+        "one_on_one",
+        "group_chat"
+      ]
+    },
+    "Message": {
+      "description": "Channel messages",
+      "hub_count": 4,
+      "hubs": [
+        "channel_message",
+        "reply",
+        "reaction",
+        "mention"
+      ]
+    },
+    "Meeting": {
+      "description": "Meetings",
+      "hub_count": 5,
+      "hubs": [
+        "meeting",
+        "meeting_attendance",
+        "meeting_recording",
+        "meeting_transcript",
+        "webinar"
+      ]
+    },
+    "Call": {
+      "description": "Calling",
+      "hub_count": 2,
+      "hubs": [
+        "call",
+        "call_record"
+      ]
+    },
+    "File": {
+      "description": "Files (SharePoint)",
+      "hub_count": 3,
+      "hubs": [
+        "file",
+        "folder",
+        "drive"
+      ]
+    },
+    "App": {
+      "description": "Apps and tabs",
+      "hub_count": 4,
+      "hubs": [
+        "app",
+        "tab",
+        "bot",
+        "connector"
+      ]
+    },
+    "User": {
+      "description": "Users",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "presence",
+        "guest"
+      ]
+    },
+    "Activity_Feed": {
+      "description": "Activity",
+      "hub_count": 1,
+      "hubs": [
+        "activity"
+      ]
+    }
+  },
+  "hubs": {
+    "organization": {
+      "entity_name": "Organization",
+      "semantic_type": "organization_id",
+      "domain": "Organization",
+      "is_core": true,
+      "description": "M365 tenant"
+    },
+    "team": {
+      "entity_name": "Team",
+      "semantic_type": "team_id",
+      "domain": "Team",
+      "is_core": true,
+      "description": "Team"
+    },
+    "team_member": {
+      "entity_name": "Team_Member",
+      "semantic_type": "team_member_id",
+      "domain": "Team",
+      "is_core": false,
+      "description": "Team membership"
+    },
+    "channel": {
+      "entity_name": "Channel",
+      "semantic_type": "channel_id",
+      "domain": "Channel",
+      "is_core": true,
+      "description": "Channel"
+    },
+    "private_channel": {
+      "entity_name": "Private_Channel",
+      "semantic_type": "private_channel_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Private channel"
+    },
+    "shared_channel": {
+      "entity_name": "Shared_Channel",
+      "semantic_type": "shared_channel_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Shared channel"
+    },
+    "channel_tab": {
+      "entity_name": "Channel_Tab",
+      "semantic_type": "channel_tab_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Tab"
+    },
+    "chat": {
+      "entity_name": "Chat",
+      "semantic_type": "chat_id",
+      "domain": "Chat",
+      "is_core": true,
+      "description": "Chat conversation"
+    },
+    "chat_message": {
+      "entity_name": "Chat_Message",
+      "semantic_type": "chat_message_id",
+      "domain": "Chat",
+      "is_core": true,
+      "description": "Chat message"
+    },
+    "one_on_one": {
+      "entity_name": "One_On_One",
+      "semantic_type": "one_on_one_id",
+      "domain": "Chat",
+      "is_core": false,
+      "description": "1:1 chat"
+    },
+    "group_chat": {
+      "entity_name": "Group_Chat",
+      "semantic_type": "group_chat_id",
+      "domain": "Chat",
+      "is_core": false,
+      "description": "Group chat"
+    },
+    "channel_message": {
+      "entity_name": "Channel_Message",
+      "semantic_type": "channel_message_id",
+      "domain": "Message",
+      "is_core": true,
+      "description": "Channel message"
+    },
+    "reply": {
+      "entity_name": "Reply",
+      "semantic_type": "reply_id",
+      "domain": "Message",
+      "is_core": true,
+      "description": "Thread reply"
+    },
+    "reaction": {
+      "entity_name": "Reaction",
+      "semantic_type": "reaction_id",
+      "domain": "Message",
+      "is_core": false,
+      "description": "Message reaction"
+    },
+    "mention": {
+      "entity_name": "Mention",
+      "semantic_type": "mention_id",
+      "domain": "Message",
+      "is_core": false,
+      "description": "@mention"
+    },
+    "meeting": {
+      "entity_name": "Meeting",
+      "semantic_type": "meeting_id",
+      "domain": "Meeting",
+      "is_core": true,
+      "description": "Online meeting"
+    },
+    "meeting_attendance": {
+      "entity_name": "Meeting_Attendance",
+      "semantic_type": "meeting_attendance_id",
+      "domain": "Meeting",
+      "is_core": false,
+      "description": "Attendance record"
+    },
+    "meeting_recording": {
+      "entity_name": "Meeting_Recording",
+      "semantic_type": "meeting_recording_id",
+      "domain": "Meeting",
+      "is_core": false,
+      "description": "Recording"
+    },
+    "meeting_transcript": {
+      "entity_name": "Meeting_Transcript",
+      "semantic_type": "meeting_transcript_id",
+      "domain": "Meeting",
+      "is_core": false,
+      "description": "Transcript"
+    },
+    "webinar": {
+      "entity_name": "Webinar",
+      "semantic_type": "webinar_id",
+      "domain": "Meeting",
+      "is_core": false,
+      "description": "Webinar"
+    },
+    "call": {
+      "entity_name": "Call",
+      "semantic_type": "call_id",
+      "domain": "Call",
+      "is_core": true,
+      "description": "Voice/video call"
+    },
+    "call_record": {
+      "entity_name": "Call_Record",
+      "semantic_type": "call_record_id",
+      "domain": "Call",
+      "is_core": false,
+      "description": "Call log"
+    },
+    "file": {
+      "entity_name": "File",
+      "semantic_type": "file_id",
+      "domain": "File",
+      "is_core": true,
+      "description": "File"
+    },
+    "folder": {
+      "entity_name": "Folder",
+      "semantic_type": "folder_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "Folder"
+    },
+    "drive": {
+      "entity_name": "Drive",
+      "semantic_type": "drive_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "Document library"
+    },
+    "app": {
+      "entity_name": "App",
+      "semantic_type": "app_id",
+      "domain": "App",
+      "is_core": true,
+      "description": "Teams app"
+    },
+    "tab": {
+      "entity_name": "Tab",
+      "semantic_type": "tab_id",
+      "domain": "App",
+      "is_core": false,
+      "description": "Channel/chat tab"
+    },
+    "bot": {
+      "entity_name": "Bot",
+      "semantic_type": "bot_id",
+      "domain": "App",
+      "is_core": false,
+      "description": "Bot"
+    },
+    "connector": {
+      "entity_name": "Connector",
+      "semantic_type": "connector_id",
+      "domain": "App",
+      "is_core": false,
+      "description": "Incoming webhook"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User"
+    },
+    "presence": {
+      "entity_name": "Presence",
+      "semantic_type": "presence_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "User presence"
+    },
+    "guest": {
+      "entity_name": "Guest",
+      "semantic_type": "guest_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Guest user"
+    },
+    "activity": {
+      "entity_name": "Activity",
+      "semantic_type": "activity_id",
+      "domain": "Activity_Feed",
+      "is_core": false,
+      "description": "Activity notification"
+    }
+  },
+  "hub_count": 33
+}

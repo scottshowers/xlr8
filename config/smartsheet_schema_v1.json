@@ -1,0 +1,298 @@
+{
+  "version": "1.0",
+  "vendor": "Smartsheet",
+  "product": "Smartsheet",
+  "source": "Smartsheet API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://api.smartsheet.com/2.0/",
+  "product_focus": "Enterprise work management - spreadsheet paradigm",
+  "key_differentiators": [
+    "Spreadsheet-like interface (familiar)",
+    "Enterprise-grade security",
+    "Resource management",
+    "Gantt charts",
+    "Cross-sheet formulas and linking",
+    "WorkApps (no-code apps)",
+    "Control Center (governance)"
+  ],
+  "domains": {
+    "Workspace": {
+      "description": "Workspace structure",
+      "hub_count": 3,
+      "hubs": [
+        "workspace",
+        "folder",
+        "home"
+      ]
+    },
+    "Sheet": {
+      "description": "Sheets (core entity)",
+      "hub_count": 3,
+      "hubs": [
+        "sheet",
+        "template",
+        "summary"
+      ]
+    },
+    "Row_Column": {
+      "description": "Rows and columns",
+      "hub_count": 4,
+      "hubs": [
+        "row",
+        "column",
+        "cell",
+        "cell_link"
+      ]
+    },
+    "Report": {
+      "description": "Reports",
+      "hub_count": 1,
+      "hubs": [
+        "report"
+      ]
+    },
+    "Dashboard": {
+      "description": "Dashboards",
+      "hub_count": 2,
+      "hubs": [
+        "dashboard",
+        "widget"
+      ]
+    },
+    "Discussion": {
+      "description": "Comments and discussions",
+      "hub_count": 3,
+      "hubs": [
+        "discussion",
+        "comment",
+        "attachment"
+      ]
+    },
+    "Automation": {
+      "description": "Automation and alerts",
+      "hub_count": 3,
+      "hubs": [
+        "automation_rule",
+        "alert",
+        "update_request"
+      ]
+    },
+    "Sharing": {
+      "description": "Sharing and permissions",
+      "hub_count": 2,
+      "hubs": [
+        "share",
+        "access_level"
+      ]
+    },
+    "User_Group": {
+      "description": "Users and groups",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "group",
+        "contact"
+      ]
+    },
+    "Proof": {
+      "description": "Proofing",
+      "hub_count": 1,
+      "hubs": [
+        "proof"
+      ]
+    },
+    "Webhook": {
+      "description": "Webhooks",
+      "hub_count": 1,
+      "hubs": [
+        "webhook"
+      ]
+    }
+  },
+  "hubs": {
+    "workspace": {
+      "entity_name": "Workspace",
+      "semantic_type": "workspace_id",
+      "domain": "Workspace",
+      "is_core": true,
+      "description": "Workspace"
+    },
+    "folder": {
+      "entity_name": "Folder",
+      "semantic_type": "folder_id",
+      "domain": "Workspace",
+      "is_core": true,
+      "description": "Folder"
+    },
+    "home": {
+      "entity_name": "Home",
+      "semantic_type": "home_id",
+      "domain": "Workspace",
+      "is_core": false,
+      "description": "Home/favorites"
+    },
+    "sheet": {
+      "entity_name": "Sheet",
+      "semantic_type": "sheet_id",
+      "domain": "Sheet",
+      "is_core": true,
+      "description": "Sheet"
+    },
+    "template": {
+      "entity_name": "Template",
+      "semantic_type": "template_id",
+      "domain": "Sheet",
+      "is_core": false,
+      "description": "Sheet template"
+    },
+    "summary": {
+      "entity_name": "Summary",
+      "semantic_type": "summary_id",
+      "domain": "Sheet",
+      "is_core": false,
+      "description": "Sheet summary"
+    },
+    "row": {
+      "entity_name": "Row",
+      "semantic_type": "row_id",
+      "domain": "Row_Column",
+      "is_core": true,
+      "description": "Row"
+    },
+    "column": {
+      "entity_name": "Column",
+      "semantic_type": "column_id",
+      "domain": "Row_Column",
+      "is_core": true,
+      "description": "Column definition"
+    },
+    "cell": {
+      "entity_name": "Cell",
+      "semantic_type": "cell_id",
+      "domain": "Row_Column",
+      "is_core": false,
+      "description": "Cell value"
+    },
+    "cell_link": {
+      "entity_name": "Cell_Link",
+      "semantic_type": "cell_link_id",
+      "domain": "Row_Column",
+      "is_core": false,
+      "description": "Cross-sheet link"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Report",
+      "is_core": true,
+      "description": "Report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Dashboard",
+      "is_core": true,
+      "description": "Sight/dashboard"
+    },
+    "widget": {
+      "entity_name": "Widget",
+      "semantic_type": "widget_id",
+      "domain": "Dashboard",
+      "is_core": false,
+      "description": "Dashboard widget"
+    },
+    "discussion": {
+      "entity_name": "Discussion",
+      "semantic_type": "discussion_id",
+      "domain": "Discussion",
+      "is_core": true,
+      "description": "Discussion thread"
+    },
+    "comment": {
+      "entity_name": "Comment",
+      "semantic_type": "comment_id",
+      "domain": "Discussion",
+      "is_core": true,
+      "description": "Comment"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Discussion",
+      "is_core": false,
+      "description": "File attachment"
+    },
+    "automation_rule": {
+      "entity_name": "Automation_Rule",
+      "semantic_type": "automation_rule_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Automation"
+    },
+    "alert": {
+      "entity_name": "Alert",
+      "semantic_type": "alert_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Notification alert"
+    },
+    "update_request": {
+      "entity_name": "Update_Request",
+      "semantic_type": "update_request_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Update request"
+    },
+    "share": {
+      "entity_name": "Share",
+      "semantic_type": "share_id",
+      "domain": "Sharing",
+      "is_core": false,
+      "description": "Share recipient"
+    },
+    "access_level": {
+      "entity_name": "Access_Level",
+      "semantic_type": "access_level_id",
+      "domain": "Sharing",
+      "is_core": false,
+      "description": "Permission level"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Group",
+      "is_core": true,
+      "description": "User"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "User_Group",
+      "is_core": false,
+      "description": "User group"
+    },
+    "contact": {
+      "entity_name": "Contact",
+      "semantic_type": "contact_id",
+      "domain": "User_Group",
+      "is_core": false,
+      "description": "Contact"
+    },
+    "proof": {
+      "entity_name": "Proof",
+      "semantic_type": "proof_id",
+      "domain": "Proof",
+      "is_core": false,
+      "description": "Proof document"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Webhook",
+      "is_core": false,
+      "description": "Webhook"
+    }
+  },
+  "hub_count": 26
+}

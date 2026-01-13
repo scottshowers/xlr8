@@ -1,0 +1,258 @@
+{
+  "version": "1.0",
+  "vendor": "Notion",
+  "product": "Notion",
+  "source": "Notion API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://api.notion.com/v1/",
+  "product_focus": "All-in-one workspace - docs, wikis, databases",
+  "key_differentiators": [
+    "Flexible blocks system",
+    "Relational databases",
+    "Notion AI",
+    "Templates gallery",
+    "Wikis",
+    "Beautiful design",
+    "API for integrations"
+  ],
+  "domains": {
+    "Workspace": {
+      "description": "Workspace",
+      "hub_count": 2,
+      "hubs": [
+        "workspace",
+        "teamspace"
+      ]
+    },
+    "Page": {
+      "description": "Pages",
+      "hub_count": 2,
+      "hubs": [
+        "page",
+        "block"
+      ]
+    },
+    "Database": {
+      "description": "Databases",
+      "hub_count": 6,
+      "hubs": [
+        "database",
+        "database_page",
+        "property",
+        "view",
+        "filter",
+        "sort"
+      ]
+    },
+    "Block_Types": {
+      "description": "Block types",
+      "hub_count": 10,
+      "hubs": [
+        "text_block",
+        "heading",
+        "list_item",
+        "to_do",
+        "toggle",
+        "code",
+        "image",
+        "embed",
+        "callout",
+        "table"
+      ]
+    },
+    "Comment": {
+      "description": "Comments",
+      "hub_count": 1,
+      "hubs": [
+        "comment"
+      ]
+    },
+    "User": {
+      "description": "Users",
+      "hub_count": 2,
+      "hubs": [
+        "user",
+        "bot"
+      ]
+    },
+    "Search": {
+      "description": "Search",
+      "hub_count": 1,
+      "hubs": [
+        "search_result"
+      ]
+    }
+  },
+  "hubs": {
+    "workspace": {
+      "entity_name": "Workspace",
+      "semantic_type": "workspace_id",
+      "domain": "Workspace",
+      "is_core": true,
+      "description": "Workspace"
+    },
+    "teamspace": {
+      "entity_name": "Teamspace",
+      "semantic_type": "teamspace_id",
+      "domain": "Workspace",
+      "is_core": false,
+      "description": "Teamspace"
+    },
+    "page": {
+      "entity_name": "Page",
+      "semantic_type": "page_id",
+      "domain": "Page",
+      "is_core": true,
+      "description": "Page"
+    },
+    "block": {
+      "entity_name": "Block",
+      "semantic_type": "block_id",
+      "domain": "Page",
+      "is_core": true,
+      "description": "Content block"
+    },
+    "database": {
+      "entity_name": "Database",
+      "semantic_type": "database_id",
+      "domain": "Database",
+      "is_core": true,
+      "description": "Database"
+    },
+    "database_page": {
+      "entity_name": "Database_Page",
+      "semantic_type": "database_page_id",
+      "domain": "Database",
+      "is_core": true,
+      "description": "Database entry"
+    },
+    "property": {
+      "entity_name": "Property",
+      "semantic_type": "property_id",
+      "domain": "Database",
+      "is_core": true,
+      "description": "Database property"
+    },
+    "view": {
+      "entity_name": "View",
+      "semantic_type": "view_id",
+      "domain": "Database",
+      "is_core": false,
+      "description": "Database view"
+    },
+    "filter": {
+      "entity_name": "Filter",
+      "semantic_type": "filter_id",
+      "domain": "Database",
+      "is_core": false,
+      "description": "View filter"
+    },
+    "sort": {
+      "entity_name": "Sort",
+      "semantic_type": "sort_id",
+      "domain": "Database",
+      "is_core": false,
+      "description": "View sort"
+    },
+    "text_block": {
+      "entity_name": "Text_Block",
+      "semantic_type": "text_block_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Text/paragraph"
+    },
+    "heading": {
+      "entity_name": "Heading",
+      "semantic_type": "heading_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Heading"
+    },
+    "list_item": {
+      "entity_name": "List_Item",
+      "semantic_type": "list_item_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Bullet/numbered"
+    },
+    "to_do": {
+      "entity_name": "To_Do",
+      "semantic_type": "to_do_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Checkbox"
+    },
+    "toggle": {
+      "entity_name": "Toggle",
+      "semantic_type": "toggle_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Toggle list"
+    },
+    "code": {
+      "entity_name": "Code",
+      "semantic_type": "code_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Code block"
+    },
+    "image": {
+      "entity_name": "Image",
+      "semantic_type": "image_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Image"
+    },
+    "embed": {
+      "entity_name": "Embed",
+      "semantic_type": "embed_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Embed"
+    },
+    "callout": {
+      "entity_name": "Callout",
+      "semantic_type": "callout_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Callout"
+    },
+    "table": {
+      "entity_name": "Table",
+      "semantic_type": "table_id",
+      "domain": "Block_Types",
+      "is_core": false,
+      "description": "Table"
+    },
+    "comment": {
+      "entity_name": "Comment",
+      "semantic_type": "comment_id",
+      "domain": "Comment",
+      "is_core": true,
+      "description": "Comment"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User"
+    },
+    "bot": {
+      "entity_name": "Bot",
+      "semantic_type": "bot_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Integration bot"
+    },
+    "search_result": {
+      "entity_name": "Search_Result",
+      "semantic_type": "search_result_id",
+      "domain": "Search",
+      "is_core": false,
+      "description": "Search result"
+    }
+  },
+  "hub_count": 24
+}

@@ -1,0 +1,299 @@
+{
+  "version": "1.0",
+  "vendor": "Salesforce",
+  "product": "Slack",
+  "source": "Slack API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "Web API, Events API, RTM",
+  "api_base": "https://slack.com/api/",
+  "product_focus": "Team messaging and collaboration",
+  "key_differentiators": [
+    "Channel-based messaging",
+    "Slack Connect (external collaboration)",
+    "Workflow Builder",
+    "2600+ app integrations",
+    "Huddles (audio/video)",
+    "Canvas documents",
+    "Enterprise Grid",
+    "Searchable history"
+  ],
+  "domains": {
+    "Workspace": {
+      "description": "Workspace structure",
+      "hub_count": 2,
+      "hubs": [
+        "workspace",
+        "enterprise_grid"
+      ]
+    },
+    "Channel": {
+      "description": "Channels",
+      "hub_count": 5,
+      "hubs": [
+        "channel",
+        "private_channel",
+        "shared_channel",
+        "dm",
+        "mpdm"
+      ]
+    },
+    "Message": {
+      "description": "Messages",
+      "hub_count": 5,
+      "hubs": [
+        "message",
+        "thread",
+        "reaction",
+        "pin",
+        "bookmark"
+      ]
+    },
+    "File": {
+      "description": "Files",
+      "hub_count": 2,
+      "hubs": [
+        "file",
+        "remote_file"
+      ]
+    },
+    "Canvas": {
+      "description": "Canvas documents",
+      "hub_count": 1,
+      "hubs": [
+        "canvas"
+      ]
+    },
+    "User": {
+      "description": "Users",
+      "hub_count": 4,
+      "hubs": [
+        "user",
+        "user_profile",
+        "user_group",
+        "guest"
+      ]
+    },
+    "App_Bot": {
+      "description": "Apps and bots",
+      "hub_count": 3,
+      "hubs": [
+        "app",
+        "bot",
+        "workflow"
+      ]
+    },
+    "Huddle": {
+      "description": "Audio/video",
+      "hub_count": 1,
+      "hubs": [
+        "huddle"
+      ]
+    },
+    "Search": {
+      "description": "Search",
+      "hub_count": 1,
+      "hubs": [
+        "search_result"
+      ]
+    },
+    "Reminder": {
+      "description": "Reminders",
+      "hub_count": 1,
+      "hubs": [
+        "reminder"
+      ]
+    },
+    "Emoji": {
+      "description": "Custom emoji",
+      "hub_count": 1,
+      "hubs": [
+        "emoji"
+      ]
+    }
+  },
+  "hubs": {
+    "workspace": {
+      "entity_name": "Workspace",
+      "semantic_type": "workspace_id",
+      "domain": "Workspace",
+      "is_core": true,
+      "description": "Slack workspace"
+    },
+    "enterprise_grid": {
+      "entity_name": "Enterprise_Grid",
+      "semantic_type": "enterprise_grid_id",
+      "domain": "Workspace",
+      "is_core": false,
+      "description": "Enterprise org"
+    },
+    "channel": {
+      "entity_name": "Channel",
+      "semantic_type": "channel_id",
+      "domain": "Channel",
+      "is_core": true,
+      "description": "Channel"
+    },
+    "private_channel": {
+      "entity_name": "Private_Channel",
+      "semantic_type": "private_channel_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Private channel"
+    },
+    "shared_channel": {
+      "entity_name": "Shared_Channel",
+      "semantic_type": "shared_channel_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Slack Connect channel"
+    },
+    "dm": {
+      "entity_name": "DM",
+      "semantic_type": "dm_id",
+      "domain": "Channel",
+      "is_core": true,
+      "description": "Direct message"
+    },
+    "mpdm": {
+      "entity_name": "MPDM",
+      "semantic_type": "mpdm_id",
+      "domain": "Channel",
+      "is_core": false,
+      "description": "Group DM"
+    },
+    "message": {
+      "entity_name": "Message",
+      "semantic_type": "message_id",
+      "domain": "Message",
+      "is_core": true,
+      "description": "Message"
+    },
+    "thread": {
+      "entity_name": "Thread",
+      "semantic_type": "thread_id",
+      "domain": "Message",
+      "is_core": true,
+      "description": "Thread reply"
+    },
+    "reaction": {
+      "entity_name": "Reaction",
+      "semantic_type": "reaction_id",
+      "domain": "Message",
+      "is_core": false,
+      "description": "Emoji reaction"
+    },
+    "pin": {
+      "entity_name": "Pin",
+      "semantic_type": "pin_id",
+      "domain": "Message",
+      "is_core": false,
+      "description": "Pinned item"
+    },
+    "bookmark": {
+      "entity_name": "Bookmark",
+      "semantic_type": "bookmark_id",
+      "domain": "Message",
+      "is_core": false,
+      "description": "Channel bookmark"
+    },
+    "file": {
+      "entity_name": "File",
+      "semantic_type": "file_id",
+      "domain": "File",
+      "is_core": true,
+      "description": "File upload"
+    },
+    "remote_file": {
+      "entity_name": "Remote_File",
+      "semantic_type": "remote_file_id",
+      "domain": "File",
+      "is_core": false,
+      "description": "External file"
+    },
+    "canvas": {
+      "entity_name": "Canvas",
+      "semantic_type": "canvas_id",
+      "domain": "Canvas",
+      "is_core": false,
+      "description": "Slack canvas"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User"
+    },
+    "user_profile": {
+      "entity_name": "User_Profile",
+      "semantic_type": "user_profile_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Profile"
+    },
+    "user_group": {
+      "entity_name": "User_Group",
+      "semantic_type": "user_group_id",
+      "domain": "User",
+      "is_core": true,
+      "description": "User group"
+    },
+    "guest": {
+      "entity_name": "Guest",
+      "semantic_type": "guest_id",
+      "domain": "User",
+      "is_core": false,
+      "description": "Guest user"
+    },
+    "app": {
+      "entity_name": "App",
+      "semantic_type": "app_id",
+      "domain": "App_Bot",
+      "is_core": true,
+      "description": "Slack app"
+    },
+    "bot": {
+      "entity_name": "Bot",
+      "semantic_type": "bot_id",
+      "domain": "App_Bot",
+      "is_core": false,
+      "description": "Bot user"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "App_Bot",
+      "is_core": true,
+      "description": "Workflow Builder"
+    },
+    "huddle": {
+      "entity_name": "Huddle",
+      "semantic_type": "huddle_id",
+      "domain": "Huddle",
+      "is_core": false,
+      "description": "Huddle call"
+    },
+    "search_result": {
+      "entity_name": "Search_Result",
+      "semantic_type": "search_result_id",
+      "domain": "Search",
+      "is_core": false,
+      "description": "Search result"
+    },
+    "reminder": {
+      "entity_name": "Reminder",
+      "semantic_type": "reminder_id",
+      "domain": "Reminder",
+      "is_core": false,
+      "description": "Reminder"
+    },
+    "emoji": {
+      "entity_name": "Emoji",
+      "semantic_type": "emoji_id",
+      "domain": "Emoji",
+      "is_core": false,
+      "description": "Custom emoji"
+    }
+  },
+  "hub_count": 26
+}

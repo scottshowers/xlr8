@@ -1,0 +1,483 @@
+{
+  "version": "1.0",
+  "vendor": "Atlassian",
+  "product": "Jira",
+  "source": "Atlassian API documentation",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "https://{site}.atlassian.net/rest/api/3/",
+  "product_focus": "Issue tracking and agile project management",
+  "key_differentiators": [
+    "Industry standard for software development",
+    "Powerful JQL query language",
+    "Scrum and Kanban boards",
+    "Highly customizable workflows",
+    "Jira Service Management (ITSM)",
+    "Atlassian ecosystem (Confluence, Bitbucket)",
+    "Marketplace apps"
+  ],
+  "products": {
+    "Jira Software": "Agile development teams",
+    "Jira Service Management": "IT service desk / ITSM",
+    "Jira Work Management": "Business teams"
+  },
+  "domains": {
+    "Project": {
+      "description": "Projects and configuration",
+      "hub_count": 4,
+      "hubs": [
+        "project",
+        "project_category",
+        "project_type",
+        "project_role"
+      ]
+    },
+    "Issue": {
+      "description": "Issues (core entity)",
+      "hub_count": 7,
+      "hubs": [
+        "issue",
+        "issue_type",
+        "issue_link",
+        "issue_link_type",
+        "subtask",
+        "epic",
+        "parent"
+      ]
+    },
+    "Workflow": {
+      "description": "Workflows and statuses",
+      "hub_count": 5,
+      "hubs": [
+        "workflow",
+        "status",
+        "status_category",
+        "transition",
+        "resolution"
+      ]
+    },
+    "Agile": {
+      "description": "Agile boards and sprints",
+      "hub_count": 4,
+      "hubs": [
+        "board",
+        "sprint",
+        "backlog",
+        "velocity"
+      ]
+    },
+    "Field": {
+      "description": "Fields and screens",
+      "hub_count": 5,
+      "hubs": [
+        "field",
+        "custom_field",
+        "custom_field_option",
+        "screen",
+        "screen_scheme"
+      ]
+    },
+    "Priority_Severity": {
+      "description": "Priority and labels",
+      "hub_count": 2,
+      "hubs": [
+        "priority",
+        "label"
+      ]
+    },
+    "Component_Version": {
+      "description": "Components and versions",
+      "hub_count": 2,
+      "hubs": [
+        "component",
+        "version"
+      ]
+    },
+    "Time_Tracking": {
+      "description": "Time tracking",
+      "hub_count": 2,
+      "hubs": [
+        "worklog",
+        "time_tracking"
+      ]
+    },
+    "Comment_Attachment": {
+      "description": "Comments and attachments",
+      "hub_count": 3,
+      "hubs": [
+        "comment",
+        "attachment",
+        "watcher"
+      ]
+    },
+    "User_Permission": {
+      "description": "Users and permissions",
+      "hub_count": 3,
+      "hubs": [
+        "user",
+        "group",
+        "permission_scheme"
+      ]
+    },
+    "Filter_Dashboard": {
+      "description": "Filters and dashboards",
+      "hub_count": 3,
+      "hubs": [
+        "filter",
+        "dashboard",
+        "gadget"
+      ]
+    },
+    "Automation": {
+      "description": "Automation",
+      "hub_count": 2,
+      "hubs": [
+        "automation_rule",
+        "webhook"
+      ]
+    },
+    "Service_Management": {
+      "description": "Jira Service Management",
+      "hub_count": 5,
+      "hubs": [
+        "service_desk",
+        "request_type",
+        "queue",
+        "sla",
+        "customer"
+      ]
+    }
+  },
+  "hubs": {
+    "project": {
+      "entity_name": "Project",
+      "semantic_type": "project_id",
+      "domain": "Project",
+      "is_core": true,
+      "description": "Jira project"
+    },
+    "project_category": {
+      "entity_name": "Project_Category",
+      "semantic_type": "project_category_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Project grouping"
+    },
+    "project_type": {
+      "entity_name": "Project_Type",
+      "semantic_type": "project_type_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Software/Business/Service"
+    },
+    "project_role": {
+      "entity_name": "Project_Role",
+      "semantic_type": "project_role_id",
+      "domain": "Project",
+      "is_core": false,
+      "description": "Project role"
+    },
+    "issue": {
+      "entity_name": "Issue",
+      "semantic_type": "issue_id",
+      "domain": "Issue",
+      "is_core": true,
+      "description": "Issue/ticket"
+    },
+    "issue_type": {
+      "entity_name": "Issue_Type",
+      "semantic_type": "issue_type_id",
+      "domain": "Issue",
+      "is_core": true,
+      "description": "Epic/Story/Task/Bug"
+    },
+    "issue_link": {
+      "entity_name": "Issue_Link",
+      "semantic_type": "issue_link_id",
+      "domain": "Issue",
+      "is_core": false,
+      "description": "Issue relationship"
+    },
+    "issue_link_type": {
+      "entity_name": "Issue_Link_Type",
+      "semantic_type": "issue_link_type_id",
+      "domain": "Issue",
+      "is_core": false,
+      "description": "Link type"
+    },
+    "subtask": {
+      "entity_name": "Subtask",
+      "semantic_type": "subtask_id",
+      "domain": "Issue",
+      "is_core": true,
+      "description": "Subtask"
+    },
+    "epic": {
+      "entity_name": "Epic",
+      "semantic_type": "epic_id",
+      "domain": "Issue",
+      "is_core": true,
+      "description": "Epic"
+    },
+    "parent": {
+      "entity_name": "Parent",
+      "semantic_type": "parent_id",
+      "domain": "Issue",
+      "is_core": false,
+      "description": "Parent issue"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Workflow",
+      "is_core": true,
+      "description": "Workflow"
+    },
+    "status": {
+      "entity_name": "Status",
+      "semantic_type": "status_id",
+      "domain": "Workflow",
+      "is_core": true,
+      "description": "Issue status"
+    },
+    "status_category": {
+      "entity_name": "Status_Category",
+      "semantic_type": "status_category_id",
+      "domain": "Workflow",
+      "is_core": false,
+      "description": "To Do/In Progress/Done"
+    },
+    "transition": {
+      "entity_name": "Transition",
+      "semantic_type": "transition_id",
+      "domain": "Workflow",
+      "is_core": false,
+      "description": "Status transition"
+    },
+    "resolution": {
+      "entity_name": "Resolution",
+      "semantic_type": "resolution_id",
+      "domain": "Workflow",
+      "is_core": false,
+      "description": "Resolution type"
+    },
+    "board": {
+      "entity_name": "Board",
+      "semantic_type": "board_id",
+      "domain": "Agile",
+      "is_core": true,
+      "description": "Scrum/Kanban board"
+    },
+    "sprint": {
+      "entity_name": "Sprint",
+      "semantic_type": "sprint_id",
+      "domain": "Agile",
+      "is_core": true,
+      "description": "Sprint"
+    },
+    "backlog": {
+      "entity_name": "Backlog",
+      "semantic_type": "backlog_id",
+      "domain": "Agile",
+      "is_core": false,
+      "description": "Product backlog"
+    },
+    "velocity": {
+      "entity_name": "Velocity",
+      "semantic_type": "velocity_id",
+      "domain": "Agile",
+      "is_core": false,
+      "description": "Velocity chart"
+    },
+    "field": {
+      "entity_name": "Field",
+      "semantic_type": "field_id",
+      "domain": "Field",
+      "is_core": true,
+      "description": "Issue field"
+    },
+    "custom_field": {
+      "entity_name": "Custom_Field",
+      "semantic_type": "custom_field_id",
+      "domain": "Field",
+      "is_core": true,
+      "description": "Custom field"
+    },
+    "custom_field_option": {
+      "entity_name": "Custom_Field_Option",
+      "semantic_type": "custom_field_option_id",
+      "domain": "Field",
+      "is_core": false,
+      "description": "Field option"
+    },
+    "screen": {
+      "entity_name": "Screen",
+      "semantic_type": "screen_id",
+      "domain": "Field",
+      "is_core": false,
+      "description": "Issue screen"
+    },
+    "screen_scheme": {
+      "entity_name": "Screen_Scheme",
+      "semantic_type": "screen_scheme_id",
+      "domain": "Field",
+      "is_core": false,
+      "description": "Screen scheme"
+    },
+    "priority": {
+      "entity_name": "Priority",
+      "semantic_type": "priority_id",
+      "domain": "Priority_Severity",
+      "is_core": true,
+      "description": "Priority level"
+    },
+    "label": {
+      "entity_name": "Label",
+      "semantic_type": "label_id",
+      "domain": "Priority_Severity",
+      "is_core": true,
+      "description": "Label/tag"
+    },
+    "component": {
+      "entity_name": "Component",
+      "semantic_type": "component_id",
+      "domain": "Component_Version",
+      "is_core": true,
+      "description": "Project component"
+    },
+    "version": {
+      "entity_name": "Version",
+      "semantic_type": "version_id",
+      "domain": "Component_Version",
+      "is_core": true,
+      "description": "Fix version/release"
+    },
+    "worklog": {
+      "entity_name": "Worklog",
+      "semantic_type": "worklog_id",
+      "domain": "Time_Tracking",
+      "is_core": true,
+      "description": "Time log entry"
+    },
+    "time_tracking": {
+      "entity_name": "Time_Tracking",
+      "semantic_type": "time_tracking_id",
+      "domain": "Time_Tracking",
+      "is_core": false,
+      "description": "Time estimates"
+    },
+    "comment": {
+      "entity_name": "Comment",
+      "semantic_type": "comment_id",
+      "domain": "Comment_Attachment",
+      "is_core": true,
+      "description": "Issue comment"
+    },
+    "attachment": {
+      "entity_name": "Attachment",
+      "semantic_type": "attachment_id",
+      "domain": "Comment_Attachment",
+      "is_core": false,
+      "description": "File attachment"
+    },
+    "watcher": {
+      "entity_name": "Watcher",
+      "semantic_type": "watcher_id",
+      "domain": "Comment_Attachment",
+      "is_core": false,
+      "description": "Issue watcher"
+    },
+    "user": {
+      "entity_name": "User",
+      "semantic_type": "user_id",
+      "domain": "User_Permission",
+      "is_core": true,
+      "description": "Jira user"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "User_Permission",
+      "is_core": false,
+      "description": "User group"
+    },
+    "permission_scheme": {
+      "entity_name": "Permission_Scheme",
+      "semantic_type": "permission_scheme_id",
+      "domain": "User_Permission",
+      "is_core": false,
+      "description": "Permissions"
+    },
+    "filter": {
+      "entity_name": "Filter",
+      "semantic_type": "filter_id",
+      "domain": "Filter_Dashboard",
+      "is_core": true,
+      "description": "Saved filter/JQL"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Filter_Dashboard",
+      "is_core": false,
+      "description": "Dashboard"
+    },
+    "gadget": {
+      "entity_name": "Gadget",
+      "semantic_type": "gadget_id",
+      "domain": "Filter_Dashboard",
+      "is_core": false,
+      "description": "Dashboard gadget"
+    },
+    "automation_rule": {
+      "entity_name": "Automation_Rule",
+      "semantic_type": "automation_rule_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Automation rule"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Automation",
+      "is_core": false,
+      "description": "Webhook"
+    },
+    "service_desk": {
+      "entity_name": "Service_Desk",
+      "semantic_type": "service_desk_id",
+      "domain": "Service_Management",
+      "is_core": false,
+      "description": "Service desk"
+    },
+    "request_type": {
+      "entity_name": "Request_Type",
+      "semantic_type": "request_type_id",
+      "domain": "Service_Management",
+      "is_core": false,
+      "description": "Request type"
+    },
+    "queue": {
+      "entity_name": "Queue",
+      "semantic_type": "queue_id",
+      "domain": "Service_Management",
+      "is_core": false,
+      "description": "Service queue"
+    },
+    "sla": {
+      "entity_name": "SLA",
+      "semantic_type": "sla_id",
+      "domain": "Service_Management",
+      "is_core": false,
+      "description": "SLA"
+    },
+    "customer": {
+      "entity_name": "Customer",
+      "semantic_type": "customer_id",
+      "domain": "Service_Management",
+      "is_core": false,
+      "description": "Portal customer"
+    }
+  },
+  "hub_count": 47
+}
