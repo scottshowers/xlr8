@@ -112,6 +112,15 @@ from .source_prioritizer import (
     prioritize_results,
 )
 
+# Relevance Scorer (Multi-factor scoring and filtering)
+from .relevance_scorer import (
+    RelevanceScorer,
+    RelevanceScore,
+    get_scorer,
+    score_and_filter,
+    score_and_filter_raw,
+)
+
 # Gatherers
 from .gatherers import (
     BaseGatherer,
@@ -188,6 +197,13 @@ __all__ = [
     'get_prioritizer',
     'prioritize_truths',
     'prioritize_results',
+    
+    # Relevance Scorer
+    'RelevanceScorer',
+    'RelevanceScore',
+    'get_scorer',
+    'score_and_filter',
+    'score_and_filter_raw',
     
     # Gatherers
     'BaseGatherer',
