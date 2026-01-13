@@ -1,0 +1,1163 @@
+{
+  "version": "1.0",
+  "vendor": "PlanSource",
+  "product": "PlanSource Benefits Administration",
+  "white_labels": [
+    "UKG Ben Admin (Prime)",
+    "Various HCM partners"
+  ],
+  "source": "PlanSource website, developer docs, partner info",
+  "extracted": "2026-01-10",
+  "api_type": "REST API with OAuth2",
+  "api_base": "https://developer.plansource.com",
+  "product_focus": "Benefits Administration Specialist - 5M+ consumers",
+  "key_differentiators": [
+    "Benefits-only specialist (not full HCM)",
+    "White-label to HCM partners (UKG, SAP, etc.)",
+    "Boost program - carrier API integrations",
+    "EOI automation with real-time decisions",
+    "IQ Suite decision support",
+    "AI assistant chatbot (ChatGPT-powered)",
+    "The Source engagement hub",
+    "Self-billing capabilities",
+    "Dependent verification services",
+    "18+ carrier API partners"
+  ],
+  "architecture": "Benefits administration with HCM/Payroll sync",
+  "hcm_partners": [
+    "UKG",
+    "SAP SuccessFactors",
+    "Various resellers"
+  ],
+  "carrier_partners": [
+    "Guardian",
+    "UnitedHealthcare",
+    "18+ more"
+  ],
+  "services": [
+    "Benefits Outsourcing",
+    "Employee Contact Center",
+    "Billing Reconciliation",
+    "COBRA Administration",
+    "HSA/FSA/HRA",
+    "Dependent Verification",
+    "ACA"
+  ],
+  "domains": {
+    "Employee_Core": {
+      "description": "Core employee information (synced from HCM)",
+      "hub_count": 4,
+      "hubs": [
+        "employee",
+        "person",
+        "employee_demographics",
+        "employee_status"
+      ]
+    },
+    "Dependent": {
+      "description": "Dependent management",
+      "hub_count": 3,
+      "hubs": [
+        "dependent",
+        "dependent_type",
+        "dependent_verification"
+      ]
+    },
+    "Beneficiary": {
+      "description": "Beneficiary management",
+      "hub_count": 3,
+      "hubs": [
+        "beneficiary",
+        "beneficiary_type",
+        "beneficiary_allocation"
+      ]
+    },
+    "Benefits_Shopping": {
+      "description": "Benefits shopping experience (core strength)",
+      "hub_count": 6,
+      "hubs": [
+        "benefits_shopping",
+        "benefit_comparison",
+        "decision_support",
+        "benefit_recommendation",
+        "shopping_cart",
+        "cost_calculator"
+      ]
+    },
+    "Benefit_Plans": {
+      "description": "Benefit plan configuration",
+      "hub_count": 7,
+      "hubs": [
+        "benefit_plan",
+        "plan_configuration",
+        "plan_option",
+        "plan_rate",
+        "plan_eligibility",
+        "plan_effective_date",
+        "guaranteed_issue"
+      ]
+    },
+    "Enrollment": {
+      "description": "Benefits enrollment",
+      "hub_count": 6,
+      "hubs": [
+        "enrollment",
+        "open_enrollment",
+        "new_hire_enrollment",
+        "qle",
+        "enrollment_status",
+        "enrollment_confirmation"
+      ]
+    },
+    "Coverage": {
+      "description": "Coverage and elections",
+      "hub_count": 6,
+      "hubs": [
+        "coverage",
+        "coverage_level",
+        "coverage_effective_date",
+        "coverage_termination_date",
+        "elected_amount",
+        "waived_coverage"
+      ]
+    },
+    "EOI": {
+      "description": "Evidence of Insurability (Boost feature)",
+      "hub_count": 7,
+      "hubs": [
+        "eoi",
+        "eoi_question",
+        "eoi_submission",
+        "eoi_decision",
+        "eoi_pending",
+        "eoi_approved",
+        "eoi_denied"
+      ]
+    },
+    "Medical": {
+      "description": "Medical benefits",
+      "hub_count": 4,
+      "hubs": [
+        "medical_plan",
+        "medical_enrollment",
+        "provider_directory",
+        "member_portal"
+      ]
+    },
+    "Dental_Vision": {
+      "description": "Dental and vision benefits",
+      "hub_count": 2,
+      "hubs": [
+        "dental_plan",
+        "vision_plan"
+      ]
+    },
+    "Life_Disability": {
+      "description": "Life and disability insurance",
+      "hub_count": 6,
+      "hubs": [
+        "life_insurance",
+        "add",
+        "std",
+        "ltd",
+        "voluntary_life",
+        "supplemental_life"
+      ]
+    },
+    "Consumer_Directed": {
+      "description": "HSA/FSA/HRA accounts",
+      "hub_count": 7,
+      "hubs": [
+        "hsa",
+        "fsa",
+        "hra",
+        "dcfsa",
+        "limited_fsa",
+        "account_balance",
+        "contribution_election"
+      ]
+    },
+    "Retirement": {
+      "description": "Retirement benefits",
+      "hub_count": 2,
+      "hubs": [
+        "retirement_plan",
+        "contribution"
+      ]
+    },
+    "Voluntary_Benefits": {
+      "description": "Voluntary/lifestyle benefits",
+      "hub_count": 8,
+      "hubs": [
+        "voluntary_benefit",
+        "accident_insurance",
+        "critical_illness",
+        "hospital_indemnity",
+        "pet_insurance",
+        "legal_plan",
+        "identity_theft",
+        "partner_marketplace"
+      ]
+    },
+    "COBRA": {
+      "description": "COBRA administration",
+      "hub_count": 5,
+      "hubs": [
+        "cobra",
+        "cobra_qe",
+        "cobra_election",
+        "cobra_payment",
+        "cobra_notice"
+      ]
+    },
+    "Billing": {
+      "description": "Benefits billing",
+      "hub_count": 6,
+      "hubs": [
+        "billing",
+        "invoice",
+        "self_billing",
+        "bill_reconciliation",
+        "premium",
+        "premium_payment"
+      ]
+    },
+    "Payroll_Deduction": {
+      "description": "Payroll deduction sync",
+      "hub_count": 6,
+      "hubs": [
+        "payroll_deduction",
+        "deduction_code",
+        "pre_tax_deduction",
+        "post_tax_deduction",
+        "employer_contribution",
+        "imputed_income"
+      ]
+    },
+    "Carrier": {
+      "description": "Carrier integrations (Boost)",
+      "hub_count": 4,
+      "hubs": [
+        "carrier",
+        "carrier_feed",
+        "carrier_api",
+        "carrier_connection"
+      ]
+    },
+    "ACA_Compliance": {
+      "description": "ACA compliance",
+      "hub_count": 6,
+      "hubs": [
+        "aca",
+        "aca_measurement",
+        "aca_stability",
+        "form_1095c",
+        "form_1094c",
+        "ale_status"
+      ]
+    },
+    "Communications": {
+      "description": "Employee communications",
+      "hub_count": 5,
+      "hubs": [
+        "communication",
+        "email_campaign",
+        "custom_message",
+        "enrollment_reminder",
+        "benefits_guide"
+      ]
+    },
+    "Engagement": {
+      "description": "Employee engagement (The Source)",
+      "hub_count": 4,
+      "hubs": [
+        "the_source",
+        "employee_portal",
+        "mobile_app",
+        "ai_assistant"
+      ]
+    },
+    "Analytics": {
+      "description": "Reporting and analytics (IQ Suite)",
+      "hub_count": 5,
+      "hubs": [
+        "report",
+        "custom_report",
+        "data_visualization",
+        "enrollment_report",
+        "participation_report"
+      ]
+    },
+    "Administrator": {
+      "description": "Administrator management",
+      "hub_count": 4,
+      "hubs": [
+        "administrator",
+        "admin_role",
+        "broker",
+        "group"
+      ]
+    },
+    "Integration": {
+      "description": "HCM/Payroll integrations",
+      "hub_count": 5,
+      "hubs": [
+        "hcm_integration",
+        "payroll_integration",
+        "api",
+        "sso",
+        "webhook"
+      ]
+    }
+  },
+  "hubs": {
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Employee record"
+    },
+    "person": {
+      "entity_name": "Person",
+      "semantic_type": "person_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Personal information"
+    },
+    "employee_demographics": {
+      "entity_name": "Employee_Demographics",
+      "semantic_type": "employee_demographics_id",
+      "domain": "Employee_Core",
+      "is_core": false,
+      "description": "Demographics"
+    },
+    "employee_status": {
+      "entity_name": "Employee_Status",
+      "semantic_type": "employee_status_id",
+      "domain": "Employee_Core",
+      "is_core": true,
+      "description": "Employment status"
+    },
+    "dependent": {
+      "entity_name": "Dependent",
+      "semantic_type": "dependent_id",
+      "domain": "Dependent",
+      "is_core": true,
+      "description": "Dependent record"
+    },
+    "dependent_type": {
+      "entity_name": "Dependent_Type",
+      "semantic_type": "dependent_type_id",
+      "domain": "Dependent",
+      "is_core": false,
+      "description": "Spouse/child/etc"
+    },
+    "dependent_verification": {
+      "entity_name": "Dependent_Verification",
+      "semantic_type": "dependent_verification_id",
+      "domain": "Dependent",
+      "is_core": false,
+      "description": "Dependent audit"
+    },
+    "beneficiary": {
+      "entity_name": "Beneficiary",
+      "semantic_type": "beneficiary_id",
+      "domain": "Beneficiary",
+      "is_core": true,
+      "description": "Beneficiary record"
+    },
+    "beneficiary_type": {
+      "entity_name": "Beneficiary_Type",
+      "semantic_type": "beneficiary_type_id",
+      "domain": "Beneficiary",
+      "is_core": false,
+      "description": "Primary/contingent"
+    },
+    "beneficiary_allocation": {
+      "entity_name": "Beneficiary_Allocation",
+      "semantic_type": "beneficiary_allocation_id",
+      "domain": "Beneficiary",
+      "is_core": false,
+      "description": "% allocation"
+    },
+    "benefits_shopping": {
+      "entity_name": "Benefits_Shopping",
+      "semantic_type": "benefits_shopping_id",
+      "domain": "Benefits_Shopping",
+      "is_core": true,
+      "description": "Shopping experience"
+    },
+    "benefit_comparison": {
+      "entity_name": "Benefit_Comparison",
+      "semantic_type": "benefit_comparison_id",
+      "domain": "Benefits_Shopping",
+      "is_core": false,
+      "description": "Plan comparison"
+    },
+    "decision_support": {
+      "entity_name": "Decision_Support",
+      "semantic_type": "decision_support_id",
+      "domain": "Benefits_Shopping",
+      "is_core": false,
+      "description": "IQ Suite decision support"
+    },
+    "benefit_recommendation": {
+      "entity_name": "Benefit_Recommendation",
+      "semantic_type": "benefit_recommendation_id",
+      "domain": "Benefits_Shopping",
+      "is_core": false,
+      "description": "AI recommendation"
+    },
+    "shopping_cart": {
+      "entity_name": "Shopping_Cart",
+      "semantic_type": "shopping_cart_id",
+      "domain": "Benefits_Shopping",
+      "is_core": false,
+      "description": "Selected benefits"
+    },
+    "cost_calculator": {
+      "entity_name": "Cost_Calculator",
+      "semantic_type": "cost_calculator_id",
+      "domain": "Benefits_Shopping",
+      "is_core": false,
+      "description": "Total cost preview"
+    },
+    "benefit_plan": {
+      "entity_name": "Benefit_Plan",
+      "semantic_type": "benefit_plan_id",
+      "domain": "Benefit_Plans",
+      "is_core": true,
+      "description": "Benefit plan"
+    },
+    "plan_configuration": {
+      "entity_name": "Plan_Configuration",
+      "semantic_type": "plan_configuration_id",
+      "domain": "Benefit_Plans",
+      "is_core": true,
+      "description": "Plan setup"
+    },
+    "plan_option": {
+      "entity_name": "Plan_Option",
+      "semantic_type": "plan_option_id",
+      "domain": "Benefit_Plans",
+      "is_core": false,
+      "description": "Plan tier"
+    },
+    "plan_rate": {
+      "entity_name": "Plan_Rate",
+      "semantic_type": "plan_rate_id",
+      "domain": "Benefit_Plans",
+      "is_core": true,
+      "description": "Plan pricing"
+    },
+    "plan_eligibility": {
+      "entity_name": "Plan_Eligibility",
+      "semantic_type": "plan_eligibility_id",
+      "domain": "Benefit_Plans",
+      "is_core": true,
+      "description": "Eligibility rules"
+    },
+    "plan_effective_date": {
+      "entity_name": "Plan_Effective_Date",
+      "semantic_type": "plan_effective_date_id",
+      "domain": "Benefit_Plans",
+      "is_core": false,
+      "description": "Plan dates"
+    },
+    "guaranteed_issue": {
+      "entity_name": "Guaranteed_Issue",
+      "semantic_type": "guaranteed_issue_id",
+      "domain": "Benefit_Plans",
+      "is_core": false,
+      "description": "GI amount"
+    },
+    "enrollment": {
+      "entity_name": "Enrollment",
+      "semantic_type": "enrollment_id",
+      "domain": "Enrollment",
+      "is_core": true,
+      "description": "Enrollment record"
+    },
+    "open_enrollment": {
+      "entity_name": "Open_Enrollment",
+      "semantic_type": "open_enrollment_id",
+      "domain": "Enrollment",
+      "is_core": true,
+      "description": "OE period"
+    },
+    "new_hire_enrollment": {
+      "entity_name": "New_Hire_Enrollment",
+      "semantic_type": "new_hire_enrollment_id",
+      "domain": "Enrollment",
+      "is_core": true,
+      "description": "New hire window"
+    },
+    "qle": {
+      "entity_name": "Qualifying_Life_Event",
+      "semantic_type": "qle_id",
+      "domain": "Enrollment",
+      "is_core": true,
+      "description": "QLE/life event"
+    },
+    "enrollment_status": {
+      "entity_name": "Enrollment_Status",
+      "semantic_type": "enrollment_status_id",
+      "domain": "Enrollment",
+      "is_core": false,
+      "description": "Enrollment state"
+    },
+    "enrollment_confirmation": {
+      "entity_name": "Enrollment_Confirmation",
+      "semantic_type": "enrollment_confirmation_id",
+      "domain": "Enrollment",
+      "is_core": false,
+      "description": "Confirmation"
+    },
+    "coverage": {
+      "entity_name": "Coverage",
+      "semantic_type": "coverage_id",
+      "domain": "Coverage",
+      "is_core": true,
+      "description": "Coverage record"
+    },
+    "coverage_level": {
+      "entity_name": "Coverage_Level",
+      "semantic_type": "coverage_level_id",
+      "domain": "Coverage",
+      "is_core": true,
+      "description": "EE/EE+SP/Family"
+    },
+    "coverage_effective_date": {
+      "entity_name": "Coverage_Effective_Date",
+      "semantic_type": "coverage_effective_date_id",
+      "domain": "Coverage",
+      "is_core": true,
+      "description": "Coverage start"
+    },
+    "coverage_termination_date": {
+      "entity_name": "Coverage_Termination_Date",
+      "semantic_type": "coverage_termination_date_id",
+      "domain": "Coverage",
+      "is_core": false,
+      "description": "Coverage end"
+    },
+    "elected_amount": {
+      "entity_name": "Elected_Amount",
+      "semantic_type": "elected_amount_id",
+      "domain": "Coverage",
+      "is_core": false,
+      "description": "Coverage amount"
+    },
+    "waived_coverage": {
+      "entity_name": "Waived_Coverage",
+      "semantic_type": "waived_coverage_id",
+      "domain": "Coverage",
+      "is_core": false,
+      "description": "Declined coverage"
+    },
+    "eoi": {
+      "entity_name": "EOI",
+      "semantic_type": "eoi_id",
+      "domain": "EOI",
+      "is_core": true,
+      "description": "Evidence of Insurability"
+    },
+    "eoi_question": {
+      "entity_name": "EOI_Question",
+      "semantic_type": "eoi_question_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "Health question"
+    },
+    "eoi_submission": {
+      "entity_name": "EOI_Submission",
+      "semantic_type": "eoi_submission_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "EOI submission"
+    },
+    "eoi_decision": {
+      "entity_name": "EOI_Decision",
+      "semantic_type": "eoi_decision_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "Underwriting decision"
+    },
+    "eoi_pending": {
+      "entity_name": "EOI_Pending",
+      "semantic_type": "eoi_pending_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "Pending EOI"
+    },
+    "eoi_approved": {
+      "entity_name": "EOI_Approved",
+      "semantic_type": "eoi_approved_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "Approved coverage"
+    },
+    "eoi_denied": {
+      "entity_name": "EOI_Denied",
+      "semantic_type": "eoi_denied_id",
+      "domain": "EOI",
+      "is_core": false,
+      "description": "Denied coverage"
+    },
+    "medical_plan": {
+      "entity_name": "Medical_Plan",
+      "semantic_type": "medical_plan_id",
+      "domain": "Medical",
+      "is_core": true,
+      "description": "Medical plan"
+    },
+    "medical_enrollment": {
+      "entity_name": "Medical_Enrollment",
+      "semantic_type": "medical_enrollment_id",
+      "domain": "Medical",
+      "is_core": true,
+      "description": "Medical election"
+    },
+    "provider_directory": {
+      "entity_name": "Provider_Directory",
+      "semantic_type": "provider_directory_id",
+      "domain": "Medical",
+      "is_core": false,
+      "description": "Provider search"
+    },
+    "member_portal": {
+      "entity_name": "Member_Portal",
+      "semantic_type": "member_portal_id",
+      "domain": "Medical",
+      "is_core": false,
+      "description": "Carrier portal SSO"
+    },
+    "dental_plan": {
+      "entity_name": "Dental_Plan",
+      "semantic_type": "dental_plan_id",
+      "domain": "Dental_Vision",
+      "is_core": true,
+      "description": "Dental plan"
+    },
+    "vision_plan": {
+      "entity_name": "Vision_Plan",
+      "semantic_type": "vision_plan_id",
+      "domain": "Dental_Vision",
+      "is_core": true,
+      "description": "Vision plan"
+    },
+    "life_insurance": {
+      "entity_name": "Life_Insurance",
+      "semantic_type": "life_insurance_id",
+      "domain": "Life_Disability",
+      "is_core": true,
+      "description": "Life insurance"
+    },
+    "add": {
+      "entity_name": "AD_D",
+      "semantic_type": "add_id",
+      "domain": "Life_Disability",
+      "is_core": false,
+      "description": "Accidental death"
+    },
+    "std": {
+      "entity_name": "STD",
+      "semantic_type": "std_id",
+      "domain": "Life_Disability",
+      "is_core": false,
+      "description": "Short-term disability"
+    },
+    "ltd": {
+      "entity_name": "LTD",
+      "semantic_type": "ltd_id",
+      "domain": "Life_Disability",
+      "is_core": false,
+      "description": "Long-term disability"
+    },
+    "voluntary_life": {
+      "entity_name": "Voluntary_Life",
+      "semantic_type": "voluntary_life_id",
+      "domain": "Life_Disability",
+      "is_core": false,
+      "description": "Voluntary life"
+    },
+    "supplemental_life": {
+      "entity_name": "Supplemental_Life",
+      "semantic_type": "supplemental_life_id",
+      "domain": "Life_Disability",
+      "is_core": false,
+      "description": "Supplemental life"
+    },
+    "hsa": {
+      "entity_name": "HSA",
+      "semantic_type": "hsa_id",
+      "domain": "Consumer_Directed",
+      "is_core": true,
+      "description": "Health savings account"
+    },
+    "fsa": {
+      "entity_name": "FSA",
+      "semantic_type": "fsa_id",
+      "domain": "Consumer_Directed",
+      "is_core": true,
+      "description": "Flexible spending account"
+    },
+    "hra": {
+      "entity_name": "HRA",
+      "semantic_type": "hra_id",
+      "domain": "Consumer_Directed",
+      "is_core": false,
+      "description": "Health reimbursement"
+    },
+    "dcfsa": {
+      "entity_name": "DCFSA",
+      "semantic_type": "dcfsa_id",
+      "domain": "Consumer_Directed",
+      "is_core": false,
+      "description": "Dependent care FSA"
+    },
+    "limited_fsa": {
+      "entity_name": "Limited_FSA",
+      "semantic_type": "limited_fsa_id",
+      "domain": "Consumer_Directed",
+      "is_core": false,
+      "description": "Limited purpose FSA"
+    },
+    "account_balance": {
+      "entity_name": "Account_Balance",
+      "semantic_type": "account_balance_id",
+      "domain": "Consumer_Directed",
+      "is_core": false,
+      "description": "Account balance"
+    },
+    "contribution_election": {
+      "entity_name": "Contribution_Election",
+      "semantic_type": "contribution_election_id",
+      "domain": "Consumer_Directed",
+      "is_core": false,
+      "description": "Annual election"
+    },
+    "retirement_plan": {
+      "entity_name": "Retirement_Plan",
+      "semantic_type": "retirement_plan_id",
+      "domain": "Retirement",
+      "is_core": false,
+      "description": "401k/403b plan"
+    },
+    "contribution": {
+      "entity_name": "Contribution",
+      "semantic_type": "contribution_id",
+      "domain": "Retirement",
+      "is_core": false,
+      "description": "Employee contribution"
+    },
+    "voluntary_benefit": {
+      "entity_name": "Voluntary_Benefit",
+      "semantic_type": "voluntary_benefit_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Voluntary product"
+    },
+    "accident_insurance": {
+      "entity_name": "Accident_Insurance",
+      "semantic_type": "accident_insurance_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Accident plan"
+    },
+    "critical_illness": {
+      "entity_name": "Critical_Illness",
+      "semantic_type": "critical_illness_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Critical illness"
+    },
+    "hospital_indemnity": {
+      "entity_name": "Hospital_Indemnity",
+      "semantic_type": "hospital_indemnity_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Hospital plan"
+    },
+    "pet_insurance": {
+      "entity_name": "Pet_Insurance",
+      "semantic_type": "pet_insurance_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Pet coverage"
+    },
+    "legal_plan": {
+      "entity_name": "Legal_Plan",
+      "semantic_type": "legal_plan_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Legal services"
+    },
+    "identity_theft": {
+      "entity_name": "Identity_Theft",
+      "semantic_type": "identity_theft_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "ID protection"
+    },
+    "partner_marketplace": {
+      "entity_name": "Partner_Marketplace",
+      "semantic_type": "partner_marketplace_id",
+      "domain": "Voluntary_Benefits",
+      "is_core": false,
+      "description": "Lifestyle benefits"
+    },
+    "cobra": {
+      "entity_name": "COBRA",
+      "semantic_type": "cobra_id",
+      "domain": "COBRA",
+      "is_core": true,
+      "description": "COBRA continuation"
+    },
+    "cobra_qe": {
+      "entity_name": "COBRA_Qualifying_Event",
+      "semantic_type": "cobra_qe_id",
+      "domain": "COBRA",
+      "is_core": false,
+      "description": "COBRA trigger"
+    },
+    "cobra_election": {
+      "entity_name": "COBRA_Election",
+      "semantic_type": "cobra_election_id",
+      "domain": "COBRA",
+      "is_core": false,
+      "description": "COBRA choice"
+    },
+    "cobra_payment": {
+      "entity_name": "COBRA_Payment",
+      "semantic_type": "cobra_payment_id",
+      "domain": "COBRA",
+      "is_core": false,
+      "description": "COBRA premium"
+    },
+    "cobra_notice": {
+      "entity_name": "COBRA_Notice",
+      "semantic_type": "cobra_notice_id",
+      "domain": "COBRA",
+      "is_core": false,
+      "description": "COBRA letter"
+    },
+    "billing": {
+      "entity_name": "Billing",
+      "semantic_type": "billing_id",
+      "domain": "Billing",
+      "is_core": true,
+      "description": "Billing record"
+    },
+    "invoice": {
+      "entity_name": "Invoice",
+      "semantic_type": "invoice_id",
+      "domain": "Billing",
+      "is_core": true,
+      "description": "Carrier invoice"
+    },
+    "self_billing": {
+      "entity_name": "Self_Billing",
+      "semantic_type": "self_billing_id",
+      "domain": "Billing",
+      "is_core": false,
+      "description": "Self-bill generation"
+    },
+    "bill_reconciliation": {
+      "entity_name": "Bill_Reconciliation",
+      "semantic_type": "bill_reconciliation_id",
+      "domain": "Billing",
+      "is_core": false,
+      "description": "Reconciliation"
+    },
+    "premium": {
+      "entity_name": "Premium",
+      "semantic_type": "premium_id",
+      "domain": "Billing",
+      "is_core": true,
+      "description": "Premium amount"
+    },
+    "premium_payment": {
+      "entity_name": "Premium_Payment",
+      "semantic_type": "premium_payment_id",
+      "domain": "Billing",
+      "is_core": false,
+      "description": "Premium remittance"
+    },
+    "payroll_deduction": {
+      "entity_name": "Payroll_Deduction",
+      "semantic_type": "payroll_deduction_id",
+      "domain": "Payroll_Deduction",
+      "is_core": true,
+      "description": "Deduction record"
+    },
+    "deduction_code": {
+      "entity_name": "Deduction_Code",
+      "semantic_type": "deduction_code_id",
+      "domain": "Payroll_Deduction",
+      "is_core": true,
+      "description": "Deduction mapping"
+    },
+    "pre_tax_deduction": {
+      "entity_name": "Pre_Tax_Deduction",
+      "semantic_type": "pre_tax_deduction_id",
+      "domain": "Payroll_Deduction",
+      "is_core": false,
+      "description": "Pre-tax amount"
+    },
+    "post_tax_deduction": {
+      "entity_name": "Post_Tax_Deduction",
+      "semantic_type": "post_tax_deduction_id",
+      "domain": "Payroll_Deduction",
+      "is_core": false,
+      "description": "Post-tax amount"
+    },
+    "employer_contribution": {
+      "entity_name": "Employer_Contribution",
+      "semantic_type": "employer_contribution_id",
+      "domain": "Payroll_Deduction",
+      "is_core": false,
+      "description": "Employer portion"
+    },
+    "imputed_income": {
+      "entity_name": "Imputed_Income",
+      "semantic_type": "imputed_income_id",
+      "domain": "Payroll_Deduction",
+      "is_core": false,
+      "description": "Imputed income"
+    },
+    "carrier": {
+      "entity_name": "Carrier",
+      "semantic_type": "carrier_id",
+      "domain": "Carrier",
+      "is_core": true,
+      "description": "Insurance carrier"
+    },
+    "carrier_feed": {
+      "entity_name": "Carrier_Feed",
+      "semantic_type": "carrier_feed_id",
+      "domain": "Carrier",
+      "is_core": false,
+      "description": "EDI/API feed"
+    },
+    "carrier_api": {
+      "entity_name": "Carrier_API",
+      "semantic_type": "carrier_api_id",
+      "domain": "Carrier",
+      "is_core": false,
+      "description": "Boost API connection"
+    },
+    "carrier_connection": {
+      "entity_name": "Carrier_Connection",
+      "semantic_type": "carrier_connection_id",
+      "domain": "Carrier",
+      "is_core": false,
+      "description": "Carrier link"
+    },
+    "aca": {
+      "entity_name": "ACA",
+      "semantic_type": "aca_id",
+      "domain": "ACA_Compliance",
+      "is_core": true,
+      "description": "ACA tracking"
+    },
+    "aca_measurement": {
+      "entity_name": "ACA_Measurement",
+      "semantic_type": "aca_measurement_id",
+      "domain": "ACA_Compliance",
+      "is_core": false,
+      "description": "Measurement period"
+    },
+    "aca_stability": {
+      "entity_name": "ACA_Stability",
+      "semantic_type": "aca_stability_id",
+      "domain": "ACA_Compliance",
+      "is_core": false,
+      "description": "Stability period"
+    },
+    "form_1095c": {
+      "entity_name": "Form_1095C",
+      "semantic_type": "form_1095c_id",
+      "domain": "ACA_Compliance",
+      "is_core": false,
+      "description": "1095-C form"
+    },
+    "form_1094c": {
+      "entity_name": "Form_1094C",
+      "semantic_type": "form_1094c_id",
+      "domain": "ACA_Compliance",
+      "is_core": false,
+      "description": "1094-C form"
+    },
+    "ale_status": {
+      "entity_name": "ALE_Status",
+      "semantic_type": "ale_status_id",
+      "domain": "ACA_Compliance",
+      "is_core": false,
+      "description": "ALE determination"
+    },
+    "communication": {
+      "entity_name": "Communication",
+      "semantic_type": "communication_id",
+      "domain": "Communications",
+      "is_core": false,
+      "description": "HR communication"
+    },
+    "email_campaign": {
+      "entity_name": "Email_Campaign",
+      "semantic_type": "email_campaign_id",
+      "domain": "Communications",
+      "is_core": false,
+      "description": "Email message"
+    },
+    "custom_message": {
+      "entity_name": "Custom_Message",
+      "semantic_type": "custom_message_id",
+      "domain": "Communications",
+      "is_core": false,
+      "description": "ChatGPT-powered"
+    },
+    "enrollment_reminder": {
+      "entity_name": "Enrollment_Reminder",
+      "semantic_type": "enrollment_reminder_id",
+      "domain": "Communications",
+      "is_core": false,
+      "description": "OE reminder"
+    },
+    "benefits_guide": {
+      "entity_name": "Benefits_Guide",
+      "semantic_type": "benefits_guide_id",
+      "domain": "Communications",
+      "is_core": false,
+      "description": "Digital guide"
+    },
+    "the_source": {
+      "entity_name": "The_Source",
+      "semantic_type": "the_source_id",
+      "domain": "Engagement",
+      "is_core": false,
+      "description": "Engagement hub"
+    },
+    "employee_portal": {
+      "entity_name": "Employee_Portal",
+      "semantic_type": "employee_portal_id",
+      "domain": "Engagement",
+      "is_core": true,
+      "description": "Self-service portal"
+    },
+    "mobile_app": {
+      "entity_name": "Mobile_App",
+      "semantic_type": "mobile_app_id",
+      "domain": "Engagement",
+      "is_core": false,
+      "description": "Mobile experience"
+    },
+    "ai_assistant": {
+      "entity_name": "AI_Assistant",
+      "semantic_type": "ai_assistant_id",
+      "domain": "Engagement",
+      "is_core": false,
+      "description": "AI chatbot"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Standard report"
+    },
+    "custom_report": {
+      "entity_name": "Custom_Report",
+      "semantic_type": "custom_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Custom report"
+    },
+    "data_visualization": {
+      "entity_name": "Data_Visualization",
+      "semantic_type": "data_visualization_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "IQ dashboards"
+    },
+    "enrollment_report": {
+      "entity_name": "Enrollment_Report",
+      "semantic_type": "enrollment_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Enrollment summary"
+    },
+    "participation_report": {
+      "entity_name": "Participation_Report",
+      "semantic_type": "participation_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Plan participation"
+    },
+    "administrator": {
+      "entity_name": "Administrator",
+      "semantic_type": "administrator_id",
+      "domain": "Administrator",
+      "is_core": true,
+      "description": "Admin user"
+    },
+    "admin_role": {
+      "entity_name": "Admin_Role",
+      "semantic_type": "admin_role_id",
+      "domain": "Administrator",
+      "is_core": false,
+      "description": "Admin permissions"
+    },
+    "broker": {
+      "entity_name": "Broker",
+      "semantic_type": "broker_id",
+      "domain": "Administrator",
+      "is_core": false,
+      "description": "Broker access"
+    },
+    "group": {
+      "entity_name": "Group",
+      "semantic_type": "group_id",
+      "domain": "Administrator",
+      "is_core": true,
+      "description": "Employer group"
+    },
+    "hcm_integration": {
+      "entity_name": "HCM_Integration",
+      "semantic_type": "hcm_integration_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "HCM sync"
+    },
+    "payroll_integration": {
+      "entity_name": "Payroll_Integration",
+      "semantic_type": "payroll_integration_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "Payroll sync"
+    },
+    "api": {
+      "entity_name": "API",
+      "semantic_type": "api_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "REST API"
+    },
+    "sso": {
+      "entity_name": "SSO",
+      "semantic_type": "sso_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "Single sign-on"
+    },
+    "webhook": {
+      "entity_name": "Webhook",
+      "semantic_type": "webhook_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "Event notification"
+    }
+  },
+  "hub_count": 121
+}

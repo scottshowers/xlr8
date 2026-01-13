@@ -1,0 +1,609 @@
+{
+  "version": "1.0",
+  "vendor": "ADP",
+  "product": "ADP Streamline",
+  "source": "ADP website, product documentation, GetApp reviews",
+  "extracted": "2026-01-10",
+  "api_type": "Web-based (limited API - via ADP GlobalView)",
+  "api_base": "StreamOnline portal",
+  "product_focus": "Multi-country payroll aggregation - 140+ countries",
+  "key_differentiators": [
+    "140+ countries coverage",
+    "In-country payroll specialist network",
+    "StreamOnline portal",
+    "Proactive legislative bulletins",
+    "Connects with ADP GlobalView",
+    "ISAE 3402 certified",
+    "Web-based interface",
+    "Multi-lingual support",
+    "HR connector for HCM integration"
+  ],
+  "architecture": "Global payroll aggregation with in-country partner network",
+  "related_products": {
+    "ADP GlobalView": "Full global HCM suite",
+    "ADP Celergo": "Multi-country payroll alternative",
+    "ADP Workforce Now Global": "Mid-market global payroll"
+  },
+  "support_model": {
+    "Global Implementation Coordinator": "Project oversight",
+    "Service Relationship Manager": "Strategic account manager",
+    "In-country Partner": "Local payroll processing"
+  },
+  "domains": {
+    "Global_Payroll_Core": {
+      "description": "Multi-country payroll processing",
+      "hub_count": 5,
+      "hubs": [
+        "global_payroll",
+        "country_payroll",
+        "payroll_run",
+        "payroll_status",
+        "payroll_calendar"
+      ]
+    },
+    "In_Country_Partner": {
+      "description": "Local payroll partner network",
+      "hub_count": 5,
+      "hubs": [
+        "in_country_partner",
+        "partner_network",
+        "local_specialist",
+        "implementation_coordinator",
+        "service_relationship_manager"
+      ]
+    },
+    "StreamOnline": {
+      "description": "Business process management portal",
+      "hub_count": 4,
+      "hubs": [
+        "streamonline",
+        "dashboard",
+        "process_monitoring",
+        "proactive_alert"
+      ]
+    },
+    "Data_Hub": {
+      "description": "Data synchronization",
+      "hub_count": 4,
+      "hubs": [
+        "data_hub",
+        "hr_data_sync",
+        "data_standardization",
+        "fixed_data"
+      ]
+    },
+    "Employee": {
+      "description": "Global employee data",
+      "hub_count": 4,
+      "hubs": [
+        "employee",
+        "employee_account",
+        "employee_country",
+        "employee_history"
+      ]
+    },
+    "Compensation": {
+      "description": "Global compensation",
+      "hub_count": 5,
+      "hubs": [
+        "compensation",
+        "salary",
+        "gross_to_net",
+        "benefits",
+        "commission"
+      ]
+    },
+    "Tax": {
+      "description": "Multi-country tax compliance",
+      "hub_count": 4,
+      "hubs": [
+        "tax",
+        "country_tax",
+        "taxentifier",
+        "statutory_reporting"
+      ]
+    },
+    "Compliance": {
+      "description": "Global compliance",
+      "hub_count": 5,
+      "hubs": [
+        "compliance",
+        "local_legislation",
+        "legislative_bulletin",
+        "regulatory_risk",
+        "isae_3402"
+      ]
+    },
+    "Time_Attendance": {
+      "description": "Time tracking",
+      "hub_count": 5,
+      "hubs": [
+        "time_entry",
+        "time_attendance",
+        "leave",
+        "sick_days",
+        "holiday"
+      ]
+    },
+    "Workforce_Management": {
+      "description": "Advanced WFM (optional)",
+      "hub_count": 4,
+      "hubs": [
+        "schedule",
+        "labor_forecast",
+        "attendance_policy",
+        "leave_management"
+      ]
+    },
+    "Analytics": {
+      "description": "Reporting and metrics",
+      "hub_count": 8,
+      "hubs": [
+        "report",
+        "custom_analytics",
+        "headcount_report",
+        "turnover_report",
+        "compensation_report",
+        "hr_metrics",
+        "payroll_metrics",
+        "modeling"
+      ]
+    },
+    "Employee_Self_Service": {
+      "description": "Employee experience",
+      "hub_count": 3,
+      "hubs": [
+        "employee_portal",
+        "multi_lingual",
+        "pay_slip"
+      ]
+    },
+    "GlobalView_Integration": {
+      "description": "ADP GlobalView connection",
+      "hub_count": 2,
+      "hubs": [
+        "globalview_connection",
+        "hcm_integration"
+      ]
+    },
+    "Security": {
+      "description": "Data security",
+      "hub_count": 3,
+      "hubs": [
+        "security",
+        "dashboard_permission",
+        "data_protection"
+      ]
+    }
+  },
+  "hubs": {
+    "global_payroll": {
+      "entity_name": "Global_Payroll",
+      "semantic_type": "global_payroll_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Multi-country payroll"
+    },
+    "country_payroll": {
+      "entity_name": "Country_Payroll",
+      "semantic_type": "country_payroll_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "In-country payroll"
+    },
+    "payroll_run": {
+      "entity_name": "Payroll_Run",
+      "semantic_type": "payroll_run_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Payroll execution"
+    },
+    "payroll_status": {
+      "entity_name": "Payroll_Status",
+      "semantic_type": "payroll_status_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Processing status"
+    },
+    "payroll_calendar": {
+      "entity_name": "Payroll_Calendar",
+      "semantic_type": "payroll_calendar_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": false,
+      "description": "Pay schedule"
+    },
+    "in_country_partner": {
+      "entity_name": "In_Country_Partner",
+      "semantic_type": "in_country_partner_id",
+      "domain": "In_Country_Partner",
+      "is_core": true,
+      "description": "Local payroll vendor"
+    },
+    "partner_network": {
+      "entity_name": "Partner_Network",
+      "semantic_type": "partner_network_id",
+      "domain": "In_Country_Partner",
+      "is_core": false,
+      "description": "ADP partner ecosystem"
+    },
+    "local_specialist": {
+      "entity_name": "Local_Specialist",
+      "semantic_type": "local_specialist_id",
+      "domain": "In_Country_Partner",
+      "is_core": false,
+      "description": "Country expert"
+    },
+    "implementation_coordinator": {
+      "entity_name": "Implementation_Coordinator",
+      "semantic_type": "implementation_coordinator_id",
+      "domain": "In_Country_Partner",
+      "is_core": false,
+      "description": "Project manager"
+    },
+    "service_relationship_manager": {
+      "entity_name": "Service_Relationship_Manager",
+      "semantic_type": "service_relationship_manager_id",
+      "domain": "In_Country_Partner",
+      "is_core": false,
+      "description": "Account manager"
+    },
+    "streamonline": {
+      "entity_name": "StreamOnline",
+      "semantic_type": "streamonline_id",
+      "domain": "StreamOnline",
+      "is_core": true,
+      "description": "Central portal"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "StreamOnline",
+      "is_core": true,
+      "description": "Status dashboard"
+    },
+    "process_monitoring": {
+      "entity_name": "Process_Monitoring",
+      "semantic_type": "process_monitoring_id",
+      "domain": "StreamOnline",
+      "is_core": false,
+      "description": "Payroll tracking"
+    },
+    "proactive_alert": {
+      "entity_name": "Proactive_Alert",
+      "semantic_type": "proactive_alert_id",
+      "domain": "StreamOnline",
+      "is_core": false,
+      "description": "Issue notification"
+    },
+    "data_hub": {
+      "entity_name": "Data_Hub",
+      "semantic_type": "data_hub_id",
+      "domain": "Data_Hub",
+      "is_core": true,
+      "description": "Central data store"
+    },
+    "hr_data_sync": {
+      "entity_name": "HR_Data_Sync",
+      "semantic_type": "hr_data_sync_id",
+      "domain": "Data_Hub",
+      "is_core": true,
+      "description": "HR platform sync"
+    },
+    "data_standardization": {
+      "entity_name": "Data_Standardization",
+      "semantic_type": "data_standardization_id",
+      "domain": "Data_Hub",
+      "is_core": false,
+      "description": "Data normalization"
+    },
+    "fixed_data": {
+      "entity_name": "Fixed_Data",
+      "semantic_type": "fixed_data_id",
+      "domain": "Data_Hub",
+      "is_core": false,
+      "description": "Employee demographics"
+    },
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Employee record"
+    },
+    "employee_account": {
+      "entity_name": "Employee_Account",
+      "semantic_type": "employee_account_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Employee profile"
+    },
+    "employee_country": {
+      "entity_name": "Employee_Country",
+      "semantic_type": "employee_country_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Work location"
+    },
+    "employee_history": {
+      "entity_name": "Employee_History",
+      "semantic_type": "employee_history_id",
+      "domain": "Employee",
+      "is_core": false,
+      "description": "Employment history"
+    },
+    "compensation": {
+      "entity_name": "Compensation",
+      "semantic_type": "compensation_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Compensation record"
+    },
+    "salary": {
+      "entity_name": "Salary",
+      "semantic_type": "salary_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Base salary"
+    },
+    "gross_to_net": {
+      "entity_name": "Gross_To_Net",
+      "semantic_type": "gross_to_net_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Payroll calculation"
+    },
+    "benefits": {
+      "entity_name": "Benefits",
+      "semantic_type": "benefits_id",
+      "domain": "Compensation",
+      "is_core": false,
+      "description": "Benefits data"
+    },
+    "commission": {
+      "entity_name": "Commission",
+      "semantic_type": "commission_id",
+      "domain": "Compensation",
+      "is_core": false,
+      "description": "Commission pay"
+    },
+    "tax": {
+      "entity_name": "Tax",
+      "semantic_type": "tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax withholding"
+    },
+    "country_tax": {
+      "entity_name": "Country_Tax",
+      "semantic_type": "country_tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Local taxes"
+    },
+    "taxentifier": {
+      "entity_name": "Tax_ID",
+      "semantic_type": "tax_identifier_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax identification"
+    },
+    "statutory_reporting": {
+      "entity_name": "Statutory_Reporting",
+      "semantic_type": "statutory_reporting_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Government reports"
+    },
+    "compliance": {
+      "entity_name": "Compliance",
+      "semantic_type": "compliance_id",
+      "domain": "Compliance",
+      "is_core": true,
+      "description": "Compliance tracking"
+    },
+    "local_legislation": {
+      "entity_name": "Local_Legislation",
+      "semantic_type": "local_legislation_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Country laws"
+    },
+    "legislative_bulletin": {
+      "entity_name": "Legislative_Bulletin",
+      "semantic_type": "legislative_bulletin_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Law updates"
+    },
+    "regulatory_risk": {
+      "entity_name": "Regulatory_Risk",
+      "semantic_type": "regulatory_risk_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Risk monitoring"
+    },
+    "isae_3402": {
+      "entity_name": "ISAE_3402",
+      "semantic_type": "isae_3402_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Audit certification"
+    },
+    "time_entry": {
+      "entity_name": "Time_Entry",
+      "semantic_type": "time_entry_id",
+      "domain": "Time_Attendance",
+      "is_core": true,
+      "description": "Time record"
+    },
+    "time_attendance": {
+      "entity_name": "Time_Attendance",
+      "semantic_type": "time_attendance_id",
+      "domain": "Time_Attendance",
+      "is_core": true,
+      "description": "T&A data"
+    },
+    "leave": {
+      "entity_name": "Leave",
+      "semantic_type": "leave_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Absence/PTO"
+    },
+    "sick_days": {
+      "entity_name": "Sick_Days",
+      "semantic_type": "sick_days_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Sick leave"
+    },
+    "holiday": {
+      "entity_name": "Holiday",
+      "semantic_type": "holiday_id",
+      "domain": "Time_Attendance",
+      "is_core": false,
+      "description": "Holiday tracking"
+    },
+    "schedule": {
+      "entity_name": "Schedule",
+      "semantic_type": "schedule_id",
+      "domain": "Workforce_Management",
+      "is_core": false,
+      "description": "Work schedule"
+    },
+    "labor_forecast": {
+      "entity_name": "Labor_Forecast",
+      "semantic_type": "labor_forecast_id",
+      "domain": "Workforce_Management",
+      "is_core": false,
+      "description": "Labor budgeting"
+    },
+    "attendance_policy": {
+      "entity_name": "Attendance_Policy",
+      "semantic_type": "attendance_policy_id",
+      "domain": "Workforce_Management",
+      "is_core": false,
+      "description": "Policy rules"
+    },
+    "leave_management": {
+      "entity_name": "Leave_Management",
+      "semantic_type": "leave_management_id",
+      "domain": "Workforce_Management",
+      "is_core": false,
+      "description": "Leave cases"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Standard report"
+    },
+    "custom_analytics": {
+      "entity_name": "Custom_Analytics",
+      "semantic_type": "custom_analytics_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Custom report"
+    },
+    "headcount_report": {
+      "entity_name": "Headcount_Report",
+      "semantic_type": "headcount_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Headcount data"
+    },
+    "turnover_report": {
+      "entity_name": "Turnover_Report",
+      "semantic_type": "turnover_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Turnover metrics"
+    },
+    "compensation_report": {
+      "entity_name": "Compensation_Report",
+      "semantic_type": "compensation_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Pay analytics"
+    },
+    "hr_metrics": {
+      "entity_name": "HR_Metrics",
+      "semantic_type": "hr_metrics_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "HR KPIs"
+    },
+    "payroll_metrics": {
+      "entity_name": "Payroll_Metrics",
+      "semantic_type": "payroll_metrics_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Payroll KPIs"
+    },
+    "modeling": {
+      "entity_name": "Modeling",
+      "semantic_type": "modeling_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "HR modeling"
+    },
+    "employee_portal": {
+      "entity_name": "Employee_Portal",
+      "semantic_type": "employee_portal_id",
+      "domain": "Employee_Self_Service",
+      "is_core": true,
+      "description": "Self-service portal"
+    },
+    "multi_lingual": {
+      "entity_name": "Multi_Lingual",
+      "semantic_type": "multi_lingual_id",
+      "domain": "Employee_Self_Service",
+      "is_core": false,
+      "description": "Language support"
+    },
+    "pay_slip": {
+      "entity_name": "Pay_Slip",
+      "semantic_type": "pay_slip_id",
+      "domain": "Employee_Self_Service",
+      "is_core": true,
+      "description": "Pay statement"
+    },
+    "globalview_connection": {
+      "entity_name": "GlobalView_Connection",
+      "semantic_type": "globalview_connection_id",
+      "domain": "GlobalView_Integration",
+      "is_core": false,
+      "description": "GlobalView sync"
+    },
+    "hcm_integration": {
+      "entity_name": "HCM_Integration",
+      "semantic_type": "hcm_integration_id",
+      "domain": "GlobalView_Integration",
+      "is_core": false,
+      "description": "Full HCM link"
+    },
+    "security": {
+      "entity_name": "Security",
+      "semantic_type": "security_id",
+      "domain": "Security",
+      "is_core": false,
+      "description": "Security controls"
+    },
+    "dashboard_permission": {
+      "entity_name": "Dashboard_Permission",
+      "semantic_type": "dashboard_permission_id",
+      "domain": "Security",
+      "is_core": false,
+      "description": "Access control"
+    },
+    "data_protection": {
+      "entity_name": "Data_Protection",
+      "semantic_type": "data_protection_id",
+      "domain": "Security",
+      "is_core": false,
+      "description": "Data security"
+    }
+  },
+  "hub_count": 61
+}

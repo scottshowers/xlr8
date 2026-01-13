@@ -1,0 +1,677 @@
+{
+  "version": "1.0",
+  "vendor": "UKG",
+  "product": "UKG One View",
+  "source": "UKG website, NelsonHall analysis, press releases",
+  "extracted": "2026-01-10",
+  "api_type": "REST API",
+  "api_base": "Integrated with UKG Pro/Ready",
+  "product_focus": "Multi-country payroll aggregation - 160+ countries",
+  "key_differentiators": [
+    "160+ countries coverage",
+    "120+ currencies",
+    "20+ languages",
+    "Bring-your-own payroll provider",
+    "AI-powered perpetual validation",
+    "Single pane of glass for global payroll",
+    "One View Payments - cross-border money movement",
+    "Integrates with UKG Pro and UKG Ready",
+    "NelsonHall Leader 2024",
+    "Global Payroll Supplier of the Year"
+  ],
+  "architecture": "Global payroll aggregation with local provider network",
+  "product_tiers": {
+    "One View Connect": "Data aggregation and unified view",
+    "One View Direct": "Single process for calculation management",
+    "One View Advanced": "Full end-to-end control",
+    "One View Managed Services": "Outsourced payroll processing",
+    "One View Payments": "Cross-border payment and funding"
+  },
+  "domains": {
+    "Global_Payroll_Core": {
+      "description": "Multi-country payroll aggregation",
+      "hub_count": 6,
+      "hubs": [
+        "global_payroll",
+        "country_payroll",
+        "payroll_provider",
+        "payroll_run",
+        "payroll_status",
+        "payroll_calendar"
+      ]
+    },
+    "Data_Aggregation": {
+      "description": "Global data consolidation",
+      "hub_count": 5,
+      "hubs": [
+        "unified_view",
+        "data_sync",
+        "data_standardization",
+        "data_hub",
+        "real_time_data"
+      ]
+    },
+    "Validation": {
+      "description": "AI-powered payroll validation",
+      "hub_count": 5,
+      "hubs": [
+        "perpetual_validation",
+        "validation_rule",
+        "validation_error",
+        "proactive_alert",
+        "data_quality"
+      ]
+    },
+    "Employee": {
+      "description": "Global employee data",
+      "hub_count": 4,
+      "hubs": [
+        "employee",
+        "employee_country",
+        "employment",
+        "international_assignee"
+      ]
+    },
+    "Compensation": {
+      "description": "Global compensation",
+      "hub_count": 5,
+      "hubs": [
+        "compensation",
+        "salary",
+        "currency",
+        "exchange_rate",
+        "gross_to_net"
+      ]
+    },
+    "Payments": {
+      "description": "Cross-border payments (One View Payments)",
+      "hub_count": 6,
+      "hubs": [
+        "payment",
+        "cross_border_payment",
+        "funding",
+        "bank_transfer",
+        "payment_status",
+        "money_movement"
+      ]
+    },
+    "Compliance": {
+      "description": "Global compliance",
+      "hub_count": 5,
+      "hubs": [
+        "compliance",
+        "local_regulation",
+        "tax_compliance",
+        "statutory_requirement",
+        "legislative_update"
+      ]
+    },
+    "Tax": {
+      "description": "Multi-country tax",
+      "hub_count": 4,
+      "hubs": [
+        "tax",
+        "country_tax",
+        "tax_filing",
+        "statutory_reporting"
+      ]
+    },
+    "Pay_Slip": {
+      "description": "Global pay statements",
+      "hub_count": 3,
+      "hubs": [
+        "pay_slip",
+        "localized_pay_slip",
+        "pay_slip_language"
+      ]
+    },
+    "Shadow_Payroll": {
+      "description": "Shadow payroll for assignees",
+      "hub_count": 3,
+      "hubs": [
+        "shadow_payroll",
+        "home_payroll",
+        "host_payroll"
+      ]
+    },
+    "Analytics": {
+      "description": "Global payroll analytics",
+      "hub_count": 8,
+      "hubs": [
+        "report",
+        "global_report",
+        "dashboard",
+        "headcount_report",
+        "turnover_report",
+        "compensation_report",
+        "cost_analytics",
+        "real_time_metrics"
+      ]
+    },
+    "Employee_Self_Service": {
+      "description": "Employee experience",
+      "hub_count": 3,
+      "hubs": [
+        "employee_portal",
+        "mobile_app",
+        "language_preference"
+      ]
+    },
+    "Product_Tiers": {
+      "description": "One View product suite",
+      "hub_count": 5,
+      "hubs": [
+        "one_view_connect",
+        "one_view_direct",
+        "one_view_advanced",
+        "one_view_managed",
+        "one_view_payments"
+      ]
+    },
+    "Integration": {
+      "description": "HCM/WFM integration",
+      "hub_count": 4,
+      "hubs": [
+        "hcm_integration",
+        "wfm_integration",
+        "api",
+        "hr_connector"
+      ]
+    },
+    "Workflow": {
+      "description": "Process automation",
+      "hub_count": 3,
+      "hubs": [
+        "workflow",
+        "approval",
+        "automation"
+      ]
+    }
+  },
+  "hubs": {
+    "global_payroll": {
+      "entity_name": "Global_Payroll",
+      "semantic_type": "global_payroll_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Multi-country payroll"
+    },
+    "country_payroll": {
+      "entity_name": "Country_Payroll",
+      "semantic_type": "country_payroll_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "In-country payroll"
+    },
+    "payroll_provider": {
+      "entity_name": "Payroll_Provider",
+      "semantic_type": "payroll_provider_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Local payroll vendor"
+    },
+    "payroll_run": {
+      "entity_name": "Payroll_Run",
+      "semantic_type": "payroll_run_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Payroll execution"
+    },
+    "payroll_status": {
+      "entity_name": "Payroll_Status",
+      "semantic_type": "payroll_status_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": true,
+      "description": "Processing status"
+    },
+    "payroll_calendar": {
+      "entity_name": "Payroll_Calendar",
+      "semantic_type": "payroll_calendar_id",
+      "domain": "Global_Payroll_Core",
+      "is_core": false,
+      "description": "Pay schedule"
+    },
+    "unified_view": {
+      "entity_name": "Unified_View",
+      "semantic_type": "unified_view_id",
+      "domain": "Data_Aggregation",
+      "is_core": true,
+      "description": "Single pane of glass"
+    },
+    "data_sync": {
+      "entity_name": "Data_Sync",
+      "semantic_type": "data_sync_id",
+      "domain": "Data_Aggregation",
+      "is_core": true,
+      "description": "Data synchronization"
+    },
+    "data_standardization": {
+      "entity_name": "Data_Standardization",
+      "semantic_type": "data_standardization_id",
+      "domain": "Data_Aggregation",
+      "is_core": false,
+      "description": "Data normalization"
+    },
+    "data_hub": {
+      "entity_name": "Data_Hub",
+      "semantic_type": "data_hub_id",
+      "domain": "Data_Aggregation",
+      "is_core": false,
+      "description": "Central data store"
+    },
+    "real_time_data": {
+      "entity_name": "Real_Time_Data",
+      "semantic_type": "real_time_data_id",
+      "domain": "Data_Aggregation",
+      "is_core": false,
+      "description": "Live data feed"
+    },
+    "perpetual_validation": {
+      "entity_name": "Perpetual_Validation",
+      "semantic_type": "perpetual_validation_id",
+      "domain": "Validation",
+      "is_core": true,
+      "description": "AI validation"
+    },
+    "validation_rule": {
+      "entity_name": "Validation_Rule",
+      "semantic_type": "validation_rule_id",
+      "domain": "Validation",
+      "is_core": false,
+      "description": "Validation logic"
+    },
+    "validation_error": {
+      "entity_name": "Validation_Error",
+      "semantic_type": "validation_error_id",
+      "domain": "Validation",
+      "is_core": false,
+      "description": "Error detection"
+    },
+    "proactive_alert": {
+      "entity_name": "Proactive_Alert",
+      "semantic_type": "proactive_alert_id",
+      "domain": "Validation",
+      "is_core": false,
+      "description": "Issue notification"
+    },
+    "data_quality": {
+      "entity_name": "Data_Quality",
+      "semantic_type": "data_quality_id",
+      "domain": "Validation",
+      "is_core": false,
+      "description": "Quality score"
+    },
+    "employee": {
+      "entity_name": "Employee",
+      "semantic_type": "employee_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Employee record"
+    },
+    "employee_country": {
+      "entity_name": "Employee_Country",
+      "semantic_type": "employee_country_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Work country"
+    },
+    "employment": {
+      "entity_name": "Employment",
+      "semantic_type": "employment_id",
+      "domain": "Employee",
+      "is_core": true,
+      "description": "Employment record"
+    },
+    "international_assignee": {
+      "entity_name": "International_Assignee",
+      "semantic_type": "international_assignee_id",
+      "domain": "Employee",
+      "is_core": false,
+      "description": "Expat/assignee"
+    },
+    "compensation": {
+      "entity_name": "Compensation",
+      "semantic_type": "compensation_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Compensation record"
+    },
+    "salary": {
+      "entity_name": "Salary",
+      "semantic_type": "salary_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Base salary"
+    },
+    "currency": {
+      "entity_name": "Currency",
+      "semantic_type": "currency_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Pay currency"
+    },
+    "exchange_rate": {
+      "entity_name": "Exchange_Rate",
+      "semantic_type": "exchange_rate_id",
+      "domain": "Compensation",
+      "is_core": false,
+      "description": "FX rate"
+    },
+    "gross_to_net": {
+      "entity_name": "Gross_To_Net",
+      "semantic_type": "gross_to_net_id",
+      "domain": "Compensation",
+      "is_core": true,
+      "description": "Payroll calculation"
+    },
+    "payment": {
+      "entity_name": "Payment",
+      "semantic_type": "payment_id",
+      "domain": "Payments",
+      "is_core": true,
+      "description": "Payment transaction"
+    },
+    "cross_border_payment": {
+      "entity_name": "Cross_Border_Payment",
+      "semantic_type": "cross_border_payment_id",
+      "domain": "Payments",
+      "is_core": true,
+      "description": "International payment"
+    },
+    "funding": {
+      "entity_name": "Funding",
+      "semantic_type": "funding_id",
+      "domain": "Payments",
+      "is_core": true,
+      "description": "Payment funding"
+    },
+    "bank_transfer": {
+      "entity_name": "Bank_Transfer",
+      "semantic_type": "bank_transfer_id",
+      "domain": "Payments",
+      "is_core": false,
+      "description": "Bank payment"
+    },
+    "payment_status": {
+      "entity_name": "Payment_Status",
+      "semantic_type": "payment_status_id",
+      "domain": "Payments",
+      "is_core": false,
+      "description": "Payment state"
+    },
+    "money_movement": {
+      "entity_name": "Money_Movement",
+      "semantic_type": "money_movement_id",
+      "domain": "Payments",
+      "is_core": false,
+      "description": "Funds transfer"
+    },
+    "compliance": {
+      "entity_name": "Compliance",
+      "semantic_type": "compliance_id",
+      "domain": "Compliance",
+      "is_core": true,
+      "description": "Compliance tracking"
+    },
+    "local_regulation": {
+      "entity_name": "Local_Regulation",
+      "semantic_type": "local_regulation_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Country regulations"
+    },
+    "tax_compliance": {
+      "entity_name": "Tax_Compliance",
+      "semantic_type": "tax_compliance_id",
+      "domain": "Compliance",
+      "is_core": true,
+      "description": "Tax obligations"
+    },
+    "statutory_requirement": {
+      "entity_name": "Statutory_Requirement",
+      "semantic_type": "statutory_requirement_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Legal requirements"
+    },
+    "legislative_update": {
+      "entity_name": "Legislative_Update",
+      "semantic_type": "legislative_update_id",
+      "domain": "Compliance",
+      "is_core": false,
+      "description": "Law changes"
+    },
+    "tax": {
+      "entity_name": "Tax",
+      "semantic_type": "tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Tax withholding"
+    },
+    "country_tax": {
+      "entity_name": "Country_Tax",
+      "semantic_type": "country_tax_id",
+      "domain": "Tax",
+      "is_core": true,
+      "description": "Local taxes"
+    },
+    "tax_filing": {
+      "entity_name": "Tax_Filing",
+      "semantic_type": "tax_filing_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Tax submission"
+    },
+    "statutory_reporting": {
+      "entity_name": "Statutory_Reporting",
+      "semantic_type": "statutory_reporting_id",
+      "domain": "Tax",
+      "is_core": false,
+      "description": "Government reports"
+    },
+    "pay_slip": {
+      "entity_name": "Pay_Slip",
+      "semantic_type": "pay_slip_id",
+      "domain": "Pay_Slip",
+      "is_core": true,
+      "description": "Pay statement"
+    },
+    "localized_pay_slip": {
+      "entity_name": "Localized_Pay_Slip",
+      "semantic_type": "localized_pay_slip_id",
+      "domain": "Pay_Slip",
+      "is_core": false,
+      "description": "Local format"
+    },
+    "pay_slip_language": {
+      "entity_name": "Pay_Slip_Language",
+      "semantic_type": "pay_slip_language_id",
+      "domain": "Pay_Slip",
+      "is_core": false,
+      "description": "Language setting"
+    },
+    "shadow_payroll": {
+      "entity_name": "Shadow_Payroll",
+      "semantic_type": "shadow_payroll_id",
+      "domain": "Shadow_Payroll",
+      "is_core": false,
+      "description": "Shadow payroll"
+    },
+    "home_payroll": {
+      "entity_name": "Home_Payroll",
+      "semantic_type": "home_payroll_id",
+      "domain": "Shadow_Payroll",
+      "is_core": false,
+      "description": "Home country payroll"
+    },
+    "host_payroll": {
+      "entity_name": "Host_Payroll",
+      "semantic_type": "host_payroll_id",
+      "domain": "Shadow_Payroll",
+      "is_core": false,
+      "description": "Host country payroll"
+    },
+    "report": {
+      "entity_name": "Report",
+      "semantic_type": "report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Standard report"
+    },
+    "global_report": {
+      "entity_name": "Global_Report",
+      "semantic_type": "global_report_id",
+      "domain": "Analytics",
+      "is_core": true,
+      "description": "Multi-country report"
+    },
+    "dashboard": {
+      "entity_name": "Dashboard",
+      "semantic_type": "dashboard_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Analytics dashboard"
+    },
+    "headcount_report": {
+      "entity_name": "Headcount_Report",
+      "semantic_type": "headcount_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Headcount data"
+    },
+    "turnover_report": {
+      "entity_name": "Turnover_Report",
+      "semantic_type": "turnover_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Turnover analysis"
+    },
+    "compensation_report": {
+      "entity_name": "Compensation_Report",
+      "semantic_type": "compensation_report_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Pay analytics"
+    },
+    "cost_analytics": {
+      "entity_name": "Cost_Analytics",
+      "semantic_type": "cost_analytics_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Labor costs"
+    },
+    "real_time_metrics": {
+      "entity_name": "Real_Time_Metrics",
+      "semantic_type": "real_time_metrics_id",
+      "domain": "Analytics",
+      "is_core": false,
+      "description": "Live KPIs"
+    },
+    "employee_portal": {
+      "entity_name": "Employee_Portal",
+      "semantic_type": "employee_portal_id",
+      "domain": "Employee_Self_Service",
+      "is_core": true,
+      "description": "Self-service portal"
+    },
+    "mobile_app": {
+      "entity_name": "Mobile_App",
+      "semantic_type": "mobile_app_id",
+      "domain": "Employee_Self_Service",
+      "is_core": false,
+      "description": "Mobile experience"
+    },
+    "language_preference": {
+      "entity_name": "Language_Preference",
+      "semantic_type": "language_preference_id",
+      "domain": "Employee_Self_Service",
+      "is_core": false,
+      "description": "20+ languages"
+    },
+    "one_view_connect": {
+      "entity_name": "One_View_Connect",
+      "semantic_type": "one_view_connect_id",
+      "domain": "Product_Tiers",
+      "is_core": false,
+      "description": "Data aggregation tier"
+    },
+    "one_view_direct": {
+      "entity_name": "One_View_Direct",
+      "semantic_type": "one_view_direct_id",
+      "domain": "Product_Tiers",
+      "is_core": false,
+      "description": "Calculation management"
+    },
+    "one_view_advanced": {
+      "entity_name": "One_View_Advanced",
+      "semantic_type": "one_view_advanced_id",
+      "domain": "Product_Tiers",
+      "is_core": false,
+      "description": "Full control tier"
+    },
+    "one_view_managed": {
+      "entity_name": "One_View_Managed",
+      "semantic_type": "one_view_managed_id",
+      "domain": "Product_Tiers",
+      "is_core": false,
+      "description": "Managed services"
+    },
+    "one_view_payments": {
+      "entity_name": "One_View_Payments",
+      "semantic_type": "one_view_payments_id",
+      "domain": "Product_Tiers",
+      "is_core": false,
+      "description": "Payment services"
+    },
+    "hcm_integration": {
+      "entity_name": "HCM_Integration",
+      "semantic_type": "hcm_integration_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "UKG Pro/Ready sync"
+    },
+    "wfm_integration": {
+      "entity_name": "WFM_Integration",
+      "semantic_type": "wfm_integration_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "Workforce management"
+    },
+    "api": {
+      "entity_name": "API",
+      "semantic_type": "api_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "Integration API"
+    },
+    "hr_connector": {
+      "entity_name": "HR_Connector",
+      "semantic_type": "hr_connector_id",
+      "domain": "Integration",
+      "is_core": false,
+      "description": "HR system link"
+    },
+    "workflow": {
+      "entity_name": "Workflow",
+      "semantic_type": "workflow_id",
+      "domain": "Workflow",
+      "is_core": true,
+      "description": "Automated workflow"
+    },
+    "approval": {
+      "entity_name": "Approval",
+      "semantic_type": "approval_id",
+      "domain": "Workflow",
+      "is_core": true,
+      "description": "Approval process"
+    },
+    "automation": {
+      "entity_name": "Automation",
+      "semantic_type": "automation_id",
+      "domain": "Workflow",
+      "is_core": false,
+      "description": "Process automation"
+    }
+  },
+  "hub_count": 69
+}

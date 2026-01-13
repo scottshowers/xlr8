@@ -1,0 +1,43 @@
+{
+  "namely_overlaps": {
+    "with_bamboohr": 91,
+    "with_gusto": 77,
+    "unique_to_namely": 34
+  },
+  "unique_concepts": [
+    "anonymousreporting",
+    "benefitsconsulting",
+    "carrier",
+    "companyculture",
+    "companydocument",
+    "compliancelibrary",
+    "customworkflow",
+    "development",
+    "documentcategory",
+    "employeedocument",
+    "employeerecognition",
+    "engagementreport",
+    "everify",
+    "handbookwizard",
+    "hoursworked",
+    "hradvisor",
+    "hranalytics",
+    "lms",
+    "managedbenefits",
+    "managedpayroll",
+    "newhireform",
+    "newsfeed",
+    "oshalog",
+    "partnernetwork",
+    "payrolltax",
+    "profile",
+    "recognition",
+    "recruiting",
+    "review360",
+    "schedule",
+    "shift",
+    "statecomparison",
+    "talentmanagement",
+    "team"
+  ]
+}
