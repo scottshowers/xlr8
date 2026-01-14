@@ -1928,18 +1928,26 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 # Remove duplicates while preserving order
                 dim_variants = list(dict.fromkeys(dim_variants))
                 
-                # Try each variant until we find concept matches
+                # Try each variant until we find usable column matches
+                # (not just any matches - value matches don't help for GROUP BY)
                 dim_matches = []
+                column_matches = []
                 for variant in dim_variants:
                     dim_matches = term_index.resolve_terms([variant])
                     if dim_matches:
-                        logger.warning(f"[DETERMINISTIC] GROUP BY dimension variant '{variant}' found {len(dim_matches)} matches")
-                        break
+                        # Filter for matches with actual column names
+                        column_matches = [m for m in dim_matches if m.column_name and m.table_name]
+                        logger.warning(f"[DETERMINISTIC] GROUP BY variant '{variant}': {len(dim_matches)} total matches, {len(column_matches)} column matches")
+                        if column_matches:
+                            break  # Found usable column matches
                 
-                # Filter for concept matches (term_type='concept')
-                concept_matches = [m for m in dim_matches if m.term_type == 'concept']
+                # Debug logging - show what we found
+                if dim_matches:
+                    logger.warning(f"[DETERMINISTIC] dim_matches details ({len(dim_matches)} total, {len(column_matches)} with column/table):")
+                    for m in dim_matches[:5]:
+                        logger.warning(f"[DETERMINISTIC]   - type={m.term_type}, table='{m.table_name[:40] if m.table_name else 'None'}', col='{m.column_name}'")
                 
-                if concept_matches:
+                if column_matches:
                     # EVOLUTION 10 FIX: Multi-tier preference for GROUP BY column selection
                     # Tier 1: Reality/employee tables (NOT config/validation)
                     # Tier 2: Any non-config/validation table
@@ -1961,16 +1969,16 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                                 '_deductions' in t)
                     
                     # Tier 1: Employee/reality tables that are NOT config
-                    tier1_matches = [m for m in concept_matches 
+                    tier1_matches = [m for m in column_matches 
                                      if is_employee_table(m.table_name, m.entity) 
                                      and not is_config_table(m.table_name)]
                     
                     # Tier 2: Any non-config table
-                    tier2_matches = [m for m in concept_matches 
+                    tier2_matches = [m for m in column_matches 
                                      if not is_config_table(m.table_name)]
                     
                     # Tier 3: Config tables (avoid if possible)
-                    tier3_matches = concept_matches
+                    tier3_matches = column_matches
                     
                     if tier1_matches:
                         best_match = tier1_matches[0]
@@ -1984,6 +1992,12 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                     
                     group_by_column = f"{best_match.table_name}.{best_match.column_name}"
                     logger.warning(f"[DETERMINISTIC] GROUP BY from concept: '{group_by_dimension}' → {group_by_column} (source={best_match.source})")
+                    
+                    # EVOLUTION 10 FIX: Add the GROUP BY match to term_matches
+                    # This ensures the assembler uses the table with the GROUP BY column
+                    # instead of the entity fallback table (which may not have this column)
+                    term_matches = [best_match] + term_matches
+                    logger.warning(f"[DETERMINISTIC] Added GROUP BY table to term_matches: {best_match.table_name}")
                 
                 # Fallback to hardcoded synonyms for common cases
                 elif not group_by_column:
