@@ -1,0 +1,1954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>XLR8 - Project-Centric UX Flow</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --white: #f6f5fa;
+      --grass-green: #83b16d;
+      --silver: #a2a1a0;
+      --sky-blue: #93abd9;
+      --clearwater: #b2d6de;
+      --electric-blue: #2766b1;
+      --ice-flow: #c9d3d4;
+      --aquamarine: #a1c3d4;
+      --accent: #285390;
+      --scarlet: #993c44;
+      --purple: #5f4282;
+      
+      --bg-primary: #f6f5fa;
+      --bg-secondary: #ffffff;
+      --bg-tertiary: #f0f4f7;
+      --text-primary: #2a3441;
+      --text-secondary: #5f6c7b;
+      --border: #e1e8ed;
+      
+      --font-header: 'Sora', sans-serif;
+      --font-body: 'Manrope', sans-serif;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: var(--font-body);
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      min-height: 100vh;
+    }
+    
+    /* Screen Navigation */
+    .screen-nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      background: white;
+      padding: 12px 24px;
+      display: flex;
+      justify-content: center;
+      gap: 8px;
+      z-index: 1000;
+      border-bottom: 1px solid var(--border);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+    }
+    
+    .screen-nav button {
+      padding: 10px 20px;
+      background: transparent;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-family: var(--font-body);
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .screen-nav button:hover {
+      border-color: var(--grass-green);
+      color: var(--grass-green);
+      background: rgba(131, 177, 109, 0.05);
+    }
+    
+    .screen-nav button.active {
+      background: var(--grass-green);
+      border-color: var(--grass-green);
+      color: white;
+    }
+    
+    .screen-nav .step-num {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      background: rgba(131, 177, 109, 0.15);
+      border-radius: 50%;
+      font-size: 11px;
+      line-height: 20px;
+      text-align: center;
+      margin-right: 8px;
+    }
+    
+    .screen-nav button.active .step-num {
+      background: rgba(255,255,255,0.25);
+    }
+    
+    /* Screen Container */
+    .screens-container {
+      padding-top: 72px;
+    }
+    
+    .screen {
+      display: none;
+      padding: 24px;
+      max-width: 1400px;
+      margin: 0 auto;
+    }
+    
+    .screen.active {
+      display: block;
+    }
+    
+    /* Mockup Frame */
+    .mockup-frame {
+      background: var(--bg-primary);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: 0 4px 20px rgba(0,0,0,0.08);
+    }
+    
+    /* App Header */
+    .app-header {
+      background: white;
+      border-bottom: 1px solid var(--border);
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 56px;
+    }
+    
+    .app-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .app-logo .logo-icon {
+      width: 36px;
+      height: 36px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .app-logo .logo-icon svg {
+      width: 100%;
+      height: 100%;
+    }
+    
+    .app-logo .logo-text {
+      font-family: var(--font-header);
+      font-weight: 700;
+      font-size: 18px;
+      color: var(--text-primary);
+    }
+    
+    .app-nav {
+      display: flex;
+      gap: 4px;
+    }
+    
+    .app-nav a {
+      padding: 8px 16px;
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    
+    .app-nav a:hover {
+      background: var(--bg-tertiary);
+    }
+    
+    .app-nav a.active {
+      background: rgba(131, 177, 109, 0.1);
+      color: var(--grass-green);
+    }
+    
+    .app-user {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    
+    .app-user .user-name {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    
+    .app-user .user-role {
+      font-size: 10px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    
+    /* App Content */
+    .app-content {
+      padding: 32px;
+      min-height: 600px;
+    }
+    
+    /* Page Header */
+    .page-header {
+      margin-bottom: 32px;
+    }
+    
+    .page-header h1 {
+      font-family: var(--font-header);
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    
+    .page-header .subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+    }
+    
+    /* Cards */
+    .card {
+      background: var(--bg-secondary);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      position: relative;
+      overflow: hidden;
+    }
+    
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--grass-green);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    
+    .card:hover::before {
+      opacity: 1;
+    }
+    
+    .card-title {
+      font-family: var(--font-header);
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .card-title .icon {
+      width: 32px;
+      height: 32px;
+      background: rgba(131, 177, 109, 0.12);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--grass-green);
+    }
+    
+    /* Form Elements */
+    .form-group {
+      margin-bottom: 20px;
+    }
+    
+    .form-group label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .form-group input,
+    .form-group select {
+      width: 100%;
+      padding: 12px 16px;
+      background: var(--bg-tertiary);
+      border: 1.5px solid var(--border);
+      border-radius: 8px;
+      font-family: var(--font-body);
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+    
+    .form-group input:focus,
+    .form-group select:focus {
+      outline: none;
+      border-color: var(--grass-green);
+      background: white;
+    }
+    
+    .form-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+    
+    /* Buttons */
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-family: var(--font-body);
+      font-weight: 700;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: var(--grass-green);
+      color: white;
+      box-shadow: 0 2px 8px rgba(131, 177, 109, 0.25);
+    }
+    
+    .btn-primary:hover {
+      background: #6b9b5a;
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(131, 177, 109, 0.35);
+    }
+    
+    .btn-secondary {
+      background: var(--bg-tertiary);
+      color: var(--text-primary);
+      border: 1.5px solid var(--border);
+    }
+    
+    /* Upload Zone */
+    .upload-zone {
+      border: 2px dashed var(--border);
+      border-radius: 12px;
+      padding: 48px;
+      text-align: center;
+      background: var(--bg-tertiary);
+      transition: all 0.3s;
+    }
+    
+    .upload-zone:hover {
+      border-color: var(--grass-green);
+      background: rgba(131, 177, 109, 0.05);
+    }
+    
+    .upload-zone .upload-icon {
+      width: 64px;
+      height: 64px;
+      background: var(--grass-green);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 16px;
+      color: white;
+      font-size: 24px;
+    }
+    
+    .upload-zone h3 {
+      font-family: var(--font-header);
+      font-size: 18px;
+      color: var(--text-primary);
+      margin-bottom: 8px;
+    }
+    
+    .upload-zone p {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    /* Progress Bar */
+    .progress-section {
+      margin-top: 24px;
+    }
+    
+    .progress-item {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 16px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .progress-item .file-icon {
+      width: 40px;
+      height: 40px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    
+    .progress-item .file-info {
+      flex: 1;
+    }
+    
+    .progress-item .file-name {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    
+    .progress-item .file-status {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    
+    .progress-bar {
+      height: 6px;
+      background: var(--border);
+      border-radius: 3px;
+      margin-top: 8px;
+      overflow: hidden;
+    }
+    
+    .progress-bar .fill {
+      height: 100%;
+      background: var(--grass-green);
+      border-radius: 3px;
+      transition: width 0.3s;
+    }
+    
+    /* Processing Animation */
+    .processing-card {
+      text-align: center;
+      padding: 48px;
+    }
+    
+    .processing-spinner {
+      width: 64px;
+      height: 64px;
+      border: 4px solid var(--border);
+      border-top-color: var(--grass-green);
+      border-radius: 50%;
+      margin: 0 auto 24px;
+      animation: spin 1s linear infinite;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .processing-steps {
+      display: flex;
+      justify-content: center;
+      gap: 32px;
+      margin-top: 32px;
+    }
+    
+    .processing-step {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    .processing-step.complete {
+      color: var(--grass-green);
+    }
+    
+    .processing-step.active {
+      color: var(--electric-blue);
+    }
+    
+    .processing-step .step-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+    }
+    
+    .processing-step.complete .step-icon {
+      background: var(--grass-green);
+      color: white;
+    }
+    
+    .processing-step.active .step-icon {
+      background: var(--electric-blue);
+      color: white;
+    }
+    
+    .processing-step.pending .step-icon {
+      background: var(--border);
+      color: var(--text-secondary);
+    }
+    
+    /* Findings Dashboard */
+    .findings-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 20px;
+      margin-bottom: 32px;
+    }
+    
+    .metric-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      text-align: center;
+    }
+    
+    .metric-card .metric-value {
+      font-family: var(--font-header);
+      font-size: 36px;
+      font-weight: 800;
+      margin-bottom: 4px;
+    }
+    
+    .metric-card .metric-label {
+      font-size: 12px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .metric-card.critical .metric-value { color: var(--scarlet); }
+    .metric-card.warning .metric-value { color: #d97706; }
+    .metric-card.info .metric-value { color: var(--accent); }
+    .metric-card.success .metric-value { color: var(--grass-green); }
+    
+    /* Findings List */
+    .findings-list {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    
+    .findings-header {
+      display: grid;
+      grid-template-columns: 40px 1fr 120px 100px 100px;
+      gap: 16px;
+      padding: 16px 20px;
+      background: var(--bg-tertiary);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .finding-row {
+      display: grid;
+      grid-template-columns: 40px 1fr 120px 100px 100px;
+      gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .finding-row:hover {
+      background: var(--bg-tertiary);
+    }
+    
+    .finding-row:last-child {
+      border-bottom: none;
+    }
+    
+    .finding-severity {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+    
+    .finding-severity.critical {
+      background: rgba(153, 60, 68, 0.1);
+      color: var(--scarlet);
+    }
+    
+    .finding-severity.warning {
+      background: rgba(217, 119, 6, 0.1);
+      color: #d97706;
+    }
+    
+    .finding-severity.info {
+      background: rgba(40, 83, 144, 0.1);
+      color: var(--accent);
+    }
+    
+    .finding-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    
+    .finding-subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-top: 2px;
+    }
+    
+    .finding-category {
+      font-size: 12px;
+      padding: 4px 10px;
+      background: var(--bg-tertiary);
+      border-radius: 12px;
+      color: var(--text-secondary);
+    }
+    
+    .finding-impact {
+      font-weight: 600;
+      font-size: 14px;
+      color: var(--text-primary);
+    }
+    
+    .finding-action {
+      color: var(--grass-green);
+      font-size: 13px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    
+    /* Detail Panel */
+    .detail-panel {
+      display: grid;
+      grid-template-columns: 1fr 400px;
+      gap: 24px;
+    }
+    
+    .detail-main {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    
+    .detail-sidebar {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    
+    .detail-header {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 24px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .detail-header .severity-badge {
+      width: 48px;
+      height: 48px;
+      background: rgba(153, 60, 68, 0.1);
+      color: var(--scarlet);
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
+    }
+    
+    .detail-header h2 {
+      font-family: var(--font-header);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    
+    .detail-header p {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .detail-section {
+      margin-bottom: 24px;
+    }
+    
+    .detail-section h4 {
+      font-family: var(--font-header);
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text-primary);
+      margin-bottom: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    
+    .detail-section p {
+      color: var(--text-secondary);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+    
+    .affected-records {
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    
+    .affected-records table {
+      width: 100%;
+      font-size: 13px;
+    }
+    
+    .affected-records th {
+      text-align: left;
+      padding: 8px;
+      color: var(--text-secondary);
+      font-weight: 600;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .affected-records td {
+      padding: 8px;
+      color: var(--text-primary);
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .sidebar-stat {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    
+    .sidebar-stat:last-child {
+      border-bottom: none;
+    }
+    
+    .sidebar-stat .label {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    .sidebar-stat .value {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+    
+    /* Playbook Builder */
+    .playbook-grid {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      gap: 24px;
+    }
+    
+    .playbook-sidebar {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+    
+    .playbook-main {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+    
+    .finding-checkbox {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    
+    .finding-checkbox:hover {
+      background: var(--bg-tertiary);
+    }
+    
+    .finding-checkbox input {
+      margin-top: 2px;
+    }
+    
+    .finding-checkbox .title {
+      font-weight: 600;
+      font-size: 13px;
+      color: var(--text-primary);
+    }
+    
+    .finding-checkbox .meta {
+      font-size: 11px;
+      color: var(--text-secondary);
+    }
+    
+    .action-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px;
+      background: var(--bg-tertiary);
+      border-radius: 8px;
+      margin-bottom: 12px;
+    }
+    
+    .action-item .action-num {
+      width: 28px;
+      height: 28px;
+      background: var(--grass-green);
+      color: white;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+    
+    .action-item .action-content {
+      flex: 1;
+    }
+    
+    .action-item .action-title {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+      margin-bottom: 4px;
+    }
+    
+    .action-item .action-desc {
+      font-size: 13px;
+      color: var(--text-secondary);
+      margin-bottom: 8px;
+    }
+    
+    .action-item .action-meta {
+      display: flex;
+      gap: 16px;
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    
+    /* Progress Tracker */
+    .tracker-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+    
+    .tracker-stats {
+      display: flex;
+      gap: 32px;
+    }
+    
+    .tracker-stat {
+      text-align: center;
+    }
+    
+    .tracker-stat .value {
+      font-family: var(--font-header);
+      font-size: 28px;
+      font-weight: 800;
+    }
+    
+    .tracker-stat .label {
+      font-size: 11px;
+      color: var(--text-secondary);
+      text-transform: uppercase;
+    }
+    
+    .tracker-stat.complete .value { color: var(--grass-green); }
+    .tracker-stat.progress .value { color: var(--electric-blue); }
+    .tracker-stat.blocked .value { color: var(--scarlet); }
+    
+    .tracker-timeline {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 48px 1fr 120px 100px;
+      gap: 16px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+      align-items: center;
+    }
+    
+    .timeline-item:last-child {
+      border-bottom: none;
+    }
+    
+    .timeline-status {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    
+    .timeline-status.complete {
+      background: var(--grass-green);
+      color: white;
+    }
+    
+    .timeline-status.progress {
+      background: var(--electric-blue);
+      color: white;
+    }
+    
+    .timeline-status.pending {
+      background: var(--border);
+      color: var(--text-secondary);
+    }
+    
+    .timeline-status.blocked {
+      background: var(--scarlet);
+      color: white;
+    }
+    
+    .timeline-content .title {
+      font-weight: 600;
+      color: var(--text-primary);
+      font-size: 14px;
+    }
+    
+    .timeline-content .subtitle {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    
+    .timeline-owner {
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+    
+    .timeline-due {
+      font-size: 13px;
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+    
+    /* Cost Savings Banner */
+    .savings-banner {
+      background: rgba(131, 177, 109, 0.08);
+      border: 1px solid rgba(131, 177, 109, 0.25);
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 24px;
+    }
+    
+    .savings-banner .savings-text h3 {
+      font-family: var(--font-header);
+      font-size: 16px;
+      color: var(--text-primary);
+      margin-bottom: 4px;
+    }
+    
+    .savings-banner .savings-text p {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+    
+    .savings-banner .savings-value {
+      text-align: right;
+    }
+    
+    .savings-banner .savings-value .amount {
+      font-family: var(--font-header);
+      font-size: 32px;
+      font-weight: 800;
+      color: var(--grass-green);
+    }
+    
+    .savings-banner .savings-value .label {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+    
+    /* Screen Info */
+    .screen-info {
+      background: white;
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--grass-green);
+      border-radius: 8px;
+      padding: 20px 24px;
+      margin-top: 24px;
+      color: var(--text-secondary);
+    }
+    
+    .screen-info h4 {
+      font-family: var(--font-header);
+      font-size: 14px;
+      color: var(--grass-green);
+      margin-bottom: 12px;
+    }
+    
+    .screen-info p {
+      font-size: 14px;
+      line-height: 1.6;
+      margin-bottom: 8px;
+    }
+    
+    .screen-info strong {
+      color: var(--text-primary);
+    }
+  </style>
+</head>
+<body>
+  <!-- Screen Navigation -->
+  <div class="screen-nav">
+    <button class="active" onclick="showScreen(1)"><span class="step-num">1</span>Create Project</button>
+    <button onclick="showScreen(2)"><span class="step-num">2</span>Upload Data</button>
+    <button onclick="showScreen(3)"><span class="step-num">3</span>Auto-Analysis</button>
+    <button onclick="showScreen(4)"><span class="step-num">4</span>Findings</button>
+    <button onclick="showScreen(5)"><span class="step-num">5</span>Drill-In</button>
+    <button onclick="showScreen(6)"><span class="step-num">6</span>Build Playbook</button>
+    <button onclick="showScreen(7)"><span class="step-num">7</span>Track Progress</button>
+  </div>
+  
+  <div class="screens-container">
+    <!-- SCREEN 1: Create Project -->
+    <div class="screen active" id="screen-1">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Create New Project</h1>
+            <p class="subtitle">Start a new analysis engagement</p>
+          </div>
+          
+          <div class="card" style="max-width: 700px;">
+            <div class="card-title">
+              <div class="icon">📋</div>
+              Project Details
+            </div>
+            
+            <div class="form-group">
+              <label>Client Name</label>
+              <input type="text" value="Acme Corporation" placeholder="Enter client name">
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>System / Platform</label>
+                <select>
+                  <option>UKG Pro</option>
+                  <option>UKG Ready</option>
+                  <option>Workday HCM</option>
+                  <option>ADP Workforce Now</option>
+                  <option>Oracle HCM</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label>Engagement Type</label>
+                <select>
+                  <option>Implementation</option>
+                  <option>Optimization</option>
+                  <option>Assessment</option>
+                  <option>Migration</option>
+                  <option>Remediation</option>
+                </select>
+              </div>
+            </div>
+            
+            <div class="form-row">
+              <div class="form-group">
+                <label>Target Go-Live</label>
+                <input type="text" value="2026-03-15" placeholder="YYYY-MM-DD">
+              </div>
+              <div class="form-group">
+                <label>Project Lead</label>
+                <select>
+                  <option>Sarah Chen</option>
+                  <option>Mike Rodriguez</option>
+                  <option>Jennifer Park</option>
+                </select>
+              </div>
+            </div>
+            
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+              <button class="btn btn-primary">Create Project →</button>
+              <button class="btn btn-secondary">Cancel</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 1: Create Project</h4>
+        <p><strong>What it shows:</strong> Simple project setup — who's the client, what system, what type of engagement.</p>
+        <p><strong>Key message:</strong> No lengthy intake forms. Just the basics to get started. The platform will learn more from the data.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 2: Upload Data -->
+    <div class="screen" id="screen-2">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Acme Corporation</h1>
+            <p class="subtitle">UKG Pro · Implementation · Go-Live: March 15, 2026</p>
+          </div>
+          
+          <div class="card">
+            <div class="card-title">
+              <div class="icon">📤</div>
+              Upload Client Data
+            </div>
+            
+            <div class="upload-zone">
+              <div class="upload-icon">↑</div>
+              <h3>Drop files here or click to browse</h3>
+              <p>Excel, CSV, PDF — we'll figure out what's what</p>
+            </div>
+            
+            <div class="progress-section">
+              <div class="progress-item">
+                <div class="file-icon">XLS</div>
+                <div class="file-info">
+                  <div class="file-name">Employee_Master_Export.xlsx</div>
+                  <div class="file-status">47,382 rows · Uploaded</div>
+                  <div class="progress-bar"><div class="fill" style="width: 100%"></div></div>
+                </div>
+              </div>
+              
+              <div class="progress-item">
+                <div class="file-icon">XLS</div>
+                <div class="file-info">
+                  <div class="file-name">Deduction_Codes.xlsx</div>
+                  <div class="file-status">1,247 rows · Uploaded</div>
+                  <div class="progress-bar"><div class="fill" style="width: 100%"></div></div>
+                </div>
+              </div>
+              
+              <div class="progress-item">
+                <div class="file-icon">CSV</div>
+                <div class="file-info">
+                  <div class="file-name">Pay_Group_Config.csv</div>
+                  <div class="file-status">Uploading... 67%</div>
+                  <div class="progress-bar"><div class="fill" style="width: 67%"></div></div>
+                </div>
+              </div>
+              
+              <div class="progress-item">
+                <div class="file-icon" style="background: var(--purple);">PDF</div>
+                <div class="file-info">
+                  <div class="file-name">Compliance_Requirements_2026.pdf</div>
+                  <div class="file-status">Queued</div>
+                  <div class="progress-bar"><div class="fill" style="width: 0%"></div></div>
+                </div>
+              </div>
+            </div>
+            
+            <div style="display: flex; gap: 12px; margin-top: 24px;">
+              <button class="btn btn-primary">Start Analysis →</button>
+              <button class="btn btn-secondary">Add More Files</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 2: Upload Data</h4>
+        <p><strong>What it shows:</strong> Simple drag-and-drop upload. Multiple file types accepted. Progress tracking.</p>
+        <p><strong>Key message:</strong> No special formatting required. No templates. Just export from your system and drop it here.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 3: Auto-Analysis -->
+    <div class="screen" id="screen-3">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Acme Corporation</h1>
+            <p class="subtitle">UKG Pro · Implementation · Go-Live: March 15, 2026</p>
+          </div>
+          
+          <div class="card processing-card">
+            <div class="processing-spinner"></div>
+            <h2 style="font-family: var(--font-header); font-size: 24px; color: var(--text-primary); margin-bottom: 8px;">Analyzing Your Data</h2>
+            <p style="color: var(--text-secondary); font-size: 15px;">This usually takes 2-5 minutes depending on data volume</p>
+            
+            <div class="processing-steps">
+              <div class="processing-step complete">
+                <div class="step-icon">✓</div>
+                <span>Schema Detection</span>
+              </div>
+              <div class="processing-step complete">
+                <div class="step-icon">✓</div>
+                <span>Data Profiling</span>
+              </div>
+              <div class="processing-step active">
+                <div class="step-icon">⋯</div>
+                <span>Pattern Analysis</span>
+              </div>
+              <div class="processing-step pending">
+                <div class="step-icon">○</div>
+                <span>Finding Generation</span>
+              </div>
+            </div>
+          </div>
+          
+          <div class="savings-banner">
+            <div class="savings-text">
+              <h3>Consultant Time Equivalent</h3>
+              <p>This analysis is processing 47,382 records across 12 tables</p>
+            </div>
+            <div class="savings-value">
+              <div class="amount">$4,250</div>
+              <div class="label">17 hours @ $250/hr</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 3: Auto-Analysis</h4>
+        <p><strong>What it shows:</strong> The platform working — schema detection, profiling, pattern matching. No user action required.</p>
+        <p><strong>Key message:</strong> This is the "tax" you used to pay — weeks of discovery. Now it takes minutes. The cost-equivalent makes it undeniable.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 4: Findings Dashboard -->
+    <div class="screen" id="screen-4">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Acme Corporation — Findings</h1>
+            <p class="subtitle">Analysis complete · 23 findings identified · Last updated: 2 minutes ago</p>
+          </div>
+          
+          <div class="savings-banner">
+            <div class="savings-text">
+              <h3>Analysis Complete</h3>
+              <p>Analyzed 47,382 records across 12 tables in 3 minutes 24 seconds</p>
+            </div>
+            <div class="savings-value">
+              <div class="amount">$4,250</div>
+              <div class="label">Equivalent manual effort saved</div>
+            </div>
+          </div>
+          
+          <div class="findings-grid">
+            <div class="metric-card critical">
+              <div class="metric-value">4</div>
+              <div class="metric-label">Critical Issues</div>
+            </div>
+            <div class="metric-card warning">
+              <div class="metric-value">7</div>
+              <div class="metric-label">Warnings</div>
+            </div>
+            <div class="metric-card info">
+              <div class="metric-value">12</div>
+              <div class="metric-label">Recommendations</div>
+            </div>
+            <div class="metric-card success">
+              <div class="metric-value">94%</div>
+              <div class="metric-label">Data Quality</div>
+            </div>
+          </div>
+          
+          <div class="findings-list">
+            <div class="findings-header">
+              <div></div>
+              <div>Finding</div>
+              <div>Category</div>
+              <div>Impact</div>
+              <div>Action</div>
+            </div>
+            
+            <div class="finding-row">
+              <div class="finding-severity critical">⚠</div>
+              <div>
+                <div class="finding-title">Missing Tax Jurisdictions</div>
+                <div class="finding-subtitle">1,247 employees without valid tax locality codes</div>
+              </div>
+              <div class="finding-category">Compliance</div>
+              <div class="finding-impact">$45K risk</div>
+              <div class="finding-action">View →</div>
+            </div>
+            
+            <div class="finding-row">
+              <div class="finding-severity critical">⚠</div>
+              <div>
+                <div class="finding-title">Duplicate SSN Records</div>
+                <div class="finding-subtitle">23 employees share SSN with another record</div>
+              </div>
+              <div class="finding-category">Data Quality</div>
+              <div class="finding-impact">Audit flag</div>
+              <div class="finding-action">View →</div>
+            </div>
+            
+            <div class="finding-row">
+              <div class="finding-severity warning">!</div>
+              <div>
+                <div class="finding-title">Orphaned Deduction Codes</div>
+                <div class="finding-subtitle">47 deduction codes not assigned to any employee</div>
+              </div>
+              <div class="finding-category">Configuration</div>
+              <div class="finding-impact">Cleanup</div>
+              <div class="finding-action">View →</div>
+            </div>
+            
+            <div class="finding-row">
+              <div class="finding-severity warning">!</div>
+              <div>
+                <div class="finding-title">Pay Group Mismatch</div>
+                <div class="finding-subtitle">312 employees with pay frequency ≠ pay group setting</div>
+              </div>
+              <div class="finding-category">Configuration</div>
+              <div class="finding-impact">Payroll risk</div>
+              <div class="finding-action">View →</div>
+            </div>
+            
+            <div class="finding-row">
+              <div class="finding-severity info">i</div>
+              <div>
+                <div class="finding-title">Benefit Eligibility Gaps</div>
+                <div class="finding-subtitle">89 eligible employees not enrolled in medical</div>
+              </div>
+              <div class="finding-category">Benefits</div>
+              <div class="finding-impact">Review</div>
+              <div class="finding-action">View →</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 4: Findings Dashboard</h4>
+        <p><strong>What it shows:</strong> Automatic findings — prioritized, categorized, quantified. No consultant digging required.</p>
+        <p><strong>Key message:</strong> Hours, not weeks. The platform tells you what's wrong. You focus on fixing it.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 5: Drill-In Detail -->
+    <div class="screen" id="screen-5">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div style="margin-bottom: 16px;">
+            <a href="#" style="color: var(--text-secondary); text-decoration: none; font-size: 13px;">← Back to Findings</a>
+          </div>
+          
+          <div class="detail-panel">
+            <div class="detail-main">
+              <div class="detail-header">
+                <div class="severity-badge">⚠</div>
+                <div>
+                  <h2>Missing Tax Jurisdictions</h2>
+                  <p>1,247 employees without valid tax locality codes</p>
+                </div>
+              </div>
+              
+              <div class="detail-section">
+                <h4>What We Found</h4>
+                <p>Analysis detected 1,247 employee records (2.6% of workforce) with missing or invalid tax jurisdiction codes. These employees are concentrated in 3 states: California (512), Texas (423), and New York (312). Without valid locality codes, these employees may have incorrect tax withholdings.</p>
+              </div>
+              
+              <div class="detail-section">
+                <h4>Why It Matters</h4>
+                <p>Missing tax jurisdictions can result in incorrect withholding calculations, exposing the organization to compliance penalties and employee dissatisfaction. California alone has aggressive local tax enforcement with penalties up to $50 per occurrence.</p>
+              </div>
+              
+              <div class="detail-section">
+                <h4>Affected Records (Sample)</h4>
+                <div class="affected-records">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Employee ID</th>
+                        <th>Name</th>
+                        <th>State</th>
+                        <th>Current Value</th>
+                        <th>Issue</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>EMP-10234</td>
+                        <td>Johnson, Michael</td>
+                        <td>CA</td>
+                        <td>(empty)</td>
+                        <td>Missing locality</td>
+                      </tr>
+                      <tr>
+                        <td>EMP-10891</td>
+                        <td>Williams, Sarah</td>
+                        <td>TX</td>
+                        <td>INVALID</td>
+                        <td>Invalid code</td>
+                      </tr>
+                      <tr>
+                        <td>EMP-11456</td>
+                        <td>Garcia, Maria</td>
+                        <td>NY</td>
+                        <td>(empty)</td>
+                        <td>Missing locality</td>
+                      </tr>
+                      <tr>
+                        <td>EMP-11892</td>
+                        <td>Chen, David</td>
+                        <td>CA</td>
+                        <td>XX-000</td>
+                        <td>Invalid format</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p style="margin-top: 12px; font-size: 13px; color: var(--text-secondary);">Showing 4 of 1,247 affected records · <a href="#" style="color: var(--grass-green);">Export Full List</a></p>
+              </div>
+              
+              <div class="detail-section">
+                <h4>Recommended Actions</h4>
+                <div class="action-item">
+                  <div class="action-num">1</div>
+                  <div class="action-content">
+                    <div class="action-title">Export affected employee list</div>
+                    <div class="action-desc">Download the complete list of employees with missing jurisdictions for remediation.</div>
+                  </div>
+                </div>
+                <div class="action-item">
+                  <div class="action-num">2</div>
+                  <div class="action-content">
+                    <div class="action-title">Cross-reference with address data</div>
+                    <div class="action-desc">Use employee home addresses to determine correct tax jurisdictions.</div>
+                  </div>
+                </div>
+                <div class="action-item">
+                  <div class="action-num">3</div>
+                  <div class="action-content">
+                    <div class="action-title">Bulk update via import template</div>
+                    <div class="action-desc">Use UKG's mass update feature to correct records in batch.</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div class="detail-sidebar">
+              <h3 style="font-family: var(--font-header); font-size: 16px; margin-bottom: 16px;">Finding Details</h3>
+              
+              <div class="sidebar-stat">
+                <span class="label">Severity</span>
+                <span class="value" style="color: var(--scarlet);">Critical</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Category</span>
+                <span class="value">Compliance</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Affected Records</span>
+                <span class="value">1,247</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">% of Total</span>
+                <span class="value">2.6%</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Risk Estimate</span>
+                <span class="value" style="color: var(--scarlet);">$45,000</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Remediation Effort</span>
+                <span class="value">8-12 hours</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Data Source</span>
+                <span class="value">Employee_Master</span>
+              </div>
+              <div class="sidebar-stat">
+                <span class="label">Detected</span>
+                <span class="value">2 minutes ago</span>
+              </div>
+              
+              <div style="margin-top: 24px; display: flex; flex-direction: column; gap: 8px;">
+                <button class="btn btn-primary" style="width: 100%;">Add to Playbook</button>
+                <button class="btn btn-secondary" style="width: 100%;">Export Records</button>
+                <button class="btn btn-secondary" style="width: 100%;">Ask a Question</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 5: Drill-In Detail</h4>
+        <p><strong>What it shows:</strong> Deep dive on a single finding — what, why, who's affected, what to do.</p>
+        <p><strong>Key message:</strong> Not just "here's a problem" but "here's exactly how to fix it." Consultant judgment, platform speed.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 6: Build Playbook -->
+    <div class="screen" id="screen-6">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#">Projects</a>
+            <a href="#">Data</a>
+            <a href="#" class="active">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Build Playbook</h1>
+            <p class="subtitle">Select findings to create an action plan</p>
+          </div>
+          
+          <div class="playbook-grid">
+            <div class="playbook-sidebar">
+              <h3 style="font-family: var(--font-header); font-size: 14px; margin-bottom: 16px;">Select Findings</h3>
+              
+              <label class="finding-checkbox">
+                <input type="checkbox" checked>
+                <div>
+                  <div class="title">Missing Tax Jurisdictions</div>
+                  <div class="meta">Critical · 1,247 records</div>
+                </div>
+              </label>
+              
+              <label class="finding-checkbox">
+                <input type="checkbox" checked>
+                <div>
+                  <div class="title">Duplicate SSN Records</div>
+                  <div class="meta">Critical · 23 records</div>
+                </div>
+              </label>
+              
+              <label class="finding-checkbox">
+                <input type="checkbox" checked>
+                <div>
+                  <div class="title">Pay Group Mismatch</div>
+                  <div class="meta">Warning · 312 records</div>
+                </div>
+              </label>
+              
+              <label class="finding-checkbox">
+                <input type="checkbox">
+                <div>
+                  <div class="title">Orphaned Deduction Codes</div>
+                  <div class="meta">Warning · 47 codes</div>
+                </div>
+              </label>
+              
+              <label class="finding-checkbox">
+                <input type="checkbox">
+                <div>
+                  <div class="title">Benefit Eligibility Gaps</div>
+                  <div class="meta">Info · 89 records</div>
+                </div>
+              </label>
+              
+              <div style="margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 8px;">3 findings selected</div>
+                <button class="btn btn-primary" style="width: 100%;">Generate Playbook</button>
+              </div>
+            </div>
+            
+            <div class="playbook-main">
+              <h3 style="font-family: var(--font-header); font-size: 18px; margin-bottom: 8px;">Acme Corporation — Remediation Playbook</h3>
+              <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 24px;">3 findings · 8 action items · Est. 24-32 hours</p>
+              
+              <div class="action-item">
+                <div class="action-num">1</div>
+                <div class="action-content">
+                  <div class="action-title">Export employees with missing tax jurisdictions</div>
+                  <div class="action-desc">Download the complete list of 1,247 employees with missing or invalid tax locality codes.</div>
+                  <div class="action-meta">
+                    <span>👤 Assigned: Sarah Chen</span>
+                    <span>📅 Due: Jan 20</span>
+                    <span>⏱ Est: 30 min</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="action-item">
+                <div class="action-num">2</div>
+                <div class="action-content">
+                  <div class="action-title">Cross-reference with employee addresses</div>
+                  <div class="action-desc">Match employee home addresses to determine correct tax jurisdictions for each state.</div>
+                  <div class="action-meta">
+                    <span>👤 Assigned: Mike R.</span>
+                    <span>📅 Due: Jan 22</span>
+                    <span>⏱ Est: 4 hours</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="action-item">
+                <div class="action-num">3</div>
+                <div class="action-content">
+                  <div class="action-title">Prepare UKG mass update file</div>
+                  <div class="action-desc">Create import file with corrected jurisdiction codes using UKG template format.</div>
+                  <div class="action-meta">
+                    <span>👤 Assigned: Sarah Chen</span>
+                    <span>📅 Due: Jan 24</span>
+                    <span>⏱ Est: 2 hours</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="action-item">
+                <div class="action-num">4</div>
+                <div class="action-content">
+                  <div class="action-title">Investigate duplicate SSN records</div>
+                  <div class="action-desc">Review 23 employees with shared SSNs to identify data entry errors vs. legitimate cases.</div>
+                  <div class="action-meta">
+                    <span>👤 Assigned: Jennifer P.</span>
+                    <span>📅 Due: Jan 21</span>
+                    <span>⏱ Est: 3 hours</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="action-item">
+                <div class="action-num">5</div>
+                <div class="action-content">
+                  <div class="action-title">Correct duplicate SSN errors</div>
+                  <div class="action-desc">Update employee records with corrected SSN data after verification with HR.</div>
+                  <div class="action-meta">
+                    <span>👤 Assigned: Jennifer P.</span>
+                    <span>📅 Due: Jan 25</span>
+                    <span>⏱ Est: 2 hours</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div style="display: flex; gap: 12px; margin-top: 24px;">
+                <button class="btn btn-primary">Save Playbook</button>
+                <button class="btn btn-secondary">Export to PDF</button>
+                <button class="btn btn-secondary">Share with Client</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 6: Build Playbook</h4>
+        <p><strong>What it shows:</strong> Findings become action items. Assigned, estimated, scheduled.</p>
+        <p><strong>Key message:</strong> This is the deliverable. Not a report that sits in a folder — a plan that drives work.</p>
+      </div>
+    </div>
+    
+    <!-- SCREEN 7: Track Progress -->
+    <div class="screen" id="screen-7">
+      <div class="mockup-frame">
+        <div class="app-header">
+          <div class="app-logo">
+            <div class="logo-icon"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570"><path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/><g fill="#a8ca99"><rect x="134.8" y="348.24" width="64.39" height="11.87"/><rect x="134.8" y="324.95" width="64.39" height="11.87"/><rect x="134.8" y="302.12" width="64.39" height="11.87"/><rect x="134.8" y="279.29" width="64.39" height="11.87"/><rect x="134.8" y="371.08" width="64.39" height="11.87"/><rect x="134.8" y="393.91" width="64.39" height="11.87"/><rect x="134.8" y="118.1" width="64.39" height="11.87"/><rect x="134.8" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="256" width="64.39" height="11.87"/><rect x="134.8" y="140.93" width="64.39" height="11.87"/><rect x="134.8" y="233.17" width="64.39" height="11.87"/><rect x="134.8" y="187.05" width="64.39" height="11.87"/><rect x="134.8" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="371.08" width="64.39" height="11.87"/><rect x="320.19" y="324.95" width="64.39" height="11.87"/><rect x="320.19" y="348.24" width="64.39" height="11.87"/><rect x="320.19" y="279.29" width="64.39" height="11.87"/><rect x="320.19" y="302.12" width="64.39" height="11.87"/><rect x="320.19" y="393.91" width="64.39" height="11.87"/><rect x="320.19" y="164.22" width="64.39" height="11.87"/><rect x="320.19" y="118.1" width="64.39" height="11.87"/><rect x="320.19" y="187.05" width="64.39" height="11.87"/><rect x="320.19" y="210.34" width="64.39" height="11.87"/><rect x="320.19" y="256" width="64.39" height="11.87"/><rect x="320.19" y="233.17" width="64.39" height="11.87"/></g><path fill="#84b26d" d="M426.59,95.27h13.7v-19.18h-173.52v19.18h11.42c19.18,0,22.83,3.65,22.83,22.83V248.24h-82.65V118.1c0-19.18,3.65-22.83,22.83-22.83h11.42v-19.18H79.09v19.18h13.7c19.18,0,22.83,3.65,22.83,22.83V406.24c0,19.18-3.65,22.83-22.83,22.83h-13.7v19.18H252.61v-19.18h-11.42c-19.18,0-22.83-3.65-22.83-22.83v-138.82h82.65v138.82c0,19.18-3.65,22.83-22.83,22.83h-11.42v19.18h173.52v-19.18h-13.7c-19.18,0-22.83-3.65-22.83-22.83V118.1c0-19.18,3.65-22.83,22.83-22.83Z"/><path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/></svg></div>
+            <div class="logo-text">XLR8</div>
+          </div>
+          <div class="app-nav">
+            <a href="#">Mission Control</a>
+            <a href="#" class="active">Projects</a>
+            <a href="#">Data</a>
+            <a href="#">Playbooks</a>
+            <a href="#">Analytics</a>
+          </div>
+          <div class="app-user">
+            <div>
+              <div class="user-name">Sarah Chen</div>
+              <div class="user-role">Senior Consultant</div>
+            </div>
+          </div>
+        </div>
+        
+        <div class="app-content">
+          <div class="page-header">
+            <h1>Acme Corporation — Progress</h1>
+            <p class="subtitle">Remediation Playbook · Started Jan 15, 2026</p>
+          </div>
+          
+          <div class="tracker-header">
+            <div class="tracker-stats">
+              <div class="tracker-stat complete">
+                <div class="value">3</div>
+                <div class="label">Complete</div>
+              </div>
+              <div class="tracker-stat progress">
+                <div class="value">2</div>
+                <div class="label">In Progress</div>
+              </div>
+              <div class="tracker-stat blocked">
+                <div class="value">1</div>
+                <div class="label">Blocked</div>
+              </div>
+              <div class="tracker-stat">
+                <div class="value" style="color: var(--text-secondary);">2</div>
+                <div class="label">Not Started</div>
+              </div>
+            </div>
+            <div>
+              <button class="btn btn-secondary">Export Report</button>
+            </div>
+          </div>
+          
+          <div class="tracker-timeline">
+            <div class="timeline-item">
+              <div class="timeline-status complete">✓</div>
+              <div class="timeline-content">
+                <div class="title">Export employees with missing tax jurisdictions</div>
+                <div class="subtitle">Completed Jan 17 — 1,247 records exported</div>
+              </div>
+              <div class="timeline-owner">Sarah Chen</div>
+              <div class="timeline-due" style="color: var(--grass-green);">Done</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status complete">✓</div>
+              <div class="timeline-content">
+                <div class="title">Investigate duplicate SSN records</div>
+                <div class="subtitle">Completed Jan 19 — 21 errors, 2 legitimate</div>
+              </div>
+              <div class="timeline-owner">Jennifer Park</div>
+              <div class="timeline-due" style="color: var(--grass-green);">Done</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status complete">✓</div>
+              <div class="timeline-content">
+                <div class="title">Cross-reference with employee addresses</div>
+                <div class="subtitle">Completed Jan 20 — All jurisdictions mapped</div>
+              </div>
+              <div class="timeline-owner">Mike Rodriguez</div>
+              <div class="timeline-due" style="color: var(--grass-green);">Done</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status progress">⋯</div>
+              <div class="timeline-content">
+                <div class="title">Prepare UKG mass update file</div>
+                <div class="subtitle">In progress — 847 of 1,247 records prepared</div>
+              </div>
+              <div class="timeline-owner">Sarah Chen</div>
+              <div class="timeline-due">Due Jan 24</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status blocked">!</div>
+              <div class="timeline-content">
+                <div class="title">Correct duplicate SSN errors</div>
+                <div class="subtitle">Blocked — Waiting for HR verification on 3 records</div>
+              </div>
+              <div class="timeline-owner">Jennifer Park</div>
+              <div class="timeline-due" style="color: var(--scarlet);">Overdue</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status pending">○</div>
+              <div class="timeline-content">
+                <div class="title">Execute mass update import</div>
+                <div class="subtitle">Not started — Depends on file preparation</div>
+              </div>
+              <div class="timeline-owner">Sarah Chen</div>
+              <div class="timeline-due">Due Jan 26</div>
+            </div>
+            
+            <div class="timeline-item">
+              <div class="timeline-status pending">○</div>
+              <div class="timeline-content">
+                <div class="title">Validate corrections and close finding</div>
+                <div class="subtitle">Not started — Final verification step</div>
+              </div>
+              <div class="timeline-owner">Sarah Chen</div>
+              <div class="timeline-due">Due Jan 28</div>
+            </div>
+          </div>
+          
+          <div class="savings-banner" style="margin-top: 24px;">
+            <div class="savings-text">
+              <h3>Project Impact</h3>
+              <p>Remediation on track · Go-live readiness: 87%</p>
+            </div>
+            <div class="savings-value">
+              <div class="amount">$49,250</div>
+              <div class="label">Risk mitigated to date</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="screen-info">
+        <h4>Screen 7: Track Progress</h4>
+        <p><strong>What it shows:</strong> Playbook execution — what's done, what's stuck, what's next.</p>
+        <p><strong>Key message:</strong> Visibility. Accountability. This isn't a report that gets filed — it's a living dashboard that drives delivery.</p>
+      </div>
+    </div>
+  </div>
+  
+  <script>
+    function showScreen(num) {
+      // Hide all screens
+      document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+      // Show selected
+      document.getElementById('screen-' + num).classList.add('active');
+      // Update nav
+      document.querySelectorAll('.screen-nav button').forEach((b, i) => {
+        b.classList.toggle('active', i === num - 1);
+      });
+      // Scroll to top
+      window.scrollTo(0, 0);
+    }
+  </script>
+</body>
+</html>
