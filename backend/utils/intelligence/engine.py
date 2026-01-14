@@ -1954,16 +1954,27 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 for variant in dim_variants_ordered:
                     dim_matches = term_index.resolve_terms([variant])
                     if dim_matches:
-                        # Filter for COLUMN-IDENTIFYING match types only
-                        # concept = explicit vocabulary mapping to column
-                        # synonym = synonym that maps to column  
-                        # EXCLUDE: value (row data), reasoned (text guess), numeric, pattern
-                        column_types = {'concept', 'synonym'}
-                        column_matches = [m for m in dim_matches 
-                                         if m.column_name and m.table_name 
-                                         and m.term_type in column_types]
+                        # Filter for COLUMN-IDENTIFYING match types:
+                        # 1. concept = explicit vocabulary mapping to column
+                        # 2. synonym = synonym that maps to column  
+                        # 3. reasoned with operator='GROUP BY' = MetadataReasoner found column name match
+                        # EXCLUDE: value (row data), numeric, pattern, reasoned text searches (ILIKE)
                         
-                        logger.warning(f"[DETERMINISTIC] GROUP BY variant '{variant}': {len(dim_matches)} total, {len(column_matches)} column-type matches")
+                        def is_column_identifying_match(m) -> bool:
+                            """Check if this match identifies a column (not a text search)."""
+                            if not m.column_name or not m.table_name:
+                                return False
+                            # Explicit column types from term_index
+                            if m.term_type in {'concept', 'synonym'}:
+                                return True
+                            # MetadataReasoner column name match (operator='GROUP BY')
+                            if m.term_type == 'reasoned' and m.operator == 'GROUP BY':
+                                return True
+                            return False
+                        
+                        column_matches = [m for m in dim_matches if is_column_identifying_match(m)]
+                        
+                        logger.warning(f"[DETERMINISTIC] GROUP BY variant '{variant}': {len(dim_matches)} total, {len(column_matches)} column-identifying matches")
                         
                         # If no quality matches, also try matches where column name contains the search term
                         if not column_matches:
