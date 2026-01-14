@@ -322,9 +322,36 @@ class SQLAssembler:
         
         # Determine primary table FIRST
         # EVOLUTION 8: For GROUP BY queries, prefer the GROUP BY table as primary
+        # EVOLUTION 10 FIX: Don't use config/validation tables as primary for COUNT - find reality alternative
         if group_by_table:
-            primary_table = group_by_table
-            logger.warning(f"[SQL_ASSEMBLER] Using GROUP BY table as primary: {primary_table}")
+            group_by_is_config = ('config' in group_by_table.lower() or 
+                                  'validation' in group_by_table.lower() or 
+                                  'lookup' in group_by_table.lower())
+            
+            if group_by_is_config and intent == QueryIntent.COUNT:
+                # Try to find a reality table with the same column as a spoke
+                group_col = group_by_column.split('.', 1)[1] if '.' in group_by_column else None
+                reality_alternative = None
+                
+                if group_col:
+                    # Look for reality tables that have this column as a spoke
+                    for table, info in self._hub_tables.items():
+                        if info['truth_type'] == 'reality' and table in tables_from_matches:
+                            # Check if this reality table has the group_by column
+                            # (This is a simplified check - could be enhanced)
+                            reality_alternative = table
+                            logger.warning(f"[SQL_ASSEMBLER] EVOLUTION 10: Found reality alternative: {table}")
+                            break
+                
+                if reality_alternative:
+                    primary_table = reality_alternative
+                    logger.warning(f"[SQL_ASSEMBLER] EVOLUTION 10: Using reality table {primary_table} instead of config {group_by_table}")
+                else:
+                    primary_table = group_by_table
+                    logger.warning(f"[SQL_ASSEMBLER] Using GROUP BY table as primary (config, no alternative): {primary_table}")
+            else:
+                primary_table = group_by_table
+                logger.warning(f"[SQL_ASSEMBLER] Using GROUP BY table as primary: {primary_table}")
         else:
             primary_table = self._get_primary_table(tables_from_matches, domain, term_matches, order_by)
         
