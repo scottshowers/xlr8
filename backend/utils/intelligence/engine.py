@@ -1934,14 +1934,16 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 for variant in dim_variants_ordered:
                     dim_matches = term_index.resolve_terms([variant])
                     if dim_matches:
-                        # Filter for QUALITY matches: concept or column type, NOT reasoned
-                        # Also must have actual column_name and table_name
-                        quality_types = {'concept', 'column', 'value', 'synonym'}
+                        # Filter for COLUMN-IDENTIFYING match types only
+                        # concept = explicit vocabulary mapping to column
+                        # synonym = synonym that maps to column  
+                        # EXCLUDE: value (row data), reasoned (text guess), numeric, pattern
+                        column_types = {'concept', 'synonym'}
                         column_matches = [m for m in dim_matches 
                                          if m.column_name and m.table_name 
-                                         and m.term_type in quality_types]
+                                         and m.term_type in column_types]
                         
-                        logger.warning(f"[DETERMINISTIC] GROUP BY variant '{variant}': {len(dim_matches)} total, {len(column_matches)} quality matches")
+                        logger.warning(f"[DETERMINISTIC] GROUP BY variant '{variant}': {len(dim_matches)} total, {len(column_matches)} column-type matches")
                         
                         # If no quality matches, also try matches where column name contains the search term
                         if not column_matches:
@@ -1958,9 +1960,12 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 
                 # Debug logging - show what we found
                 if dim_matches:
-                    logger.warning(f"[DETERMINISTIC] Final dim_matches: {len(dim_matches)} total, {len(column_matches)} usable")
-                    for m in dim_matches[:5]:
-                        logger.warning(f"[DETERMINISTIC]   - type={m.term_type}, table='{m.table_name[:40] if m.table_name else 'None'}', col='{m.column_name}'")
+                    type_counts = {}
+                    for m in dim_matches:
+                        type_counts[m.term_type] = type_counts.get(m.term_type, 0) + 1
+                    logger.warning(f"[DETERMINISTIC] dim_matches: {len(dim_matches)} total, types: {type_counts}, usable: {len(column_matches)}")
+                    for m in dim_matches[:3]:
+                        logger.warning(f"[DETERMINISTIC]   - type={m.term_type}, table='{m.table_name[-35:] if m.table_name else 'None'}', col='{m.column_name}'")
                 
                 if column_matches:
                     # EVOLUTION 10 FIX: Multi-tier preference for GROUP BY column selection
@@ -1976,13 +1981,10 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                     def is_employee_table(table_name: str, entity: str) -> bool:
                         """Check if table contains employee data."""
                         t = table_name.lower()
-                        # Exclude companytax tables - they're tax config, not employee data
-                        if 'companytax' in t or 'tax_' in t:
-                            return False
                         return (entity == 'employee' or 
                                 'employee' in t or 
                                 'personal' in t or
-                                '_company' in t or  # Employee company assignments (not companytax)
+                                '_us_1_' in t or  # Employee conversion tables
                                 '_earnings' in t or
                                 '_deductions' in t)
                     
@@ -2047,24 +2049,54 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                         column_name = dimension_synonyms[group_by_dimension]
                         logger.warning(f"[DETERMINISTIC] GROUP BY synonym: '{group_by_dimension}' → {column_name}")
                         
-                        # EVOLUTION 10 FIX: Find an employee table that has this column
-                        # Don't just use the column name - find the right table!
+                        # EVOLUTION 10: Find a table with this column, prioritized by domain
+                        # Use domain to determine table preference patterns
+                        domain_table_patterns = {
+                            'demographics': ['employee', 'personal', '_us_1_'],
+                            'earnings': ['earning', 'pay', 'wage'],
+                            'deductions': ['deduction', 'benefit'],
+                            'taxes': ['tax', 'fit', 'sit', 'withhold'],
+                            'time': ['time', 'attendance', 'schedule'],
+                        }
+                        
+                        preferred_patterns = domain_table_patterns.get(parsed.domain.value, ['employee'])
+                        
                         try:
-                            table_result = term_index.conn.execute("""
-                                SELECT DISTINCT table_name FROM _column_profiles
-                                WHERE project = ? 
-                                AND column_name = ?
-                                AND table_name LIKE '%employee%'
-                                AND table_name NOT LIKE '%config%'
-                                AND table_name NOT LIKE '%validation%'
-                                ORDER BY table_name
-                                LIMIT 1
-                            """, [term_index.project, column_name]).fetchone()
+                            # First try: Find table matching domain patterns (exclude config)
+                            found_table = None
+                            for pattern in preferred_patterns:
+                                result = term_index.conn.execute("""
+                                    SELECT DISTINCT table_name FROM _column_profiles
+                                    WHERE project = ? 
+                                    AND column_name = ?
+                                    AND LOWER(table_name) LIKE ?
+                                    AND LOWER(table_name) NOT LIKE '%config%'
+                                    AND LOWER(table_name) NOT LIKE '%validation%'
+                                    ORDER BY table_name
+                                    LIMIT 1
+                                """, [term_index.project, column_name, f'%{pattern}%']).fetchone()
+                                if result:
+                                    found_table = result[0]
+                                    logger.warning(f"[DETERMINISTIC] Found {parsed.domain.value} table with {column_name}: {found_table}")
+                                    break
                             
-                            if table_result:
-                                found_table = table_result[0]
+                            # Fallback: Any non-config table with this column
+                            if not found_table:
+                                result = term_index.conn.execute("""
+                                    SELECT DISTINCT table_name FROM _column_profiles
+                                    WHERE project = ? 
+                                    AND column_name = ?
+                                    AND LOWER(table_name) NOT LIKE '%config%'
+                                    AND LOWER(table_name) NOT LIKE '%validation%'
+                                    ORDER BY table_name
+                                    LIMIT 1
+                                """, [term_index.project, column_name]).fetchone()
+                                if result:
+                                    found_table = result[0]
+                                    logger.warning(f"[DETERMINISTIC] Found fallback table with {column_name}: {found_table}")
+                            
+                            if found_table:
                                 group_by_column = f"{found_table}.{column_name}"
-                                logger.warning(f"[DETERMINISTIC] Found employee table with {column_name}: {found_table}")
                                 
                                 # Add synthetic match to term_matches
                                 from backend.utils.intelligence.term_index import TermMatch
@@ -2074,8 +2106,8 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                                     column_name=column_name,
                                     operator='GROUP BY',
                                     match_value='',
-                                    domain='demographics',
-                                    entity='employee',
+                                    domain=parsed.domain.value,
+                                    entity='employee' if parsed.domain.value == 'demographics' else 'unknown',
                                     confidence=0.85,
                                     term_type='synonym_lookup',
                                     source='synonym_table_lookup'
@@ -2084,7 +2116,7 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                                 logger.warning(f"[DETERMINISTIC] Added synonym lookup table to term_matches: {found_table}")
                             else:
                                 group_by_column = column_name
-                                logger.warning(f"[DETERMINISTIC] No employee table found with {column_name}, using column name only")
+                                logger.warning(f"[DETERMINISTIC] No table found with column {column_name}, using column name only")
                         except Exception as e:
                             logger.warning(f"[DETERMINISTIC] Synonym table lookup failed: {e}")
                             group_by_column = column_name
