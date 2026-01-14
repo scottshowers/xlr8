@@ -1749,20 +1749,27 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             
             # EVOLUTION 8: Detect GROUP BY dimension EARLY to exclude from term resolution
             # Patterns: "by state", "per department", "for each location", "broken down by region"
+            # EVOLUTION 10 FIX: Also capture multi-word dimensions like "job code", "employee type"
             group_by_dimension = None
             group_by_patterns = [
-                r'\bby\s+(\w+)',           # "by state", "by department"
-                r'\bper\s+(\w+)',          # "per location", "per employee"
-                r'\bfor each\s+(\w+)',     # "for each state"
+                r'\bby\s+(\w+\s+\w+)',      # "by job code", "by employee type" (2 words first)
+                r'\bby\s+(\w+)',            # "by state", "by department" (1 word fallback)
+                r'\bper\s+(\w+\s+\w+)',     # "per pay period"
+                r'\bper\s+(\w+)',           # "per location", "per employee"
+                r'\bfor each\s+(\w+\s+\w+)', # "for each job code"
+                r'\bfor each\s+(\w+)',      # "for each state"
+                r'\bbroken down by\s+(\w+\s+\w+)', # "broken down by job code"
                 r'\bbroken down by\s+(\w+)', # "broken down by region"
-                r'\bgrouped by\s+(\w+)',   # "grouped by status"
+                r'\bgrouped by\s+(\w+\s+\w+)', # "grouped by job code"
+                r'\bgrouped by\s+(\w+)',    # "grouped by status"
             ]
             for pattern in group_by_patterns:
                 match = re.search(pattern, question.lower())
                 if match:
-                    group_by_dimension = match.group(1)
-                    # Exclude dimension AND "by" from term resolution
-                    phrase_words.add(group_by_dimension)
+                    group_by_dimension = match.group(1).strip()
+                    # Exclude dimension words AND "by" from term resolution
+                    for dim_word in group_by_dimension.split():
+                        phrase_words.add(dim_word)
                     phrase_words.add('by')
                     phrase_words.add('per')
                     logger.warning(f"[DETERMINISTIC] Detected GROUP BY dimension: '{group_by_dimension}'")
@@ -1899,22 +1906,72 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             
             # Step 4: Resolve GROUP BY dimension to a column if detected
             # EVOLUTION 8 FIX: Use concept terms from term_index instead of hardcoded synonyms
+            # EVOLUTION 10 FIX: Strongly deprioritize config/validation tables for GROUP BY
             group_by_column = None
             if group_by_dimension:
-                # Try term_index FIRST - look for concept matches
-                dim_matches = term_index.resolve_terms([group_by_dimension])
+                # EVOLUTION 10: Try multiple variants of the dimension
+                # "job code" might be indexed as "job_code" or "job code"
+                dim_variants = [
+                    group_by_dimension,                           # Original (e.g., "job code")
+                    group_by_dimension.replace(' ', '_'),         # Underscore variant (e.g., "job_code")
+                    group_by_dimension.replace('_', ' '),         # Space variant (if originally had underscore)
+                ]
+                # Remove duplicates while preserving order
+                dim_variants = list(dict.fromkeys(dim_variants))
+                
+                # Try each variant until we find concept matches
+                dim_matches = []
+                for variant in dim_variants:
+                    dim_matches = term_index.resolve_terms([variant])
+                    if dim_matches:
+                        logger.warning(f"[DETERMINISTIC] GROUP BY dimension variant '{variant}' found {len(dim_matches)} matches")
+                        break
                 
                 # Filter for concept matches (term_type='concept')
                 concept_matches = [m for m in dim_matches if m.term_type == 'concept']
                 
                 if concept_matches:
-                    # Prefer matches from Reality/employee tables over Configuration
-                    employee_matches = [m for m in concept_matches if m.entity == 'employee' or 'personal' in m.table_name.lower()]
+                    # EVOLUTION 10 FIX: Multi-tier preference for GROUP BY column selection
+                    # Tier 1: Reality/employee tables (NOT config/validation)
+                    # Tier 2: Any non-config/validation table
+                    # Tier 3: Config tables (last resort)
                     
-                    if employee_matches:
-                        best_match = employee_matches[0]
+                    def is_config_table(table_name: str) -> bool:
+                        """Check if table is a config/validation/lookup table."""
+                        t = table_name.lower()
+                        return 'config' in t or 'validation' in t or 'lookup' in t or '_ref_' in t
+                    
+                    def is_employee_table(table_name: str, entity: str) -> bool:
+                        """Check if table contains employee data."""
+                        t = table_name.lower()
+                        return (entity == 'employee' or 
+                                'employee' in t or 
+                                'personal' in t or
+                                '_company' in t or  # Employee company assignments
+                                '_earnings' in t or
+                                '_deductions' in t)
+                    
+                    # Tier 1: Employee/reality tables that are NOT config
+                    tier1_matches = [m for m in concept_matches 
+                                     if is_employee_table(m.table_name, m.entity) 
+                                     and not is_config_table(m.table_name)]
+                    
+                    # Tier 2: Any non-config table
+                    tier2_matches = [m for m in concept_matches 
+                                     if not is_config_table(m.table_name)]
+                    
+                    # Tier 3: Config tables (avoid if possible)
+                    tier3_matches = concept_matches
+                    
+                    if tier1_matches:
+                        best_match = tier1_matches[0]
+                        logger.warning(f"[DETERMINISTIC] GROUP BY from TIER 1 (employee/reality): {best_match.table_name}")
+                    elif tier2_matches:
+                        best_match = tier2_matches[0]
+                        logger.warning(f"[DETERMINISTIC] GROUP BY from TIER 2 (non-config): {best_match.table_name}")
                     else:
-                        best_match = concept_matches[0]
+                        best_match = tier3_matches[0]
+                        logger.warning(f"[DETERMINISTIC] GROUP BY from TIER 3 (config fallback): {best_match.table_name}")
                     
                     group_by_column = f"{best_match.table_name}.{best_match.column_name}"
                     logger.warning(f"[DETERMINISTIC] GROUP BY from concept: '{group_by_dimension}' → {group_by_column} (source={best_match.source})")
@@ -1932,10 +1989,17 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                         'type': 'employee_type',
                         'company': 'company_code',
                         'job': 'job_code',
+                        'job code': 'job_code',  # EVOLUTION 10: Multi-word
                         'pay': 'pay_group',
+                        'pay group': 'pay_group',  # EVOLUTION 10: Multi-word
+                        'pay period': 'pay_period',  # EVOLUTION 10: Multi-word
                         'gender': 'gender',
                         'city': 'city',
                         'country': 'country_code',
+                        'employee type': 'employee_type',  # EVOLUTION 10: Multi-word
+                        'employment status': 'employment_status_code',  # EVOLUTION 10: Multi-word
+                        'term reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
+                        'termination reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
                     }
                     
                     if group_by_dimension in dimension_synonyms:
