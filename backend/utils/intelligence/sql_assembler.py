@@ -672,20 +672,31 @@ class SQLAssembler:
                      group_by_column: str = None) -> AssembledQuery:
         """Build COUNT query. EVOLUTION 8: Added GROUP BY support."""
         
+        # EVOLUTION 8 FIX: Ensure GROUP BY table is in all_tables for JOIN resolution
+        all_tables_extended = list(all_tables)
+        if group_by_column and '.' in group_by_column:
+            gb_table = group_by_column.split('.', 1)[0]
+            if gb_table not in all_tables_extended:
+                all_tables_extended.append(gb_table)
+                logger.warning(f"[SQL_ASSEMBLER] COUNT: Added GROUP BY table to all_tables: {gb_table}")
+        
         # Get tables and joins
-        tables, joins, aliases = self._resolve_tables_and_joins(primary_table, term_matches, all_tables)
+        tables, joins, aliases = self._resolve_tables_and_joins(primary_table, term_matches, all_tables_extended)
         
         # Build SELECT
         if group_by_column:
             # EVOLUTION 8: GROUP BY support
             if '.' in group_by_column:
                 group_table, group_col = group_by_column.split('.', 1)
-                group_alias = aliases.get(group_table, 't0')
+                group_alias = aliases.get(group_table)
+                if not group_alias:
+                    logger.warning(f"[SQL_ASSEMBLER] COUNT: GROUP BY table '{group_table}' not in aliases - using primary")
+                    group_alias = aliases.get(primary_table, 't0')
             else:
                 group_col = group_by_column
                 group_alias = aliases.get(primary_table, 't0')
             sql = f'SELECT {group_alias}."{group_col}", COUNT(*) as count'
-            logger.warning(f"[SQL_ASSEMBLER] COUNT with GROUP BY: {group_col}")
+            logger.warning(f"[SQL_ASSEMBLER] COUNT with GROUP BY: {group_col} (alias={group_alias})")
         else:
             sql = f'SELECT COUNT(*) as count'
         
@@ -701,7 +712,9 @@ class SQLAssembler:
         if group_by_column:
             if '.' in group_by_column:
                 group_table, group_col = group_by_column.split('.', 1)
-                group_alias = aliases.get(group_table, 't0')
+                group_alias = aliases.get(group_table)
+                if not group_alias:
+                    group_alias = aliases.get(primary_table, 't0')
             else:
                 group_col = group_by_column
                 group_alias = aliases.get(primary_table, 't0')
@@ -849,7 +862,18 @@ class SQLAssembler:
         # If we have an aggregation table and no filter matches, use the agg table as primary
         effective_primary = agg_table if (agg_table and not filter_matches) else primary_table
         
-        tables, joins, aliases = self._resolve_tables_and_joins(effective_primary, filter_matches, all_tables)
+        # EVOLUTION 8 FIX: Ensure agg_table and group_by table are in all_tables for JOIN resolution
+        all_tables_extended = list(all_tables)
+        if agg_table and agg_table not in all_tables_extended:
+            all_tables_extended.append(agg_table)
+            logger.warning(f"[SQL_ASSEMBLER] Added aggregation table to all_tables: {agg_table}")
+        if group_by_column and '.' in group_by_column:
+            gb_table = group_by_column.split('.', 1)[0]
+            if gb_table not in all_tables_extended:
+                all_tables_extended.append(gb_table)
+                logger.warning(f"[SQL_ASSEMBLER] Added GROUP BY table to all_tables: {gb_table}")
+        
+        tables, joins, aliases = self._resolve_tables_and_joins(effective_primary, filter_matches, all_tables_extended)
         
         # Ensure effective primary is in aliases
         if effective_primary not in aliases:
@@ -867,12 +891,17 @@ class SQLAssembler:
                 # group_by_column could be "table.column" or just "column"
                 if '.' in group_by_column:
                     group_table, group_col = group_by_column.split('.', 1)
-                    group_alias = aliases.get(group_table, 't0')
+                    group_alias = aliases.get(group_table)
+                    # If GROUP BY table not in aliases, the JOIN failed - warn and try to recover
+                    if not group_alias:
+                        logger.warning(f"[SQL_ASSEMBLER] WARNING: GROUP BY table '{group_table}' not in aliases - JOIN may have failed")
+                        # Try to use the primary table if it has this column
+                        group_alias = aliases.get(effective_primary, 't0')
                 else:
                     group_col = group_by_column
                     group_alias = aliases.get(effective_primary, 't0')
                 sql = f'SELECT {group_alias}."{group_col}", {agg_expr}'
-                logger.warning(f"[SQL_ASSEMBLER] GROUP BY query: {group_col}")
+                logger.warning(f"[SQL_ASSEMBLER] GROUP BY query: {group_col} (alias={group_alias})")
             else:
                 sql = f'SELECT {agg_expr}'
         else:
@@ -902,7 +931,10 @@ class SQLAssembler:
         if group_by_column:
             if '.' in group_by_column:
                 group_table, group_col = group_by_column.split('.', 1)
-                group_alias = aliases.get(group_table, 't0')
+                group_alias = aliases.get(group_table)
+                if not group_alias:
+                    # Fallback to primary if GROUP BY table not in aliases
+                    group_alias = aliases.get(effective_primary, 't0')
             else:
                 group_col = group_by_column
                 group_alias = aliases.get(effective_primary, 't0')
@@ -998,6 +1030,9 @@ class SQLAssembler:
         CRITICAL: Only returns tables that have valid join paths.
         Tables without join paths are excluded to prevent WHERE clause errors.
         
+        EVOLUTION 8 FIX: Also includes tables from all_tables (GROUP BY, aggregation targets)
+        that may not be in term_matches because concept matches were filtered.
+        
         Returns:
             (tables, joins, aliases) - only tables actually in the query
         """
@@ -1010,6 +1045,15 @@ class SQLAssembler:
         for match in term_matches:
             if match.table_name != primary_table:
                 other_tables_needed.add(match.table_name)
+        
+        # EVOLUTION 8 FIX: Also include tables from all_tables
+        # This captures GROUP BY tables and aggregation target tables that were filtered as concepts
+        for table in all_tables:
+            if table and table != primary_table:
+                other_tables_needed.add(table)
+        
+        if other_tables_needed:
+            logger.warning(f"[SQL_ASSEMBLER] Tables needing JOIN: {sorted(other_tables_needed)}")
         
         # For each other table, check if we can join it
         for table in sorted(other_tables_needed):  # Sort for determinism
