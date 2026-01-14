@@ -854,8 +854,16 @@ class IntelligenceEngineV2:
         negation_keywords = ['not ', 'excluding ', 'except ', 'without ']
         has_negation = any(kw in question.lower() for kw in negation_keywords)
         
+        # EVOLUTION 8 FIX: Skip QueryResolver for GROUP BY queries
+        # QueryResolver's workforce_snapshot always groups by status, not the requested dimension
+        # These queries should go through the deterministic path which handles GROUP BY correctly
+        group_by_patterns = [' by ', ' per ', ' for each ', ' broken down by ', ' grouped by ']
+        has_group_by = any(pattern in question.lower() for pattern in group_by_patterns)
+        
         if has_negation:
             logger.warning(f"[ENGINE-V2] Skipping QueryResolver - negation detected in query")
+        elif has_group_by:
+            logger.warning(f"[ENGINE-V2] Skipping QueryResolver - GROUP BY detected, using deterministic path")
         else:
             try:
                 resolver_context = self._try_query_resolver(question)
