@@ -298,23 +298,54 @@ export function PageHeader({
   subtitle = null,
   icon: Icon = null,  // Lucide icon component
   breadcrumbs = [],
-  action = null,
+  action = null,      // Single action: { label, icon, onClick, to, variant }
+  actions = [],       // Multiple actions array
   badge = null,
+  rightContent = null, // Custom right-side content
 }) {
-  const actionButtonStyle = {
-    padding: '0.75rem 1.25rem',
-    background: 'white',
-    border: `2px solid ${COLORS.grassGreen}`,
+  const getActionStyle = (variant = 'outline', disabled = false) => ({
+    padding: '0.6rem 1rem',
+    background: variant === 'primary' ? COLORS.grassGreen : 'white',
+    border: variant === 'primary' ? 'none' : `2px solid ${COLORS.grassGreen}`,
     borderRadius: '8px',
-    color: COLORS.grassGreen,
+    color: variant === 'primary' ? 'white' : COLORS.grassGreen,
     fontWeight: 600,
-    cursor: 'pointer',
+    cursor: disabled ? 'wait' : 'pointer',
+    opacity: disabled ? 0.7 : 1,
     display: 'flex',
     alignItems: 'center',
     gap: '0.5rem',
-    fontSize: '0.9rem',
+    fontSize: '0.85rem',
     textDecoration: 'none',
     transition: 'all 0.2s ease',
+  });
+
+  // Combine single action with actions array
+  const allActions = action ? [action, ...actions] : actions;
+
+  const renderAction = (act, idx) => {
+    const style = getActionStyle(act.variant, act.disabled);
+    
+    if (act.to) {
+      return (
+        <Link key={idx} to={act.to} style={style}>
+          {act.icon && <span style={{ display: 'flex' }}>{act.icon}</span>}
+          {act.label}
+        </Link>
+      );
+    }
+    
+    return (
+      <button 
+        key={idx} 
+        onClick={act.onClick} 
+        disabled={act.disabled}
+        style={style}
+      >
+        {act.icon && <span style={{ display: 'flex' }}>{act.icon}</span>}
+        {act.label}
+      </button>
+    );
   };
 
   return (
@@ -395,19 +426,10 @@ export function PageHeader({
           )}
         </div>
 
-        {action && (
-          action.to ? (
-            <Link to={action.to} style={actionButtonStyle}>
-              {action.icon && <span>{action.icon}</span>}
-              {action.label}
-            </Link>
-          ) : (
-            <button onClick={action.onClick} style={actionButtonStyle}>
-              {action.icon && <span>{action.icon}</span>}
-              {action.label}
-            </button>
-          )
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {rightContent}
+          {allActions.map(renderAction)}
+        </div>
       </div>
     </div>
   );
