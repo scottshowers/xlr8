@@ -1148,6 +1148,12 @@ class SQLAssembler:
                 logger.warning(f"[SQL_ASSEMBLER] SKIP: Entity fallback match for '{match.term}' - no filter needed")
                 continue
             
+            # Skip GROUP BY matches - they're for table selection and GROUP BY clause, not WHERE filtering
+            # These come from MetadataReasoner column name matches
+            if match.operator == 'GROUP BY':
+                logger.warning(f"[SQL_ASSEMBLER] SKIP: GROUP BY match for '{match.term}' - used for table selection, not filtering")
+                continue
+            
             # SAFETY CHECK: Only include conditions for tables that are in the query
             if match.table_name not in aliases:
                 logger.warning(f"[SQL_ASSEMBLER] SKIP: Table '{match.table_name}' not in query aliases, skipping filter for '{match.term}'")
