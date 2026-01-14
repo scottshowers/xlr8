@@ -1899,31 +1899,100 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                     employee_keywords = ['employee', 'employees', 'worker', 'workers', 'people', 'staff', 'personnel', 'headcount']
                     if any(kw in question_lower for kw in employee_keywords):
                         # Find the best employee table using term_index
+                        # EVOLUTION 10 FIX: If we have a GROUP BY dimension, find a table that has BOTH
+                        # the employee identifier AND the GROUP BY column
                         try:
-                            # Query for employee_number hub to find the employee table
-                            result = term_index.conn.execute("""
-                                SELECT DISTINCT table_name FROM _term_index
-                                WHERE project = ? AND (
-                                    column_name LIKE '%employee_number%' 
-                                    OR column_name LIKE '%person_number%'
-                                    OR column_name = 'employee_id'
-                                )
-                                ORDER BY table_name
-                                LIMIT 1
-                            """, [term_index.project]).fetchone()
-                            if result:
-                                entity_table = result[0]
-                                logger.warning(f"[DETERMINISTIC] COUNT entity fallback: employee → {entity_table}")
+                            if group_by_dimension:
+                                # Convert "job code" → "job_code" for column matching
+                                group_col_pattern = group_by_dimension.replace(' ', '_').lower()
+                                
+                                # First try: Find table with BOTH employee_number AND the GROUP BY column
+                                result = term_index.conn.execute("""
+                                    SELECT t1.table_name 
+                                    FROM _term_index t1
+                                    JOIN _term_index t2 ON t1.table_name = t2.table_name AND t1.project = t2.project
+                                    WHERE t1.project = ? 
+                                    AND (t1.column_name LIKE '%employee_number%' 
+                                         OR t1.column_name LIKE '%person_number%'
+                                         OR t1.column_name = 'employee_id')
+                                    AND LOWER(t2.column_name) LIKE ?
+                                    AND LOWER(t1.table_name) NOT LIKE '%config%'
+                                    AND LOWER(t1.table_name) NOT LIKE '%validation%'
+                                    ORDER BY t1.table_name
+                                    LIMIT 1
+                                """, [term_index.project, f'%{group_col_pattern}%']).fetchone()
+                                
+                                if result:
+                                    entity_table = result[0]
+                                    logger.warning(f"[DETERMINISTIC] Found table with BOTH employee_number AND {group_by_dimension}: {entity_table}")
+                                else:
+                                    # Fallback: Find ANY table with the GROUP BY column (prefer employee tables)
+                                    result = term_index.conn.execute("""
+                                        SELECT DISTINCT table_name FROM _term_index
+                                        WHERE project = ? 
+                                        AND LOWER(column_name) LIKE ?
+                                        AND LOWER(table_name) NOT LIKE '%config%'
+                                        AND LOWER(table_name) NOT LIKE '%validation%'
+                                        ORDER BY 
+                                            CASE WHEN LOWER(table_name) LIKE '%employee%' THEN 0
+                                                 WHEN LOWER(table_name) LIKE '%personal%' THEN 1
+                                                 ELSE 2 END,
+                                            table_name
+                                        LIMIT 1
+                                    """, [term_index.project, f'%{group_col_pattern}%']).fetchone()
+                                    
+                                    if result:
+                                        entity_table = result[0]
+                                        logger.warning(f"[DETERMINISTIC] Found table with {group_by_dimension} column: {entity_table}")
+                            else:
+                                # No GROUP BY - just find any employee table
+                                result = term_index.conn.execute("""
+                                    SELECT DISTINCT table_name FROM _term_index
+                                    WHERE project = ? AND (
+                                        column_name LIKE '%employee_number%' 
+                                        OR column_name LIKE '%person_number%'
+                                        OR column_name = 'employee_id'
+                                    )
+                                    ORDER BY table_name
+                                    LIMIT 1
+                                """, [term_index.project]).fetchone()
+                                if result:
+                                    entity_table = result[0]
+                                    logger.warning(f"[DETERMINISTIC] COUNT entity fallback: employee → {entity_table}")
                         except Exception as e:
                             logger.warning(f"[DETERMINISTIC] Entity table lookup failed: {e}")
                     
                     if entity_table:
                         # Create a synthetic term match for the entity table
+                        # Find the actual identifier column in this table
                         from backend.utils.intelligence.term_index import TermMatch
+                        
+                        id_column = 'employee_number'  # default
+                        try:
+                            # Find actual identifier column in this table
+                            id_result = term_index.conn.execute("""
+                                SELECT column_name FROM _term_index
+                                WHERE project = ? AND table_name = ?
+                                AND (column_name LIKE '%employee_number%' 
+                                     OR column_name LIKE '%person_number%'
+                                     OR column_name = 'employee_id'
+                                     OR column_name LIKE '%_id')
+                                ORDER BY 
+                                    CASE WHEN column_name LIKE '%employee_number%' THEN 0
+                                         WHEN column_name LIKE '%person_number%' THEN 1
+                                         WHEN column_name = 'employee_id' THEN 2
+                                         ELSE 3 END
+                                LIMIT 1
+                            """, [term_index.project, entity_table]).fetchone()
+                            if id_result:
+                                id_column = id_result[0]
+                        except:
+                            pass
+                        
                         term_matches = [TermMatch(
                             term='employees',
                             table_name=entity_table,
-                            column_name='employee_number',  # or whatever identifier
+                            column_name=id_column,
                             operator='IS NOT NULL',  # Just select all records
                             match_value='',
                             domain='hr',
@@ -1932,7 +2001,7 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                             term_type='entity',
                             source='entity_fallback'
                         )]
-                        logger.warning(f"[DETERMINISTIC] Created entity fallback match for COUNT/GROUP BY query")
+                        logger.warning(f"[DETERMINISTIC] Created entity fallback: {entity_table}.{id_column}")
                     else:
                         # Get available columns for suggestions
                         try:
