@@ -655,14 +655,17 @@ class TableSelector:
         # 0a. TABLE NAME DOMAIN MATCH (v4.0 - highest priority)
         # When user asks for "earnings", table NAMED earnings_earnings should 
         # crush tables that just mention earnings in column values
+        # v4.3 FIX: Don't boost config/validation tables - they're not data sources
         # =====================================================================
         requested_domain = None
+        is_config_table = 'config' in table_name or 'validation' in table_name or 'lookup' in table_name
+        
         for domain, keywords in TABLE_NAME_DOMAIN_KEYWORDS.items():
             # Check if question contains this domain keyword
             if any(kw in q_lower for kw in keywords):
                 requested_domain = domain
-                # Check if table NAME contains the domain
-                if domain in table_name or any(kw in table_name for kw in keywords):
+                # Check if table NAME contains the domain (but skip config/validation tables)
+                if not is_config_table and (domain in table_name or any(kw in table_name for kw in keywords)):
                     score += 200  # Massive boost - table IS the domain
                     logger.warning(f"[TABLE-SEL] TABLE NAME DOMAIN MATCH: {table_name[-45:]} matches '{domain}' (+200)")
                 break
@@ -769,6 +772,42 @@ class TableSelector:
         # =====================================================================
         score += self._score_value_match(table, words)
         
+        # =====================================================================
+        # 9. COUNT/AGGREGATE QUESTION HANDLING (v4.3)
+        # Questions like "how many", "number of", "count" need REALITY data,
+        # not CONFIG tables with low row counts
+        # =====================================================================
+        count_keywords = ['how many', 'number of', 'count', 'total employees', 
+                          'total workers', 'employees by', 'workers by']
+        is_count_question = any(kw in q_lower for kw in count_keywords)
+        
+        if is_count_question:
+            # Get classification to check table type
+            classification = self._get_classification(table_name)
+            table_type = None
+            if classification:
+                if isinstance(classification, dict):
+                    table_type = classification.get('table_type', '').lower()
+                else:
+                    table_type = classification.table_type.value.lower() if hasattr(classification, 'table_type') else ''
+            
+            # Config/validation tables are BAD for count questions
+            if 'config' in table_name or 'validation' in table_name:
+                score -= 100
+                logger.warning(f"[TABLE-SEL] CONFIG PENALTY (count question): {table_name[-40:]} (-100)")
+            elif table_type == 'config':
+                score -= 80
+                logger.warning(f"[TABLE-SEL] CONFIG TYPE PENALTY (count question): {table_name[-40:]} (-80)")
+            
+            # Master/reality tables with real row counts are GOOD
+            if row_count > 100 and table_type in ['master', 'reality', 'transaction']:
+                score += 60
+                logger.warning(f"[TABLE-SEL] MASTER/REALITY BOOST (count question): {table_name[-40:]} rows={row_count} (+60)")
+            elif row_count > 500:
+                # Even without classification, high row count suggests reality data
+                score += 30
+                logger.warning(f"[TABLE-SEL] HIGH ROW COUNT BOOST (count question): {table_name[-40:]} rows={row_count} (+30)")
+        
         return score
     
     def _score_fallback_domain(self, table_name: str, question_domain: str, q_lower: str) -> int:
@@ -849,13 +888,6 @@ class TableSelector:
             if config_target and question_domain and config_target == question_domain:
                 score += 50  # Very strong - this is THE config table for this domain
                 logger.warning(f"[TABLE-SEL] CONFIG TARGET MATCH: {table_name[-40:]} target={config_target} (+50)")
-        
-        # =====================================================================
-        # MASTER TABLE BOOST for "how many" questions
-        # =====================================================================
-        if 'how many' in table_name or any(w in ['count', 'total'] for w in table_name.split('_')):
-            if table_type == 'master':
-                score += 40  # Master tables are good for counting entities
         
         return score
     
