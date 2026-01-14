@@ -2064,11 +2064,24 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                         try:
                             # First try: Find table matching domain patterns (exclude config)
                             found_table = None
+                            logger.warning(f"[DETERMINISTIC] Looking for column '{column_name}' in domain '{parsed.domain.value}' with patterns: {preferred_patterns}")
+                            
+                            # Debug: Show ALL tables that have this column
+                            all_tables = term_index.conn.execute("""
+                                SELECT table_name, column_name FROM _column_profiles
+                                WHERE project = ? AND LOWER(column_name) = LOWER(?)
+                                LIMIT 10
+                            """, [term_index.project, column_name]).fetchall()
+                            if all_tables:
+                                logger.warning(f"[DETERMINISTIC] Tables with column '{column_name}': {[t[0][-30:] for t in all_tables]}")
+                            else:
+                                logger.warning(f"[DETERMINISTIC] No tables found with column '{column_name}' in _column_profiles")
+                            
                             for pattern in preferred_patterns:
                                 result = term_index.conn.execute("""
                                     SELECT DISTINCT table_name FROM _column_profiles
                                     WHERE project = ? 
-                                    AND column_name = ?
+                                    AND LOWER(column_name) = LOWER(?)
                                     AND LOWER(table_name) LIKE ?
                                     AND LOWER(table_name) NOT LIKE '%config%'
                                     AND LOWER(table_name) NOT LIKE '%validation%'
@@ -2085,7 +2098,7 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                                 result = term_index.conn.execute("""
                                     SELECT DISTINCT table_name FROM _column_profiles
                                     WHERE project = ? 
-                                    AND column_name = ?
+                                    AND LOWER(column_name) = LOWER(?)
                                     AND LOWER(table_name) NOT LIKE '%config%'
                                     AND LOWER(table_name) NOT LIKE '%validation%'
                                     ORDER BY table_name
@@ -2311,9 +2324,9 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
         Evolution 10: Handle multi-hop relationship queries.
         
         Processes queries like:
-        - "manager's department" → self-join through supervisor_id
-        - "employees in John's team" → filter by supervisor name
-        - "location's regional manager" → multi-hop join
+        - "manager's department" - self-join through supervisor_id
+        - "employees in John's team" - filter by supervisor name
+        - "location's regional manager" - multi-hop join
         
         Args:
             question: The original question
