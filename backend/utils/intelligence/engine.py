@@ -1832,7 +1832,16 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             
             # Combine words and all phrase types for resolution
             terms_to_resolve = words + numeric_phrases + date_phrases + or_phrases + negation_phrases
-            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric={numeric_phrases}, date={date_phrases}, or={or_phrases}, negation={negation_phrases}")
+            
+            # EVOLUTION 10 FIX: Add GROUP BY dimension to resolution so term_index finds the right table
+            # Don't exclude it - resolve it! The infrastructure knows job_code → company table
+            if group_by_dimension:
+                # Add as underscore version for column matching
+                group_by_term = group_by_dimension.replace(' ', '_')
+                terms_to_resolve.append(group_by_term)
+                logger.warning(f"[DETERMINISTIC] Added GROUP BY dimension to resolution: '{group_by_term}'")
+            
+            logger.warning(f"[DETERMINISTIC] Resolving terms: words={words}, numeric={numeric_phrases}, date={date_phrases}, or={or_phrases}, negation={negation_phrases}, group_by={group_by_dimension}")
             
             # Use enhanced resolution if available (includes numeric, date, OR, and negation parsing)
             if hasattr(term_index, 'resolve_terms_enhanced'):
@@ -1881,8 +1890,7 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             if not term_matches and not agg_matches:
                 # SPECIAL CASE: COUNT queries OR GROUP BY queries can work with entity detection
                 # "how many employees" → COUNT(*) on employee table
-                # "employees by job code" → COUNT(*) ... GROUP BY job_code on employee table
-                # EVOLUTION 10 FIX: GROUP BY dimension implies COUNT
+                # "employees by job code" → COUNT(*) ... GROUP BY job_code on table WITH job_code
                 is_count_or_groupby = detected_intent == 'count' or group_by_dimension
                 
                 if is_count_or_groupby:
@@ -1891,76 +1899,77 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                         detected_intent = 'count'
                         logger.warning(f"[DETERMINISTIC] GROUP BY detected - treating as COUNT query")
                     
-                    # Extract entities from the question
-                    question_lower = question.lower()
                     entity_table = None
+                    id_column = None
                     
-                    # Check for employee/person entities
-                    employee_keywords = ['employee', 'employees', 'worker', 'workers', 'people', 'staff', 'personnel', 'headcount']
-                    if any(kw in question_lower for kw in employee_keywords):
-                        # Find the best employee table using term_index
-                        # EVOLUTION 10 FIX: If we have a GROUP BY dimension, find a table that has BOTH
-                        # the employee identifier AND the GROUP BY column
+                    # EVOLUTION 10 FIX: For GROUP BY queries, find table by GROUP BY column FIRST
+                    # Don't require employee_number - the table with job_code IS the right table
+                    if group_by_dimension:
+                        group_col_pattern = group_by_dimension.replace(' ', '_').lower()
+                        logger.warning(f"[DETERMINISTIC] Looking for table with GROUP BY column: {group_col_pattern}")
+                        
                         try:
-                            if group_by_dimension:
-                                # Convert "job code" → "job_code" for column matching
-                                group_col_pattern = group_by_dimension.replace(' ', '_').lower()
-                                
-                                # First try: Find table with BOTH employee_number AND the GROUP BY column
-                                result = term_index.conn.execute("""
-                                    SELECT t1.table_name 
-                                    FROM _term_index t1
-                                    JOIN _term_index t2 ON t1.table_name = t2.table_name AND t1.project = t2.project
-                                    WHERE t1.project = ? 
-                                    AND (t1.column_name LIKE '%employee_number%' 
-                                         OR t1.column_name LIKE '%person_number%'
-                                         OR t1.column_name = 'employee_id')
-                                    AND LOWER(t2.column_name) LIKE ?
-                                    AND LOWER(t1.table_name) NOT LIKE '%config%'
-                                    AND LOWER(t1.table_name) NOT LIKE '%validation%'
-                                    ORDER BY t1.table_name
+                            # Find table with the GROUP BY column (prefer non-config tables)
+                            result = term_index.conn.execute("""
+                                SELECT table_name, column_name FROM _term_index
+                                WHERE LOWER(project) = LOWER(?)
+                                AND LOWER(column_name) LIKE ?
+                                AND LOWER(table_name) NOT LIKE '%config%'
+                                AND LOWER(table_name) NOT LIKE '%validation%'
+                                AND LOWER(table_name) NOT LIKE '%lookup%'
+                                ORDER BY 
+                                    CASE WHEN LOWER(table_name) LIKE '%employee%' THEN 0
+                                         WHEN LOWER(table_name) LIKE '%personal%' THEN 1
+                                         WHEN LOWER(table_name) LIKE '%company%' THEN 2
+                                         ELSE 3 END,
+                                    table_name
+                                LIMIT 1
+                            """, [term_index.project, f'%{group_col_pattern}%']).fetchone()
+                            
+                            if result:
+                                entity_table = result[0]
+                                # The GROUP BY column IS our anchor - find an ID column in same table
+                                id_result = term_index.conn.execute("""
+                                    SELECT column_name FROM _term_index
+                                    WHERE LOWER(project) = LOWER(?) AND table_name = ?
+                                    AND (LOWER(column_name) LIKE '%employee%' 
+                                         OR LOWER(column_name) LIKE '%person%'
+                                         OR LOWER(column_name) LIKE '%_id'
+                                         OR LOWER(column_name) LIKE '%_number')
+                                    ORDER BY 
+                                        CASE WHEN LOWER(column_name) LIKE '%employee_number%' THEN 0
+                                             WHEN LOWER(column_name) LIKE '%person_number%' THEN 1
+                                             ELSE 2 END
                                     LIMIT 1
-                                """, [term_index.project, f'%{group_col_pattern}%']).fetchone()
+                                """, [term_index.project, entity_table]).fetchone()
                                 
-                                if result:
-                                    entity_table = result[0]
-                                    logger.warning(f"[DETERMINISTIC] Found table with BOTH employee_number AND {group_by_dimension}: {entity_table}")
-                                else:
-                                    # Fallback: Find ANY table with the GROUP BY column (prefer employee tables)
-                                    result = term_index.conn.execute("""
-                                        SELECT DISTINCT table_name FROM _term_index
-                                        WHERE project = ? 
-                                        AND LOWER(column_name) LIKE ?
-                                        AND LOWER(table_name) NOT LIKE '%config%'
-                                        AND LOWER(table_name) NOT LIKE '%validation%'
-                                        ORDER BY 
-                                            CASE WHEN LOWER(table_name) LIKE '%employee%' THEN 0
-                                                 WHEN LOWER(table_name) LIKE '%personal%' THEN 1
-                                                 ELSE 2 END,
-                                            table_name
-                                        LIMIT 1
-                                    """, [term_index.project, f'%{group_col_pattern}%']).fetchone()
-                                    
-                                    if result:
-                                        entity_table = result[0]
-                                        logger.warning(f"[DETERMINISTIC] Found table with {group_by_dimension} column: {entity_table}")
-                            else:
-                                # No GROUP BY - just find any employee table
+                                id_column = id_result[0] if id_result else result[1]  # fallback to GROUP BY col
+                                logger.warning(f"[DETERMINISTIC] Found table with {group_col_pattern}: {entity_table}, id_col={id_column}")
+                        except Exception as e:
+                            logger.warning(f"[DETERMINISTIC] GROUP BY table lookup failed: {e}")
+                    
+                    # Fallback: If no GROUP BY or GROUP BY lookup failed, try employee_number approach
+                    if not entity_table:
+                        question_lower = question.lower()
+                        employee_keywords = ['employee', 'employees', 'worker', 'workers', 'people', 'staff', 'personnel', 'headcount']
+                        if any(kw in question_lower for kw in employee_keywords):
+                            try:
                                 result = term_index.conn.execute("""
                                     SELECT DISTINCT table_name FROM _term_index
-                                    WHERE project = ? AND (
-                                        column_name LIKE '%employee_number%' 
-                                        OR column_name LIKE '%person_number%'
-                                        OR column_name = 'employee_id'
+                                    WHERE LOWER(project) = LOWER(?) AND (
+                                        LOWER(column_name) LIKE '%employee_number%' 
+                                        OR LOWER(column_name) LIKE '%person_number%'
                                     )
+                                    AND LOWER(table_name) NOT LIKE '%config%'
                                     ORDER BY table_name
                                     LIMIT 1
                                 """, [term_index.project]).fetchone()
                                 if result:
                                     entity_table = result[0]
-                                    logger.warning(f"[DETERMINISTIC] COUNT entity fallback: employee → {entity_table}")
-                        except Exception as e:
-                            logger.warning(f"[DETERMINISTIC] Entity table lookup failed: {e}")
+                                    id_column = 'employee_number'
+                                    logger.warning(f"[DETERMINISTIC] Fallback to employee table: {entity_table}")
+                            except Exception as e:
+                                logger.warning(f"[DETERMINISTIC] Employee table lookup failed: {e}")
                     
                     if entity_table:
                         # Create a synthetic term match for the entity table
