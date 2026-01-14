@@ -210,4 +210,5 @@ LOOKUP_INDICATORS = [
     '_lookup', '_ref', '_xref', '_map', '_mapping',
     'lookup_', 'ref_', 'xref_', 'map_',
     '_code_', '_codes', 'code_table',
+    'validation', 'configuration_validation',  # Config validation tables
 ]
