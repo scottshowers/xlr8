@@ -14,21 +14,23 @@ We:
 - Return a filter specification for the SQLAssembler
 
 FLOW:
-1. Term comes in ("401k") - not found in term_index
-2. MetadataReasoner queries:
+1. Term comes in ("job_code") - not found in term_index
+2. FIRST: Check if term is an actual COLUMN NAME (highest priority!)
+3. MetadataReasoner queries:
+   - _column_profiles: Is this term a column name?
    - _table_classifications: What domains/tables exist?
-   - _column_profiles: What columns are searchable text?
    - _column_mappings: What semantic types exist?
-3. Apply rules:
+4. Apply rules:
+   - Column name match → return as concept/GROUP BY target (highest confidence)
    - Alphanumeric like "401k" → search description columns
    - Looks like a name → search name columns
    - Looks like a code → search code columns
-4. Return: table, column, operator, pattern
+5. Return: table, column, operator, pattern
 
 NO LLM. NO PRE-COMPUTATION. JUST REASONING OVER EXISTING METADATA.
 
 Author: XLR8 Team
-Date: 2026-01-11
+Date: 2026-01-14 (Updated with column name matching)
 """
 
 import re
@@ -47,7 +49,7 @@ class ReasonedMatch:
     term: str
     table_name: str
     column_name: str
-    operator: str  # '=', 'ILIKE', 'IN'
+    operator: str  # '=', 'ILIKE', 'IN', 'GROUP BY'
     match_value: str
     domain: Optional[str] = None
     confidence: float = 0.7  # Lower than term_index matches
@@ -77,6 +79,7 @@ class MetadataReasoner:
         self._description_columns: Dict[str, List[str]] = {}  # table -> [desc columns]
         self._code_columns: Dict[str, List[str]] = {}  # table -> [code columns]
         self._name_columns: Dict[str, List[str]] = {}  # table -> [name columns]
+        self._all_columns: Dict[str, List[str]] = {}  # table -> [all columns]
         
         self._load_metadata()
     
@@ -115,6 +118,11 @@ class MetadataReasoner:
             for table_name, column_name, inferred_type in results:
                 col_lower = column_name.lower()
                 
+                # Track ALL columns for column-name matching
+                if table_name not in self._all_columns:
+                    self._all_columns[table_name] = []
+                self._all_columns[table_name].append(column_name)
+                
                 # Description columns (including *_long which often contains descriptive text)
                 if any(pat in col_lower for pat in ['desc', 'description', 'title', 'label', 'text', 'long']):
                     if table_name not in self._description_columns:
@@ -136,15 +144,131 @@ class MetadataReasoner:
             logger.warning(f"[REASONER] Found description columns in {len(self._description_columns)} tables")
             logger.warning(f"[REASONER] Found code columns in {len(self._code_columns)} tables")
             logger.warning(f"[REASONER] Found name columns in {len(self._name_columns)} tables")
+            logger.warning(f"[REASONER] Indexed all columns from {len(self._all_columns)} tables")
         except Exception as e:
             logger.warning(f"[REASONER] Could not load column profiles: {e}")
+    
+    def _find_column_name_matches(self, term: str) -> List[ReasonedMatch]:
+        """
+        FIRST PASS: Check if the term matches an actual column name.
+        
+        This is critical for GROUP BY queries like "employees by job code" where
+        "job_code" is the actual column name, not text to search for.
+        
+        Prioritizes:
+        1. Exact column name match (highest confidence)
+        2. Column name contains term (medium confidence)
+        3. Reality/employee tables over config tables
+        
+        Args:
+            term: The term to match (e.g., "job_code", "department")
+            
+        Returns:
+            List of ReasonedMatch objects for column name matches
+        """
+        matches = []
+        term_lower = term.lower().strip()
+        
+        # Normalize term variants (handle both underscore and space)
+        term_variants = {
+            term_lower,
+            term_lower.replace('_', ''),  # jobcode
+            term_lower.replace(' ', '_'),  # job_code
+            term_lower.replace('_', ' '),  # job code
+        }
+        
+        # Helper to determine table priority (reality tables > config tables)
+        def get_table_priority(table_name: str) -> int:
+            """Higher = better. Reality/employee tables preferred."""
+            t = table_name.lower()
+            
+            # Config/validation tables - lowest priority
+            if 'config' in t or 'validation' in t or 'lookup' in t or '_ref_' in t:
+                return 1
+            
+            # Company tax tables - low priority for employee queries
+            if 'companytax' in t or 'tax_jurisdiction' in t:
+                return 2
+            
+            # Employee reality tables - highest priority
+            if 'employee' in t or 'personal' in t or '_us_1_' in t:
+                return 10
+            
+            # Company table (has job_code, department, etc.) - high priority
+            if 'company' in t and 'tax' not in t:
+                return 9
+            
+            # Other tables
+            return 5
+        
+        # Search all tables for column name matches
+        exact_matches = []
+        partial_matches = []
+        
+        for table_name, columns in self._all_columns.items():
+            for column_name in columns:
+                col_lower = column_name.lower()
+                
+                # Check for exact match with any variant
+                if col_lower in term_variants:
+                    priority = get_table_priority(table_name)
+                    exact_matches.append((table_name, column_name, priority))
+                    logger.warning(f"[REASONER] COLUMN NAME EXACT MATCH: '{term}' → {table_name}.{column_name} (priority={priority})")
+                
+                # Check for partial match (term in column name or vice versa)
+                elif term_lower in col_lower or col_lower in term_lower:
+                    # Only if it's a meaningful match (not just 'a' in 'salary')
+                    if len(term_lower) >= 3:
+                        priority = get_table_priority(table_name)
+                        partial_matches.append((table_name, column_name, priority))
+                        logger.warning(f"[REASONER] COLUMN NAME PARTIAL MATCH: '{term}' → {table_name}.{column_name} (priority={priority})")
+        
+        # Sort by priority (highest first) and build matches
+        exact_matches.sort(key=lambda x: -x[2])
+        partial_matches.sort(key=lambda x: -x[2])
+        
+        # Add exact matches first (high confidence)
+        for table_name, column_name, priority in exact_matches:
+            matches.append(ReasonedMatch(
+                term=term_lower,
+                table_name=table_name,
+                column_name=column_name,
+                operator='GROUP BY',  # Column name matches are for GROUP BY/SELECT
+                match_value='',  # No filter value - this is the column itself
+                domain=self._get_table_domain(table_name),
+                confidence=0.95 if priority >= 9 else 0.85,  # Higher confidence for reality tables
+                reasoning=f"Column name exact match: {column_name} in {table_name}"
+            ))
+        
+        # Add partial matches if no exact matches (lower confidence)
+        if not exact_matches:
+            for table_name, column_name, priority in partial_matches[:3]:  # Limit partial matches
+                matches.append(ReasonedMatch(
+                    term=term_lower,
+                    table_name=table_name,
+                    column_name=column_name,
+                    operator='GROUP BY',
+                    match_value='',
+                    domain=self._get_table_domain(table_name),
+                    confidence=0.75 if priority >= 9 else 0.65,
+                    reasoning=f"Column name partial match: {column_name} in {table_name}"
+                ))
+        
+        if matches:
+            logger.warning(f"[REASONER] Found {len(matches)} column name matches for '{term}'")
+        
+        return matches
     
     def resolve_unknown_term(self, term: str, context_domain: str = None) -> List[ReasonedMatch]:
         """
         Resolve an unknown term by reasoning over metadata.
         
+        RESOLUTION ORDER (most specific to least specific):
+        1. COLUMN NAME MATCH - Is this term an actual column name? (e.g., "job_code")
+        2. TEXT SEARCH - Search description/code/name columns for text content
+        
         Args:
-            term: The unknown term (e.g., "401k", "overtime", "manager")
+            term: The unknown term (e.g., "401k", "overtime", "job_code")
             context_domain: Optional domain hint from other resolved terms
             
         Returns:
@@ -167,6 +291,21 @@ class MetadataReasoner:
         if term_lower in DOMAIN_INDICATOR_WORDS:
             logger.warning(f"[REASONER] Skipping domain indicator word: '{term_lower}'")
             return matches
+        
+        # ======================================================================
+        # PASS 1: COLUMN NAME MATCHING (HIGHEST PRIORITY)
+        # ======================================================================
+        # Check if this term IS a column name before treating it as search text
+        # This is critical for "employees by job code" type queries
+        column_matches = self._find_column_name_matches(term_lower)
+        if column_matches:
+            logger.warning(f"[REASONER] Returning {len(column_matches)} COLUMN NAME matches for '{term_lower}'")
+            return column_matches
+        
+        # ======================================================================
+        # PASS 2: TEXT CONTENT SEARCH (FALLBACK)
+        # ======================================================================
+        # If not a column name, treat as search term for text columns
         
         # Classify the term
         term_type = self._classify_term(term_lower)
