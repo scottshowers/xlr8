@@ -26,6 +26,7 @@
 
 import React, { createContext, useContext, useState, useCallback, useRef, useEffect } from 'react';
 import api from '../services/api';
+import { useAuth } from './AuthContext';
 
 const UploadContext = createContext(null);
 
@@ -53,6 +54,7 @@ const STAGE_MESSAGES = {
 export function UploadProvider({ children }) {
   const [uploads, setUploads] = useState([]);
   const pollIntervals = useRef({});
+  const { user } = useAuth();
 
   // Cleanup polling on unmount
   useEffect(() => {
@@ -158,6 +160,11 @@ export function UploadProvider({ children }) {
     formData.append('project', projName);
     if (projId) {
       formData.append('project_id', projId);
+    }
+    
+    // Track who uploaded the file
+    if (user?.email) {
+      formData.append('uploaded_by', user.email);
     }
     
     if (options.standards_mode) {
