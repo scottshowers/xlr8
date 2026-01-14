@@ -34,7 +34,7 @@ Deploy to: backend/utils/intelligence/__init__.py
 """
 
 # Version
-__version__ = "8.0.0"  # v8.0: Phase 3 - Synthesis Pipeline
+__version__ = "10.0.0"  # v10.0: Evolution 10 - Honest Failure (No LLM Fallback)
 
 # Core types (always available)
 from .types import (
@@ -149,6 +149,18 @@ from .relationship_resolver import (
     MultiHopJoin,
     detect_multi_hop_query,
     get_resolver as get_relationship_resolver,
+)
+
+# Resolution Response (Evolution 10: Honest failure instead of garbage fallback)
+from .resolution_response import (
+    ResolutionStatus,
+    ResolutionFailure,
+    build_cannot_resolve_response,
+    build_needs_clarification_response,
+    build_no_data_response,
+    build_complex_query_response,
+    build_system_error_response,
+    get_fuzzy_suggestions,
 )
 
 # =========================================================================
@@ -311,6 +323,16 @@ __all__ = [
     'MultiHopJoin',
     'detect_multi_hop_query',
     'get_relationship_resolver',
+    
+    # Resolution Response (Evolution 10: Honest Failure)
+    'ResolutionStatus',
+    'ResolutionFailure',
+    'build_cannot_resolve_response',
+    'build_needs_clarification_response',
+    'build_no_data_response',
+    'build_complex_query_response',
+    'build_system_error_response',
+    'get_fuzzy_suggestions',
     
     # Phase 3: Truth Assembler
     'TruthAssembler',
