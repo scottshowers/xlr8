@@ -317,11 +317,13 @@ export default function Chat({ functionalAreas = [] }) {
 
   return (
     <div style={{
-      height: '75vh',
-      minHeight: 500,
+      height: 'calc(100vh - 200px)', // Account for Layout header, PageHeader, and padding
+      minHeight: 400,
       display: 'flex',
       flexDirection: 'column',
       background: colors.card,
+      borderRadius: 12,
+      border: `1px solid ${colors.divider}`,
       overflow: 'hidden',
     }}>
       {/* Header */}

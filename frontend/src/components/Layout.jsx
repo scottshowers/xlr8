@@ -14,8 +14,8 @@ import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
   Rocket, MessageSquare, ChevronDown, ChevronUp,
-  Target, FolderOpen, Database, ClipboardList, BarChart3,
-  Lightbulb, Wrench, GraduationCap, Settings, Map, Building2, Activity
+  Target, FolderOpen, Database, ClipboardList, BarChart3, ScrollText,
+  Wrench, GraduationCap, Settings, Map, Building2, Activity
 } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
@@ -105,13 +105,13 @@ const MAIN_NAV = [
   { path: '/projects', label: 'Projects', icon: FolderOpen, permission: null, tooltip: 'Create and manage customer implementation projects' },
   { path: '/data', label: 'Data', icon: Database, permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
   { path: '/playbooks', label: 'Playbooks', icon: ClipboardList, permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
+  { path: '/standards', label: 'Standards', icon: ScrollText, permission: null, tooltip: 'Upload compliance documents, extract rules, run checks' },
   { path: '/analytics', label: 'Smart Analytics', icon: BarChart3, permission: null, tooltip: 'Query your data with natural language or SQL' },
   { path: '/workspace', label: 'AI Assist', icon: MessageSquare, permission: null, tooltip: 'Chat with AI about your project data' },
 ];
 
 // Admin nav items - collapsible
 const ADMIN_NAV = [
-  { path: '/advisor', label: 'Work Advisor', icon: Lightbulb, permission: Permissions.OPS_CENTER, tooltip: 'AI-powered recommendations for tasks and next steps' },
   { path: '/playbooks/builder', label: 'Playbook Builder', icon: Wrench, permission: Permissions.OPS_CENTER, tooltip: 'Create and customize analysis playbooks' },
   { path: '/learning-admin', label: 'Learning', icon: GraduationCap, permission: Permissions.OPS_CENTER, tooltip: 'Train the system with domain knowledge' },
   { path: '/admin', label: 'System', icon: Settings, permission: Permissions.OPS_CENTER, tooltip: 'System settings, users, and configuration' },
