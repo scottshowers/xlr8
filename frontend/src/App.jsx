@@ -48,7 +48,6 @@ import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import StandardsPage from './pages/StandardsPage';
-import WorkAdvisor from './pages/WorkAdvisor';
 import AdminPage from './pages/AdminPage';
 import AdminDashboard from './pages/AdminDashboard';
 import DataHealthPage from './pages/DataHealthPage';
@@ -145,11 +144,6 @@ function AppRoutes() {
         {/* Playbooks */}
         <Route path="/playbooks" element={
           <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Work Advisor - Conversational guide to features/playbooks */}
-        <Route path="/advisor" element={
-          <ProtectedRoute><Layout><WorkAdvisor /></Layout></ProtectedRoute>
         } />
         
         {/* Workspace (Chat) */}
