@@ -42,7 +42,19 @@ from .types import (
     TruthType
 )
 from .table_selector import TableSelector
+# OLD PATH DISABLED - Import kept for backward compatibility but not used for fallback
 from .sql_generator import SQLGenerator
+
+# NEW: Honest failure responses instead of garbage fallback
+from .resolution_response import (
+    build_cannot_resolve_response,
+    build_needs_clarification_response,
+    build_no_data_response,
+    build_complex_query_response,
+    build_system_error_response,
+    get_fuzzy_suggestions,
+    ResolutionStatus
+)
 from .synthesis_pipeline import SynthesisPipeline as Synthesizer  # Phase 3: New clean implementation
 from .truth_enricher import TruthEnricher
 from .consultative_templates import (
@@ -875,17 +887,40 @@ class IntelligenceEngineV2:
         
         # =====================================================================
         # STEP 2.5: DETERMINISTIC PATH - Term Index + SQL Assembler
-        # This is the FALLBACK PATH when QueryResolver doesn't have rich context.
-        # Used for simple lookups that don't need consultative synthesis.
+        # This is the PRIMARY PATH for DuckDB queries.
+        # NO FALLBACK TO OLD LLM PATH - honest failure instead.
         # =====================================================================
         try:
             deterministic_result = self._try_deterministic_path(question)
             if deterministic_result:
-                logger.warning(f"[ENGINE-V2] DETERMINISTIC PATH SUCCESS - returning directly")
-                return deterministic_result
+                # Check if this is a structured failure response
+                if hasattr(deterministic_result, 'structured_output'):
+                    output = deterministic_result.structured_output or {}
+                    status = output.get('status', '')
+                    
+                    # Complex queries need full pipeline - continue to gather all truths
+                    if status == 'complex_query':
+                        logger.warning(f"[ENGINE-V2] Complex query - continuing to full pipeline")
+                        # Fall through to gather Reference/Regulatory/Compliance
+                    else:
+                        # Success or honest failure - return directly
+                        logger.warning(f"[ENGINE-V2] DETERMINISTIC PATH - returning (status={status or 'success'})")
+                        return deterministic_result
+                else:
+                    # Legacy success response
+                    logger.warning(f"[ENGINE-V2] DETERMINISTIC PATH SUCCESS - returning directly")
+                    return deterministic_result
         except Exception as e:
             logger.error(f"[ENGINE-V2] Error in deterministic_path: {e}")
-            # Don't raise - fall back to old path
+            import traceback
+            logger.error(f"[ENGINE-V2] Traceback: {traceback.format_exc()}")
+            # Return honest error instead of falling back to garbage generator
+            return build_system_error_response(
+                question=question,
+                error=str(e),
+                component="deterministic_path",
+                context={"traceback": traceback.format_exc()[:500]}
+            )
         
         # STEP 3: Analyze question
         try:
@@ -1578,24 +1613,34 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
         This short-circuits the old flow if successful, returning
         a complete SynthesizedAnswer with data.
         
-        Falls back to old path (returns None) if:
-        - No term matches found
-        - No structured handler available
-        - SQL execution fails
-        - Question requires complex analysis (ChromaDB, synthesis)
+        EVOLUTION 10: No more None returns that trigger garbage fallback.
+        Now returns structured failure responses:
+        - CANNOT_RESOLVE - We don't understand the terms  
+        - NEEDS_CLARIFICATION - Ambiguous query
+        - NO_DATA - Understood but found nothing
+        - COMPLEX_QUERY - Needs full pipeline (Reference/Regulatory)
+        - SYSTEM_ERROR - Technical failure
         
         Returns:
-            SynthesizedAnswer if successful, None to fall back to old path
+            SynthesizedAnswer - either with data OR with honest failure info
         """
         logger.warning(f"[DETERMINISTIC] Entering deterministic path. Available={DETERMINISTIC_PATH_AVAILABLE}")
         
         if not DETERMINISTIC_PATH_AVAILABLE:
             logger.warning("[DETERMINISTIC] Path not available - missing imports")
-            return None
+            return build_system_error_response(
+                question=question,
+                error="Deterministic path components not available (TermIndex/SQLAssembler)",
+                component="deterministic_path_imports"
+            )
         
         if not self.structured_handler:
             logger.warning("[DETERMINISTIC] No structured handler available")
-            return None
+            return build_system_error_response(
+                question=question,
+                error="No database connection available. Please upload data first.",
+                component="structured_handler"
+            )
         
         try:
             # Step 1: Parse intent from question
@@ -1610,9 +1655,16 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 'compliant', 'compliance', 'regulatory', 'risk',
                 'best practice', 'validate', 'correct', 'wrong'
             ]
-            if any(ind in q_lower for ind in complex_indicators):
-                logger.warning(f"[DETERMINISTIC] Complex question detected - falling back to full pipeline")
-                return None
+            matched_indicators = [ind for ind in complex_indicators if ind in q_lower]
+            if matched_indicators:
+                logger.warning(f"[DETERMINISTIC] Complex question detected ({matched_indicators}) - deferring to full pipeline")
+                # Return COMPLEX_QUERY status so engine knows to continue with full pipeline
+                return build_complex_query_response(
+                    question=question,
+                    reason=f"Question contains analysis keywords: {matched_indicators}",
+                    required_sources=['reference', 'regulatory', 'compliance'],
+                    context={'matched_indicators': matched_indicators}
+                )
             
             # ================================================================
             # EVOLUTION 10: MULTI-HOP RELATIONSHIP DETECTION
@@ -1882,11 +1934,55 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                         )]
                         logger.warning(f"[DETERMINISTIC] Created entity fallback match for COUNT/GROUP BY query")
                     else:
-                        logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
-                        return None
+                        # Get available columns for suggestions
+                        try:
+                            available_cols = term_index.conn.execute("""
+                                SELECT DISTINCT column_name FROM _term_index
+                                WHERE project = ?
+                                LIMIT 50
+                            """, [term_index.project]).fetchall()
+                            avail_list = [c[0] for c in available_cols] if available_cols else []
+                        except:
+                            avail_list = []
+                        
+                        logger.warning(f"[DETERMINISTIC] No term matches found for entity COUNT query")
+                        return build_cannot_resolve_response(
+                            question=question,
+                            reason="Could not find any database columns matching your query terms",
+                            unresolved_terms=[w for w in words[:5]],  # Show first 5 unresolved words
+                            suggestions=get_fuzzy_suggestions(' '.join(words[:3]), avail_list),
+                            available_columns=avail_list[:20],
+                            context={
+                                'detected_intent': detected_intent,
+                                'group_by_dimension': group_by_dimension,
+                                'words_parsed': words[:10]
+                            }
+                        )
                 else:
-                    logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
-                    return None
+                    # Not a COUNT/GROUP BY query and no term matches
+                    # Get available columns for suggestions
+                    try:
+                        available_cols = term_index.conn.execute("""
+                            SELECT DISTINCT column_name FROM _term_index
+                            WHERE project = ?
+                            LIMIT 50
+                        """, [term_index.project]).fetchall()
+                        avail_list = [c[0] for c in available_cols] if available_cols else []
+                    except:
+                        avail_list = []
+                    
+                    logger.warning(f"[DETERMINISTIC] No term matches found - returning cannot resolve")
+                    return build_cannot_resolve_response(
+                        question=question,
+                        reason="Could not resolve any terms to database columns",
+                        unresolved_terms=[w for w in words[:5]],
+                        suggestions=get_fuzzy_suggestions(' '.join(words[:3]), avail_list),
+                        available_columns=avail_list[:20],
+                        context={
+                            'parsed_intent': parsed.intent.value,
+                            'words_parsed': words[:10]
+                        }
+                    )
             
             # Merge term_matches and agg_matches
             if agg_matches:
@@ -2154,7 +2250,17 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             
             if not assembled.success:
                 logger.warning(f"[DETERMINISTIC] Assembly failed: {assembled.error}")
-                return None
+                return build_cannot_resolve_response(
+                    question=question,
+                    reason=f"Could not assemble SQL query: {assembled.error}",
+                    unresolved_terms=[m.term for m in filter_matches[:5]],
+                    suggestions=[],
+                    context={
+                        'assembler_error': assembled.error,
+                        'tables_involved': assembled.tables,
+                        'intent': assembler_intent.value if hasattr(assembler_intent, 'value') else str(assembler_intent)
+                    }
+                )
             
             logger.warning(f"[DETERMINISTIC] Assembled SQL: {assembled.sql}")
             
@@ -2166,11 +2272,29 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                 logger.warning(f"[DETERMINISTIC] Executed: {len(result)} rows returned")
             except Exception as sql_error:
                 logger.error(f"[DETERMINISTIC] SQL execution error: {sql_error}")
-                return None
+                return build_system_error_response(
+                    question=question,
+                    error=f"SQL execution failed: {str(sql_error)[:200]}",
+                    component="sql_execution",
+                    context={
+                        'sql': assembled.sql[:500],
+                        'tables': assembled.tables,
+                        'error_type': type(sql_error).__name__
+                    }
+                )
             
             if not result:
-                logger.warning(f"[DETERMINISTIC] No results - falling back")
-                return None
+                logger.warning(f"[DETERMINISTIC] No results found - returning no_data response")
+                return build_no_data_response(
+                    question=question,
+                    sql=assembled.sql,
+                    filters_applied=assembled.filters,
+                    table_name=assembled.primary_table,
+                    context={
+                        'intent': assembler_intent.value if hasattr(assembler_intent, 'value') else str(assembler_intent),
+                        'tables': assembled.tables
+                    }
+                )
             
             # Step 6: Build response
             rows = [dict(zip(columns, row)) for row in result]
@@ -2316,8 +2440,14 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
         except Exception as e:
             logger.error(f"[DETERMINISTIC] Error: {e}")
             import traceback
-            logger.error(f"[DETERMINISTIC] Traceback: {traceback.format_exc()}")
-            return None
+            tb = traceback.format_exc()
+            logger.error(f"[DETERMINISTIC] Traceback: {tb}")
+            return build_system_error_response(
+                question=question,
+                error=str(e)[:200],
+                component="deterministic_path",
+                context={'traceback': tb[:500]}
+            )
     
     def _try_multi_hop_query(self, question: str, multi_hop_info: Dict) -> Optional[SynthesizedAnswer]:
         """
