@@ -1827,9 +1827,18 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             
             # Check if we have enough to proceed
             if not term_matches and not agg_matches:
-                # SPECIAL CASE: COUNT queries can work with just entity detection
+                # SPECIAL CASE: COUNT queries OR GROUP BY queries can work with entity detection
                 # "how many employees" → COUNT(*) on employee table
-                if detected_intent == 'count':
+                # "employees by job code" → COUNT(*) ... GROUP BY job_code on employee table
+                # EVOLUTION 10 FIX: GROUP BY dimension implies COUNT
+                is_count_or_groupby = detected_intent == 'count' or group_by_dimension
+                
+                if is_count_or_groupby:
+                    # If GROUP BY detected but not explicit COUNT, set intent to COUNT
+                    if group_by_dimension and not detected_intent:
+                        detected_intent = 'count'
+                        logger.warning(f"[DETERMINISTIC] GROUP BY detected - treating as COUNT query")
+                    
                     # Extract entities from the question
                     question_lower = question.lower()
                     entity_table = None
@@ -1871,7 +1880,7 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
                             term_type='entity',
                             source='entity_fallback'
                         )]
-                        logger.warning(f"[DETERMINISTIC] Created entity fallback match for COUNT query")
+                        logger.warning(f"[DETERMINISTIC] Created entity fallback match for COUNT/GROUP BY query")
                     else:
                         logger.warning(f"[DETERMINISTIC] No term matches and no aggregation target found - falling back")
                         return None
