@@ -2,6 +2,43 @@
 XLR8 Intelligence Engine - SQL Generator v4.1
 ==============================================
 
+██████╗ ███████╗██████╗ ██████╗ ███████╗ ██████╗ █████╗ ████████╗███████╗██████╗ 
+██╔══██╗██╔════╝██╔══██╗██╔══██╗██╔════╝██╔════╝██╔══██╗╚══██╔══╝██╔════╝██╔══██╗
+██║  ██║█████╗  ██████╔╝██████╔╝█████╗  ██║     ███████║   ██║   █████╗  ██║  ██║
+██║  ██║██╔══╝  ██╔═══╝ ██╔══██╗██╔══╝  ██║     ██╔══██║   ██║   ██╔══╝  ██║  ██║
+██████╔╝███████╗██║     ██║  ██║███████╗╚██████╗██║  ██║   ██║   ███████╗██████╔╝
+╚═════╝ ╚══════╝╚═╝     ╚═╝  ╚═╝╚══════╝ ╚═════╝╚═╝  ╚═╝   ╚═╝   ╚══════╝╚═════╝ 
+
+THIS FILE IS DEPRECATED AS OF EVOLUTION 10 (2026-01-14)
+=======================================================
+
+The LLM-based SQL generation approach has been replaced with deterministic 
+term resolution via:
+- TermIndex (term_index.py) - O(1) term→column lookup
+- SQLAssembler (sql_assembler.py) - Deterministic SQL assembly
+
+WHY THIS WAS REMOVED:
+1. LLM SQL generation produces "hallucinated" queries that sometimes work
+2. When they fail, they fail silently by returning garbage
+3. This masked bugs in the actual resolution logic
+4. Users got inconsistent, unreliable results
+
+THE NEW APPROACH (resolution_response.py):
+1. Either we resolve deterministically, or we tell the user why not
+2. "Honest failure > Silent garbage"
+3. No LLM guessing at SQL structure
+4. Clear feedback on what terms couldn't be resolved
+
+This file is kept for backward compatibility (some imports reference it)
+but its functionality should NOT be used. All code paths that previously
+fell back to this generator now return structured failure responses.
+
+DO NOT USE THIS FOR NEW CODE.
+
+=======================================================
+
+Original description (historical):
+
 Generates SQL queries from natural language questions.
 
 v4.1 CHANGES:
