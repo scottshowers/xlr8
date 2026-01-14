@@ -188,25 +188,39 @@ class RealityGatherer(DuckDBGatherer):
                     else:
                         logger.warning(f"[GATHER-REALITY] QueryResolver fallback: {resolved.explanation or 'No match'}")
             except Exception as e:
-                logger.warning(f"[GATHER-REALITY] QueryResolver error (falling back): {e}")
+                logger.warning(f"[GATHER-REALITY] QueryResolver error: {e}")
                 import traceback
                 logger.warning(f"[GATHER-REALITY] Traceback: {traceback.format_exc()}")
         
-        # FALLBACK: Generate via SQL generator (LLM + TableSelector)
-        if self.sql_generator:
-            result = self.sql_generator.generate(question, context)
-            if result:
-                result['source'] = 'llm'
-                # Pass through JOIN detection debug if available
-                if hasattr(self.sql_generator, '_join_detection_debug'):
-                    result['_join_debug'] = self.sql_generator._join_detection_debug
-                return result
+        # =========================================================================
+        # OLD LLM FALLBACK - DISABLED
+        # =========================================================================
+        # The old path used SQLGenerator (LLM + TableSelector) which produced
+        # garbage SQL that sometimes worked by accident. This masked bugs and
+        # gave users bad answers.
+        #
+        # PRINCIPLE: Honest failure > Silent garbage
+        #
+        # If we reach here, it means:
+        # 1. No resolver context was provided
+        # 2. QueryResolver failed to resolve the query
+        #
+        # The deterministic path in engine.py should handle this and return
+        # a proper failure response to the user.
+        # =========================================================================
+        logger.warning("[GATHER-REALITY] No resolution path available - returning None (will be handled by engine)")
         
         return None
     
     def _execute_with_retry(self, sql: str, sql_info: Dict, 
                            max_attempts: int = 3) -> List[Dict]:
-        """Execute SQL with retry and error fixing."""
+        """
+        Execute SQL with retry on transient errors.
+        
+        NOTE: LLM-based SQL fixing has been removed. If SQL fails, it fails honestly.
+        The deterministic path should produce valid SQL - if it doesn't, that's a bug
+        to fix in the assembler, not mask with LLM guessing.
+        """
         for attempt in range(max_attempts):
             try:
                 rows = self.handler.query(sql)
@@ -217,15 +231,17 @@ class RealityGatherer(DuckDBGatherer):
                 error_msg = str(e)
                 logger.warning(f"[GATHER-REALITY] Attempt {attempt + 1} failed: {error_msg}")
                 
-                # Try to fix SQL
-                if self.sql_generator and attempt < max_attempts - 1:
-                    fixed = self.sql_generator.fix_from_error(
-                        sql, error_msg, 
-                        sql_info.get('all_columns', set())
-                    )
-                    if fixed and fixed != sql:
-                        sql = fixed
-                        continue
+                # Only retry on transient errors (connection issues, etc.)
+                # Don't retry on SQL syntax errors - those need to be fixed in the assembler
+                if 'syntax' in error_msg.lower() or 'does not exist' in error_msg.lower():
+                    logger.warning(f"[GATHER-REALITY] SQL error - not retrying (fix the assembler)")
+                    break
+                
+                # For transient errors, wait briefly and retry
+                if attempt < max_attempts - 1:
+                    import time
+                    time.sleep(0.1 * (attempt + 1))
+                    continue
                 break
         
         return []
