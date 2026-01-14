@@ -1175,14 +1175,14 @@ class SQLAssembler:
                     if '-' in val1:  # Date format YYYY-MM-DD
                         condition = f'{alias}."{match.column_name}" >= \'{val1}\' AND {alias}."{match.column_name}" < \'{val2}\''
                     else:
-                        # Numeric BETWEEN
-                        condition = f'{alias}."{match.column_name}" BETWEEN {val1} AND {val2}'
+                        # Numeric BETWEEN - use TRY_CAST to handle VARCHAR columns
+                        condition = f'TRY_CAST({alias}."{match.column_name}" AS DOUBLE) BETWEEN {val1} AND {val2}'
                 else:
                     logger.warning(f"[SQL_ASSEMBLER] Invalid BETWEEN format: {match.match_value}")
                     continue
             elif match.operator in ('>', '>=', '<', '<='):
-                # Numeric comparisons - no quotes
-                condition = f'{alias}."{match.column_name}" {match.operator} {match.match_value}'
+                # Numeric comparisons - use TRY_CAST to handle VARCHAR columns stored as strings
+                condition = f'TRY_CAST({alias}."{match.column_name}" AS DOUBLE) {match.operator} {match.match_value}'
             elif match.operator == '!=':
                 # Negation - with quotes for string values
                 safe_value = str(match.match_value).replace("'", "''")
