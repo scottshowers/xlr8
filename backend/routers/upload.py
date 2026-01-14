@@ -705,6 +705,20 @@ def run_intelligence_analysis(project: str, handler, job_id: str) -> dict:
         ProcessingJobModel.update_progress(job_id, 78, status_msg)
         logger.info(f"[INTELLIGENCE] Analysis complete: {findings_count} findings, {tasks_count} tasks, {critical_count} critical")
         
+        # =====================================================
+        # TERM INDEX REBUILD - Capture new data patterns
+        # File reload creates new tables but term_index keeps old mappings
+        # Must rebuild to index new values (e.g., new states, new codes)
+        # =====================================================
+        try:
+            from backend.utils.intelligence.term_index import recalc_term_index
+            recalc_result = recalc_term_index(handler.conn, project)
+            terms_indexed = recalc_result.get('terms_indexed', 0)
+            logger.info(f"[INTELLIGENCE] Term index rebuilt: {terms_indexed} terms indexed")
+            ProcessingJobModel.update_progress(job_id, 80, f"✅ Indexed {terms_indexed} searchable terms")
+        except Exception as term_e:
+            logger.warning(f"[INTELLIGENCE] Term index rebuild failed: {term_e}")
+        
         return intelligence_summary
         
     except Exception as e:
