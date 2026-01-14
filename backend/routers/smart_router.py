@@ -246,6 +246,7 @@ async def smart_upload(
     truth_type: Optional[str] = Form(None),
     content_domain: Optional[str] = Form(None),
     system: Optional[str] = Form(None),  # NEW: HCM/ERP system (ukg, workday, etc.)
+    uploaded_by: Optional[str] = Form(None),  # User email who uploaded
     # Routing control
     processing_type: str = Form(default="auto"),
     # Register-specific (passed through if register route)
@@ -314,6 +315,10 @@ async def smart_upload(
         if not uploaded_by_id:
             uploaded_by_id = request.headers.get('X-User-Id')
             uploaded_by_email = request.headers.get('X-User-Email')
+        
+        # Fallback to form field if still not set
+        if not uploaded_by_email and uploaded_by:
+            uploaded_by_email = uploaded_by
     except Exception as e:
         logger.warning(f"[SMART-ROUTER] Could not extract user info: {e}")
     
