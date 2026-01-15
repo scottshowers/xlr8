@@ -355,20 +355,20 @@ export default function Layout({ children }) {
       {/* Step indicator - fixed white bar at very top */}
       {showSteps && <StepIndicator currentStep={currentStep} />}
 
-      {/* Main App Frame - ONE card containing header + content */}
+      {/* Main App Frame - matches mockup .mockup-frame */}
       <div style={{
-        background: '#ffffff',
+        background: '#f6f5fa',
         borderRadius: 12,
         border: '1px solid #e1e8ed',
         boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
         minHeight: 'calc(100vh - 120px)',
         overflow: 'hidden',
       }}>
-        {/* Header inside the frame */}
+        {/* Header inside the frame - white background */}
         <Header />
 
-        {/* Content area */}
-        <main>
+        {/* Content area - matches mockup .app-content with 32px padding */}
+        <main style={{ padding: 32 }}>
           {children}
         </main>
       </div>

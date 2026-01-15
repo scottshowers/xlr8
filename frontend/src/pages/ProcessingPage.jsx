@@ -302,22 +302,19 @@ export default function ProcessingPage() {
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: 800, margin: '0 auto' }}>
-        {/* Page Header */}
-        <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
+    <div style={{ maxWidth: 800, margin: '0 auto' }}>
+      {/* Page Header - matches mockup .page-header */}
+      <div style={{ marginBottom: 32 }}>
         <h1 style={{
           fontFamily: "'Sora', sans-serif",
-          fontSize: '1.75rem',
+          fontSize: 28,
           fontWeight: 700,
-          color: colors.text,
-          marginBottom: '0.5rem',
+          color: '#2a3441',
+          marginBottom: 8,
         }}>
           {customerName || activeProject?.customer || activeProject?.name || 'Project'}
         </h1>
-        <p style={{
-          fontSize: '0.9rem',
-          color: colors.textMuted,
-        }}>
+        <p style={{ color: '#5f6c7b', fontSize: 15, margin: 0 }}>
           {activeProject?.system_type || 'UKG Pro'} · {activeProject?.engagement_type || 'Implementation'} · Go-Live: {activeProject?.target_go_live || 'TBD'}
         </p>
       </div>

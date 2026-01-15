@@ -162,11 +162,17 @@ export default function UploadDataPage() {
   const hasQueuedFiles = files.some((f) => f.status === 'queued');
 
   return (
-    <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
-        {/* Page Header */}
-        <div className="xlr8-page-header">
-          <h1>{customerName || activeProject?.customer || activeProject?.name || 'New Project'}</h1>
-        <p className="subtitle">
+    <>
+      {/* Page Header - matches mockup .page-header */}
+      <div style={{ marginBottom: 32 }}>
+        <h1 style={{
+          fontFamily: "'Sora', sans-serif",
+          fontSize: 28,
+          fontWeight: 700,
+          color: '#2a3441',
+          marginBottom: 8,
+        }}>{customerName || activeProject?.customer || activeProject?.name || 'New Project'}</h1>
+        <p style={{ color: '#5f6c7b', fontSize: 15, margin: 0 }}>
           {activeProject?.system_type || 'UKG Pro'} · {activeProject?.engagement_type || 'Implementation'} · Go-Live: {activeProject?.target_go_live || 'TBD'}
         </p>
       </div>
@@ -362,6 +368,6 @@ export default function UploadDataPage() {
           </button>
         </div>
       </div>
-    </div>
+    </>
   );
 }

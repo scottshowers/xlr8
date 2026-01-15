@@ -85,11 +85,17 @@ export default function CreateProjectPage() {
   };
 
   return (
-    <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
-      {/* Page Header */}
-      <div className="xlr8-page-header">
-        <h1>Create New Project</h1>
-        <p className="subtitle">Start a new analysis engagement</p>
+    <>
+      {/* Page Header - matches mockup .page-header */}
+      <div style={{ marginBottom: 32 }}>
+        <h1 style={{
+          fontFamily: "'Sora', sans-serif",
+          fontSize: 28,
+          fontWeight: 700,
+          color: '#2a3441',
+          marginBottom: 8,
+        }}>Create New Project</h1>
+        <p style={{ color: '#5f6c7b', fontSize: 15, margin: 0 }}>Start a new analysis engagement</p>
       </div>
 
       {/* Form Card */}
@@ -219,6 +225,6 @@ export default function CreateProjectPage() {
           </div>
         </form>
       </div>
-    </div>
+    </>
   );
 }
