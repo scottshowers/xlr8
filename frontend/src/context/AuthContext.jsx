@@ -292,7 +292,9 @@ export function AuthProvider({ children }) {
   const isAdmin = user?.role === 'admin';
   const isConsultant = user?.role === 'consultant';
   const isCustomer = user?.role === 'customer';
-  const isAuthenticated = !!user;
+  // Check both session and user - session is set immediately on login,
+  // user is set after profile fetch completes
+  const isAuthenticated = !!session?.user || !!user;
 
   // Auth header for API calls
   const getAuthHeader = () => {
