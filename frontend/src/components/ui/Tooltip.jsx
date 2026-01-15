@@ -21,7 +21,7 @@ const colors = {
   skyBlue: '#93abd9',
 };
 
-export default function Tooltip({ 
+export function Tooltip({ 
   children, 
   title, 
   detail, 
@@ -182,3 +182,6 @@ export function SimpleTooltip({ children, text, position = 'top' }) {
     </div>
   );
 }
+
+// Default export for backward compatibility
+export default Tooltip;
