@@ -2,13 +2,12 @@
  * Layout.jsx - Main App Layout
  * =============================
  *
- * EXACT match to mockup header design:
+ * EXACT match to mockup design:
+ * - Step indicator ABOVE header (on project flow pages)
  * - Clean white header with border
  * - Left: Logo + "XLR8"
  * - Center: Nav links (text only, green when active)
  * - Right: User name + role + Logout
- *
- * NO context bar - that's removed per mockup
  *
  * Phase 4A UX Redesign - January 15, 2026
  */
@@ -42,6 +41,34 @@ const MAIN_NAV = [
   { path: '/playbooks', label: 'Playbooks' },
   { path: '/analytics', label: 'Analytics' },
 ];
+
+// Step indicator steps
+const FLOW_STEPS = [
+  { num: 1, label: 'Create Project', paths: ['/projects/new'] },
+  { num: 2, label: 'Upload Data', paths: ['/upload'] },
+  { num: 3, label: 'Auto-Analysis', paths: ['/processing'] },
+  { num: 4, label: 'Findings', paths: ['/findings'] },
+  { num: 5, label: 'Drill-In', paths: ['/findings/'] },
+  { num: 6, label: 'Build Playbook', paths: ['/build-playbook'] },
+  { num: 7, label: 'Track Progress', paths: ['/progress'] },
+];
+
+// Determine current step based on pathname
+const getCurrentStep = (pathname) => {
+  if (pathname === '/projects/new') return 1;
+  if (pathname === '/upload') return 2;
+  if (pathname.startsWith('/processing')) return 3;
+  if (pathname === '/findings') return 4;
+  if (pathname.startsWith('/findings/')) return 5;
+  if (pathname.startsWith('/build-playbook')) return 6;
+  if (pathname.startsWith('/progress')) return 7;
+  return null;
+};
+
+// Check if we should show step indicator
+const shouldShowStepIndicator = (pathname) => {
+  return getCurrentStep(pathname) !== null;
+};
 
 // XLR8 Logo SVG (from mockup)
 const XLR8Logo = () => (
@@ -79,6 +106,65 @@ const XLR8Logo = () => (
     <path fill="#9cc28a" d="M426.59,101.36h19.79v-31.36h-183.7v31.36h15.5c15.8,0,16.74,.94,16.74,16.74v124.05h-70.47V118.1c0-15.8,.94-16.74,16.74-16.74h15.5v-31.36H73v31.36h19.79c15.8,0,16.74,.94,16.74,16.74V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35h183.7v-31.35h-15.5c-15.8,0-16.74-.94-16.74-16.74v-132.73h70.47v132.73c0,15.8,.94,16.74-16.74,16.74h-15.5v31.35h183.7v-31.35h-19.79c-15.8,0-16.74-.94-16.74-16.74V118.1c0-15.8,.94-16.74,16.74-16.74Z"/>
   </svg>
 );
+
+// Step Indicator Component - shows above header on flow pages
+function StepIndicator({ currentStep }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 8,
+      padding: '12px 24px',
+      background: '#ffffff',
+      borderBottom: '1px solid #e1e8ed',
+    }}>
+      {FLOW_STEPS.map((step, index) => {
+        const isActive = step.num === currentStep;
+        const isCompleted = step.num < currentStep;
+
+        return (
+          <React.Fragment key={step.num}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '6px 14px',
+                borderRadius: 20,
+                background: isActive ? '#83b16d' : isCompleted ? 'rgba(131, 177, 109, 0.15)' : 'transparent',
+                color: isActive ? '#ffffff' : isCompleted ? '#83b16d' : '#5f6c7b',
+                fontSize: 13,
+                fontWeight: 500,
+                border: isActive ? 'none' : '1px solid #e1e8ed',
+              }}
+            >
+              <span style={{
+                width: 18,
+                height: 18,
+                borderRadius: '50%',
+                background: isActive ? 'rgba(255,255,255,0.3)' : isCompleted ? '#83b16d' : '#e1e8ed',
+                color: isActive ? '#fff' : isCompleted ? '#fff' : '#5f6c7b',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 10,
+                fontWeight: 700,
+              }}>
+                {isCompleted ? '✓' : step.num}
+              </span>
+              {step.label}
+            </div>
+
+            {index < FLOW_STEPS.length - 1 && (
+              <span style={{ color: '#c9d3d4', fontSize: 11 }}>→</span>
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
+}
 
 // Header component - EXACT mockup match
 function Header() {
@@ -235,9 +321,11 @@ function Header() {
   );
 }
 
-// Main Layout - Clean, no context bar
+// Main Layout
 export default function Layout({ children }) {
   const location = useLocation();
+  const currentStep = getCurrentStep(location.pathname);
+  const showSteps = shouldShowStepIndicator(location.pathname);
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
@@ -250,7 +338,10 @@ export default function Layout({ children }) {
       display: 'flex',
       flexDirection: 'column',
     }}>
-      {/* Header only - no context bar */}
+      {/* Step indicator ABOVE header - only on flow pages */}
+      {showSteps && <StepIndicator currentStep={currentStep} />}
+
+      {/* Header */}
       <Header />
 
       {/* Main content area */}
