@@ -15,7 +15,6 @@ import React, { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
-import StepIndicator from '../components/StepIndicator';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -163,9 +162,7 @@ export default function UploadDataPage() {
   const hasQueuedFiles = files.some((f) => f.status === 'queued');
 
   return (
-    <>
-      <StepIndicator currentStep={2} />
-      <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
+    <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
         {/* Page Header */}
         <div className="xlr8-page-header">
           <h1>{customerName || activeProject?.customer || activeProject?.name || 'New Project'}</h1>
@@ -366,6 +363,5 @@ export default function UploadDataPage() {
         </div>
       </div>
     </div>
-    </>
   );
 }
