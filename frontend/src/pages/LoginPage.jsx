@@ -2,7 +2,7 @@
  * LoginPage - Clean login matching screenshot design
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Rocket } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -57,14 +57,21 @@ const HLogo = () => (
 export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { supabase } = useAuth();
-  
+  const { supabase, isAuthenticated, loading: authLoading } = useAuth();
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
   const from = location.state?.from?.pathname || '/dashboard';
+
+  // Redirect when authenticated (after login or if already logged in)
+  useEffect(() => {
+    if (!authLoading && isAuthenticated) {
+      navigate(from, { replace: true });
+    }
+  }, [isAuthenticated, authLoading, navigate, from]);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -83,9 +90,8 @@ export default function LoginPage() {
 
       if (loginError) throw loginError;
 
-      if (data?.session) {
-        navigate(from, { replace: true });
-      }
+      // Navigation handled by useEffect when isAuthenticated becomes true
+      // This ensures AuthContext has fully processed the auth state change
     } catch (err) {
       console.error('Login error:', err);
       setError(err.message || 'Login failed. Please check your credentials.');
