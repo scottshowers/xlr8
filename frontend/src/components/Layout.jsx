@@ -108,15 +108,23 @@ const XLR8Logo = () => (
   </svg>
 );
 
-// Step Indicator Component - floats on background, no card wrapper
+// Step Indicator Component - fixed white bar at very top
 function StepIndicator({ currentStep }) {
   return (
     <div style={{
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      padding: '12px 0',
+      padding: '12px 24px',
+      background: '#ffffff',
+      borderBottom: '1px solid #e1e8ed',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
+      zIndex: 1000,
     }}>
       {FLOW_STEPS.map((step, index) => {
         const isActive = step.num === currentStep;
@@ -330,13 +338,17 @@ export default function Layout({ children }) {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
+  // Calculate top padding based on whether step indicator is showing
+  const topPadding = showSteps ? 80 : 24; // 80 = 24 padding + ~56 for fixed bar
+
   return (
     <div style={{
       minHeight: '100vh',
       background: '#f6f5fa',
       padding: 24,
+      paddingTop: topPadding,
     }}>
-      {/* Step indicator - OUTSIDE the frame, at very top */}
+      {/* Step indicator - fixed white bar at very top */}
       {showSteps && <StepIndicator currentStep={currentStep} />}
 
       {/* Main App Frame - ONE card containing header + content */}
@@ -346,7 +358,6 @@ export default function Layout({ children }) {
         border: '1px solid #e1e8ed',
         boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
         minHeight: 'calc(100vh - 120px)',
-        marginTop: showSteps ? 16 : 0,
         overflow: 'hidden',
       }}>
         {/* Header inside the frame */}
