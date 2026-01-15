@@ -39,10 +39,12 @@ import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
+import CreateProjectPage from './pages/CreateProjectPage';
 import DataPage from './pages/DataPage';
 import DataExplorer from './pages/DataExplorer';
 import DataModelPage from './pages/DataModelPage';
 import VacuumUploadPage from './pages/VacuumUploadPage';
+import UploadDataPage from './pages/UploadDataPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
@@ -116,6 +118,9 @@ function AppRoutes() {
         <Route path="/projects" element={
           <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
         } />
+        <Route path="/projects/new" element={
+          <ProtectedRoute><Layout><CreateProjectPage /></Layout></ProtectedRoute>
+        } />
         <Route path="/projects/:id" element={
           <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
         } />
@@ -131,6 +136,11 @@ function AppRoutes() {
           <ProtectedRoute><Layout><DataModelPage /></Layout></ProtectedRoute>
         } />
         
+        {/* Upload Data - Phase 4A Screen 2 */}
+        <Route path="/upload" element={
+          <ProtectedRoute><Layout><UploadDataPage /></Layout></ProtectedRoute>
+        } />
+
         {/* Vacuum (sub-pages of Data) */}
         <Route path="/vacuum" element={
           <ProtectedRoute><Layout><VacuumUploadPage /></Layout></ProtectedRoute>
@@ -247,7 +257,6 @@ function AppRoutes() {
         
         <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
         <Route path="/chat" element={<Navigate to="/workspace" replace />} />
-        <Route path="/upload" element={<Navigate to="/data" replace />} />
         <Route path="/status" element={<Navigate to="/admin" replace />} />
         <Route path="/system" element={<Navigate to="/admin" replace />} />
         <Route path="/secure20" element={<Navigate to="/playbooks" replace />} />

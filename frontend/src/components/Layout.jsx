@@ -1,21 +1,22 @@
 /**
- * Layout.jsx - Main App Wrapper
+ * Layout.jsx - Main App Layout
+ * =============================
  *
- * PHASE 4A UX REDESIGN - Clean mockup-matching layout
+ * EXACT match to mockup header design:
+ * - Clean white header with border
+ * - Left: Logo + "XLR8"
+ * - Center: Nav links (text only, green when active)
+ * - Right: User name + role + Logout
  *
- * Header: Logo | Nav (5 items) | User Info
- * Nav: Mission Control | Projects | Data | Playbooks | Analytics
+ * NO context bar - that's removed per mockup
  *
- * Updated: January 15, 2026 - Simplified to match mockup design
+ * Phase 4A UX Redesign - January 15, 2026
  */
 
-import React, { useLayoutEffect, useState } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { Settings } from 'lucide-react';
-import ContextBar from './ContextBar';
-import { useAuth, Permissions } from '../context/AuthContext';
-import { UploadStatusIndicator } from '../context/UploadContext';
-import CustomerGenome, { GenomeButton } from './CustomerGenome';
+import { useAuth } from '../context/AuthContext';
 
 // Helper to derive display name from email if full_name not set
 const getDisplayName = (user) => {
@@ -33,7 +34,7 @@ const getDisplayName = (user) => {
   return 'User';
 };
 
-// Main nav items - simplified to match mockup
+// Main nav items - EXACTLY matching mockup
 const MAIN_NAV = [
   { path: '/dashboard', label: 'Mission Control' },
   { path: '/projects', label: 'Projects' },
@@ -42,8 +43,8 @@ const MAIN_NAV = [
   { path: '/analytics', label: 'Analytics' },
 ];
 
-// Logo SVG
-const HLogoGreen = () => (
+// XLR8 Logo SVG (from mockup)
+const XLR8Logo = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
     <path fill="#698f57" d="M492.04,500v-31.35l-36.53-35.01V163.76c0-15.8,.94-16.74,16.74-16.74h19.79v-31.36l-45.66-45.66H73v31.36l36.53,36.53V406.24c0,15.8-.94,16.74-16.74,16.74h-19.79v31.35l45.66,45.66H492.04Z"/>
     <g fill="#a8ca99">
@@ -79,96 +80,98 @@ const HLogoGreen = () => (
   </svg>
 );
 
-function Navigation({ onOpenGenome }) {
+// Header component - EXACT mockup match
+function Header() {
   const location = useLocation();
   const { user, isAdmin, logout } = useAuth();
 
   const isActive = (path) => {
-    if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
+    if (path === '/dashboard') {
+      return location.pathname === '/dashboard' || location.pathname === '/';
+    }
     if (path === '/projects') {
-      // Projects includes findings, processing, playbook flows
       return location.pathname.startsWith('/projects') ||
              location.pathname.startsWith('/findings') ||
              location.pathname.startsWith('/processing') ||
+             location.pathname.startsWith('/upload') ||
              location.pathname.startsWith('/build-playbook') ||
              location.pathname.startsWith('/progress');
     }
     if (path === '/data') {
-      return location.pathname.startsWith('/data') || location.pathname.startsWith('/vacuum');
+      return location.pathname.startsWith('/data') ||
+             location.pathname.startsWith('/vacuum');
+    }
+    if (path === '/playbooks') {
+      return location.pathname === '/playbooks';
+    }
+    if (path === '/analytics') {
+      return location.pathname.startsWith('/analytics');
     }
     return location.pathname.startsWith(path);
   };
 
   return (
-    <nav style={{
-      background: 'white',
+    <header style={{
+      background: '#ffffff',
       borderBottom: '1px solid #e1e8ed',
-      padding: '0 24px',
+      height: 60,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      height: 56,
+      padding: '0 32px',
     }}>
       {/* Left: Logo */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <Link to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
-          <div style={{ width: 36, height: 36 }}>
-            <HLogoGreen />
-          </div>
-          <span style={{
-            fontFamily: "'Sora', sans-serif",
-            fontWeight: 700,
-            fontSize: 18,
-            color: '#2a3441',
-          }}>
-            XLR8
-          </span>
-        </Link>
-      </div>
+      <Link
+        to="/dashboard"
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          textDecoration: 'none'
+        }}
+      >
+        <div style={{ width: 32, height: 32 }}>
+          <XLR8Logo />
+        </div>
+        <span style={{
+          fontFamily: "'Sora', sans-serif",
+          fontWeight: 700,
+          fontSize: 18,
+          color: '#2a3441',
+        }}>
+          XLR8
+        </span>
+      </Link>
 
-      {/* Center: Nav */}
-      <div style={{ display: 'flex', gap: 4 }}>
+      {/* Center: Navigation */}
+      <nav style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         {MAIN_NAV.map((item) => (
           <Link
             key={item.path}
             to={item.path}
             style={{
               padding: '8px 16px',
-              color: isActive(item.path) ? '#83b16d' : '#5f6c7b',
               textDecoration: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 6,
-              background: isActive(item.path) ? 'rgba(131, 177, 109, 0.1)' : 'transparent',
-              transition: 'all 0.2s',
-            }}
-            onMouseEnter={(e) => {
-              if (!isActive(item.path)) {
-                e.currentTarget.style.background = '#f0f4f7';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (!isActive(item.path)) {
-                e.currentTarget.style.background = 'transparent';
-              }
+              fontSize: 14,
+              fontWeight: 500,
+              color: isActive(item.path) ? '#83b16d' : '#5f6c7b',
+              transition: 'color 0.2s',
             }}
           >
             {item.label}
           </Link>
         ))}
 
-        {/* Admin link - only show for admins */}
+        {/* Admin link for admins only */}
         {isAdmin && (
           <Link
             to="/admin"
             style={{
               padding: '8px 16px',
-              color: location.pathname.startsWith('/admin') ? '#83b16d' : '#5f6c7b',
               textDecoration: 'none',
-              fontSize: 13,
-              fontWeight: 600,
-              borderRadius: 6,
-              background: location.pathname.startsWith('/admin') ? 'rgba(131, 177, 109, 0.1)' : 'transparent',
+              fontSize: 14,
+              fontWeight: 500,
+              color: location.pathname.startsWith('/admin') ? '#83b16d' : '#5f6c7b',
               display: 'flex',
               alignItems: 'center',
               gap: 6,
@@ -178,31 +181,25 @@ function Navigation({ onOpenGenome }) {
             Admin
           </Link>
         )}
-      </div>
+      </nav>
 
-      {/* Right: User */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-        {/* Upload Status - keep this for functionality */}
-        <UploadStatusIndicator />
-
-        {/* Customer Genome - keep but minimal */}
-        <GenomeButton onClick={onOpenGenome} />
-
+      {/* Right: User info */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
         {user && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+          <>
             <div style={{ textAlign: 'right' }}>
               <div style={{
-                fontSize: 13,
+                fontSize: 14,
                 fontWeight: 600,
                 color: '#2a3441',
               }}>
                 {getDisplayName(user)}
               </div>
               <div style={{
-                fontSize: 10,
+                fontSize: 11,
                 color: '#5f6c7b',
                 textTransform: 'uppercase',
-                letterSpacing: 0.5,
+                letterSpacing: '0.5px',
               }}>
                 {user.role || 'Consultant'}
               </div>
@@ -210,48 +207,59 @@ function Navigation({ onOpenGenome }) {
             <button
               onClick={logout}
               style={{
-                padding: '6px 12px',
+                padding: '8px 16px',
                 background: 'transparent',
                 border: '1px solid #e1e8ed',
                 borderRadius: 6,
                 color: '#5f6c7b',
-                fontSize: 12,
+                fontSize: 13,
                 fontWeight: 500,
                 cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = '#83b16d';
+                e.currentTarget.style.color = '#83b16d';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = '#e1e8ed';
+                e.currentTarget.style.color = '#5f6c7b';
               }}
             >
               Logout
             </button>
-          </div>
+          </>
         )}
       </div>
-    </nav>
+    </header>
   );
 }
 
+// Main Layout - Clean, no context bar
 export default function Layout({ children }) {
   const location = useLocation();
-  const [genomeOpen, setGenomeOpen] = useState(false);
 
   useLayoutEffect(() => {
     window.scrollTo(0, 0);
   }, [location.pathname]);
 
   return (
-    <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
-      {/* Sticky header */}
-      <div style={{ position: 'sticky', top: 0, zIndex: 100 }}>
-        <ContextBar />
-        <Navigation onOpenGenome={() => setGenomeOpen(true)} />
-      </div>
+    <div style={{
+      minHeight: '100vh',
+      background: '#f6f5fa',
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
+      {/* Header only - no context bar */}
+      <Header />
 
-      {/* Main content */}
-      <main style={{ minHeight: 'calc(100vh - 112px)' }}>
+      {/* Main content area */}
+      <main style={{
+        flex: 1,
+        padding: 0,
+      }}>
         {children}
       </main>
-
-      {/* Customer Genome Panel */}
-      <CustomerGenome isOpen={genomeOpen} onClose={() => setGenomeOpen(false)} />
     </div>
   );
 }
