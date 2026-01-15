@@ -34,6 +34,9 @@ class ProjectCreate(BaseModel):
     domains: Optional[List[str]] = []  # Array of domain codes
     functional_areas: Optional[List[dict]] = []  # Array of {domain, area} objects
     engagement_type: Optional[str] = None  # Engagement type code
+    # Phase 4A.1 additions
+    target_go_live: Optional[str] = None  # Target go-live date (YYYY-MM-DD)
+    lead_name: Optional[str] = None  # Project lead name
 
 
 class ProjectUpdate(BaseModel):
@@ -51,6 +54,9 @@ class ProjectUpdate(BaseModel):
     domains: Optional[List[str]] = None  # Array of domain codes
     functional_areas: Optional[List[dict]] = None  # Array of {domain, area} objects
     engagement_type: Optional[str] = None  # Engagement type code
+    # Phase 4A.1 additions
+    target_go_live: Optional[str] = None  # Target go-live date (YYYY-MM-DD)
+    lead_name: Optional[str] = None  # Project lead name
 
 
 @router.get("/list")
@@ -81,6 +87,9 @@ async def list_projects():
                 'domains': metadata.get('domains', []),
                 'functional_areas': metadata.get('functional_areas', []),
                 'engagement_type': metadata.get('engagement_type', ''),
+                # Phase 4A.1 fields
+                'target_go_live': metadata.get('target_go_live', ''),
+                'lead_name': metadata.get('lead_name', ''),
                 # Other fields
                 'is_active': proj.get('is_active', False),
                 'created_at': proj.get('created_at'),
@@ -128,6 +137,10 @@ async def create_project(project: ProjectCreate):
             existing_metadata['functional_areas'] = project.functional_areas
         if project.engagement_type:
             existing_metadata['engagement_type'] = project.engagement_type
+        if project.target_go_live:
+            existing_metadata['target_go_live'] = project.target_go_live
+        if project.lead_name:
+            existing_metadata['lead_name'] = project.lead_name
         
         # Save updated metadata
         ProjectModel.update(new_project['id'], metadata=existing_metadata)
@@ -150,6 +163,8 @@ async def create_project(project: ProjectCreate):
                 'domains': metadata.get('domains', []),
                 'functional_areas': metadata.get('functional_areas', []),
                 'engagement_type': metadata.get('engagement_type', ''),
+                'target_go_live': metadata.get('target_go_live', ''),
+                'lead_name': metadata.get('lead_name', ''),
                 'status': new_project.get('status', 'active'),
                 'created_at': new_project.get('created_at')
             },
@@ -193,6 +208,8 @@ async def update_project(project_id: str, updates: ProjectUpdate):
             updates.domains is not None,
             updates.functional_areas is not None,
             updates.engagement_type is not None,
+            updates.target_go_live is not None,
+            updates.lead_name is not None,
         ])
         
         if metadata_fields_present:
@@ -226,6 +243,13 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 if updates.engagement_type is not None:
                     existing_metadata['engagement_type'] = updates.engagement_type
                 
+                # Phase 4A.1 additions
+                if updates.target_go_live is not None:
+                    existing_metadata['target_go_live'] = updates.target_go_live
+                
+                if updates.lead_name is not None:
+                    existing_metadata['lead_name'] = updates.lead_name
+                
                 update_dict['metadata'] = existing_metadata
         
         # Perform update
@@ -251,6 +275,8 @@ async def update_project(project_id: str, updates: ProjectUpdate):
                 'domains': metadata.get('domains', []),
                 'functional_areas': metadata.get('functional_areas', []),
                 'engagement_type': metadata.get('engagement_type', ''),
+                'target_go_live': metadata.get('target_go_live', ''),
+                'lead_name': metadata.get('lead_name', ''),
                 'status': updated.get('status', 'active'),
                 'updated_at': updated.get('updated_at')
             },
