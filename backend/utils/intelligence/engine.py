@@ -290,6 +290,42 @@ class IntelligenceEngineV2:
         'terminated', 'active employee', 'hired', 'tenure'
     ]
     
+    # Pure Chat - Definitional/conceptual questions (no data needed)
+    # Code word to enable Claude API fallback for Pure Chat
+    PURE_CHAT_CODE_WORD = "[ASTROS2X]"
+    
+    # Patterns that indicate a definitional/conceptual question
+    PURE_CHAT_PATTERNS = [
+        'what is a ', 'what is an ', 'what are ',
+        'what does ', 'what do ',
+        'how does ', 'how do ',
+        'explain ', 'define ', 'describe ',
+        'tell me about ', 'what\'s the difference between',
+        'what is the purpose of ', 'why would ',
+        'when should ', 'when would ',
+        'can you explain ', 'help me understand ',
+    ]
+    
+    # Indicators that the question needs actual data (NOT pure chat)
+    DATA_INDICATORS = [
+        # Quantitative
+        'how many', 'count', 'total', 'sum', 'average',
+        # Inventory/listing
+        'list ', 'show ', 'display ', 'give me ', 'get me ',
+        'what are the ', 'what are our ', 'what are my ',
+        'do we have', 'do i have', 'does our',
+        # Specific lookups - geographic with state names
+        ' in texas', ' in california', ' in new york', ' in florida',
+        'employees in ', 'workers in ', 'people in ',
+        'for john', 'for employee', 'for department',
+        # Possessives indicating client data
+        'our ', 'my ', 'we have', 'our company',
+        # Table/report language
+        'table', 'report', 'spreadsheet', 'export',
+        # Comparison with data
+        'compare our', 'versus our', 'vs our',
+    ]
+    
     def __init__(self, project_name: str, project_id: str = None, product_id: str = None):
         """
         Initialize the engine.
@@ -849,6 +885,23 @@ class IntelligenceEngineV2:
             logger.error(f"[ENGINE-V2] Error in export_request: {e}")
             raise
         
+        # =====================================================================
+        # STEP 1.5: PURE CHAT - Definitional/conceptual questions
+        # Skip data gathering for questions like "what is a benefit class?"
+        # Uses Reference docs + Local LLM only (no Claude unless [ASTROS2X])
+        # =====================================================================
+        try:
+            if self._is_pure_chat_question(question, q_lower):
+                pure_chat_result = self._handle_pure_chat(question, q_lower)
+                if pure_chat_result:
+                    logger.warning("[ENGINE-V2] PURE CHAT SUCCESS - returning directly")
+                    return pure_chat_result
+                else:
+                    logger.warning("[ENGINE-V2] Pure Chat failed - continuing to normal flow")
+        except Exception as e:
+            logger.error(f"[ENGINE-V2] Error in pure_chat: {e}")
+            # Don't raise - continue to normal flow
+        
         # STEP 2: Query Resolver
         # EVOLUTION 6: Skip QueryResolver for negation queries - it doesn't understand NOT/!=
         negation_keywords = ['not ', 'excluding ', 'except ', 'without ']
@@ -1308,6 +1361,50 @@ class IntelligenceEngineV2:
         """Check if question is about config (not employee data)."""
         return any(cd in q_lower for cd in self.CONFIG_DOMAINS)
     
+    def _is_pure_chat_question(self, question: str, q_lower: str) -> bool:
+        """
+        Detect if this is a "Pure Chat" question - definitional/conceptual
+        that doesn't require data gathering.
+        
+        Pure Chat = definitional patterns WITHOUT data indicators
+        
+        Examples that ARE Pure Chat:
+        - "what is a benefit class?"
+        - "how does UKG handle accruals?"
+        - "explain garnishments"
+        
+        Examples that are NOT Pure Chat (need data):
+        - "what is the headcount in Texas?" (has 'in Texas')
+        - "what are our deduction codes?" (has 'our')
+        - "how many employees have benefits?" (has 'how many')
+        
+        Returns:
+            True if this is a pure definitional question
+        """
+        # Check for definitional patterns
+        has_definitional_pattern = any(
+            pattern in q_lower for pattern in self.PURE_CHAT_PATTERNS
+        )
+        
+        if not has_definitional_pattern:
+            return False
+        
+        # Check for data indicators that mean we need actual data
+        has_data_indicator = any(
+            indicator in q_lower for indicator in self.DATA_INDICATORS
+        )
+        
+        if has_data_indicator:
+            logger.warning(f"[PURE-CHAT] Definitional pattern found but has data indicator - NOT pure chat")
+            return False
+        
+        logger.warning(f"[PURE-CHAT] Detected pure chat question: {question[:60]}...")
+        return True
+    
+    def _has_deep_code_word(self, question: str) -> bool:
+        """Check if question contains the code word to enable Claude fallback."""
+        return self.PURE_CHAT_CODE_WORD.lower() in question.lower()
+    
     def _detect_entity_scope(self, question: str, q_lower: str) -> Optional[Dict]:
         """
         Detect if question references specific entity values for scoping.
@@ -1611,6 +1708,182 @@ Bad: "Based on the data, I found 3,976 active records and 36 LOA records totalin
             import traceback
             logger.error(f"[CONSULTATIVE] Traceback: {traceback.format_exc()}")
             return None
+    
+    def _handle_pure_chat(self, question: str, q_lower: str) -> Optional[SynthesizedAnswer]:
+        """
+        Handle Pure Chat questions - definitional/conceptual questions
+        that don't need Reality/Configuration data gathering.
+        
+        Flow:
+        1. Search ChromaDB for Reference documentation
+        2. Build context from Reference truths
+        3. Call LOCAL LLM (Mistral) for synthesis
+        4. Only use Claude API if [ASTROS2X] code word is present
+        
+        Args:
+            question: User's question
+            q_lower: Lowercase version
+            
+        Returns:
+            SynthesizedAnswer or None if Pure Chat fails
+        """
+        logger.warning(f"[PURE-CHAT] Handling: {question[:60]}...")
+        
+        # Check for code word that enables Claude fallback
+        use_claude_fallback = self._has_deep_code_word(question)
+        if use_claude_fallback:
+            logger.warning(f"[PURE-CHAT] Code word '{self.PURE_CHAT_CODE_WORD}' detected - Claude fallback ENABLED")
+            # Remove code word from question for cleaner processing
+            clean_question = question.replace(self.PURE_CHAT_CODE_WORD, '').replace(self.PURE_CHAT_CODE_WORD.lower(), '').strip()
+        else:
+            logger.warning(f"[PURE-CHAT] No code word - LOCAL LLM ONLY (no Claude fallback)")
+            clean_question = question
+        
+        # Step 1: Gather Reference truths from ChromaDB
+        reference_truths = []
+        try:
+            if self.reference_gatherer:
+                reference_truths = self.reference_gatherer.gather(
+                    clean_question, 
+                    {'system': self.product_id or 'ukg'}
+                )
+                logger.warning(f"[PURE-CHAT] Got {len(reference_truths)} Reference truths")
+            else:
+                logger.warning("[PURE-CHAT] No reference_gatherer available")
+        except Exception as e:
+            logger.error(f"[PURE-CHAT] Reference gathering error: {e}")
+        
+        # Also try Regulatory truths for compliance-related questions
+        regulatory_truths = []
+        compliance_keywords = ['compliance', 'regulation', 'law', 'legal', 'irs', 'dol', 'flsa', 'aca', 'cobra']
+        if any(kw in q_lower for kw in compliance_keywords):
+            try:
+                if self.regulatory_gatherer:
+                    regulatory_truths = self.regulatory_gatherer.gather(
+                        clean_question,
+                        {'system': self.product_id or 'ukg'}
+                    )
+                    logger.warning(f"[PURE-CHAT] Got {len(regulatory_truths)} Regulatory truths")
+            except Exception as e:
+                logger.error(f"[PURE-CHAT] Regulatory gathering error: {e}")
+        
+        # Step 2: Build context from truths
+        context_parts = []
+        
+        if reference_truths:
+            context_parts.append("REFERENCE DOCUMENTATION:")
+            for i, truth in enumerate(reference_truths[:5], 1):
+                content = truth.content
+                if isinstance(content, dict):
+                    text = content.get('text', str(content))
+                    source = content.get('metadata', {}).get('filename', 'Reference')
+                else:
+                    text = str(content)
+                    source = 'Reference'
+                context_parts.append(f"\n[{i}] From {source}:\n{text[:1500]}")
+        
+        if regulatory_truths:
+            context_parts.append("\n\nREGULATORY CONTEXT:")
+            for i, truth in enumerate(regulatory_truths[:3], 1):
+                content = truth.content
+                if isinstance(content, dict):
+                    text = content.get('text', str(content))
+                else:
+                    text = str(content)
+                context_parts.append(f"\n[{i}] {text[:1000]}")
+        
+        context_text = "\n".join(context_parts)
+        
+        # If no reference context found, provide a helpful base response
+        if not context_text.strip():
+            logger.warning("[PURE-CHAT] No Reference/Regulatory context found")
+            context_text = """No specific documentation found in the knowledge base for this topic.
+Please provide a general explanation based on common HCM/HR practices."""
+        
+        # Step 3: Get LLM orchestrator
+        orchestrator = None
+        if self._llm_synthesizer and hasattr(self._llm_synthesizer, '_orchestrator'):
+            orchestrator = self._llm_synthesizer._orchestrator
+        
+        if not orchestrator:
+            try:
+                from utils.llm_orchestrator import LLMOrchestrator
+                orchestrator = LLMOrchestrator()
+                logger.warning("[PURE-CHAT] Created new LLMOrchestrator")
+            except Exception as e:
+                logger.error(f"[PURE-CHAT] Could not create LLMOrchestrator: {e}")
+                return None
+        
+        # Step 4: Build expert prompt for definitional questions
+        expert_prompt = """You are an expert HCM implementation consultant answering a conceptual question.
+
+YOUR TASK: Provide a clear, educational explanation of the concept asked about.
+
+USE THE PROVIDED DOCUMENTATION to ground your answer in specific system knowledge.
+If documentation is available, reference specific features, settings, or best practices from it.
+
+STYLE:
+- Start with a direct definition or explanation
+- Use concrete examples to illustrate concepts
+- Explain WHY this matters in an implementation context
+- Keep it conversational but professional
+- 2-4 paragraphs is ideal
+
+DO NOT:
+- Say "based on the documentation provided"
+- Start with "As an AI..." or similar
+- Give overly generic answers when specific docs are available"""
+
+        logger.warning(f"[PURE-CHAT] Calling LLM with {len(context_text)} chars of context")
+        
+        # Step 5: Call LLM - LOCAL ONLY unless code word present
+        try:
+            result = orchestrator.synthesize_answer(
+                question=clean_question,
+                context=context_text,
+                expert_prompt=expert_prompt,
+                use_claude_fallback=use_claude_fallback  # Only True if [ASTROS2X] present
+            )
+            
+            if result.get('success') and result.get('response'):
+                response_text = result['response']
+                model_used = result.get('model_used', 'local')
+                
+                if len(response_text) > 50:
+                    # Build SynthesizedAnswer
+                    answer = SynthesizedAnswer(
+                        question=question,
+                        answer=response_text,
+                        confidence=0.85,
+                        from_reference=reference_truths[:3],
+                        from_regulatory=regulatory_truths[:2] if regulatory_truths else [],
+                        reasoning=[
+                            f"Pure Chat path - definitional question",
+                            f"Synthesized via {model_used}",
+                            f"Reference docs: {len(reference_truths)}",
+                        ],
+                        structured_output={
+                            'type': 'pure_chat',
+                            'model': model_used,
+                            'reference_count': len(reference_truths),
+                            'regulatory_count': len(regulatory_truths),
+                            'claude_enabled': use_claude_fallback
+                        }
+                    )
+                    
+                    logger.warning(f"[PURE-CHAT] SUCCESS via {model_used} ({len(response_text)} chars)")
+                    return answer
+                else:
+                    logger.warning(f"[PURE-CHAT] Response too short ({len(response_text)} chars)")
+            else:
+                logger.warning(f"[PURE-CHAT] LLM failed: {result.get('error', 'unknown')}")
+                
+        except Exception as e:
+            logger.error(f"[PURE-CHAT] Synthesis error: {e}")
+            import traceback
+            logger.error(f"[PURE-CHAT] Traceback: {traceback.format_exc()}")
+        
+        return None
     
     def _try_deterministic_path(self, question: str) -> Optional[SynthesizedAnswer]:
         """
