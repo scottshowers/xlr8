@@ -327,7 +327,7 @@ function Navigation({ onOpenGenome }) {
                   <Link
                     to="/admin"
                     style={{
-                      ...styles.navItem(isActive('/admin') || location.pathname.startsWith('/admin/')),
+                      ...styles.navLink(isActive('/admin') || location.pathname.startsWith('/admin/')),
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px',
