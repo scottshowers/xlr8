@@ -13,9 +13,9 @@
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  Rocket, MessageSquare, ChevronDown, ChevronUp,
+  Rocket, MessageSquare,
   Target, FolderOpen, Database, ClipboardList, BarChart3, ScrollText,
-  Wrench, GraduationCap, Settings, Map, Building2, Activity
+  Settings, Map, Building2, Activity
 } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
@@ -110,13 +110,6 @@ const MAIN_NAV = [
   { path: '/workspace', label: 'AI Assist', icon: MessageSquare, permission: null, tooltip: 'Chat with AI about your project data' },
 ];
 
-// Admin nav items - collapsible
-const ADMIN_NAV = [
-  { path: '/playbooks/builder', label: 'Playbook Builder', icon: Wrench, permission: Permissions.OPS_CENTER, tooltip: 'Create and customize analysis playbooks' },
-  { path: '/learning-admin', label: 'Learning', icon: GraduationCap, permission: Permissions.OPS_CENTER, tooltip: 'Train the system with domain knowledge' },
-  { path: '/admin', label: 'System', icon: Settings, permission: Permissions.OPS_CENTER, tooltip: 'System settings, users, and configuration' },
-];
-
 // Logo SVG
 const HLogoGreen = () => (
   <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 570 570" style={{ width: '100%', height: '100%' }}>
@@ -159,15 +152,10 @@ function Navigation({ onOpenGenome }) {
   const { hasPermission, user, isAdmin, logout } = useAuth();
   useOnboarding(); // Keep for data-tour attributes
   const { tooltipsEnabled, toggleTooltips } = useTooltips();
-  const [adminExpanded, setAdminExpanded] = useState(false);
-
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
     return location.pathname.startsWith(path);
   };
-
-  // Check if any admin path is active
-  const isAdminActive = ADMIN_NAV.some(item => isActive(item.path));
 
   const filterItems = (items) => items.filter(item => {
     if (!item.permission) return true;
@@ -176,8 +164,8 @@ function Navigation({ onOpenGenome }) {
   });
 
   const mainItems = filterItems(MAIN_NAV);
-  const adminItems = filterItems(ADMIN_NAV);
-  const showAdminSection = adminItems.length > 0;
+  // Show admin section if user has OPS_CENTER permission or is admin
+  const showAdminSection = isAdmin || hasPermission(Permissions.OPS_CENTER);
 
   const styles = {
     nav: {
@@ -247,47 +235,6 @@ function Navigation({ onOpenGenome }) {
       marginBottom: '-1px',
       transition: 'color 0.2s ease',
       whiteSpace: 'nowrap',
-    }),
-    adminToggle: (active, expanded) => ({
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.35rem',
-      padding: '0.875rem 0.75rem',
-      fontSize: '0.85rem',
-      fontWeight: '600',
-      color: active || expanded ?COLORS.primary : COLORS.textLight,
-      borderBottom: active ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-      marginBottom: '-1px',
-      cursor: 'pointer',
-      background: 'none',
-      border: 'none',
-      whiteSpace: 'nowrap',
-      transition: 'color 0.2s ease',
-    }),
-    adminDropdown: {
-      position: 'absolute',
-      top: '100%',
-      left: 0,
-      background: 'white',
-      border: '1px solid #e1e8ed',
-      borderRadius: '8px',
-      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-      minWidth: '180px',
-      zIndex: 200,
-      overflow: 'hidden',
-    },
-    adminDropdownItem: (active) => ({
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      padding: '0.75rem 1rem',
-      textDecoration: 'none',
-      fontSize: '0.85rem',
-      fontWeight: active ? '600' : '500',
-      color: active ?COLORS.primary : COLORS.text,
-      background: active ? '#f0fdf4' : 'transparent',
-      borderBottom: '1px solid #f0f0f0',
-      transition: 'background 0.2s ease',
     }),
     rightSection: {
       display: 'flex',
@@ -372,42 +319,34 @@ function Navigation({ onOpenGenome }) {
               })}
             </div>
 
-            {/* Admin Dropdown */}
+            {/* Admin Link */}
             {showAdminSection && (
               <>
                 <div style={styles.navDivider} />
-                <div style={{ position: 'relative' }}>
-                  <button
-                    onClick={() => setAdminExpanded(!adminExpanded)}
-                    onBlur={() => setTimeout(() => setAdminExpanded(false), 200)}
-                    style={styles.adminToggle(isAdminActive, adminExpanded)}
+                <SimpleTooltip text="Platform administration and settings">
+                  <Link
+                    to="/admin"
+                    style={{
+                      ...styles.navItem(isActive('/admin') || location.pathname.startsWith('/admin/')),
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                    }}
+                    onMouseEnter={(e) => {
+                      if (!isActive('/admin') && !location.pathname.startsWith('/admin/')) {
+                        e.currentTarget.style.background = 'rgba(131,177,109,0.08)';
+                      }
+                    }}
+                    onMouseLeave={(e) => {
+                      if (!isActive('/admin') && !location.pathname.startsWith('/admin/')) {
+                        e.currentTarget.style.background = 'transparent';
+                      }
+                    }}
                   >
-                    <span></span>
+                    <Settings size={14} />
                     Admin
-                    {adminExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                  </button>
-
-                  {adminExpanded && (
-                    <div style={styles.adminDropdown}>
-                      {adminItems.map((item) => {
-                        const IconComponent = item.icon;
-                        return (
-                          <SimpleTooltip key={item.path} text={item.tooltip}>
-                            <Link
-                              to={item.path}
-                              style={styles.adminDropdownItem(isActive(item.path))}
-                              onMouseEnter={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = '#f8fafc'; }}
-                              onMouseLeave={(e) => { if (!isActive(item.path)) e.currentTarget.style.background = 'transparent'; }}
-                            >
-                              <IconComponent size={14} />
-                              {item.label}
-                            </Link>
-                          </SimpleTooltip>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                  </Link>
+                </SimpleTooltip>
               </>
             )}
           </div>
