@@ -13,8 +13,8 @@
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { 
-  Rocket, MessageSquare,
-  Target, FolderOpen, Database, ClipboardList, BarChart3, ScrollText,
+  Rocket, MessageSquare, AlertTriangle,
+  Target, FolderOpen, Database, ClipboardList, BarChart3,
   Settings, Map, Building2, Activity
 } from 'lucide-react';
 import ContextBar from './ContextBar';
@@ -103,9 +103,9 @@ const COLORS = {
 const MAIN_NAV = [
   { path: '/dashboard', label: 'Mission Control', icon: Target, permission: null, tooltip: 'Platform health, metrics, and system status at a glance' },
   { path: '/projects', label: 'Projects', icon: FolderOpen, permission: null, tooltip: 'Create and manage customer implementation projects' },
+  { path: '/findings', label: 'Findings', icon: AlertTriangle, permission: null, tooltip: 'Auto-surfaced analysis results and data quality issues' },
   { path: '/data', label: 'Data', icon: Database, permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
   { path: '/playbooks', label: 'Playbooks', icon: ClipboardList, permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
-  { path: '/standards', label: 'Standards', icon: ScrollText, permission: null, tooltip: 'Upload compliance documents, extract rules, run checks' },
   { path: '/analytics', label: 'Smart Analytics', icon: BarChart3, permission: null, tooltip: 'Query your data with natural language or SQL' },
   { path: '/workspace', label: 'AI Assist', icon: MessageSquare, permission: null, tooltip: 'Chat with AI about your project data' },
 ];
