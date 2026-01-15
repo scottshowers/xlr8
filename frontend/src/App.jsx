@@ -53,6 +53,7 @@ import PlaybookSelectPage from './pages/PlaybookSelectPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
+import ExportPage from './pages/ExportPage';
 import ProcessingPage from './pages/ProcessingPage';
 import FindingsDashboard from './pages/FindingsDashboard';
 import FindingDetailPage from './pages/FindingDetailPage';
@@ -189,7 +190,12 @@ function AppRoutes() {
         
         {/* Progress Tracker - Phase 4A.7 */}
         <Route path="/progress/:playbookId" element={
-          <ProtectedRoute><Layout><ProgressTrackerPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><ProgressTrackerPage /></ProtectedRoute>
+        } />
+        
+        {/* Export - Step 8 of Flow */}
+        <Route path="/export" element={
+          <ProtectedRoute><ExportPage /></ProtectedRoute>
         } />
         
         {/* Findings Dashboard - Phase 4A.4 */}
