@@ -336,22 +336,33 @@ export default function Layout({ children }) {
     <div style={{
       minHeight: '100vh',
       background: '#f6f5fa',
-      display: 'flex',
-      flexDirection: 'column',
+      padding: 24,
     }}>
-      {/* Step indicator ABOVE header - only on flow pages */}
-      {showSteps && <StepIndicator currentStep={currentStep} />}
-
-      {/* Header */}
-      <Header />
-
-      {/* Main content area */}
-      <main style={{
-        flex: 1,
-        padding: 0,
+      {/* App Frame - card container like mockup */}
+      <div style={{
+        background: '#f6f5fa',
+        borderRadius: 12,
+        border: '1px solid #e1e8ed',
+        boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
+        overflow: 'hidden',
+        minHeight: 'calc(100vh - 48px)',
+        display: 'flex',
+        flexDirection: 'column',
       }}>
-        {children}
-      </main>
+        {/* Step indicator ABOVE header */}
+        {showSteps && <StepIndicator currentStep={currentStep} />}
+
+        {/* Header */}
+        <Header />
+
+        {/* Main content area */}
+        <main style={{
+          flex: 1,
+          background: '#f6f5fa',
+        }}>
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
