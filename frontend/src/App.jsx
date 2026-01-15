@@ -2,7 +2,7 @@
  * App.jsx - Main Application Entry
  * 
  * NAV STRUCTURE:
- * Main: Dashboard | Projects | Data | Reference Library | Playbooks | Workspace
+ * Main: Mission Control | Projects | Data | Reference Library | Playbooks | Workspace
  * Admin: Admin | Learning (System moved to Admin tab)
  * 
  * PROVIDERS:
@@ -13,7 +13,7 @@
  * - OnboardingProvider (Joyride tours)
  * - TooltipProvider (global tooltip toggle)
  * 
- * Updated: December 23, 2025 - Added TooltipProvider for global tooltip control
+ * Updated: January 15, 2026 - Added Mission Control (Phase 4A UX Overhaul)
  */
 
 import React from 'react';
@@ -37,6 +37,7 @@ import Layout from './components/Layout';
 import Landing from './pages/Landing';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
+import MissionControl from './pages/MissionControl';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import CreateProjectPage from './pages/CreateProjectPage';
@@ -109,9 +110,14 @@ function AppRoutes() {
         
         {/* ====== MAIN NAV ====== */}
         
-        {/* Dashboard */}
+        {/* Mission Control - Cross-project review queue */}
+        <Route path="/mission-control" element={
+          <ProtectedRoute><Layout><MissionControl /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Dashboard - Points to Mission Control */}
         <Route path="/dashboard" element={
-          <ProtectedRoute><Layout><DashboardPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Layout><MissionControl /></Layout></ProtectedRoute>
         } />
         
         {/* Projects */}
