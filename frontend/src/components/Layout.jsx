@@ -42,15 +42,15 @@ const MAIN_NAV = [
   { path: '/analytics', label: 'Analytics' },
 ];
 
-// Step indicator steps
+// Step indicator steps - each has a link for navigation
 const FLOW_STEPS = [
-  { num: 1, label: 'Create Project', paths: ['/projects/new'] },
-  { num: 2, label: 'Upload Data', paths: ['/upload'] },
-  { num: 3, label: 'Auto-Analysis', paths: ['/processing'] },
-  { num: 4, label: 'Findings', paths: ['/findings'] },
-  { num: 5, label: 'Drill-In', paths: ['/findings/'] },
-  { num: 6, label: 'Build Playbook', paths: ['/build-playbook'] },
-  { num: 7, label: 'Track Progress', paths: ['/progress'] },
+  { num: 1, label: 'Create Project', link: '/projects/new' },
+  { num: 2, label: 'Upload Data', link: '/upload' },
+  { num: 3, label: 'Auto-Analysis', link: '/processing' },
+  { num: 4, label: 'Findings', link: '/findings' },
+  { num: 5, label: 'Drill-In', link: '/findings' },
+  { num: 6, label: 'Build Playbook', link: '/build-playbook' },
+  { num: 7, label: 'Track Progress', link: '/progress' },
 ];
 
 // Determine current step based on pathname (for highlighting)
@@ -132,7 +132,8 @@ function StepIndicator({ currentStep }) {
 
         return (
           <React.Fragment key={step.num}>
-            <div
+            <Link
+              to={step.link}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -144,6 +145,9 @@ function StepIndicator({ currentStep }) {
                 fontSize: 13,
                 fontWeight: 500,
                 border: isActive ? 'none' : '1px solid #e1e8ed',
+                textDecoration: 'none',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
               }}
             >
               <span style={{
@@ -161,7 +165,7 @@ function StepIndicator({ currentStep }) {
                 {isCompleted ? '✓' : step.num}
               </span>
               {step.label}
-            </div>
+            </Link>
 
             {index < FLOW_STEPS.length - 1 && (
               <span style={{ color: '#c9d3d4', fontSize: 11 }}>→</span>
