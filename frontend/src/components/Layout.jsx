@@ -42,26 +42,30 @@ const MAIN_NAV = [
   { path: '/analytics', label: 'Analytics' },
 ];
 
-// Step indicator steps - each has a link for navigation
+// Step indicator steps - REVISED 2026-01-15
+// Playbook selection BEFORE analysis (drives what gets analyzed)
+// Export as explicit final step (deliverables matter)
 const FLOW_STEPS = [
   { num: 1, label: 'Create Project', link: '/projects/new' },
   { num: 2, label: 'Upload Data', link: '/upload' },
-  { num: 3, label: 'Auto-Analysis', link: '/processing' },
-  { num: 4, label: 'Findings', link: '/findings' },
-  { num: 5, label: 'Drill-In', link: '/findings' },
-  { num: 6, label: 'Build Playbook', link: '/build-playbook' },
+  { num: 3, label: 'Select Playbooks', link: '/playbooks/select' },
+  { num: 4, label: 'Analysis', link: '/processing' },
+  { num: 5, label: 'Findings', link: '/findings' },
+  { num: 6, label: 'Drill-In', link: '/findings' },
   { num: 7, label: 'Track Progress', link: '/progress' },
+  { num: 8, label: 'Export', link: '/export' },
 ];
 
 // Determine current step based on pathname (for highlighting)
 const getCurrentStep = (pathname) => {
   if (pathname === '/projects/new') return 1;
   if (pathname === '/upload' || pathname.startsWith('/data') || pathname.startsWith('/vacuum')) return 2;
-  if (pathname.startsWith('/processing')) return 3;
-  if (pathname === '/findings') return 4;
-  if (pathname.startsWith('/findings/')) return 5;
-  if (pathname.startsWith('/build-playbook') || pathname === '/playbooks') return 6;
+  if (pathname === '/playbooks/select' || pathname === '/playbooks') return 3;
+  if (pathname.startsWith('/processing')) return 4;
+  if (pathname === '/findings') return 5;
+  if (pathname.startsWith('/findings/')) return 6;
   if (pathname.startsWith('/progress')) return 7;
+  if (pathname.startsWith('/export')) return 8;
   // Default - no step highlighted (dashboard, projects list, etc.)
   return null;
 };
