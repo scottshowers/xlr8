@@ -16,7 +16,7 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import ColumnSplitter from '../components/ColumnSplitter';
 import { useTheme } from '../context/ThemeContext';
 import { ClipboardList, BarChart3 } from 'lucide-react';
-import '../styles/vacuum.css';
+
 
 const API_BASE = '/api';
 

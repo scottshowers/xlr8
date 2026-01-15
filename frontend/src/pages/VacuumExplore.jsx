@@ -15,7 +15,7 @@ import {
   ClipboardList, BarChart3, Folder, Search, BookOpen, CheckCircle,
   User, DollarSign, Building, HelpCircle
 } from 'lucide-react';
-import '../styles/vacuum.css';
+
 
 // API base - adjust for your environment
 const API_BASE = '/api';
