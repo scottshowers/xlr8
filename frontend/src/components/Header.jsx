@@ -52,8 +52,9 @@ export const Header = ({ user, onMenuClick }) => {
           </svg>
         </div>
         <div className="xlr8-header__brand">
-          <div className="xlr8-header__brand-name">XLR8</div>
-          <div className="xlr8-header__brand-tagline">HCMPACT Intelligence</div>
+          <div className="xlr8-header__brand-name">
+            XLR8 <span className="xlr8-header__brand-divider">|</span> <span className="xlr8-header__brand-tagline">INTELLIGENT ANALYSIS by HCMPACT</span>
+          </div>
         </div>
       </div>
 
