@@ -1,38 +1,28 @@
 /**
  * Layout.jsx - Main App Wrapper
- * 
- * RESTRUCTURED NAV:
- * Main: Command Center | Projects | Data | Playbooks | AI Assist
- * Admin: Collapsible dropdown with Standards, Work Advisor, Playbook Builder, Learning, System
- * 
- * Includes: Upload status indicator, tooltip toggle, Customer Genome
- * 
- * Updated: January 4, 2026 - Replaced tour toggle with tooltip toggle
+ *
+ * PHASE 4A UX REDESIGN - Clean mockup-matching layout
+ *
+ * Header: Logo | Nav (5 items) | User Info
+ * Nav: Mission Control | Projects | Data | Playbooks | Analytics
+ *
+ * Updated: January 15, 2026 - Simplified to match mockup design
  */
 
 import React, { useLayoutEffect, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { 
-  Rocket, MessageSquare, AlertTriangle,
-  Target, FolderOpen, Database, ClipboardList, BarChart3,
-  Settings, Map, Building2, Activity
-} from 'lucide-react';
+import { Settings } from 'lucide-react';
 import ContextBar from './ContextBar';
 import { useAuth, Permissions } from '../context/AuthContext';
 import { UploadStatusIndicator } from '../context/UploadContext';
-import { useOnboarding } from '../context/OnboardingContext';
-import { useTooltips } from '../context/TooltipContext';
 import CustomerGenome, { GenomeButton } from './CustomerGenome';
-import { SimpleTooltip } from './ui/Tooltip';
 
 // Helper to derive display name from email if full_name not set
 const getDisplayName = (user) => {
   if (!user) return '';
-  // If full_name is set and different from email, use it
   if (user.full_name && user.full_name !== user.email) {
     return user.full_name;
   }
-  // Derive from email: scott.showers@hcmpact.com -> Scott Showers
   if (user.email) {
     const localPart = user.email.split('@')[0];
     return localPart
@@ -43,71 +33,13 @@ const getDisplayName = (user) => {
   return 'User';
 };
 
-// Sales/Demo page buttons for header
-function SalesButtons() {
-  const [hovered, setHovered] = useState(null);
-  
-  const buttons = [
-    { id: 'journey', path: '/journey', icon: Map, title: 'The Journey' },
-    { id: 'architecture', path: '/architecture', icon: Building2, title: 'Architecture' },
-    { id: 'metrics', path: '/architecture/metrics-pipeline', icon: Activity, title: 'Metrics Pipeline' },
-  ];
-  
-  return (
-    <div style={{ display: 'flex', gap: '0.25rem' }}>
-      {buttons.map(btn => {
-        const IconComponent = btn.icon;
-        return (
-          <SimpleTooltip key={btn.id} text={btn.title}>
-            <Link
-              to={btn.path}
-              onMouseEnter={() => setHovered(btn.id)}
-              onMouseLeave={() => setHovered(null)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 32,
-                height: 32,
-                background: hovered === btn.id ? '#f0fdf4' : '#f8fafc',
-                border: `1px solid ${hovered === btn.id ? '#83b16d' : '#e1e8ed'}`,
-                borderRadius: 6,
-                cursor: 'pointer',
-                transition: 'all 0.15s ease',
-                textDecoration: 'none',
-              }}
-            >
-              <IconComponent size={16} color={hovered === btn.id ? '#83b16d' : '#64748b'} />
-            </Link>
-          </SimpleTooltip>
-        );
-      })}
-    </div>
-  );
-}
-
-// Mission Control Color Palette
-const COLORS = {
-  primary: '#83b16d',
-  accent: '#285390',
-  iceFlow: '#c9d3d4',
-  white: '#f6f5fa',
-  text: '#1a2332',
-  textMuted: '#64748b',
-  textLight: '#94a3b8',
-  bg: '#f0f2f5',
-  border: '#e2e8f0',
-};
-
-// Main nav items - core workflow
+// Main nav items - simplified to match mockup
 const MAIN_NAV = [
-  { path: '/dashboard', label: 'Mission Control', icon: Target, permission: null, tooltip: 'Platform health, metrics, and system status at a glance' },
-  { path: '/projects', label: 'Projects', icon: FolderOpen, permission: null, tooltip: 'Create and manage customer implementation projects' },
-  { path: '/findings', label: 'Findings', icon: AlertTriangle, permission: null, tooltip: 'Auto-surfaced analysis results and data quality issues' },
-  { path: '/data', label: 'Data', icon: Database, permission: Permissions.UPLOAD, tooltip: 'Upload files, view tables, and explore your data' },
-  { path: '/playbooks', label: 'Playbooks', icon: ClipboardList, permission: Permissions.PLAYBOOKS, tooltip: 'Run analysis playbooks like Year-End Checklist' },
-  { path: '/analytics', label: 'Smart Analytics', icon: BarChart3, permission: null, tooltip: 'Query your data with natural language or SQL' },
-  { path: '/workspace', label: 'AI Assist', icon: MessageSquare, permission: null, tooltip: 'Chat with AI about your project data' },
+  { path: '/dashboard', label: 'Mission Control' },
+  { path: '/projects', label: 'Projects' },
+  { path: '/data', label: 'Data' },
+  { path: '/playbooks', label: 'Playbooks' },
+  { path: '/analytics', label: 'Analytics' },
 ];
 
 // Logo SVG
@@ -149,250 +81,149 @@ const HLogoGreen = () => (
 
 function Navigation({ onOpenGenome }) {
   const location = useLocation();
-  const { hasPermission, user, isAdmin, logout } = useAuth();
-  useOnboarding(); // Keep for data-tour attributes
-  const { tooltipsEnabled, toggleTooltips } = useTooltips();
+  const { user, isAdmin, logout } = useAuth();
+
   const isActive = (path) => {
     if (path === '/dashboard') return location.pathname === '/dashboard' || location.pathname === '/';
+    if (path === '/projects') {
+      // Projects includes findings, processing, playbook flows
+      return location.pathname.startsWith('/projects') ||
+             location.pathname.startsWith('/findings') ||
+             location.pathname.startsWith('/processing') ||
+             location.pathname.startsWith('/build-playbook') ||
+             location.pathname.startsWith('/progress');
+    }
+    if (path === '/data') {
+      return location.pathname.startsWith('/data') || location.pathname.startsWith('/vacuum');
+    }
     return location.pathname.startsWith(path);
   };
 
-  const filterItems = (items) => items.filter(item => {
-    if (!item.permission) return true;
-    if (isAdmin) return true;
-    return hasPermission(item.permission);
-  });
-
-  const mainItems = filterItems(MAIN_NAV);
-  // Show admin section if user has OPS_CENTER permission or is admin
-  const showAdminSection = isAdmin || hasPermission(Permissions.OPS_CENTER);
-
-  const styles = {
-    nav: {
+  return (
+    <nav style={{
       background: 'white',
       borderBottom: '1px solid #e1e8ed',
-    },
-    container: {
+      padding: '0 24px',
       display: 'flex',
+      alignItems: 'center',
       justifyContent: 'space-between',
-      alignItems: 'center',
-      padding: '0 1.5rem',
-      maxWidth: '1800px',
-      margin: '0 auto',
-    },
-    left: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '1.5rem',
-    },
-    logo: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      textDecoration: 'none',
-      color: COLORS.text,
-    },
-    logoIcon: {
-      width: '32px',
-      height: '32px',
-    },
-    logoText: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '4px',
-    },
-    logoName: {
-      fontFamily: "'Sora', sans-serif",
-      fontWeight: 700,
-      fontSize: '1.1rem',
-      color: COLORS.text,
-    },
-    navGroup: {
-      display: 'flex',
-      alignItems: 'center',
-    },
-    navItems: {
-      display: 'flex',
-      alignItems: 'center',
-    },
-    navDivider: {
-      width: '2px',
-      height: '28px',
-      background: '#c9d3d4',
-      margin: '0 0.75rem',
-      borderRadius: '1px',
-    },
-    navLink: (active) => ({
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.35rem',
-      padding: '0.875rem 0.75rem',
-      textDecoration: 'none',
-      fontSize: '0.85rem',
-      fontWeight: '600',
-      color: active ?COLORS.primary : COLORS.textLight,
-      borderBottom: active ? `2px solid ${COLORS.primary}` : '2px solid transparent',
-      marginBottom: '-1px',
-      transition: 'color 0.2s ease',
-      whiteSpace: 'nowrap',
-    }),
-    rightSection: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.75rem',
-    },
-    helpBtn: {
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'center',
-      width: '32px',
-      height: '32px',
-      background: '#f8fafc',
-      border: '1px solid #e1e8ed',
-      borderRadius: '6px',
-      cursor: 'pointer',
-      color: COLORS.textLight,
-      transition: 'all 0.2s ease',
-    },
-    userMenu: {
-      display: 'flex',
-      alignItems: 'center',
-      gap: '1rem',
-    },
-    userInfo: {
-      textAlign: 'right',
-    },
-    userName: {
-      fontSize: '0.85rem',
-      fontWeight: '600',
-      color: COLORS.text,
-    },
-    userRole: {
-      fontSize: '0.7rem',
-      color: COLORS.textLight,
-      textTransform: 'uppercase',
-      letterSpacing: '0.5px',
-    },
-    logoutBtn: {
-      padding: '0.5rem 1rem',
-      background: 'transparent',
-      border: '1px solid #e1e8ed',
-      borderRadius: '6px',
-      color: COLORS.textLight,
-      fontSize: '0.8rem',
-      cursor: 'pointer',
-    },
-  };
-
-  // Generate data-tour attribute
-  const getTourAttr = (path) => `nav-${path.replace('/', '').replace('-', '')}`;
-
-  return (
-    <nav style={styles.nav}>
-      <div style={styles.container}>
-        <div style={styles.left}>
-          <Link to="/dashboard" style={styles.logo}>
-            <div style={styles.logoIcon}><HLogoGreen /></div>
-            <div style={styles.logoText}>
-              <span style={styles.logoName}>XLR8</span>
-              <Rocket style={{ width: 14, height: 14, color: COLORS.primary }} />
-            </div>
-          </Link>
-
-          <div style={styles.navGroup}>
-            {/* Main Nav Items */}
-            <div style={styles.navItems}>
-              {mainItems.map((item) => {
-                const IconComponent = item.icon;
-                return (
-                  <SimpleTooltip key={item.path} text={item.tooltip}>
-                    <Link
-                      to={item.path}
-                      data-tour={getTourAttr(item.path)}
-                      style={styles.navLink(isActive(item.path))}
-                    >
-                      <IconComponent size={16} />
-                      {item.label}
-                    </Link>
-                  </SimpleTooltip>
-                );
-              })}
-            </div>
-
-            {/* Admin Link */}
-            {showAdminSection && (
-              <>
-                <div style={styles.navDivider} />
-                <SimpleTooltip text="Platform administration and settings">
-                  <Link
-                    to="/admin"
-                    style={{
-                      ...styles.navLink(isActive('/admin') || location.pathname.startsWith('/admin/')),
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                    onMouseEnter={(e) => {
-                      if (!isActive('/admin') && !location.pathname.startsWith('/admin/')) {
-                        e.currentTarget.style.background = 'rgba(131,177,109,0.08)';
-                      }
-                    }}
-                    onMouseLeave={(e) => {
-                      if (!isActive('/admin') && !location.pathname.startsWith('/admin/')) {
-                        e.currentTarget.style.background = 'transparent';
-                      }
-                    }}
-                  >
-                    <Settings size={14} />
-                    Admin
-                  </Link>
-                </SimpleTooltip>
-              </>
-            )}
+      height: 56,
+    }}>
+      {/* Left: Logo */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <Link to="/dashboard" style={{ display: 'flex', alignItems: 'center', gap: 10, textDecoration: 'none' }}>
+          <div style={{ width: 36, height: 36 }}>
+            <HLogoGreen />
           </div>
-        </div>
+          <span style={{
+            fontFamily: "'Sora', sans-serif",
+            fontWeight: 700,
+            fontSize: 18,
+            color: '#2a3441',
+          }}>
+            XLR8
+          </span>
+        </Link>
+      </div>
 
-        <div style={styles.rightSection}>
-          {/* Upload Status Indicator */}
-          <UploadStatusIndicator />
-          
-          {/* Sales/Demo Page Buttons */}
-          <SalesButtons />
-          
-          {/* Divider */}
-          <div style={{ width: 1, height: 20, background: '#e1e8ed' }} />
-          
-          {/* Customer Genome Button */}
-          <GenomeButton onClick={onOpenGenome} />
-          
-          {/* Tooltip Toggle */}
-          <SimpleTooltip text={tooltipsEnabled ? 'Turn off tooltips' : 'Turn on tooltips'}>
+      {/* Center: Nav */}
+      <div style={{ display: 'flex', gap: 4 }}>
+        {MAIN_NAV.map((item) => (
+          <Link
+            key={item.path}
+            to={item.path}
+            style={{
+              padding: '8px 16px',
+              color: isActive(item.path) ? '#83b16d' : '#5f6c7b',
+              textDecoration: 'none',
+              fontSize: 13,
+              fontWeight: 600,
+              borderRadius: 6,
+              background: isActive(item.path) ? 'rgba(131, 177, 109, 0.1)' : 'transparent',
+              transition: 'all 0.2s',
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive(item.path)) {
+                e.currentTarget.style.background = '#f0f4f7';
+              }
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive(item.path)) {
+                e.currentTarget.style.background = 'transparent';
+              }
+            }}
+          >
+            {item.label}
+          </Link>
+        ))}
+
+        {/* Admin link - only show for admins */}
+        {isAdmin && (
+          <Link
+            to="/admin"
+            style={{
+              padding: '8px 16px',
+              color: location.pathname.startsWith('/admin') ? '#83b16d' : '#5f6c7b',
+              textDecoration: 'none',
+              fontSize: 13,
+              fontWeight: 600,
+              borderRadius: 6,
+              background: location.pathname.startsWith('/admin') ? 'rgba(131, 177, 109, 0.1)' : 'transparent',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}
+          >
+            <Settings size={14} />
+            Admin
+          </Link>
+        )}
+      </div>
+
+      {/* Right: User */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* Upload Status - keep this for functionality */}
+        <UploadStatusIndicator />
+
+        {/* Customer Genome - keep but minimal */}
+        <GenomeButton onClick={onOpenGenome} />
+
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+            <div style={{ textAlign: 'right' }}>
+              <div style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: '#2a3441',
+              }}>
+                {getDisplayName(user)}
+              </div>
+              <div style={{
+                fontSize: 10,
+                color: '#5f6c7b',
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}>
+                {user.role || 'Consultant'}
+              </div>
+            </div>
             <button
-              onClick={toggleTooltips}
+              onClick={logout}
               style={{
-                ...styles.helpBtn,
-                background: tooltipsEnabled ? COLORS.primary : '#f8fafc',
-                color: tooltipsEnabled ? 'white' : COLORS.textLight,
-                borderColor: tooltipsEnabled ? COLORS.primary : '#e1e8ed',
+                padding: '6px 12px',
+                background: 'transparent',
+                border: '1px solid #e1e8ed',
+                borderRadius: 6,
+                color: '#5f6c7b',
+                fontSize: 12,
+                fontWeight: 500,
+                cursor: 'pointer',
               }}
             >
-              <MessageSquare size={16} />
+              Logout
             </button>
-          </SimpleTooltip>
-          
-          {/* User menu */}
-          {user && (
-            <div style={styles.userMenu}>
-              <div style={styles.userInfo}>
-                <div style={styles.userName}>{getDisplayName(user)}</div>
-                <div style={styles.userRole}>{user.role}</div>
-              </div>
-              <SimpleTooltip text="Sign out of XLR8">
-                <button onClick={logout} style={styles.logoutBtn}>Logout</button>
-              </SimpleTooltip>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </nav>
   );
@@ -408,15 +239,17 @@ export default function Layout({ children }) {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f6f5fa' }}>
-      {/* Sticky header container - keeps both bars together */}
+      {/* Sticky header */}
       <div style={{ position: 'sticky', top: 0, zIndex: 100 }}>
         <ContextBar />
         <Navigation onOpenGenome={() => setGenomeOpen(true)} />
       </div>
-      <main style={{ padding: '1.5rem', maxWidth: '1800px', margin: '0 auto' }}>
+
+      {/* Main content */}
+      <main style={{ minHeight: 'calc(100vh - 112px)' }}>
         {children}
       </main>
-      
+
       {/* Customer Genome Panel */}
       <CustomerGenome isOpen={genomeOpen} onClose={() => setGenomeOpen(false)} />
     </div>
