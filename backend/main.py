@@ -516,6 +516,14 @@ try:
 except ImportError as e:
     logger.warning(f"Findings router import failed: {e}")
 
+# Register remediation router (Phase 4A.6/4A.7 - Playbook Wire-up & Progress Tracker)
+try:
+    from routers import remediation
+    app.include_router(remediation.router, prefix="/api/remediation", tags=["remediation"])
+    logger.info("Remediation router registered at /api/remediation")
+except ImportError as e:
+    logger.warning(f"Remediation router import failed: {e}")
+
 
 @app.get("/api/debug/imports")
 async def debug_imports():
