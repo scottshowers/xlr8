@@ -112,12 +112,12 @@ function AppRoutes() {
         
         {/* Mission Control - Cross-project review queue */}
         <Route path="/mission-control" element={
-          <ProtectedRoute><Layout><MissionControl /></Layout></ProtectedRoute>
+          <ProtectedRoute><MissionControl /></ProtectedRoute>
         } />
         
         {/* Dashboard - Points to Mission Control */}
         <Route path="/dashboard" element={
-          <ProtectedRoute><Layout><MissionControl /></Layout></ProtectedRoute>
+          <ProtectedRoute><MissionControl /></ProtectedRoute>
         } />
         
         {/* Projects */}
