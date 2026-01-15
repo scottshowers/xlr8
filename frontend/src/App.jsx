@@ -49,6 +49,7 @@ import UploadDataPage from './pages/UploadDataPage';
 import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
+import PlaybookSelectPage from './pages/PlaybookSelectPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
@@ -174,6 +175,11 @@ function AppRoutes() {
         {/* Playbooks */}
         <Route path="/playbooks" element={
           <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Playbook Selection - Step 3 of Flow */}
+        <Route path="/playbooks/select" element={
+          <ProtectedRoute><PlaybookSelectPage /></ProtectedRoute>
         } />
         
         {/* Build Playbook - Phase 4A.6 */}
