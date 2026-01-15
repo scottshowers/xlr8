@@ -108,7 +108,7 @@ const XLR8Logo = () => (
   </svg>
 );
 
-// Step Indicator Component - shows below header
+// Step Indicator Component - shows at very top, outside the frame
 function StepIndicator({ currentStep }) {
   return (
     <div style={{
@@ -120,7 +120,6 @@ function StepIndicator({ currentStep }) {
       background: '#ffffff',
       border: '1px solid #e1e8ed',
       borderRadius: 12,
-      marginTop: 12,
       boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
     }}>
       {FLOW_STEPS.map((step, index) => {
@@ -203,14 +202,12 @@ function Header() {
   return (
     <header style={{
       background: '#ffffff',
-      border: '1px solid #e1e8ed',
-      borderRadius: 12,
+      borderBottom: '1px solid #e1e8ed',
       height: 60,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       padding: '0 24px',
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
     }}>
       {/* Left: Logo */}
       <Link
@@ -341,23 +338,25 @@ export default function Layout({ children }) {
     <div style={{
       minHeight: '100vh',
       background: '#f6f5fa',
-      padding: '24px 24px 24px 24px',
+      padding: 24,
     }}>
-      {/* Header - separate bar at top, NOT inside card */}
-      <Header />
-
-      {/* Step indicator below header */}
+      {/* Step indicator - OUTSIDE the frame, at very top */}
       {showSteps && <StepIndicator currentStep={currentStep} />}
 
-      {/* Content Card - below header */}
+      {/* Main App Frame - ONE card containing header + content */}
       <div style={{
         background: '#ffffff',
         borderRadius: 12,
         border: '1px solid #e1e8ed',
         boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-        minHeight: 'calc(100vh - 140px)',
-        marginTop: 16,
+        minHeight: 'calc(100vh - 120px)',
+        marginTop: showSteps ? 16 : 0,
+        overflow: 'hidden',
       }}>
+        {/* Header inside the frame */}
+        <Header />
+
+        {/* Content area */}
         <main>
           {children}
         </main>
