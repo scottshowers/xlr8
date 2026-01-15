@@ -47,6 +47,8 @@ import VacuumExplore from './pages/VacuumExplore';
 import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
+import PlaybookWireupPage from './pages/PlaybookWireupPage';
+import ProgressTrackerPage from './pages/ProgressTrackerPage';
 import FindingsDashboard from './pages/FindingsDashboard';
 import StandardsPage from './pages/StandardsPage';
 import AdminPage from './pages/AdminPage';
@@ -146,6 +148,16 @@ function AppRoutes() {
         {/* Playbooks */}
         <Route path="/playbooks" element={
           <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Build Playbook - Phase 4A.6 */}
+        <Route path="/build-playbook" element={
+          <ProtectedRoute><Layout><PlaybookWireupPage /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Progress Tracker - Phase 4A.7 */}
+        <Route path="/progress/:playbookId" element={
+          <ProtectedRoute><Layout><ProgressTrackerPage /></Layout></ProtectedRoute>
         } />
         
         {/* Findings Dashboard - Phase 4A.4 */}

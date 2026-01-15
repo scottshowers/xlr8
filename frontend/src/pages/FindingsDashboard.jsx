@@ -213,7 +213,7 @@ function SummaryStats({ summary, colors }) {
 // FINDING CARD
 // =============================================================================
 
-function FindingCard({ finding, colors, onClick }) {
+function FindingCard({ finding, colors, onClick, selected, onToggleSelect }) {
   const severityConfig = SEVERITY_CONFIG[finding.severity] || SEVERITY_CONFIG.info;
   const categoryConfig = CATEGORY_CONFIG[finding.category] || CATEGORY_CONFIG.pattern;
   const SeverityIcon = severityConfig.icon;
@@ -229,10 +229,9 @@ function FindingCard({ finding, colors, onClick }) {
   
   return (
     <div
-      onClick={onClick}
       style={{
-        background: colors.card,
-        border: `1px solid ${colors.border}`,
+        background: selected ? `${colors.primary}08` : colors.card,
+        border: `1px solid ${selected ? colors.primary : colors.border}`,
         borderLeft: `4px solid ${sc.border}`,
         borderRadius: 8,
         padding: '1rem 1.25rem',
@@ -256,18 +255,37 @@ function FindingCard({ finding, colors, onClick }) {
         marginBottom: '0.75rem'
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <div style={{
-            width: 32,
-            height: 32,
-            borderRadius: 6,
-            background: sc.bg,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
+          {/* Checkbox for selection */}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={(e) => {
+              e.stopPropagation();
+              onToggleSelect(finding.id);
+            }}
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              width: 18,
+              height: 18,
+              accentColor: colors.primary,
+              cursor: 'pointer',
+              flexShrink: 0,
+            }}
+          />
+          <div 
+            onClick={onClick}
+            style={{
+              width: 32,
+              height: 32,
+              borderRadius: 6,
+              background: sc.bg,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}>
             <SeverityIcon size={16} color={sc.border} />
           </div>
-          <div>
+          <div onClick={onClick}>
             <div style={{ 
               fontSize: '0.95rem', 
               fontWeight: 600, 
@@ -288,11 +306,13 @@ function FindingCard({ finding, colors, onClick }) {
           </div>
         </div>
         
-        <div style={{ 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '0.5rem' 
-        }}>
+        <div 
+          onClick={onClick}
+          style={{ 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '0.5rem' 
+          }}>
           <span style={{
             fontSize: '0.65rem',
             fontWeight: 600,
@@ -310,22 +330,26 @@ function FindingCard({ finding, colors, onClick }) {
       </div>
       
       {/* Description */}
-      <p style={{ 
-        fontSize: '0.8rem', 
-        color: colors.textMuted, 
-        margin: '0 0 0.75rem',
-        lineHeight: 1.5
-      }}>
+      <p 
+        onClick={onClick}
+        style={{ 
+          fontSize: '0.8rem', 
+          color: colors.textMuted, 
+          margin: '0 0 0.75rem',
+          lineHeight: 1.5
+        }}>
         {finding.description}
       </p>
       
       {/* Footer stats */}
-      <div style={{ 
-        display: 'flex', 
-        alignItems: 'center', 
-        gap: '1rem',
-        flexWrap: 'wrap'
-      }}>
+      <div 
+        onClick={onClick}
+        style={{ 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '1rem',
+          flexWrap: 'wrap'
+        }}>
         {finding.affected_count > 0 && (
           <div style={{ 
             display: 'flex', 
@@ -804,10 +828,31 @@ export default function FindingsDashboard() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [selectedFinding, setSelectedFinding] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
   
   // Filters
   const [severityFilter, setSeverityFilter] = useState('all');
   const [categoryFilter, setCategoryFilter] = useState('all');
+  
+  // Toggle finding selection
+  const toggleFindingSelection = (id) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
+  };
+  
+  // Navigate to build playbook with selected findings
+  const handleBuildPlaybook = () => {
+    navigate('/build-playbook', {
+      state: { selectedFindingIds: Array.from(selectedIds) }
+    });
+  };
   
   // Load findings when project changes
   useEffect(() => {
@@ -989,6 +1034,8 @@ export default function FindingsDashboard() {
                   finding={finding}
                   colors={colors}
                   onClick={() => setSelectedFinding(finding)}
+                  selected={selectedIds.has(finding.id)}
+                  onToggleSelect={toggleFindingSelection}
                 />
               ))}
             </div>
@@ -1024,11 +1071,14 @@ export default function FindingsDashboard() {
                   color: colors.textMuted,
                   margin: 0
                 }}>
-                  Create a playbook from these findings to track remediation progress.
+                  {selectedIds.size > 0 
+                    ? `${selectedIds.size} finding${selectedIds.size !== 1 ? 's' : ''} selected — create a playbook to track remediation.`
+                    : 'Select findings or click to build a playbook from all findings.'}
                 </p>
               </div>
-              <Link to="/playbooks" style={{ textDecoration: 'none' }}>
-                <button style={{
+              <button 
+                onClick={handleBuildPlaybook}
+                style={{
                   padding: '0.75rem 1.5rem',
                   background: colors.primary,
                   border: 'none',
@@ -1041,10 +1091,9 @@ export default function FindingsDashboard() {
                   alignItems: 'center',
                   gap: '0.5rem',
                 }}>
-                  Build Playbook
-                  <ArrowRight size={16} />
-                </button>
-              </Link>
+                Build Playbook
+                <ArrowRight size={16} />
+              </button>
             </div>
           )}
         </>
