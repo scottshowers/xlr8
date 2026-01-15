@@ -508,6 +508,14 @@ if DASHBOARD_AVAILABLE:
 else:
     logger.warning("Dashboard router not available")
 
+# Register findings router (Phase 4A.4 - Findings Dashboard)
+try:
+    from routers import findings
+    app.include_router(findings.router, prefix="/api/findings", tags=["findings"])
+    logger.info("Findings router registered at /api/findings")
+except ImportError as e:
+    logger.warning(f"Findings router import failed: {e}")
+
 
 @app.get("/api/debug/imports")
 async def debug_imports():
