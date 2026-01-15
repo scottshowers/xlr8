@@ -149,6 +149,62 @@ When facing a technical decision:
 
 ---
 
+## Frontend Development Principles
+
+### Pipeline Safety First
+**NEVER touch backend during UX work:**
+- ❌ `/backend/routers/` - API endpoints  
+- ❌ `/backend/services/` - Intelligence services  
+- ❌ `/backend/utils/` - Detection, analysis, LLM  
+- ❌ `/backend/models/` - Data models  
+- ❌ `playbooks/` - Playbook definitions  
+- ❌ Database schema
+
+**Why:** The backend pipeline is battle-tested and exit-ready. Breaking it delays acquisition.
+
+### Design System Consistency
+**Every component uses:**
+- CSS custom properties (no magic numbers)
+- Sora font for headings, Manrope for body
+- 8px spacing system (4/8/16/24/32/48)
+- Grass green (#83b16d) as primary brand color
+- Consistent hover states (translateY + shadow)
+
+**Why:** Professional appearance = higher valuation.
+
+### Component Reusability
+**Build once, use everywhere:**
+- Button (primary/secondary/danger variants)
+- Card (white background, 16px radius, hover lift)
+- Badge (critical/warning/info colors)
+- PageHeader (title + subtitle + actions)
+
+**Why:** Faster development, consistent UX, easier maintenance.
+
+### File Creation Strategy
+**For new files:**
+- Short (<100 lines): Create complete in one call
+- Long (>100 lines): Build iteratively section by section
+
+**For existing files:**
+- Use str_replace for targeted edits
+- Never replace entire file unless <200 lines
+- Backup before major changes
+
+**Why:** Avoid compaction issues, preserve git history.
+
+### Page-by-Page Implementation
+**Build one page at a time:**
+1. Create component file
+2. Test in isolation
+3. Integrate with routing
+4. Verify existing features still work
+5. Document completion before moving to next page
+
+**Why:** Incremental progress, easier debugging, avoids overwhelming context window.
+
+---
+
 ## What Success Looks Like
 
 ### Engine Success
@@ -190,4 +246,5 @@ When facing a technical decision:
 
 | Date | Change |
 |------|--------|
+| 2026-01-15 | Added Frontend Development principles - design system, component reusability, page-by-page strategy |
 | 2026-01-11 | Initial version - extracted from evolved practices |

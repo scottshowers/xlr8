@@ -95,16 +95,23 @@
 
 ---
 
-## Phase 4A: E2E Flow Polish
+## Phase 4A: UX Overhaul
 
-**Login through Admin - clean up and connect existing frontend**
+**Complete frontend redesign with production-ready design system**
 
-| Component | Description | Hours |
-|-----------|-------------|-------|
-| 4A.1 | Flow Audit & Mapping | 2 |
-| 4A.2 | Navigation Cleanup | 2-3 |
-| 4A.3 | State Management Polish | 2-3 |
-| 4A.4 | First-Time UX & Empty States | 2-3 |
+| Component | Description | Hours | Status |
+|-----------|-------------|-------|--------|
+| 4A.1 | Design System Foundation | 4-6 | IN PROGRESS |
+| 4A.2 | Core Layout (Header/Sidebar/Flow Bar) | 3-4 | NOT STARTED |
+| 4A.3 | Mission Control (Cross-Project) | 4-5 | NOT STARTED |
+| 4A.4 | Finding Review & Massage | 4-5 | NOT STARTED |
+| 4A.5 | Project Workspace (4 Tabs) | 6-8 | NOT STARTED |
+| 4A.6 | Vacuum UX Refresh | 2-3 | NOT STARTED |
+| 4A.7 | Admin Module Pages | 6-8 | NOT STARTED |
+
+**Total:** 29-39 hours
+
+**Approach:** Page-by-page implementation, one component at a time to avoid compaction
 
 **Detail:** See `/doc/PHASE_04A_E2E_FLOW.md`
 
@@ -265,6 +272,7 @@
 
 | Date | Change |
 |------|--------|
+| 2026-01-15 | Phase 4A updated: Complete UX overhaul with design system (29-39 hours) |
 | 2026-01-13 | Phase 3 (Synthesis) COMPLETE - truth_assembler, llm_prompter, enhanced_gap_detector, response_patterns, synthesis_pipeline |
 | 2026-01-13 | Created full Phase 7 (Feature Engine) and Phase 8 (Playbook Engine) docs |
 | 2026-01-13 | Split Phase 4 into 4A (E2E Flow) and 4B (Export Template Repo) |
