@@ -108,7 +108,7 @@ const XLR8Logo = () => (
   </svg>
 );
 
-// Step Indicator Component - shows above header on flow pages
+// Step Indicator Component - shows below header
 function StepIndicator({ currentStep }) {
   return (
     <div style={{
@@ -118,7 +118,10 @@ function StepIndicator({ currentStep }) {
       gap: 8,
       padding: '12px 24px',
       background: '#ffffff',
-      borderBottom: '1px solid #e1e8ed',
+      border: '1px solid #e1e8ed',
+      borderRadius: 12,
+      marginTop: 12,
+      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
     }}>
       {FLOW_STEPS.map((step, index) => {
         const isActive = step.num === currentStep;
@@ -200,12 +203,14 @@ function Header() {
   return (
     <header style={{
       background: '#ffffff',
-      borderBottom: '1px solid #e1e8ed',
+      border: '1px solid #e1e8ed',
+      borderRadius: 12,
       height: 60,
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
-      padding: '0 32px',
+      padding: '0 24px',
+      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
     }}>
       {/* Left: Logo */}
       <Link
@@ -336,30 +341,24 @@ export default function Layout({ children }) {
     <div style={{
       minHeight: '100vh',
       background: '#f6f5fa',
-      padding: 24,
+      padding: '24px 24px 24px 24px',
     }}>
-      {/* App Frame - card container like mockup */}
+      {/* Header - separate bar at top, NOT inside card */}
+      <Header />
+
+      {/* Step indicator below header */}
+      {showSteps && <StepIndicator currentStep={currentStep} />}
+
+      {/* Content Card - below header */}
       <div style={{
-        background: '#f6f5fa',
+        background: '#ffffff',
         borderRadius: 12,
         border: '1px solid #e1e8ed',
         boxShadow: '0 4px 20px rgba(0,0,0,0.08)',
-        overflow: 'hidden',
-        minHeight: 'calc(100vh - 48px)',
-        display: 'flex',
-        flexDirection: 'column',
+        minHeight: 'calc(100vh - 140px)',
+        marginTop: 16,
       }}>
-        {/* Step indicator ABOVE header */}
-        {showSteps && <StepIndicator currentStep={currentStep} />}
-
-        {/* Header */}
-        <Header />
-
-        {/* Main content area */}
-        <main style={{
-          flex: 1,
-          background: '#f6f5fa',
-        }}>
+        <main>
           {children}
         </main>
       </div>
