@@ -23,6 +23,8 @@ The mockups define the target UX. All implementation should match the look, feel
 
 ## The Flow
 
+**REVISED January 15, 2026** - Playbook selection drives analysis, Export is explicit deliverable step.
+
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                                                                 │
@@ -32,28 +34,41 @@ The mockups define the target UX. All implementation should match the look, feel
 │   2. UPLOAD DATA                                                │
 │      └── Drag/drop any format, no templates required            │
 │                        ↓                                        │
-│   3. AUTO-ANALYSIS (no user action)                             │
+│   3. SELECT PLAYBOOK(S)                                         │
+│      └── Choose which analysis to run                           │
+│      └── Year-End, Data Quality, Migration, etc.                │
+│      └── Can select multiple playbooks                          │
+│                        ↓                                        │
+│   4. ANALYSIS                                                   │
 │      └── Schema detection → Profiling → Pattern analysis        │
 │      └── Cost Equivalent banner: "17 hrs @ $250 = $4,250"       │
+│      └── Runs based on selected playbook(s)                     │
 │                        ↓                                        │
-│   4. FINDINGS DASHBOARD                                         │
+│   5. FINDINGS DASHBOARD                                         │
 │      └── Prioritized, categorized, quantified                   │
 │      └── Critical / Warning / Info counts                       │
+│      └── Grouped by playbook if multiple selected               │
 │                        ↓                                        │
-│   5. DRILL-IN DETAIL                                            │
+│   6. DRILL-IN DETAIL                                            │
 │      └── What we found, why it matters, who's affected          │
-│      └── Recommended actions                                    │
-│                        ↓                                        │
-│   6. BUILD PLAYBOOK                                             │
-│      └── Select findings → Generate action items                │
-│      └── Assign owners, set deadlines                           │
+│      └── Recommended actions per finding                        │
 │                        ↓                                        │
 │   7. TRACK PROGRESS                                             │
 │      └── Complete / In Progress / Blocked / Pending             │
 │      └── Risk mitigated to date                                 │
+│                        ↓                                        │
+│   8. EXPORT                                                     │
+│      └── Findings report                                        │
+│      └── Work products                                          │
+│      └── Client-ready deliverables                              │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Key Design Decisions:**
+- Playbook selection BEFORE analysis - playbooks drive WHAT gets analyzed
+- "Build Playbook" removed from flow - that's an Admin function, not project workflow
+- Export is explicit step - deliverables matter, not just findings
 
 ---
 
