@@ -1,0 +1,50 @@
+/* Layout Component Styles */
+
+.xlr8-layout {
+  min-height: 100vh;
+  background: var(--bg-primary);
+}
+
+/* ========================================
+   MAIN CONTENT AREA
+   ======================================== */
+
+.xlr8-layout__main {
+  margin-top: 64px; /* Header height */
+  margin-left: 260px; /* Sidebar width */
+  padding: var(--space-8);
+  min-height: calc(100vh - 64px);
+  transition: margin-left var(--transition-bounce);
+}
+
+/* With Flow Bar - Additional top margin */
+.xlr8-layout__main--with-flow {
+  margin-top: 116px; /* 64px header + 52px flow bar */
+  min-height: calc(100vh - 116px);
+}
+
+/* When sidebar is collapsed */
+.xlr8-sidebar--collapsed ~ .xlr8-layout__main {
+  margin-left: 0;
+}
+
+/* ========================================
+   RESPONSIVE
+   ======================================== */
+
+@media (max-width: 1200px) {
+  .xlr8-layout__main {
+    padding: var(--space-6);
+  }
+}
+
+@media (max-width: 768px) {
+  .xlr8-layout__main {
+    margin-left: 0;
+    padding: var(--space-4);
+  }
+  
+  .xlr8-layout__main--with-flow {
+    margin-top: 116px; /* Same spacing on mobile */
+  }
+}
