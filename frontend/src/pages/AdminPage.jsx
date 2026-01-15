@@ -16,8 +16,8 @@
  * - Endpoints: API testing tool
  */
 
-import React, { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import React, { useState, useEffect } from 'react';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import PersonaManagement from '../components/PersonaManagement';
 import SecurityTab from '../components/SecurityTab';
 import RolePermissions from '../components/RolePermissions';
@@ -29,7 +29,7 @@ import { PageHeader, EmptyState } from '../components/ui';
 import { SimpleTooltip } from '../components/ui/Tooltip';
 import { 
   Settings, BarChart3, Users, Shield, Lock, Plug, Trash2, Wrench,
-  Building2, Clock, Rocket, HardDrive, Zap
+  Building2, Clock, Rocket, HardDrive, Zap, ArrowLeft
 } from 'lucide-react';
 
 const COLORS = {
@@ -332,8 +332,16 @@ function EndpointsTab() {
 
 // ==================== MAIN COMPONENT ====================
 export default function AdminPage() {
-  const [activeTab, setActiveTab] = useState('system');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const navigate = useNavigate();
   const { hasPermission, isAdmin } = useAuth();
+  
+  // Get tab from URL or default to 'system'
+  const activeTab = searchParams.get('tab') || 'system';
+  
+  const setActiveTab = (tabId) => {
+    setSearchParams({ tab: tabId });
+  };
 
   const ALL_TABS = [
     { id: 'system', label: 'System', icon: BarChart3, permission: Permissions.OPS_CENTER, tooltip: 'Platform health, database status, and system monitoring' },
@@ -390,9 +398,29 @@ export default function AdminPage() {
 
   return (
     <div data-tour="admin-header">
+      {/* Back to Admin Hub link */}
+      <button
+        onClick={() => navigate('/admin')}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: COLORS.textMuted,
+          background: 'none',
+          border: 'none',
+          fontSize: 13,
+          marginBottom: 16,
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <ArrowLeft size={16} />
+        Back to Admin Hub
+      </button>
+      
       <PageHeader 
         icon={Settings}
-        title="Admin" 
+        title="Admin Settings" 
         subtitle="System administration and configuration" 
       />
 
