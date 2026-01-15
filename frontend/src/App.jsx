@@ -49,7 +49,9 @@ import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
+import ProcessingPage from './pages/ProcessingPage';
 import FindingsDashboard from './pages/FindingsDashboard';
+import FindingDetailPage from './pages/FindingDetailPage';
 import StandardsPage from './pages/StandardsPage';
 import AdminPage from './pages/AdminPage';
 import AdminHub from './pages/AdminHub';
@@ -139,7 +141,15 @@ function AppRoutes() {
         <Route path="/vacuum/mapping/:jobId" element={
           <ProtectedRoute><Layout><VacuumColumnMapping /></Layout></ProtectedRoute>
         } />
-        
+
+        {/* Processing Feedback - Phase 4A.3 */}
+        <Route path="/processing" element={
+          <ProtectedRoute><Layout><ProcessingPage /></Layout></ProtectedRoute>
+        } />
+        <Route path="/processing/:jobId" element={
+          <ProtectedRoute><Layout><ProcessingPage /></Layout></ProtectedRoute>
+        } />
+
         {/* Reference Library (was Standards) */}
         <Route path="/reference-library" element={
           <ProtectedRoute><Layout><ReferenceLibraryPage /></Layout></ProtectedRoute>
@@ -164,7 +174,12 @@ function AppRoutes() {
         <Route path="/findings" element={
           <ProtectedRoute><Layout><FindingsDashboard /></Layout></ProtectedRoute>
         } />
-        
+
+        {/* Finding Detail - Phase 4A.5 */}
+        <Route path="/findings/:findingId" element={
+          <ProtectedRoute><Layout><FindingDetailPage /></Layout></ProtectedRoute>
+        } />
+
         {/* Workspace (Chat) */}
         <Route path="/workspace" element={
           <ProtectedRoute><Layout><WorkspacePage /></Layout></ProtectedRoute>
