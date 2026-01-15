@@ -17,10 +17,27 @@ import { Plus, ChevronRight, Clock, Users, FileText } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 
+// Get display name from user object
+const getDisplayName = (user) => {
+  if (!user) return '';
+  if (user.full_name && user.full_name !== user.email) {
+    return user.full_name.split(' ')[0]; // First name only
+  }
+  if (user.email) {
+    // Parse from email: scott.showers@... -> Scott
+    const localPart = user.email.split('@')[0];
+    const firstName = localPart.split(/[._-]/)[0];
+    return firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase();
+  }
+  return '';
+};
+
 export default function DashboardPage() {
   const navigate = useNavigate();
   const { projects, loading, setActiveProject } = useProject();
   const { user } = useAuth();
+
+  const displayName = getDisplayName(user);
 
   // Get recent projects (last 5)
   const recentProjects = (projects || [])
@@ -57,7 +74,7 @@ export default function DashboardPage() {
     <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
       {/* Page Header */}
       <div className="xlr8-page-header">
-        <h1>Welcome back{user?.full_name ? `, ${user.full_name.split(' ')[0]}` : ''}</h1>
+        <h1>Welcome back{displayName ? `, ${displayName}` : ''}</h1>
         <p className="subtitle">Here's what's happening with your projects</p>
       </div>
 
