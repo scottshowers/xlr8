@@ -49,6 +49,7 @@ import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import StandardsPage from './pages/StandardsPage';
 import AdminPage from './pages/AdminPage';
+import AdminHub from './pages/AdminHub';
 import AdminDashboard from './pages/AdminDashboard';
 import DataHealthPage from './pages/DataHealthPage';
 import ReferenceLibraryPage from './pages/ReferenceLibraryPage';
@@ -158,8 +159,13 @@ function AppRoutes() {
         
         {/* ====== ADMIN NAV ====== */}
         
-        {/* Admin (includes System tab now) */}
+        {/* Admin Hub - Card navigation */}
         <Route path="/admin" element={
+          <ProtectedRoute><Layout><AdminHub /></Layout></ProtectedRoute>
+        } />
+        
+        {/* Admin Settings - Tabbed interface */}
+        <Route path="/admin/settings" element={
           <ProtectedRoute><Layout><AdminPage /></Layout></ProtectedRoute>
         } />
         
