@@ -1,192 +1,46 @@
 /**
- * ProcessingPage.jsx - Auto-Analysis Feedback Screen
- * ===================================================
- *
- * Phase 4A.3: Processing Feedback
- *
- * Shows visual progress during data analysis with:
- * - Animated spinner
- * - Step indicators (Schema Detection → Data Profiling → Pattern Analysis → Finding Generation)
- * - Cost Equivalent banner
- * - Auto-redirect to Findings Dashboard when complete
- *
- * Matches mockup Screen 3 design.
- *
- * Created: January 15, 2026
+ * ProcessingPage.jsx - Step 4: Analysis
+ * 
+ * Fourth step in the 8-step consultant workflow.
+ * Shows visual progress during data analysis with animated steps,
+ * cost equivalent banner, and auto-redirect on completion.
+ * 
+ * Flow: Create Project → Upload Data → Select Playbooks → [ANALYSIS] → Findings → ...
+ * 
+ * Updated: January 15, 2026 - Phase 4A UX Overhaul (proper rebuild)
  */
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import { Loader2, CheckCircle, Circle, ArrowRight } from 'lucide-react';
+import MainLayout from '../components/MainLayout';
+import { PageHeader } from '../components/ui/PageHeader';
+import { Card, CardHeader, CardTitle } from '../components/ui/Card';
+import { Button } from '../components/ui/Button';
+import { Badge } from '../components/ui/Badge';
 import { useProject } from '../context/ProjectContext';
-import { useTheme } from '../context/ThemeContext';
+import './ProcessingPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-// =============================================================================
-// COLORS
-// =============================================================================
-
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f6f5fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  border: dark ? '#2d3548' : '#e1e8ed',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#5f6c7b',
-  primary: '#83b16d',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.08)',
-  primaryBorder: dark ? 'rgba(131, 177, 109, 0.4)' : 'rgba(131, 177, 109, 0.25)',
-  electricBlue: '#2766b1',
-});
-
-// =============================================================================
-// PROCESSING STEPS
-// =============================================================================
-
+// Processing steps configuration
 const PROCESSING_STEPS = [
-  { id: 'schema', label: 'Schema Detection', description: 'Identifying tables and columns' },
-  { id: 'profiling', label: 'Data Profiling', description: 'Analyzing data quality' },
-  { id: 'patterns', label: 'Pattern Analysis', description: 'Finding anomalies' },
-  { id: 'findings', label: 'Finding Generation', description: 'Creating recommendations' },
+  { id: 'schema', label: 'Schema Detection', description: 'Identifying tables and columns', icon: '🔍' },
+  { id: 'profiling', label: 'Data Profiling', description: 'Analyzing data quality', icon: '📊' },
+  { id: 'patterns', label: 'Pattern Analysis', description: 'Finding anomalies', icon: '🔎' },
+  { id: 'findings', label: 'Finding Generation', description: 'Creating recommendations', icon: '✨' },
 ];
 
-// =============================================================================
-// STEP INDICATOR COMPONENT
-// =============================================================================
-
-function ProcessingStep({ step, status, colors }) {
-  const getStepStyle = () => {
-    switch (status) {
-      case 'complete':
-        return {
-          iconBg: colors.primary,
-          iconColor: '#fff',
-          textColor: colors.primary,
-          symbol: '✓'
-        };
-      case 'active':
-        return {
-          iconBg: colors.electricBlue,
-          iconColor: '#fff',
-          textColor: colors.electricBlue,
-          symbol: '⋯'
-        };
-      default:
-        return {
-          iconBg: colors.border,
-          iconColor: colors.textMuted,
-          textColor: colors.textMuted,
-          symbol: '○'
-        };
-    }
-  };
-
-  const style = getStepStyle();
-
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: '0.5rem',
-      color: style.textColor,
-    }}>
-      <div style={{
-        width: 24,
-        height: 24,
-        borderRadius: '50%',
-        background: style.iconBg,
-        color: style.iconColor,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        fontSize: '0.75rem',
-        fontWeight: 600,
-      }}>
-        {style.symbol}
-      </div>
-      <span style={{ fontSize: '0.85rem', fontWeight: 500 }}>
-        {step.label}
-      </span>
-    </div>
-  );
-}
-
-// =============================================================================
-// COST EQUIVALENT BANNER
-// =============================================================================
-
-function CostEquivalentBanner({ records, tables, hours, cost, colors, title, subtitle }) {
-  return (
-    <div style={{
-      background: colors.primaryLight,
-      border: `1px solid ${colors.primaryBorder}`,
-      borderRadius: 12,
-      padding: '1.5rem',
-      display: 'flex',
-      alignItems: 'center',
-      justifyContent: 'space-between',
-      flexWrap: 'wrap',
-      gap: '1rem',
-    }}>
-      <div>
-        <h3 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1rem',
-          fontWeight: 600,
-          color: colors.text,
-          marginBottom: '0.25rem',
-        }}>
-          {title || 'Consultant Time Equivalent'}
-        </h3>
-        <p style={{
-          fontSize: '0.875rem',
-          color: colors.textMuted,
-          margin: 0,
-        }}>
-          {subtitle || `This analysis is processing ${records?.toLocaleString() || 0} records across ${tables || 0} tables`}
-        </p>
-      </div>
-
-      <div style={{ textAlign: 'right' }}>
-        <div style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '2rem',
-          fontWeight: 800,
-          color: colors.primary,
-          lineHeight: 1,
-        }}>
-          ${cost?.toLocaleString() || 0}
-        </div>
-        <div style={{
-          fontSize: '0.75rem',
-          color: colors.textMuted,
-          marginTop: '0.25rem',
-        }}>
-          {hours || 0} hours @ $250/hr
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// =============================================================================
-// MAIN PAGE COMPONENT
-// =============================================================================
-
-export default function ProcessingPage() {
+const ProcessingPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { jobId: paramJobId } = useParams();
-  const { darkMode } = useTheme();
-  const colors = getColors(darkMode);
   const { activeProject, customerName } = useProject();
 
-  // Get jobId from params or location state
   const jobId = paramJobId || location.state?.jobId;
 
   // State
   const [currentStep, setCurrentStep] = useState(0);
-  const [status, setStatus] = useState('processing');
+  const [status, setStatus] = useState('processing'); // processing, complete, error
   const [progress, setProgress] = useState(null);
   const [costEquivalent, setCostEquivalent] = useState({
     records: 0,
@@ -199,15 +53,13 @@ export default function ProcessingPage() {
   const pollIntervalRef = useRef(null);
   const stepIntervalRef = useRef(null);
 
-  // Poll for job status
+  // Poll for job status or simulate
   useEffect(() => {
     if (!jobId) {
-      // Demo mode - simulate processing
       simulateProcessing();
       return;
     }
 
-    // Real mode - poll API
     pollJobStatus();
     pollIntervalRef.current = setInterval(pollJobStatus, 2000);
 
@@ -232,7 +84,7 @@ export default function ProcessingPage() {
       else if (percent < 75) setCurrentStep(2);
       else if (percent < 100) setCurrentStep(3);
 
-      // Update cost equivalent from chunks
+      // Update cost equivalent
       if (data.chunks) {
         const rows = data.chunks.rows_so_far || 0;
         const tables = data.chunks.total || 1;
@@ -250,11 +102,7 @@ export default function ProcessingPage() {
         clearInterval(pollIntervalRef.current);
         setCurrentStep(4);
         setStatus('complete');
-
-        // Redirect to findings after brief delay
-        setTimeout(() => {
-          navigate('/findings');
-        }, 1500);
+        setTimeout(() => navigate('/findings'), 1500);
       } else if (data.status === 'failed' || data.status === 'error') {
         clearInterval(pollIntervalRef.current);
         setStatus('error');
@@ -265,9 +113,7 @@ export default function ProcessingPage() {
     }
   };
 
-  // Demo mode simulation
   const simulateProcessing = () => {
-    // Set initial cost equivalent
     setCostEquivalent({
       records: 47382,
       tables: 12,
@@ -275,7 +121,6 @@ export default function ProcessingPage() {
       cost: 4250,
     });
 
-    // Step through stages
     let step = 0;
     stepIntervalRef.current = setInterval(() => {
       step++;
@@ -284,16 +129,11 @@ export default function ProcessingPage() {
       if (step >= 4) {
         clearInterval(stepIntervalRef.current);
         setStatus('complete');
-
-        // Redirect to findings
-        setTimeout(() => {
-          navigate('/findings');
-        }, 1500);
+        setTimeout(() => navigate('/findings'), 1500);
       }
     }, 2000);
   };
 
-  // Get step status
   const getStepStatus = (index) => {
     if (index < currentStep) return 'complete';
     if (index === currentStep && status === 'processing') return 'active';
@@ -302,161 +142,133 @@ export default function ProcessingPage() {
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: 800, margin: '0 auto' }}>
-        {/* Page Header */}
-        <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
-        <h1 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.75rem',
-          fontWeight: 700,
-          color: colors.text,
-          marginBottom: '0.5rem',
-        }}>
-          {customerName || activeProject?.customer || activeProject?.name || 'Project'}
-        </h1>
-        <p style={{
-          fontSize: '0.9rem',
-          color: colors.textMuted,
-        }}>
-          {activeProject?.system_type || 'UKG Pro'} · {activeProject?.engagement_type || 'Implementation'} · Go-Live: {activeProject?.target_go_live || 'TBD'}
-        </p>
-      </div>
+    <MainLayout showFlowBar={true} currentStep={4}>
+      <div className="processing-page">
+        <PageHeader
+          title={customerName || activeProject?.customer || 'Analyzing Data'}
+          subtitle={`Step 4 of 8 • ${activeProject?.system_type || 'UKG Pro'} · ${activeProject?.engagement_type || 'Implementation'}`}
+        />
 
-      {/* Processing Card */}
-      <div style={{
-        background: colors.card,
-        border: `1px solid ${colors.border}`,
-        borderRadius: 12,
-        padding: '3rem',
-        textAlign: 'center',
-        marginBottom: '1.5rem',
-      }}>
-        {/* Spinner */}
-        {status === 'processing' && (
-          <div style={{
-            width: 64,
-            height: 64,
-            margin: '0 auto 1.5rem',
-            border: `4px solid ${colors.border}`,
-            borderTopColor: colors.primary,
-            borderRadius: '50%',
-            animation: 'spin 1s linear infinite',
-          }} />
-        )}
+        <div className="processing-page__content">
+          {/* Main Processing Card */}
+          <Card className="processing-page__main-card">
+            {/* Spinner / Complete Icon */}
+            <div className="processing-page__status-icon">
+              {status === 'processing' ? (
+                <div className="spinner-icon" />
+              ) : status === 'complete' ? (
+                <div className="complete-icon">✓</div>
+              ) : (
+                <div className="error-icon">!</div>
+              )}
+            </div>
 
-        {/* Complete icon */}
-        {status === 'complete' && (
-          <div style={{
-            width: 64,
-            height: 64,
-            margin: '0 auto 1.5rem',
-            background: colors.primary,
-            borderRadius: '50%',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}>
-            <CheckCircle size={32} color="#fff" />
+            {/* Title */}
+            <h2 className="processing-page__title">
+              {status === 'complete' 
+                ? 'Analysis Complete!' 
+                : status === 'error'
+                  ? 'Analysis Failed'
+                  : 'Analyzing Your Data'}
+            </h2>
+
+            <p className="processing-page__subtitle">
+              {status === 'complete'
+                ? 'Redirecting to your findings...'
+                : status === 'error'
+                  ? error || 'An error occurred during processing'
+                  : 'This usually takes 2-5 minutes depending on data volume'}
+            </p>
+
+            {/* Processing Steps */}
+            <div className="processing-page__steps">
+              {PROCESSING_STEPS.map((step, index) => {
+                const stepStatus = getStepStatus(index);
+                return (
+                  <div 
+                    key={step.id} 
+                    className={`processing-step processing-step--${stepStatus}`}
+                  >
+                    <div className="processing-step__icon">
+                      {stepStatus === 'complete' ? '✓' : stepStatus === 'active' ? '⋯' : step.icon}
+                    </div>
+                    <div className="processing-step__content">
+                      <div className="processing-step__label">{step.label}</div>
+                      <div className="processing-step__description">{step.description}</div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Manual Navigation */}
+            {status === 'complete' && (
+              <div className="processing-page__actions">
+                <Button variant="primary" onClick={() => navigate('/findings')}>
+                  View Findings →
+                </Button>
+              </div>
+            )}
+
+            {status === 'error' && (
+              <div className="processing-page__actions">
+                <Button variant="primary" onClick={() => navigate('/playbooks/select')}>
+                  ← Try Again
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          {/* Cost Equivalent Banner */}
+          <Card className="processing-page__cost-card">
+            <div className="cost-banner">
+              <div className="cost-banner__info">
+                <h3 className="cost-banner__title">
+                  {status === 'complete' ? 'Analysis Complete' : 'Consultant Time Equivalent'}
+                </h3>
+                <p className="cost-banner__subtitle">
+                  {status === 'complete'
+                    ? `Analyzed ${costEquivalent.records.toLocaleString()} records across ${costEquivalent.tables} tables`
+                    : `Processing ${costEquivalent.records.toLocaleString()} records across ${costEquivalent.tables} tables`}
+                </p>
+              </div>
+              <div className="cost-banner__value">
+                <div className="cost-amount">${costEquivalent.cost.toLocaleString()}</div>
+                <div className="cost-label">{costEquivalent.hours} hours @ $250/hr</div>
+              </div>
+            </div>
+          </Card>
+
+          {/* Sidebar */}
+          <div className="processing-page__sidebar">
+            {/* What's Happening Card */}
+            <Card className="processing-page__info-card">
+              <CardHeader>
+                <CardTitle icon="🔬">What's Happening</CardTitle>
+              </CardHeader>
+              <ul className="info-list">
+                <li><strong>Schema Detection</strong> - Identifying data structure and relationships</li>
+                <li><strong>Data Profiling</strong> - Analyzing completeness, patterns, and quality</li>
+                <li><strong>Pattern Analysis</strong> - Finding anomalies and inconsistencies</li>
+                <li><strong>Finding Generation</strong> - Creating actionable recommendations</li>
+              </ul>
+            </Card>
+
+            {/* Next Step Card */}
+            <Card className="processing-page__next-card">
+              <div className="next-step-preview">
+                <div className="next-step-label">Next Step</div>
+                <div className="next-step-title">📊 Findings Dashboard</div>
+                <div className="next-step-description">
+                  Review prioritized findings with severity ratings and impact analysis.
+                </div>
+              </div>
+            </Card>
           </div>
-        )}
-
-        {/* Title */}
-        <h2 style={{
-          fontFamily: "'Sora', sans-serif",
-          fontSize: '1.5rem',
-          fontWeight: 700,
-          color: colors.text,
-          marginBottom: '0.5rem',
-        }}>
-          {status === 'complete' ? 'Analysis Complete!' : 'Analyzing Your Data'}
-        </h2>
-
-        <p style={{
-          fontSize: '0.9rem',
-          color: colors.textMuted,
-          marginBottom: '2rem',
-        }}>
-          {status === 'complete'
-            ? 'Redirecting to your findings...'
-            : 'This usually takes 2-5 minutes depending on data volume'}
-        </p>
-
-        {/* Processing Steps */}
-        <div style={{
-          display: 'flex',
-          justifyContent: 'center',
-          gap: '2rem',
-          flexWrap: 'wrap',
-        }}>
-          {PROCESSING_STEPS.map((step, index) => (
-            <ProcessingStep
-              key={step.id}
-              step={step}
-              status={getStepStatus(index)}
-              colors={colors}
-            />
-          ))}
         </div>
       </div>
-
-      {/* Cost Equivalent Banner */}
-      <CostEquivalentBanner
-        records={costEquivalent.records}
-        tables={costEquivalent.tables}
-        hours={costEquivalent.hours}
-        cost={costEquivalent.cost}
-        colors={colors}
-        title={status === 'complete' ? 'Analysis Complete' : 'Consultant Time Equivalent'}
-        subtitle={status === 'complete'
-          ? `Analyzed ${costEquivalent.records.toLocaleString()} records across ${costEquivalent.tables} tables`
-          : undefined}
-      />
-
-      {/* Error State */}
-      {error && (
-        <div style={{
-          marginTop: '1.5rem',
-          padding: '1rem 1.5rem',
-          background: 'rgba(153, 60, 68, 0.1)',
-          border: '1px solid rgba(153, 60, 68, 0.3)',
-          borderRadius: 8,
-          color: '#993c44',
-        }}>
-          {error}
-        </div>
-      )}
-
-      {/* Manual navigation (in case auto-redirect fails) */}
-      {status === 'complete' && (
-        <div style={{ textAlign: 'center', marginTop: '1.5rem' }}>
-          <button
-            onClick={() => navigate('/findings')}
-            style={{
-              padding: '0.75rem 1.5rem',
-              background: colors.primary,
-              border: 'none',
-              borderRadius: 8,
-              color: '#fff',
-              fontWeight: 600,
-              fontSize: '0.9rem',
-              cursor: 'pointer',
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-            }}
-          >
-            View Findings
-            <ArrowRight size={16} />
-          </button>
-        </div>
-      )}
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
-    </div>
+    </MainLayout>
   );
-}
+};
+
+export default ProcessingPage;
