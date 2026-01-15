@@ -53,21 +53,22 @@ const FLOW_STEPS = [
   { num: 7, label: 'Track Progress', paths: ['/progress'] },
 ];
 
-// Determine current step based on pathname
+// Determine current step based on pathname (for highlighting)
 const getCurrentStep = (pathname) => {
   if (pathname === '/projects/new') return 1;
-  if (pathname === '/upload') return 2;
+  if (pathname === '/upload' || pathname.startsWith('/data') || pathname.startsWith('/vacuum')) return 2;
   if (pathname.startsWith('/processing')) return 3;
   if (pathname === '/findings') return 4;
   if (pathname.startsWith('/findings/')) return 5;
-  if (pathname.startsWith('/build-playbook')) return 6;
+  if (pathname.startsWith('/build-playbook') || pathname === '/playbooks') return 6;
   if (pathname.startsWith('/progress')) return 7;
+  // Default - no step highlighted (dashboard, projects list, etc.)
   return null;
 };
 
-// Check if we should show step indicator
-const shouldShowStepIndicator = (pathname) => {
-  return getCurrentStep(pathname) !== null;
+// Always show step indicator (it's on every page in the mockup)
+const shouldShowStepIndicator = () => {
+  return true;
 };
 
 // XLR8 Logo SVG (from mockup)
