@@ -1,0 +1,40 @@
+/* LoadingSpinner Component Styles */
+
+.xlr8-spinner {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.xlr8-spinner__circle {
+  border-radius: 50%;
+  border-style: solid;
+  border-color: var(--border-medium);
+  border-top-color: var(--grass-green);
+  animation: xlr8-spin 0.8s linear infinite;
+}
+
+/* Sizes */
+.xlr8-spinner--sm .xlr8-spinner__circle {
+  width: 16px;
+  height: 16px;
+  border-width: 2px;
+}
+
+.xlr8-spinner--md .xlr8-spinner__circle {
+  width: 32px;
+  height: 32px;
+  border-width: 3px;
+}
+
+.xlr8-spinner--lg .xlr8-spinner__circle {
+  width: 48px;
+  height: 48px;
+  border-width: 4px;
+}
+
+@keyframes xlr8-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
