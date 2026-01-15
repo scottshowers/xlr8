@@ -58,6 +58,25 @@ const TRUTH_ICONS = {
   regulatory: { icon: AlertCircle, color: '#993c44' },
 };
 
+// File type icons and colors for upload differentiation
+const FILE_TYPE_CONFIG = {
+  xlsx: { bg: '#285390', label: 'XLS', icon: FileSpreadsheet },
+  xls: { bg: '#285390', label: 'XLS', icon: FileSpreadsheet },
+  csv: { bg: '#5f4282', label: 'CSV', icon: FileText },
+  pdf: { bg: '#993c44', label: 'PDF', icon: FileText },
+  docx: { bg: '#2766b1', label: 'DOC', icon: FileText },
+  doc: { bg: '#2766b1', label: 'DOC', icon: FileText },
+  txt: { bg: '#64748b', label: 'TXT', icon: FileText },
+  md: { bg: '#64748b', label: 'MD', icon: FileText },
+};
+
+// Helper to get file type info from filename
+const getFileTypeInfo = (filename) => {
+  if (!filename) return { bg: '#64748b', label: 'FILE', icon: FileText };
+  const ext = filename.split('.').pop()?.toLowerCase();
+  return FILE_TYPE_CONFIG[ext] || { bg: '#64748b', label: ext?.toUpperCase() || 'FILE', icon: FileText };
+};
+
 
 // ============================================================================
 // MAIN PAGE
@@ -629,11 +648,33 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
             transition: 'all 0.2s'
           }}
         >
-          <UploadIcon size={28} style={{ color: c.primary, marginBottom: '0.5rem' }} />
-          <p style={{ fontWeight: 600, color: c.text, margin: '0 0 0.25rem', fontSize: '0.9rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '0.75rem' }}>
+            <UploadIcon size={28} style={{ color: c.primary }} />
+          </div>
+          <p style={{ fontWeight: 600, color: c.text, margin: '0 0 0.5rem', fontSize: '0.9rem' }}>
             Drop files or click to browse
           </p>
-          <p style={{ fontSize: '0.75rem', color: c.textMuted, margin: 0 }}>PDF, Excel, Word, CSV</p>
+          {/* File type badges */}
+          <div style={{ display: 'flex', justifyContent: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+            {[
+              { label: 'XLS', bg: '#285390' },
+              { label: 'CSV', bg: '#5f4282' },
+              { label: 'PDF', bg: '#993c44' },
+              { label: 'DOC', bg: '#2766b1' },
+            ].map(ft => (
+              <span key={ft.label} style={{
+                fontSize: '0.65rem',
+                fontWeight: 700,
+                padding: '0.2rem 0.5rem',
+                borderRadius: 4,
+                background: `${ft.bg}15`,
+                color: ft.bg,
+                letterSpacing: '0.03em'
+              }}>
+                {ft.label}
+              </span>
+            ))}
+          </div>
         </div>
 
         {/* Active Uploads */}
@@ -647,26 +688,37 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
               <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} />
               Processing ({activeUploads.length})
             </label>
-            {activeUploads.map(upload => (
-              <div key={upload.id} style={{
-                display: 'flex', alignItems: 'center', gap: '0.75rem',
-                padding: '0.75rem', background: `${c.electricBlue}10`,
-                border: `1px solid ${c.electricBlue}30`, borderRadius: 8, marginBottom: '0.5rem'
-              }}>
-                <Loader2 size={16} style={{ color: c.electricBlue, animation: 'spin 1s linear infinite', flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.8rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {upload.filename}
+            {activeUploads.map(upload => {
+              const fileType = getFileTypeInfo(upload.filename);
+              return (
+                <div key={upload.id} style={{
+                  display: 'flex', alignItems: 'center', gap: '0.75rem',
+                  padding: '0.75rem', background: `${c.electricBlue}10`,
+                  border: `1px solid ${c.electricBlue}30`, borderRadius: 8, marginBottom: '0.5rem'
+                }}>
+                  {/* File type badge */}
+                  <div style={{
+                    width: 32, height: 32, borderRadius: 6,
+                    background: fileType.bg, color: '#fff',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: '0.6rem', fontWeight: 700, flexShrink: 0
+                  }}>
+                    {fileType.label}
                   </div>
-                  <div style={{ height: 4, background: c.border, borderRadius: 2, marginTop: '0.35rem', overflow: 'hidden' }}>
-                    <div style={{ height: '100%', width: `${upload.progress || 0}%`, background: c.electricBlue, borderRadius: 2, transition: 'width 0.3s' }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: '0.8rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {upload.filename}
+                    </div>
+                    <div style={{ height: 4, background: c.border, borderRadius: 2, marginTop: '0.35rem', overflow: 'hidden' }}>
+                      <div style={{ height: '100%', width: `${upload.progress || 0}%`, background: c.electricBlue, borderRadius: 2, transition: 'width 0.3s' }} />
+                    </div>
                   </div>
+                  <span style={{ fontSize: '0.7rem', color: c.electricBlue, fontWeight: 600 }}>
+                    {upload.status === 'uploading' ? `${upload.progress || 0}%` : 'Processing...'}
+                  </span>
                 </div>
-                <span style={{ fontSize: '0.7rem', color: c.electricBlue, fontWeight: 600 }}>
-                  {upload.status === 'uploading' ? `${upload.progress || 0}%` : 'Processing...'}
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -884,25 +936,63 @@ function FilesPanel({ c, project, targetScope }) {
           }}>
             <CheckCircle size={16} /> Just Added
           </div>
-          {recentlyCompleted.map(upload => (
-            <div key={upload.id} style={{
-              display: 'flex', alignItems: 'center', gap: '0.75rem',
-              padding: '0.65rem 1rem', borderBottom: `1px solid ${c.accent}15`
-            }}>
-              <CheckCircle size={16} style={{ color: c.accent }} />
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {upload.filename}
+          {recentlyCompleted.map(upload => {
+            const fileType = getFileTypeInfo(upload.filename);
+            return (
+              <div key={upload.id} style={{
+                display: 'flex', alignItems: 'center', gap: '0.75rem',
+                padding: '0.65rem 1rem', borderBottom: `1px solid ${c.accent}15`
+              }}>
+                {/* File type badge */}
+                <div style={{
+                  width: 28, height: 28, borderRadius: 5,
+                  background: fileType.bg, color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  fontSize: '0.55rem', fontWeight: 700, flexShrink: 0
+                }}>
+                  {fileType.label}
                 </div>
-                <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                  {upload.result?.tables_created 
-                    ? `${upload.result.tables_created} table(s), ${upload.result.total_rows?.toLocaleString() || 0} rows`
-                    : upload.result?.chunks_created ? `${upload.result.chunks_created} chunks` : 'Processed'}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.85rem', fontWeight: 500, color: c.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {upload.filename}
+                  </div>
+                  <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                    {upload.result?.tables_created 
+                      ? `${upload.result.tables_created} table(s), ${upload.result.total_rows?.toLocaleString() || 0} rows`
+                      : upload.result?.chunks_created ? `${upload.result.chunks_created} chunks` : 'Processed'}
+                  </div>
                 </div>
+                <CheckCircle size={16} style={{ color: c.accent }} />
               </div>
-              <span style={{ fontSize: '0.75rem', color: c.accent }}>✓</span>
-            </div>
-          ))}
+            );
+          })}
+          {/* Start Analysis CTA */}
+          <div style={{ padding: '0.75rem 1rem', borderTop: `1px solid ${c.accent}20` }}>
+            <Link to="/workspace" style={{ textDecoration: 'none' }}>
+              <button style={{
+                width: '100%',
+                padding: '0.65rem 1rem',
+                background: c.primary,
+                color: '#fff',
+                border: 'none',
+                borderRadius: 6,
+                fontWeight: 600,
+                fontSize: '0.85rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '0.5rem',
+                transition: 'background 0.2s'
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.background = '#6b9b5a'}
+              onMouseLeave={(e) => e.currentTarget.style.background = c.primary}
+              >
+                <Sparkles size={16} />
+                Start Analyzing
+              </button>
+            </Link>
+          </div>
         </div>
       )}
 
