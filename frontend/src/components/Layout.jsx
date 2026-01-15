@@ -108,7 +108,7 @@ const XLR8Logo = () => (
   </svg>
 );
 
-// Step Indicator Component - shows at very top, outside the frame
+// Step Indicator Component - floats on background, no card wrapper
 function StepIndicator({ currentStep }) {
   return (
     <div style={{
@@ -116,11 +116,7 @@ function StepIndicator({ currentStep }) {
       alignItems: 'center',
       justifyContent: 'center',
       gap: 8,
-      padding: '12px 24px',
-      background: '#ffffff',
-      border: '1px solid #e1e8ed',
-      borderRadius: 12,
-      boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+      padding: '12px 0',
     }}>
       {FLOW_STEPS.map((step, index) => {
         const isActive = step.num === currentStep;
