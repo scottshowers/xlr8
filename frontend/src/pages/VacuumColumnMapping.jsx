@@ -16,23 +16,24 @@ import { useSearchParams, useNavigate } from 'react-router-dom';
 import ColumnSplitter from '../components/ColumnSplitter';
 import { useTheme } from '../context/ThemeContext';
 import { ClipboardList, BarChart3 } from 'lucide-react';
+import '../styles/vacuum.css';
 
 const API_BASE = '/api';
 
 // Theme-aware colors
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  primary: '#83b16d',
+const getColors = () => ({
+  bg: 'var(--vacuum-bg-light)',
+  card: 'white',
+  cardBorder: '#e8ecf1',
+  text: 'var(--vacuum-text-primary)',
+  textMuted: 'var(--vacuum-text-muted)',
+  primary: 'var(--vacuum-primary)',
   blue: '#285390',
   amber: '#d97706',
   red: '#993c44',
   green: '#5a8a5a',
   purple: '#6b5a7a',
-  divider: dark ? '#2d3548' : '#e8ecf1',
+  divider: '#e8ecf1',
 });
 
 // Section definitions with muted colors
