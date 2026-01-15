@@ -243,6 +243,8 @@ export default function ProjectsPage() {
     domains: [],
     functional_areas: [],
     engagement_type: '',
+    target_go_live: '',
+    lead_name: '',
     notes: '',
     playbooks: [],
   });
@@ -324,6 +326,8 @@ export default function ProjectsPage() {
           return area ? { domain: area.domain_code, area: fa } : { area: fa };
         }),
         engagement_type: formData.engagement_type,
+        target_go_live: formData.target_go_live || null,
+        lead_name: formData.lead_name || null,
       };
       
       if (editingProject) {
@@ -347,6 +351,8 @@ export default function ProjectsPage() {
       domains: [],
       functional_areas: [],
       engagement_type: '',
+      target_go_live: '',
+      lead_name: '',
       notes: '',
       playbooks: [],
     });
@@ -361,6 +367,8 @@ export default function ProjectsPage() {
       domains: project.domains || [],
       functional_areas: (project.functional_areas || []).map(fa => fa.area || fa.code || fa),
       engagement_type: project.engagement_type || '',
+      target_go_live: project.target_go_live || '',
+      lead_name: project.lead_name || '',
       notes: project.notes || '',
       playbooks: project.playbooks || [],
     });
@@ -641,6 +649,55 @@ export default function ProjectsPage() {
                       <option key={t.code} value={t.code}>{t.name}</option>
                     ))}
                   </select>
+                </div>
+              </div>
+              
+              {/* Row 2.5: Go-Live and Project Lead */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '1rem', marginBottom: '1rem' }}>
+                <div>
+                  <Tooltip title="Target Go-Live" detail="The planned go-live date for this implementation. Used for timeline tracking and milestone planning." action="Format: YYYY-MM-DD">
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                      Target Go-Live
+                    </label>
+                  </Tooltip>
+                  <input
+                    type="date"
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem',
+                      border: `1px solid ${colors.inputBorder}`,
+                      borderRadius: 6,
+                      fontSize: '0.85rem',
+                      background: colors.card,
+                      color: colors.text,
+                      boxSizing: 'border-box',
+                      height: '42px',
+                    }}
+                    value={formData.target_go_live}
+                    onChange={(e) => setFormData({ ...formData, target_go_live: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <Tooltip title="Project Lead" detail="The primary consultant or project manager responsible for this engagement. Shown in project listings and reports." action="Enter name or email">
+                    <label style={{ display: 'block', marginBottom: '0.4rem', fontSize: '0.8rem', fontWeight: 600, color: colors.text, cursor: 'help' }}>
+                      Project Lead
+                    </label>
+                  </Tooltip>
+                  <input
+                    style={{
+                      width: '100%',
+                      padding: '0.6rem',
+                      border: `1px solid ${colors.inputBorder}`,
+                      borderRadius: 6,
+                      fontSize: '0.85rem',
+                      background: colors.card,
+                      color: colors.text,
+                      boxSizing: 'border-box',
+                    }}
+                    value={formData.lead_name}
+                    onChange={(e) => setFormData({ ...formData, lead_name: e.target.value })}
+                    placeholder="e.g., John Smith"
+                  />
                 </div>
               </div>
               
