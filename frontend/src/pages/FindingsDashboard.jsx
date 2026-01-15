@@ -127,80 +127,238 @@ function CostEquivalentBanner({ costData, colors }) {
 }
 
 // =============================================================================
-// SUMMARY STATS
+// SUMMARY STATS (Mockup Screen 4 style - 4 column grid)
 // =============================================================================
 
-function SummaryStats({ summary, colors }) {
+function SummaryStats({ summary, colors, dataQualityScore = 94 }) {
   const stats = [
-    { 
-      label: 'Critical', 
-      value: summary.critical, 
-      color: colors.critical,
-      bg: colors.criticalBg,
-      icon: AlertTriangle 
+    {
+      label: 'Critical Issues',
+      value: summary.critical,
+      color: '#993c44',  // scarlet
     },
-    { 
-      label: 'Warnings', 
-      value: summary.warning, 
-      color: colors.warning,
-      bg: colors.warningBg,
-      icon: AlertCircle 
+    {
+      label: 'Warnings',
+      value: summary.warning,
+      color: '#d97706',  // amber
     },
-    { 
-      label: 'Info', 
-      value: summary.info, 
-      color: colors.info,
-      bg: colors.infoBg,
-      icon: Info 
+    {
+      label: 'Recommendations',
+      value: summary.info,
+      color: '#285390',  // accent blue
+    },
+    {
+      label: 'Data Quality',
+      value: `${dataQualityScore}%`,
+      color: '#83b16d',  // grass green
     },
   ];
-  
+
   return (
     <div style={{
       display: 'grid',
-      gridTemplateColumns: 'repeat(3, 1fr)',
-      gap: '1rem',
-      marginBottom: '1.5rem',
+      gridTemplateColumns: 'repeat(4, 1fr)',
+      gap: '1.25rem',
+      marginBottom: '2rem',
     }}>
-      {stats.map(stat => {
-        const Icon = stat.icon;
-        return (
-          <div key={stat.label} style={{
-            background: stat.bg,
-            border: `1px solid ${stat.color}30`,
-            borderRadius: 10,
-            padding: '1rem 1.25rem',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
+      {stats.map(stat => (
+        <div key={stat.label} style={{
+          background: colors.card,
+          border: `1px solid ${colors.border}`,
+          borderRadius: 12,
+          padding: '1.25rem',
+          textAlign: 'center',
+        }}>
+          <div style={{
+            fontFamily: "'Sora', sans-serif",
+            fontSize: '2.25rem',
+            fontWeight: 800,
+            color: stat.color,
+            lineHeight: 1,
+            marginBottom: '0.25rem'
           }}>
-            <div style={{
-              width: 40,
-              height: 40,
-              borderRadius: 8,
-              background: `${stat.color}20`,
-              display: 'flex',
+            {stat.value}
+          </div>
+          <div style={{
+            fontSize: '0.7rem',
+            color: colors.textMuted,
+            textTransform: 'uppercase',
+            letterSpacing: '0.05em',
+            fontWeight: 600,
+          }}>
+            {stat.label}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// =============================================================================
+// FINDINGS TABLE (Mockup Screen 4 style - Table rows)
+// =============================================================================
+
+function FindingsTable({ findings, colors, onClickFinding, selectedIds, onToggleSelect, navigate }) {
+  const getSeveritySymbol = (severity) => {
+    switch (severity) {
+      case 'critical': return { symbol: '!', bg: '#993c44', color: '#fff' };
+      case 'warning': return { symbol: '!', bg: '#d97706', color: '#fff' };
+      default: return { symbol: 'i', bg: '#285390', color: '#fff' };
+    }
+  };
+
+  const getCategoryLabel = (category) => {
+    const labels = {
+      data_quality: 'Data Quality',
+      configuration: 'Configuration',
+      compliance: 'Compliance',
+      coverage: 'Coverage',
+      pattern: 'Pattern',
+    };
+    return labels[category] || category;
+  };
+
+  const getImpactLabel = (finding) => {
+    if (finding.impact_value) return finding.impact_value;
+    if (finding.severity === 'critical') return 'High Risk';
+    if (finding.severity === 'warning') return 'Medium';
+    return 'Review';
+  };
+
+  return (
+    <div style={{
+      background: colors.card,
+      border: `1px solid ${colors.border}`,
+      borderRadius: 12,
+      overflow: 'hidden',
+    }}>
+      {/* Table Header */}
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: '40px 40px 1fr 120px 100px 80px',
+        gap: '1rem',
+        padding: '0.75rem 1.25rem',
+        background: colors.bg,
+        borderBottom: `1px solid ${colors.border}`,
+        fontSize: '0.7rem',
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: colors.textMuted,
+      }}>
+        <div></div>
+        <div></div>
+        <div>Finding</div>
+        <div>Category</div>
+        <div>Impact</div>
+        <div>Action</div>
+      </div>
+
+      {/* Table Rows */}
+      {findings.map((finding, index) => {
+        const severity = getSeveritySymbol(finding.severity);
+        const isSelected = selectedIds.has(finding.id);
+
+        return (
+          <div
+            key={finding.id}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '40px 40px 1fr 120px 100px 80px',
+              gap: '1rem',
+              padding: '1rem 1.25rem',
+              borderBottom: index < findings.length - 1 ? `1px solid ${colors.border}` : 'none',
               alignItems: 'center',
-              justifyContent: 'center',
-            }}>
-              <Icon size={20} color={stat.color} />
-            </div>
+              cursor: 'pointer',
+              transition: 'background 0.15s',
+              background: isSelected ? `${colors.primary}08` : 'transparent',
+            }}
+            onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = colors.bg; }}
+            onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+          >
+            {/* Checkbox */}
             <div>
-              <div style={{ 
-                fontSize: '1.5rem', 
-                fontWeight: 700, 
-                color: stat.color,
-                lineHeight: 1
+              <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => onToggleSelect(finding.id)}
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  width: 18,
+                  height: 18,
+                  accentColor: colors.primary,
+                  cursor: 'pointer',
+                }}
+              />
+            </div>
+
+            {/* Severity Icon */}
+            <div
+              style={{
+                width: 32,
+                height: 32,
+                borderRadius: 8,
+                background: severity.bg,
+                color: severity.color,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.85rem',
+                fontWeight: 700,
+              }}
+            >
+              {severity.symbol}
+            </div>
+
+            {/* Finding Title/Subtitle */}
+            <div onClick={() => onClickFinding(finding)}>
+              <div style={{
+                fontSize: '0.9rem',
+                fontWeight: 600,
+                color: colors.text,
+                lineHeight: 1.3,
               }}>
-                {stat.value}
+                {finding.title}
               </div>
-              <div style={{ 
-                fontSize: '0.75rem', 
-                color: colors.textMuted,
-                marginTop: '0.15rem'
-              }}>
-                {stat.label}
-              </div>
+              {finding.subtitle && (
+                <div style={{
+                  fontSize: '0.8rem',
+                  color: colors.textMuted,
+                  marginTop: '0.15rem',
+                }}>
+                  {finding.subtitle}
+                </div>
+              )}
+            </div>
+
+            {/* Category */}
+            <div style={{
+              fontSize: '0.8rem',
+              color: colors.textMuted,
+            }}>
+              {getCategoryLabel(finding.category)}
+            </div>
+
+            {/* Impact */}
+            <div style={{
+              fontSize: '0.8rem',
+              fontWeight: 500,
+              color: finding.severity === 'critical' ? '#993c44' : colors.text,
+            }}>
+              {getImpactLabel(finding)}
+            </div>
+
+            {/* Action */}
+            <div
+              onClick={() => navigate(`/findings/${finding.id}`, { state: { finding } })}
+              style={{
+                fontSize: '0.85rem',
+                fontWeight: 600,
+                color: colors.primary,
+                cursor: 'pointer',
+              }}
+            >
+              View →
             </div>
           </div>
         );
@@ -210,7 +368,7 @@ function SummaryStats({ summary, colors }) {
 }
 
 // =============================================================================
-// FINDING CARD
+// FINDING CARD (Legacy - keeping for compatibility)
 // =============================================================================
 
 function FindingCard({ finding, colors, onClick, selected, onToggleSelect }) {
@@ -1025,20 +1183,16 @@ export default function FindingsDashboard() {
             </div>
           )}
           
-          {/* Findings List */}
+          {/* Findings List (Mockup Table Style) */}
           {filteredFindings.length > 0 ? (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {filteredFindings.map(finding => (
-                <FindingCard
-                  key={finding.id}
-                  finding={finding}
-                  colors={colors}
-                  onClick={() => setSelectedFinding(finding)}
-                  selected={selectedIds.has(finding.id)}
-                  onToggleSelect={toggleFindingSelection}
-                />
-              ))}
-            </div>
+            <FindingsTable
+              findings={filteredFindings}
+              colors={colors}
+              onClickFinding={(finding) => setSelectedFinding(finding)}
+              selectedIds={selectedIds}
+              onToggleSelect={toggleFindingSelection}
+              navigate={navigate}
+            />
           ) : (
             <EmptyState colors={colors} hasProject={!!activeProject} />
           )}

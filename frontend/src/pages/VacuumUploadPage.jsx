@@ -4,8 +4,9 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { 
-  Upload, FileText, Users, DollarSign, CheckCircle, XCircle, 
+import { useNavigate } from 'react-router-dom';
+import {
+  Upload, FileText, Users, DollarSign, CheckCircle, XCircle,
   Loader2, Trash2, Eye, AlertTriangle, ChevronDown, ChevronRight,
   Shield, Cloud, Lock, Download, BarChart3, Wand2,
   Maximize2, Minimize2
@@ -43,6 +44,7 @@ const getColors = (dark) => ({
 });
 
 export default function VacuumUploadPage() {
+  const navigate = useNavigate();
   const { activeProject } = useProject();
   const { darkMode } = useTheme();
   const colors = getColors(darkMode);
@@ -131,6 +133,8 @@ export default function VacuumUploadPage() {
       if (data.job_id) {
         setJobId(data.job_id);
         setJobStatus({ status: 'processing', progress: 0, message: 'Starting...' });
+        // Navigate to processing page for better UX (Phase 4A.3)
+        navigate(`/processing/${data.job_id}`);
       } else {
         setResult(data); setUploading(false); loadExtracts();
       }
