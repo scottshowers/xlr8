@@ -21,6 +21,7 @@ import {
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
 import { PageHeader } from '../components/ui';
+import StepIndicator from '../components/StepIndicator';
 import api from '../services/api';
 
 // =============================================================================
@@ -1058,15 +1059,17 @@ export default function FindingsDashboard() {
   }, [findings, severityFilter, categoryFilter]);
   
   return (
-    <div>
-      <PageHeader
-        icon={AlertTriangle}
-        title="Findings"
-        subtitle={activeProject 
-          ? `Analysis results for ${activeProject.customer || activeProject.name}`
-          : "Auto-surfaced analysis results"
-        }
-      />
+    <>
+      <StepIndicator currentStep={4} />
+      <div>
+        <PageHeader
+          icon={AlertTriangle}
+          title="Findings"
+          subtitle={activeProject
+            ? `Analysis results for ${activeProject.customer || activeProject.name}`
+            : "Auto-surfaced analysis results"
+          }
+        />
       
       {/* Cost Equivalent Banner */}
       {costEquivalent && (
@@ -1268,6 +1271,7 @@ export default function FindingsDashboard() {
           to { transform: rotate(360deg); }
         }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 }

@@ -20,6 +20,7 @@ import { useNavigate, useParams, useLocation } from 'react-router-dom';
 import { Loader2, CheckCircle, Circle, ArrowRight } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { useTheme } from '../context/ThemeContext';
+import StepIndicator from '../components/StepIndicator';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -302,9 +303,11 @@ export default function ProcessingPage() {
   };
 
   return (
-    <div style={{ padding: '2rem', maxWidth: 800, margin: '0 auto' }}>
-      {/* Page Header */}
-      <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
+    <>
+      <StepIndicator currentStep={3} />
+      <div style={{ padding: '2rem', maxWidth: 800, margin: '0 auto' }}>
+        {/* Page Header */}
+        <div style={{ marginBottom: '2rem', textAlign: 'center' }}>
         <h1 style={{
           fontFamily: "'Sora', sans-serif",
           fontSize: '1.75rem',
@@ -457,6 +460,7 @@ export default function ProcessingPage() {
           to { transform: rotate(360deg); }
         }
       `}</style>
-    </div>
+      </div>
+    </>
   );
 }
