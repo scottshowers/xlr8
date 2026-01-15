@@ -17,7 +17,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
-import StepIndicator from '../components/StepIndicator';
 
 // System options
 const SYSTEMS = [
@@ -86,11 +85,9 @@ export default function CreateProjectPage() {
   };
 
   return (
-    <>
-      <StepIndicator currentStep={1} />
-      <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
-        {/* Page Header */}
-        <div className="xlr8-page-header">
+    <div style={{ padding: 32, maxWidth: 1400, margin: '0 auto' }}>
+      {/* Page Header */}
+      <div className="xlr8-page-header">
         <h1>Create New Project</h1>
         <p className="subtitle">Start a new analysis engagement</p>
       </div>
@@ -223,6 +220,5 @@ export default function CreateProjectPage() {
         </form>
       </div>
     </div>
-    </>
   );
 }
