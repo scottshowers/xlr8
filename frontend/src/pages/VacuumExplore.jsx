@@ -15,34 +15,33 @@ import {
   ClipboardList, BarChart3, Folder, Search, BookOpen, CheckCircle,
   User, DollarSign, Building, HelpCircle
 } from 'lucide-react';
+import '../styles/vacuum.css';
 
 // API base - adjust for your environment
 const API_BASE = '/api';
 
 // Theme-aware colors
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f5f7fa',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e8ecf1',
-  text: dark ? '#e8eaed' : '#2a3441',
-  textMuted: dark ? '#8b95a5' : '#6b7280',
-  textLight: dark ? '#5f6a7d' : '#9ca3af',
-  primary: '#83b16d',
-  primaryLight: dark ? 'rgba(90, 138, 74, 0.15)' : 'rgba(90, 138, 74, 0.1)',
+const getColors = () => ({
+  primary: 'var(--vacuum-primary)',
+  primaryLight: 'rgba(90, 138, 74, 0.1)',
+  bg: 'var(--vacuum-bg-light)',
+  text: 'var(--vacuum-text-primary)',
+  textMuted: 'var(--vacuum-text-muted)',
+  textLight: '#9ca3af',
   blue: '#285390',
-  blueLight: dark ? 'rgba(74, 107, 138, 0.15)' : 'rgba(74, 107, 138, 0.1)',
+  blueLight: 'rgba(74, 107, 138, 0.1)',
   amber: '#d97706',
-  amberLight: dark ? 'rgba(138, 107, 74, 0.15)' : 'rgba(138, 107, 74, 0.1)',
+  amberLight: 'rgba(138, 107, 74, 0.1)',
   red: '#993c44',
-  redLight: dark ? 'rgba(138, 74, 74, 0.15)' : 'rgba(138, 74, 74, 0.1)',
+  redLight: 'rgba(138, 74, 74, 0.1)',
   green: '#5a8a5a',
-  greenLight: dark ? 'rgba(90, 138, 90, 0.15)' : 'rgba(90, 138, 90, 0.1)',
+  greenLight: 'rgba(90, 138, 90, 0.1)',
   purple: '#6b5a7a',
-  purpleLight: dark ? 'rgba(107, 90, 122, 0.15)' : 'rgba(107, 90, 122, 0.1)',
-  divider: dark ? '#2d3548' : '#e8ecf1',
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
-  selected: dark ? 'rgba(90, 138, 74, 0.2)' : 'rgba(90, 138, 74, 0.1)',
-  selectedBorder: '#83b16d',
+  purpleLight: 'rgba(107, 90, 122, 0.1)',
+  divider: '#e8ecf1',
+  inputBg: '#f8fafc',
+  selected: 'rgba(90, 138, 74, 0.1)',
+  selectedBorder: '#83b16d'
 });
 
 // Confidence thresholds for visual indicators
