@@ -6,7 +6,7 @@
  * 
  * Flow: [CREATE PROJECT] → Upload → Select Playbooks → Analysis → ...
  * 
- * Updated: January 15, 2026 - Phase 4A UX Overhaul (proper rebuild)
+ * Updated: January 16, 2026 - Phase 4A UX Overhaul
  */
 
 import React, { useState } from 'react';
@@ -97,166 +97,164 @@ const CreateProjectPage = () => {
   const selectedEngagement = ENGAGEMENT_TYPES.find(e => e.value === formData.engagement_type);
 
   return (
-    
-      <div className="create-project">
-        <PageHeader
-          title="Create New Project"
-          subtitle="Step 1 of 8 • Start a new analysis engagement"
-        />
+    <div className="create-project">
+      <PageHeader
+        title="Create New Project"
+        subtitle="Step 1 of 8 • Start a new analysis engagement"
+      />
 
-        <div className="create-project__content">
-          {/* Main Form Card */}
-          <Card className="create-project__form-card">
-            <CardHeader>
-              <CardTitle icon="📋">Project Details</CardTitle>
-            </CardHeader>
+      <div className="create-project__content">
+        {/* Main Form Card */}
+        <Card className="create-project__form-card">
+          <CardHeader>
+            <CardTitle icon="📋">Project Details</CardTitle>
+          </CardHeader>
 
-            <form onSubmit={handleSubmit} className="create-project__form">
-              {/* Client Name */}
-              <div className="form-group">
-                <label htmlFor="customer">Client Name</label>
+          <form onSubmit={handleSubmit} className="create-project__form">
+            {/* Client Name */}
+            <div className="xlr8-form-group">
+              <label htmlFor="customer">Client Name</label>
+              <input
+                id="customer"
+                type="text"
+                value={formData.customer}
+                onChange={(e) => handleChange('customer', e.target.value)}
+                placeholder="e.g., Acme Corporation"
+                autoFocus
+              />
+            </div>
+
+            {/* System & Engagement Type Row */}
+            <div className="xlr8-form-row">
+              <div className="xlr8-form-group">
+                <label htmlFor="system_type">System / Platform</label>
+                <select
+                  id="system_type"
+                  value={formData.system_type}
+                  onChange={(e) => handleChange('system_type', e.target.value)}
+                >
+                  {SYSTEMS.map(sys => (
+                    <option key={sys.value} value={sys.value}>{sys.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="xlr8-form-group">
+                <label htmlFor="engagement_type">Engagement Type</label>
+                <select
+                  id="engagement_type"
+                  value={formData.engagement_type}
+                  onChange={(e) => handleChange('engagement_type', e.target.value)}
+                >
+                  {ENGAGEMENT_TYPES.map(type => (
+                    <option key={type.value} value={type.value}>{type.label}</option>
+                  ))}
+                </select>
+                {selectedEngagement && (
+                  <span className="xlr8-form-hint">{selectedEngagement.description}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Go-Live & Project Lead Row */}
+            <div className="xlr8-form-row">
+              <div className="xlr8-form-group">
+                <label htmlFor="target_go_live">Target Go-Live</label>
                 <input
-                  id="customer"
+                  id="target_go_live"
+                  type="date"
+                  value={formData.target_go_live}
+                  onChange={(e) => handleChange('target_go_live', e.target.value)}
+                />
+                <span className="xlr8-form-hint">Optional - helps prioritize work</span>
+              </div>
+
+              <div className="xlr8-form-group">
+                <label htmlFor="project_lead">Project Lead</label>
+                <input
+                  id="project_lead"
                   type="text"
-                  value={formData.customer}
-                  onChange={(e) => handleChange('customer', e.target.value)}
-                  placeholder="e.g., Acme Corporation"
-                  autoFocus
+                  value={formData.project_lead}
+                  onChange={(e) => handleChange('project_lead', e.target.value)}
+                  placeholder="Lead consultant name"
                 />
               </div>
+            </div>
 
-              {/* System & Engagement Type Row */}
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="system_type">System / Platform</label>
-                  <select
-                    id="system_type"
-                    value={formData.system_type}
-                    onChange={(e) => handleChange('system_type', e.target.value)}
-                  >
-                    {SYSTEMS.map(sys => (
-                      <option key={sys.value} value={sys.value}>{sys.label}</option>
-                    ))}
-                  </select>
-                </div>
+            {/* Description (optional) */}
+            <div className="xlr8-form-group">
+              <label htmlFor="description">Notes (Optional)</label>
+              <textarea
+                id="description"
+                value={formData.description}
+                onChange={(e) => handleChange('description', e.target.value)}
+                placeholder="Any additional context about this engagement..."
+                rows={3}
+              />
+            </div>
 
-                <div className="form-group">
-                  <label htmlFor="engagement_type">Engagement Type</label>
-                  <select
-                    id="engagement_type"
-                    value={formData.engagement_type}
-                    onChange={(e) => handleChange('engagement_type', e.target.value)}
-                  >
-                    {ENGAGEMENT_TYPES.map(type => (
-                      <option key={type.value} value={type.value}>{type.label}</option>
-                    ))}
-                  </select>
-                  {selectedEngagement && (
-                    <span className="form-hint">{selectedEngagement.description}</span>
-                  )}
-                </div>
+            {/* Error Message */}
+            {error && (
+              <div className="create-project__error">
+                <span>⚠️</span>
+                {error}
               </div>
+            )}
 
-              {/* Go-Live & Project Lead Row */}
-              <div className="form-row">
-                <div className="form-group">
-                  <label htmlFor="target_go_live">Target Go-Live</label>
-                  <input
-                    id="target_go_live"
-                    type="date"
-                    value={formData.target_go_live}
-                    onChange={(e) => handleChange('target_go_live', e.target.value)}
-                  />
-                  <span className="form-hint">Optional - helps prioritize work</span>
-                </div>
+            {/* Actions */}
+            <div className="create-project__actions">
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={saving}
+              >
+                {saving ? 'Creating...' : 'Create Project →'}
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => navigate('/projects')}
+              >
+                Cancel
+              </Button>
+            </div>
+          </form>
+        </Card>
 
-                <div className="form-group">
-                  <label htmlFor="project_lead">Project Lead</label>
-                  <input
-                    id="project_lead"
-                    type="text"
-                    value={formData.project_lead}
-                    onChange={(e) => handleChange('project_lead', e.target.value)}
-                    placeholder="Lead consultant name"
-                  />
-                </div>
-              </div>
-
-              {/* Description (optional) */}
-              <div className="form-group">
-                <label htmlFor="description">Notes (Optional)</label>
-                <textarea
-                  id="description"
-                  value={formData.description}
-                  onChange={(e) => handleChange('description', e.target.value)}
-                  placeholder="Any additional context about this engagement..."
-                  rows={3}
-                />
-              </div>
-
-              {/* Error Message */}
-              {error && (
-                <div className="create-project__error">
-                  <span className="error-icon">⚠️</span>
-                  {error}
-                </div>
-              )}
-
-              {/* Actions */}
-              <div className="create-project__actions">
-                <Button
-                  type="submit"
-                  variant="primary"
-                  disabled={saving}
-                >
-                  {saving ? 'Creating...' : 'Create Project →'}
-                </Button>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  onClick={() => navigate('/projects')}
-                >
-                  Cancel
-                </Button>
-              </div>
-            </form>
+        {/* Help Sidebar */}
+        <div className="create-project__sidebar">
+          <Card className="create-project__help-card">
+            <CardHeader>
+              <CardTitle icon="💡">Quick Tips</CardTitle>
+            </CardHeader>
+            <ul className="create-project__help-list">
+              <li>
+                <strong>Client Name</strong> - Use the legal entity name for consistency across projects
+              </li>
+              <li>
+                <strong>System</strong> - Select the HCM platform being implemented or assessed
+              </li>
+              <li>
+                <strong>Engagement Type</strong> - This determines which playbooks are recommended
+              </li>
+              <li>
+                <strong>Go-Live Date</strong> - Helps XLR8 prioritize critical findings
+              </li>
+            </ul>
           </Card>
 
-          {/* Help Sidebar */}
-          <div className="create-project__sidebar">
-            <Card className="create-project__help-card">
-              <CardHeader>
-                <CardTitle icon="💡">Quick Tips</CardTitle>
-              </CardHeader>
-              <ul className="help-list">
-                <li>
-                  <strong>Client Name</strong> - Use the legal entity name for consistency across projects
-                </li>
-                <li>
-                  <strong>System</strong> - Select the HCM platform being implemented or assessed
-                </li>
-                <li>
-                  <strong>Engagement Type</strong> - This determines which playbooks are recommended
-                </li>
-                <li>
-                  <strong>Go-Live Date</strong> - Helps XLR8 prioritize critical findings
-                </li>
-              </ul>
-            </Card>
-
-            <Card className="create-project__next-card">
-              <div className="next-step-preview">
-                <div className="next-step-label">Next Step</div>
-                <div className="next-step-title">📤 Upload Data</div>
-                <div className="next-step-description">
-                  After creating the project, you'll upload customer data files for analysis.
-                </div>
+          <Card className="create-project__next-card">
+            <div className="create-project__next-preview">
+              <div className="create-project__next-label">Next Step</div>
+              <div className="create-project__next-title">📤 Upload Data</div>
+              <div className="create-project__next-description">
+                After creating the project, you'll upload customer data files for analysis.
               </div>
-            </Card>
-          </div>
+            </div>
+          </Card>
         </div>
       </div>
-    
+    </div>
   );
 };
 

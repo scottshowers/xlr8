@@ -1,16 +1,19 @@
+/**
+ * MissionControl.jsx - Cross-Project Review Queue
+ * ================================================
+ * 
+ * Hub for consultants to review findings across all active projects.
+ * Shows stats, review queue with batch actions, and projects needing work.
+ * 
+ * Phase 4A UX Overhaul - January 16, 2026
+ */
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-
-/**
- * Mission Control Page
- * 
- * Cross-project review queue hub for consultants
- * Shows all findings awaiting review across all active projects
- */
 
 const MissionControl = () => {
   const navigate = useNavigate();
@@ -178,249 +181,247 @@ const MissionControl = () => {
 
   if (loading) {
     return (
-      
+      <div className="mission-control">
         <div className="mission-control-loading">
           <div className="spinner" />
           <p>Loading Mission Control...</p>
         </div>
-      
+      </div>
     );
   }
 
   return (
-    
-      <div className="mission-control">
-        {/* Page Header */}
-        <PageHeader
-          title="Mission Control"
-          subtitle={`Cross-project review queue • ${stats.awaiting} findings awaiting approval across ${projects.length} active projects`}
-          actions={
-            <>
-              <Button variant="secondary" icon="📥">
-                Export Report
-              </Button>
-              <Button variant="primary" icon="✨">
-                Generate Report
-              </Button>
-            </>
-          }
-        />
+    <div className="mission-control">
+      {/* Page Header */}
+      <PageHeader
+        title="Mission Control"
+        subtitle={`Cross-project review queue • ${stats.awaiting} findings awaiting approval across ${projects.length} active projects`}
+        actions={
+          <>
+            <Button variant="secondary" icon="📥">
+              Export Report
+            </Button>
+            <Button variant="primary" icon="✨">
+              Generate Report
+            </Button>
+          </>
+        }
+      />
 
-        {/* Stats Grid */}
-        <div className="mission-control__stats">
-          <Card className="mission-control__stat-card">
-            <div className="stat-icon stat-icon--critical">⏳</div>
-            <div className="stat-content">
-              <div className="stat-label">Awaiting Review</div>
-              <div className="stat-value stat-value--critical">{stats.awaiting}</div>
-              <div className="stat-sublabel">Across {projects.length} projects</div>
-              <div className="stat-trend stat-trend--up">↑ 5 from yesterday</div>
-            </div>
-          </Card>
-
-          <Card className="mission-control__stat-card">
-            <div className="stat-icon stat-icon--critical">🔴</div>
-            <div className="stat-content">
-              <div className="stat-label">Critical Findings</div>
-              <div className="stat-value stat-value--critical">{stats.critical}</div>
-              <div className="stat-sublabel">Require immediate attention</div>
-              <div className="stat-trend stat-trend--up">↑ 3 new today</div>
-            </div>
-          </Card>
-
-          <Card className="mission-control__stat-card">
-            <div className="stat-icon stat-icon--warning">📝</div>
-            <div className="stat-content">
-              <div className="stat-label">In Progress</div>
-              <div className="stat-value stat-value--warning">{stats.inProgress}</div>
-              <div className="stat-sublabel">Currently reviewing</div>
-              <div className="stat-trend stat-trend--neutral">→ No change</div>
-            </div>
-          </Card>
-
-          <Card className="mission-control__stat-card">
-            <div className="stat-icon stat-icon--success">✅</div>
-            <div className="stat-content">
-              <div className="stat-label">Approved Today</div>
-              <div className="stat-value stat-value--success">{stats.approved}</div>
-              <div className="stat-sublabel">Ready for export</div>
-              <div className="stat-trend stat-trend--up">↑ 12 since morning</div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Review Queue */}
-        <Card>
-          <CardHeader>
-            <CardTitle icon="🎯">Cross-Project Review Queue</CardTitle>
-            <div className="mission-control__filters">
-              <Button 
-                variant={activeFilter === 'all' ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveFilter('all')}
-              >
-                All Findings
-              </Button>
-              <Button 
-                variant={activeFilter === 'critical' ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveFilter('critical')}
-              >
-                Critical
-              </Button>
-              <Button 
-                variant={activeFilter === 'warning' ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveFilter('warning')}
-              >
-                Warning
-              </Button>
-              <Button 
-                variant={activeFilter === 'info' ? 'primary' : 'ghost'}
-                size="sm"
-                onClick={() => setActiveFilter('info')}
-              >
-                Info
-              </Button>
-            </div>
-          </CardHeader>
-
-          {/* Batch Actions */}
-          {selectedFindings.size > 0 && (
-            <div className="mission-control__batch-actions">
-              <Button 
-                variant="primary" 
-                size="sm"
-                onClick={handleBatchApprove}
-              >
-                ✓ Approve Selected ({selectedFindings.size})
-              </Button>
-              <Button 
-                variant="secondary" 
-                size="sm"
-                onClick={handleBatchReject}
-              >
-                ✗ Reject Selected
-              </Button>
-              <Button 
-                variant="secondary" 
-                size="sm"
-                onClick={handleMarkFalsePositive}
-              >
-                🚫 Mark False Positive
-              </Button>
-            </div>
-          )}
-
-          {/* Findings List */}
-          <div className="mission-control__findings">
-            {filteredFindings.map(finding => (
-              <div 
-                key={finding.id}
-                className="finding-row"
-                onClick={() => navigate(`/findings/${finding.id}`)}
-              >
-                <div 
-                  className="finding-checkbox"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFinding(finding.id);
-                  }}
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedFindings.has(finding.id)}
-                    onChange={() => {}}
-                  />
-                </div>
-
-                <div className="finding-content">
-                  <div className="finding-title">{finding.title}</div>
-                  <div className="finding-meta">
-                    <span>🏢 {finding.project}</span>
-                    <span>📋 {finding.playbook}</span>
-                    <span>⚙️ {finding.action}</span>
-                    <span>📅 Detected: {finding.detectedAt}</span>
-                  </div>
-                </div>
-
-                <div className="finding-severity-col">
-                  <Badge 
-                    variant={finding.severity} 
-                    dot
-                  >
-                    {finding.severity}
-                  </Badge>
-                  <div className="finding-affected">
-                    {finding.affectedCount} {finding.affectedLabel}
-                  </div>
-                </div>
-              </div>
-            ))}
-
-            {filteredFindings.length === 0 && (
-              <div className="mission-control__empty">
-                <div className="empty-icon">✅</div>
-                <div className="empty-title">No findings in this category</div>
-                <div className="empty-subtitle">
-                  {activeFilter === 'all' 
-                    ? 'All findings have been reviewed!'
-                    : `No ${activeFilter} findings at this time.`}
-                </div>
-              </div>
-            )}
+      {/* Stats Grid */}
+      <div className="mission-control__stats">
+        <Card className="mission-control__stat-card">
+          <div className="stat-icon stat-icon--critical">⏳</div>
+          <div className="stat-content">
+            <div className="stat-label">Awaiting Review</div>
+            <div className="stat-value stat-value--critical">{stats.awaiting}</div>
+            <div className="stat-sublabel">Across {projects.length} projects</div>
+            <div className="stat-trend stat-trend--up">↑ 5 from yesterday</div>
           </div>
         </Card>
 
-        {/* Projects with Pending Work */}
-        <Card>
-          <CardHeader>
-            <CardTitle icon="📁">Projects with Pending Work</CardTitle>
-          </CardHeader>
+        <Card className="mission-control__stat-card">
+          <div className="stat-icon stat-icon--critical">🔴</div>
+          <div className="stat-content">
+            <div className="stat-label">Critical Findings</div>
+            <div className="stat-value stat-value--critical">{stats.critical}</div>
+            <div className="stat-sublabel">Require immediate attention</div>
+            <div className="stat-trend stat-trend--up">↑ 3 new today</div>
+          </div>
+        </Card>
 
-          <div className="mission-control__projects">
-            {projects.map(project => (
-              <div 
-                key={project.id}
-                className="project-card"
-                onClick={() => navigate(`/projects/${project.id}/hub`)}
-              >
-                <div className="project-name">{project.name}</div>
-                <div className="project-meta">
-                  <span>📋 {project.playbook}</span>
-                  <span>•</span>
-                  <span>
-                    {project.goLive && `🎯 Go-Live: ${project.goLive}`}
-                    {project.started && `🚀 Started: ${project.started}`}
-                    {project.due && `⏰ Due: ${project.due}`}
-                  </span>
-                </div>
-                <div className="project-stats">
-                  <div className="project-stat">
-                    <div className="project-stat-value project-stat-value--critical">
-                      {project.awaiting}
-                    </div>
-                    <div className="project-stat-label">Awaiting</div>
-                  </div>
-                  <div className="project-stat">
-                    <div className="project-stat-value project-stat-value--success">
-                      {project.approved}
-                    </div>
-                    <div className="project-stat-label">Approved</div>
-                  </div>
-                  <div className="project-stat">
-                    <div className="project-stat-value project-stat-value--neutral">
-                      {project.inProgress}
-                    </div>
-                    <div className="project-stat-label">In Progress</div>
-                  </div>
-                </div>
-              </div>
-            ))}
+        <Card className="mission-control__stat-card">
+          <div className="stat-icon stat-icon--warning">📝</div>
+          <div className="stat-content">
+            <div className="stat-label">In Progress</div>
+            <div className="stat-value stat-value--warning">{stats.inProgress}</div>
+            <div className="stat-sublabel">Currently reviewing</div>
+            <div className="stat-trend stat-trend--neutral">→ No change</div>
+          </div>
+        </Card>
+
+        <Card className="mission-control__stat-card">
+          <div className="stat-icon stat-icon--success">✅</div>
+          <div className="stat-content">
+            <div className="stat-label">Approved Today</div>
+            <div className="stat-value stat-value--success">{stats.approved}</div>
+            <div className="stat-sublabel">Ready for export</div>
+            <div className="stat-trend stat-trend--up">↑ 12 since morning</div>
           </div>
         </Card>
       </div>
-    
+
+      {/* Review Queue */}
+      <Card>
+        <CardHeader>
+          <CardTitle icon="🎯">Cross-Project Review Queue</CardTitle>
+          <div className="mission-control__filters">
+            <Button 
+              variant={activeFilter === 'all' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveFilter('all')}
+            >
+              All Findings
+            </Button>
+            <Button 
+              variant={activeFilter === 'critical' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveFilter('critical')}
+            >
+              Critical
+            </Button>
+            <Button 
+              variant={activeFilter === 'warning' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveFilter('warning')}
+            >
+              Warning
+            </Button>
+            <Button 
+              variant={activeFilter === 'info' ? 'primary' : 'ghost'}
+              size="sm"
+              onClick={() => setActiveFilter('info')}
+            >
+              Info
+            </Button>
+          </div>
+        </CardHeader>
+
+        {/* Batch Actions */}
+        {selectedFindings.size > 0 && (
+          <div className="mission-control__batch-actions">
+            <Button 
+              variant="primary" 
+              size="sm"
+              onClick={handleBatchApprove}
+            >
+              ✓ Approve Selected ({selectedFindings.size})
+            </Button>
+            <Button 
+              variant="secondary" 
+              size="sm"
+              onClick={handleBatchReject}
+            >
+              ✗ Reject Selected
+            </Button>
+            <Button 
+              variant="secondary" 
+              size="sm"
+              onClick={handleMarkFalsePositive}
+            >
+              🚫 Mark False Positive
+            </Button>
+          </div>
+        )}
+
+        {/* Findings List */}
+        <div className="mission-control__findings">
+          {filteredFindings.map(finding => (
+            <div 
+              key={finding.id}
+              className="finding-row"
+              onClick={() => navigate(`/findings/${finding.id}`)}
+            >
+              <div 
+                className="finding-checkbox"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  toggleFinding(finding.id);
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={selectedFindings.has(finding.id)}
+                  onChange={() => {}}
+                />
+              </div>
+
+              <div className="finding-content">
+                <div className="finding-title">{finding.title}</div>
+                <div className="finding-meta">
+                  <span>🏢 {finding.project}</span>
+                  <span>📋 {finding.playbook}</span>
+                  <span>⚙️ {finding.action}</span>
+                  <span>📅 Detected: {finding.detectedAt}</span>
+                </div>
+              </div>
+
+              <div className="finding-severity-col">
+                <Badge 
+                  variant={finding.severity} 
+                  dot
+                >
+                  {finding.severity}
+                </Badge>
+                <div className="finding-affected">
+                  {finding.affectedCount} {finding.affectedLabel}
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {filteredFindings.length === 0 && (
+            <div className="mission-control__empty">
+              <div className="empty-icon">✅</div>
+              <div className="empty-title">No findings in this category</div>
+              <div className="empty-subtitle">
+                {activeFilter === 'all' 
+                  ? 'All findings have been reviewed!'
+                  : `No ${activeFilter} findings at this time.`}
+              </div>
+            </div>
+          )}
+        </div>
+      </Card>
+
+      {/* Projects with Pending Work */}
+      <Card>
+        <CardHeader>
+          <CardTitle icon="📁">Projects with Pending Work</CardTitle>
+        </CardHeader>
+
+        <div className="mission-control__projects">
+          {projects.map(project => (
+            <div 
+              key={project.id}
+              className="project-card"
+              onClick={() => navigate(`/projects/${project.id}/hub`)}
+            >
+              <div className="project-name">{project.name}</div>
+              <div className="project-meta">
+                <span>📋 {project.playbook}</span>
+                <span>•</span>
+                <span>
+                  {project.goLive && `🎯 Go-Live: ${project.goLive}`}
+                  {project.started && `🚀 Started: ${project.started}`}
+                  {project.due && `⏰ Due: ${project.due}`}
+                </span>
+              </div>
+              <div className="project-stats">
+                <div className="project-stat">
+                  <div className="project-stat-value project-stat-value--critical">
+                    {project.awaiting}
+                  </div>
+                  <div className="project-stat-label">Awaiting</div>
+                </div>
+                <div className="project-stat">
+                  <div className="project-stat-value project-stat-value--success">
+                    {project.approved}
+                  </div>
+                  <div className="project-stat-label">Approved</div>
+                </div>
+                <div className="project-stat">
+                  <div className="project-stat-value project-stat-value--neutral">
+                    {project.inProgress}
+                  </div>
+                  <div className="project-stat-label">In Progress</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </Card>
+    </div>
   );
 };
 
