@@ -2167,22 +2167,59 @@ DO NOT:
                 if agg_matches:
                     logger.warning(f"[DETERMINISTIC] Added {len(agg_matches)} aggregation target matches")
             
-            # If no term matches and no aggregation matches, return honest failure
-            # Trust term_index to do its job - no hacky SQL bypasses
+            # If no term matches and no aggregation matches, fall back to local LLM
+            # This handles general questions that don't relate to loaded data
             if not term_matches and not agg_matches:
-                logger.warning(f"[DETERMINISTIC] No term matches found - honest failure")
-                return build_cannot_resolve_response(
-                    question=question,
-                    reason="Could not resolve any terms to database columns",
-                    unresolved_terms=terms_to_resolve[:5],
-                    suggestions=[],
-                    available_columns=[],
-                    context={
-                        'parsed_intent': parsed.intent.value,
-                        'group_by_dimension': group_by_dimension,
-                        'terms_attempted': terms_to_resolve[:10]
-                    }
-                )
+                logger.warning(f"[DETERMINISTIC] No term matches found - falling back to local LLM")
+                
+                # Check if this looks like a data question or a general question
+                data_keywords = ['how many', 'count', 'list', 'show', 'employees', 'workers', 
+                                 'in texas', 'in california', 'our ', 'my ', 'total', 'sum']
+                is_data_question = any(kw in question.lower() for kw in data_keywords)
+                
+                if is_data_question:
+                    # This was a data question but we can't find the data
+                    logger.warning(f"[DETERMINISTIC] Data question with no matches - returning resolution failure")
+                    return build_cannot_resolve_response(
+                        question=question,
+                        reason="Could not resolve any terms to database columns",
+                        unresolved_terms=terms_to_resolve[:5],
+                        suggestions=[],
+                        available_columns=[],
+                        context={
+                            'parsed_intent': parsed.intent.value,
+                            'group_by_dimension': group_by_dimension,
+                            'terms_attempted': terms_to_resolve[:10]
+                        }
+                    )
+                else:
+                    # General question - route to local LLM (Pure Chat path)
+                    logger.warning(f"[DETERMINISTIC] General question - routing to Pure Chat handler")
+                    try:
+                        pure_chat_result = self._handle_pure_chat(question, question.lower())
+                        if pure_chat_result:
+                            logger.warning(f"[DETERMINISTIC] Pure Chat fallback succeeded")
+                            # Prepend transparency message
+                            no_data_prefix = "**No data found that is relevant to your request**, but this is what was found when I queried the HCMPACT LLM:\n\n---\n\n"
+                            pure_chat_result.answer = no_data_prefix + pure_chat_result.answer
+                            pure_chat_result.reasoning.insert(0, "No matching data - fell back to local LLM")
+                            return pure_chat_result
+                    except Exception as e:
+                        logger.error(f"[DETERMINISTIC] Pure Chat fallback failed: {e}")
+                    
+                    # If Pure Chat also fails, return honest failure
+                    return build_cannot_resolve_response(
+                        question=question,
+                        reason="Could not resolve any terms to database columns",
+                        unresolved_terms=terms_to_resolve[:5],
+                        suggestions=[],
+                        available_columns=[],
+                        context={
+                            'parsed_intent': parsed.intent.value,
+                            'group_by_dimension': group_by_dimension,
+                            'terms_attempted': terms_to_resolve[:10]
+                        }
+                    )
             
             # If GROUP BY detected but no explicit count intent, set it
             if group_by_dimension and not detected_intent:
