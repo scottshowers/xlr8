@@ -136,11 +136,11 @@ const ProjectsPage = () => {
             {filteredProjects.map(project => (
               <tr key={project.id} onClick={() => navigate(`/projects/${project.id}/hub`)} style={{ cursor: 'pointer' }}>
                 <td>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center">
                     <div className="project-card__avatar" style={{ width: '32px', height: '32px', fontSize: 'var(--text-sm)', background: getCustomerColor(project.customer || project.name), flexShrink: 0 }}>
                       {project.initials}
                     </div>
-                    <span style={{ fontWeight: 'var(--weight-semibold)' }}>{project.customer || project.name}</span>
+                    <span style={{ fontWeight: 'var(--weight-semibold)', marginLeft: '16px' }}>{project.customer || project.name}</span>
                   </div>
                 </td>
                 <td>{(project.systems || []).map(s => s.replace(/_/g, ' ').replace(/-/g, ' ')).join(', ') || project.product || '-'}</td>
