@@ -163,7 +163,7 @@ const Sidebar = () => {
       items: [
         ...(isAdmin ? [{ icon: Settings, label: 'Platform Settings', path: '/admin' }] : []),
         { icon: BookOpen, label: 'Playbook Builder', path: '/admin/playbook-builder' },
-        { icon: Library, label: 'Standards Library', path: '/standards' }
+        { icon: Library, label: 'Global Knowledge', path: '/admin/global-knowledge' }
       ]
     }
   ];
