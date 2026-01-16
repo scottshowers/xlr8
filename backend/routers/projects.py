@@ -24,6 +24,7 @@ class ProjectCreate(BaseModel):
     """Schema for creating a project"""
     name: str
     customer: str
+    code: Optional[str] = None  # Short project code (e.g., TEA1000) - auto-generated if not provided
     product: Optional[str] = None  # UKG Pro, WFM Dimensions, UKG Ready
     type: str = "Implementation"  # Frontend sends 'type'
     start_date: Optional[str] = None
@@ -43,6 +44,7 @@ class ProjectUpdate(BaseModel):
     """Schema for updating a project"""
     name: Optional[str] = None
     customer: Optional[str] = None
+    code: Optional[str] = None  # Short project code
     product: Optional[str] = None
     type: Optional[str] = None
     start_date: Optional[str] = None
@@ -75,6 +77,7 @@ async def list_projects():
             formatted.append({
                 'id': proj.get('id'),
                 'name': proj.get('name'),
+                'code': proj.get('code'),  # Project code for DuckDB/term index
                 'customer': proj.get('customer'),  # ✅ Column is 'customer' not 'client_name'
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),
@@ -118,7 +121,8 @@ async def create_project(project: ProjectCreate):
             client_name=project.customer,      # Maps to 'customer' column
             project_type=project.type,         # Stored in metadata.type
             notes=project.notes or "",         # Stored in metadata.notes
-            product=project.product or ""      # Stored in metadata.product
+            product=project.product or "",     # Stored in metadata.product
+            code=project.code                  # Project code for DuckDB/term index
         )
         
         if not new_project:
@@ -154,6 +158,7 @@ async def create_project(project: ProjectCreate):
             "project": {
                 'id': new_project.get('id'),
                 'name': new_project.get('name'),
+                'code': new_project.get('code'),  # Return the project code
                 'customer': new_project.get('customer'),
                 'product': metadata.get('product', ''),
                 'type': metadata.get('type', 'Implementation'),

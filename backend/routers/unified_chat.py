@@ -788,21 +788,27 @@ async def unified_chat(request: UnifiedChatRequest):
     citation_builder = CitationBuilder()
     
     try:
-        # Get project_id (UUID) from project name for RAG filtering
+        # Get project_id (UUID) and project_code from project name for DuckDB/RAG operations
         project_id = None
+        project_code = None  # The code used in DuckDB term index
         product_id = None  # Phase 5F: Multi-product support
         if project and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id, metadata').eq('name', project).limit(1).execute()
+                result = supabase.table('projects').select('id, code, metadata').eq('name', project).limit(1).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
+                    project_code = result.data[0].get('code')  # Get the project code for DuckDB
                     # Phase 5F: Extract product from metadata
                     metadata = result.data[0].get('metadata', {}) or {}
                     product_id = metadata.get('product')
-                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}, product: {product_id}")
+                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}, project_code: {project_code}, product: {product_id}")
             except Exception as e:
                 logger.warning(f"[UNIFIED] Could not resolve project_id: {e}")
+        
+        # Use project_code for DuckDB operations if available, otherwise fall back to project name
+        project_for_duckdb = project_code or project
+        logger.warning(f"[UNIFIED] Using project_for_duckdb: {project_for_duckdb}")
         
         # Get or create intelligence engine (V2 ONLY)
         if session['engine']:
@@ -815,7 +821,8 @@ async def unified_chat(request: UnifiedChatRequest):
                 engine._load_product_schema(product_id)
         elif ENGINE_V2_AVAILABLE:
             logger.warning("[UNIFIED] Creating IntelligenceEngineV2 (modular)")
-            engine = IntelligenceEngineV2(project or 'default', project_id=project_id, product_id=product_id)
+            # Use project_code for the engine so term index lookups work
+            engine = IntelligenceEngineV2(project_for_duckdb or 'default', project_id=project_id, product_id=product_id)
             session['engine'] = engine
             session['engine_type'] = 'v2'
         else:
