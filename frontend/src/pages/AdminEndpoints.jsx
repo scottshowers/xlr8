@@ -638,7 +638,7 @@ export default function AdminEndpoints() {
     <div style={{ minHeight: '100vh', background: c.background, padding: '1.5rem', color: c.text }}>
       <div style={{ marginBottom: '1.5rem' }}>
         <Link to="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: c.primary, textDecoration: 'none', marginBottom: '1rem' }}>
-          <ArrowLeft size={16} /> Back to Admin
+          <ArrowLeft size={16} /> Back to Platform Settings
         </Link>
         <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Link2 size={24} color={c.primary} />
