@@ -17,7 +17,8 @@ import {
   Plug, 
   Trash2, 
   ChevronRight,
-  Brain
+  Brain,
+  GraduationCap
 } from 'lucide-react';
 
 // ==================== ADMIN SECTIONS CONFIG ====================
@@ -34,6 +35,15 @@ const ADMIN_SECTIONS = [
         route: '/admin/intelligence-test',
         permission: Permissions.OPS_CENTER,
         color: '#8b5cf6',
+      },
+      {
+        id: 'learning',
+        title: 'Learning Engine',
+        description: 'View learned patterns, feedback, mappings, and preferences',
+        icon: GraduationCap,
+        route: '/learning-admin',
+        permission: Permissions.OPS_CENTER,
+        color: '#10b981',
       },
       {
         id: 'cleanup',
