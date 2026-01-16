@@ -48,6 +48,7 @@ import ProcessingPage from './pages/ProcessingPage';
 import FindingsDashboard from './pages/FindingsDashboard';
 import FindingDetailPage from './pages/FindingDetailPage';
 import StandardsPage from './pages/StandardsPage';
+import GlobalKnowledgePage from './pages/GlobalKnowledgePage';
 import AdminPage from './pages/AdminPage';
 import AdminHub from './pages/AdminHub';
 import AdminDashboard from './pages/AdminDashboard';
@@ -201,16 +202,6 @@ function AppRoutes() {
           <ProtectedRoute><Page><AnalyticsPage /></Page></ProtectedRoute>
         } />
         
-        {/* Reference Library */}
-        <Route path="/reference-library" element={
-          <ProtectedRoute><Page><ReferenceLibraryPage /></Page></ProtectedRoute>
-        } />
-        
-        {/* Standards */}
-        <Route path="/standards" element={
-          <ProtectedRoute><Page><StandardsPage /></Page></ProtectedRoute>
-        } />
-        
         {/* Data Health */}
         <Route path="/data-health" element={
           <ProtectedRoute><Page><DataHealthPage /></Page></ProtectedRoute>
@@ -236,11 +227,16 @@ function AppRoutes() {
         <Route path="/admin/playbook-builder" element={
           <ProtectedRoute><Page><PlaybookBuilderPage /></Page></ProtectedRoute>
         } />
+        <Route path="/admin/global-knowledge" element={
+          <ProtectedRoute><Page><GlobalKnowledgePage /></Page></ProtectedRoute>
+        } />
         <Route path="/learning-admin" element={
           <ProtectedRoute><Page><AdminDashboard /></Page></ProtectedRoute>
         } />
         
         {/* ====== LEGACY REDIRECTS ====== */}
+        <Route path="/standards" element={<Navigate to="/admin/global-knowledge" replace />} />
+        <Route path="/reference-library" element={<Navigate to="/admin/global-knowledge" replace />} />
         <Route path="/data-cleanup" element={<Navigate to="/admin/data-cleanup" replace />} />
         <Route path="/admin-endpoints" element={<Navigate to="/admin/endpoints" replace />} />
         <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
