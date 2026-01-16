@@ -396,53 +396,9 @@ export default function DataExplorer() {
             </div>
             Data Explorer
           </h1>
-          
-          {/* Project Selector */}
-          <div style={{ margin: '6px 0 0 46px', position: 'relative' }}>
-            <button
-              onClick={() => setShowProjectDropdown(!showProjectDropdown)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-                padding: 'var(--space-1) var(--space-2)',
-                background: 'transparent', border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)', cursor: 'pointer',
-                fontSize: 'var(--text-sm)', color: 'var(--text-primary)',
-                fontFamily: 'var(--font-body)'
-              }}
-            >
-              <span style={{ color: 'var(--text-muted)' }}>Project:</span>
-              <span style={{ fontWeight: 500 }}>{projectName || 'Select'}</span>
-              {activeProject?.code && (
-                <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-xs)' }}>({activeProject.code})</span>
-              )}
-              <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />
-            </button>
-            
-            {showProjectDropdown && (
-              <div style={{
-                position: 'absolute', top: '100%', left: 0, marginTop: '4px',
-                minWidth: '250px', background: 'var(--bg-secondary)',
-                border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)',
-                boxShadow: 'var(--shadow-lg)', zIndex: 100, maxHeight: '300px', overflowY: 'auto'
-              }}>
-                {projects.map(proj => (
-                  <button
-                    key={proj.id}
-                    onClick={() => { selectProject(proj); setShowProjectDropdown(false); }}
-                    style={{
-                      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                      width: '100%', padding: 'var(--space-2) var(--space-3)',
-                      border: 'none', background: proj.id === activeProject?.id ? 'var(--grass-green-alpha-10)' : 'transparent',
-                      cursor: 'pointer', textAlign: 'left', borderBottom: '1px solid var(--border-light)',
-                      fontSize: 'var(--text-sm)', color: 'var(--text-primary)', fontFamily: 'var(--font-body)'
-                    }}
-                  >
-                    <span>{proj.customer || proj.name}</span>
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+            View tables, columns, and relationships
+          </p>
         </div>
         
         <button 

@@ -282,82 +282,9 @@ export default function DataPage() {
             </div>
             Project Data
           </h1>
-          {/* Project selector with dropdown */}
-          <div style={{ margin: '6px 0 0 46px', position: 'relative' }}>
-            <button
-              onClick={() => setShowProjectDropdown(!showProjectDropdown)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.25rem 0.5rem',
-                background: 'transparent',
-                border: `1px solid ${c.border}`,
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: 'var(--text-sm)',
-                color: c.text,
-                fontFamily: 'var(--font-body)'
-              }}
-            >
-              <span style={{ color: c.textMuted }}>Project:</span>
-              <span style={{ fontWeight: 500 }}>{activeProject?.name || 'Select'}</span>
-              {activeProject?.code && (
-                <span style={{ color: c.textMuted, fontSize: 'var(--text-xs)' }}>({activeProject.code})</span>
-              )}
-              <ChevronDown size={14} style={{ color: c.textMuted }} />
-            </button>
-            
-            {showProjectDropdown && (
-              <div style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                marginTop: '4px',
-                minWidth: '250px',
-                background: c.cardBg,
-                border: `1px solid ${c.border}`,
-                borderRadius: '8px',
-                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
-                zIndex: 100,
-                maxHeight: '300px',
-                overflowY: 'auto'
-              }}>
-                {projects.map(proj => (
-                  <button
-                    key={proj.id}
-                    onClick={() => {
-                      selectProject(proj);
-                      setShowProjectDropdown(false);
-                    }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      width: '100%',
-                      padding: '0.625rem 1rem',
-                      border: 'none',
-                      background: proj.id === activeProject?.id ? `${c.primary}10` : 'transparent',
-                      cursor: 'pointer',
-                      textAlign: 'left',
-                      borderBottom: `1px solid ${c.border}`,
-                      transition: 'background 0.15s',
-                      fontFamily: 'var(--font-body)',
-                      fontSize: 'var(--text-sm)',
-                      color: c.text
-                    }}
-                    onMouseOver={(e) => e.currentTarget.style.background = `${c.primary}08`}
-                    onMouseOut={(e) => e.currentTarget.style.background = proj.id === activeProject?.id ? `${c.primary}10` : 'transparent'}
-                  >
-                    <span>{proj.customer || proj.name}</span>
-                    {proj.id === activeProject?.id && (
-                      <CheckCircle size={14} style={{ color: c.primary }} />
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
+          <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: c.textMuted }}>
+            Upload and manage project files
+          </p>
         </div>
         
         <div style={{ display: 'flex', gap: '0.75rem' }}>
