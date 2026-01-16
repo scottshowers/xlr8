@@ -83,13 +83,176 @@ const getFileTypeInfo = (filename) => {
 // ============================================================================
 export default function DataPage() {
   const { colors, darkMode } = useTheme();
-  const { activeProject } = useProject();
+  const { activeProject, projects, selectProject, loading: projectsLoading } = useProject();
   
   // Shared state for scope toggle - lifted up so FilesPanel can filter accordingly
   const [targetScope] = useState('project'); // Project-only scope (global moved to Admin > Global Knowledge)
   
   // Merge theme colors with brand colors
   const c = { ...colors, ...brandColors };
+  
+  // If no project selected, show project selector
+  if (!activeProject && !projectsLoading) {
+    return (
+      <div style={{ padding: '2rem' }}>
+        {/* Page Header */}
+        <div style={{ marginBottom: '2rem' }}>
+          <h1 style={{ 
+            margin: 0, 
+            fontSize: '20px', 
+            fontWeight: 600, 
+            color: c.text, 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '10px',
+            fontFamily: "'Sora', sans-serif"
+          }}>
+            <div style={{ 
+              width: '36px', 
+              height: '36px', 
+              borderRadius: '10px', 
+              backgroundColor: c.primary, 
+              display: 'flex', 
+              alignItems: 'center', 
+              justifyContent: 'center' 
+            }}>
+              <Database size={20} color="#ffffff" />
+            </div>
+            Project Data
+          </h1>
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: c.textMuted }}>
+            Select a project to upload and manage data
+          </p>
+        </div>
+        
+        {/* Project Selector */}
+        <div style={{ 
+          maxWidth: '600px',
+          margin: '0 auto',
+          padding: '2rem',
+          background: c.cardBg,
+          border: `1px solid ${c.border}`,
+          borderRadius: '12px'
+        }}>
+          <div style={{ textAlign: 'center', marginBottom: '1.5rem' }}>
+            <div style={{
+              width: '64px',
+              height: '64px',
+              borderRadius: '16px',
+              background: `${c.primary}15`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              margin: '0 auto 1rem'
+            }}>
+              <HardDrive size={28} color={c.primary} />
+            </div>
+            <h2 style={{ 
+              fontFamily: "'Sora', sans-serif",
+              fontSize: '1.25rem',
+              fontWeight: 600,
+              color: c.text,
+              marginBottom: '0.5rem'
+            }}>
+              Select a Project
+            </h2>
+            <p style={{ color: c.textMuted, fontSize: '0.9rem' }}>
+              Choose a project to upload files and manage data
+            </p>
+          </div>
+          
+          {projects.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '1rem' }}>
+              <p style={{ color: c.textMuted, marginBottom: '1rem' }}>No projects yet</p>
+              <a 
+                href="/projects/new"
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  padding: '0.75rem 1.5rem',
+                  background: c.primary,
+                  color: '#fff',
+                  borderRadius: '8px',
+                  textDecoration: 'none',
+                  fontWeight: 500,
+                  fontSize: '0.9rem'
+                }}
+              >
+                Create Your First Project
+              </a>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              {projects.map(project => (
+                <button
+                  key={project.id}
+                  onClick={() => selectProject(project)}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '1rem',
+                    padding: '1rem',
+                    background: c.background,
+                    border: `1px solid ${c.border}`,
+                    borderRadius: '8px',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    transition: 'all 0.2s'
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.borderColor = c.primary;
+                    e.currentTarget.style.background = `${c.primary}08`;
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.borderColor = c.border;
+                    e.currentTarget.style.background = c.background;
+                  }}
+                >
+                  <div style={{
+                    width: '40px',
+                    height: '40px',
+                    borderRadius: '8px',
+                    background: `${c.accent}15`,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0
+                  }}>
+                    <User size={18} color={c.accent} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ 
+                      fontWeight: 600, 
+                      color: c.text,
+                      fontSize: '0.95rem',
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis'
+                    }}>
+                      {project.name}
+                    </div>
+                    <div style={{ 
+                      fontSize: '0.8rem', 
+                      color: c.textMuted,
+                      marginTop: '2px'
+                    }}>
+                      {project.customer || 'No customer'}
+                      {project.code && <span style={{ marginLeft: '0.5rem', opacity: 0.7 }}>({project.code})</span>}
+                    </div>
+                  </div>
+                  <ChevronRight size={18} color={c.textMuted} />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+  
+  // State for project dropdown
+  const [showProjectDropdown, setShowProjectDropdown] = useState(false);
   
   return (
     <div>
@@ -117,13 +280,86 @@ export default function DataPage() {
             }}>
               <Database size={20} color="#ffffff" />
             </div>
-            Data Management
+            Project Data
           </h1>
-          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: c.textMuted }}>
-            {targetScope === 'project' 
-              ? (activeProject ? `Project: ${activeProject.name}` : 'Select a project to get started')
-              : 'Reference Library (Global)'}
-          </p>
+          {/* Project selector with dropdown */}
+          <div style={{ margin: '6px 0 0 46px', position: 'relative' }}>
+            <button
+              onClick={() => setShowProjectDropdown(!showProjectDropdown)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.25rem 0.5rem',
+                background: 'transparent',
+                border: `1px solid ${c.border}`,
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '13px',
+                color: c.text
+              }}
+            >
+              <span style={{ color: c.textMuted }}>Project:</span>
+              <span style={{ fontWeight: 500 }}>{activeProject?.name || 'Select'}</span>
+              {activeProject?.code && (
+                <span style={{ color: c.textMuted, fontSize: '11px' }}>({activeProject.code})</span>
+              )}
+              <ChevronDown size={14} style={{ color: c.textMuted }} />
+            </button>
+            
+            {showProjectDropdown && (
+              <div style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                marginTop: '4px',
+                minWidth: '280px',
+                background: c.cardBg,
+                border: `1px solid ${c.border}`,
+                borderRadius: '8px',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                zIndex: 100,
+                maxHeight: '300px',
+                overflowY: 'auto'
+              }}>
+                {projects.map(proj => (
+                  <button
+                    key={proj.id}
+                    onClick={() => {
+                      selectProject(proj);
+                      setShowProjectDropdown(false);
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.75rem',
+                      width: '100%',
+                      padding: '0.75rem 1rem',
+                      border: 'none',
+                      background: proj.id === activeProject?.id ? `${c.primary}10` : 'transparent',
+                      cursor: 'pointer',
+                      textAlign: 'left',
+                      borderBottom: `1px solid ${c.border}`,
+                      transition: 'background 0.15s'
+                    }}
+                    onMouseOver={(e) => e.currentTarget.style.background = `${c.primary}08`}
+                    onMouseOut={(e) => e.currentTarget.style.background = proj.id === activeProject?.id ? `${c.primary}10` : 'transparent'}
+                  >
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontWeight: 500, color: c.text, fontSize: '0.9rem' }}>{proj.name}</div>
+                      <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
+                        {proj.customer}
+                        {proj.code && <span style={{ marginLeft: '0.5rem' }}>({proj.code})</span>}
+                      </div>
+                    </div>
+                    {proj.id === activeProject?.id && (
+                      <CheckCircle size={16} style={{ color: c.primary }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
         
         <div style={{ display: 'flex', gap: '0.75rem' }}>
@@ -760,11 +996,12 @@ function FilesPanel({ c, project, targetScope }) {
     try {
       // Use fast /files endpoint instead of slow /platform
       // When in global scope (Reference Library), don't filter by project
-      const projectName = project?.name || project?.id || '';
-      const shouldFilterByProject = targetScope !== 'global' && projectName;
+      // Use project CODE for DuckDB queries, not display name
+      const projectCode = project?.code || project?.name || project?.id || '';
+      const shouldFilterByProject = targetScope !== 'global' && projectCode;
       
       const [filesRes, refRes] = await Promise.all([
-        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectName)}` : ''}`).catch(() => ({ data: {} })),
+        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectCode)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
@@ -798,18 +1035,21 @@ function FilesPanel({ c, project, targetScope }) {
   // Filter based on scope
   const isGlobalScope = targetScope === 'global';
   
+  // Use project code for matching (files are stored with code in DuckDB)
+  const projectCode = project?.code || project?.name;
+  
   const structuredFiles = (structuredData?.files || []).filter(f => {
     if (isGlobalScope) {
       return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library' || f.project === '__STANDARDS__';
     }
-    return !project || f.project === project.id || f.project === project.name;
+    return !project || f.project?.toLowerCase() === projectCode?.toLowerCase();
   });
   
   const docs = (documents?.documents || []).filter(d => {
     if (isGlobalScope) {
       return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library' || d.project === '__STANDARDS__';
     }
-    return !project || d.project === project.id || d.project === project.name;
+    return !project || d.project?.toLowerCase() === projectCode?.toLowerCase();
   });
   
   // Reference library files (always global)
