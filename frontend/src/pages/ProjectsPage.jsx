@@ -317,7 +317,7 @@ export default function ProjectsPage() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          navigate(`/projects/${project.id}/edit`);
+                          navigate(`/projects/${project.id}/hub`);
                           setMenuOpen(null);
                         }}
                         style={{
@@ -335,7 +335,7 @@ export default function ProjectsPage() {
                         }}
                       >
                         <Edit2 size={14} />
-                        Edit
+                        Edit Project
                       </button>
                       <button
                         onClick={(e) => handleDelete(e, project)}
