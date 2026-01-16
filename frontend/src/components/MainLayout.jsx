@@ -74,6 +74,7 @@ const Header = () => {
           <img src={logo} alt="XLR8" className="xlr8-header__logo-img" />
           <div className="xlr8-header__logo-text">
             <span className="xlr8-header__logo-name">XLR8</span>
+            <span className="xlr8-header__logo-divider">|</span>
             <span className="xlr8-header__logo-tagline">INTELLIGENT ANALYSIS BY HCMPACT</span>
           </div>
         </div>
