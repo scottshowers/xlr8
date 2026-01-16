@@ -295,14 +295,15 @@ export default function DataPage() {
                 border: `1px solid ${c.border}`,
                 borderRadius: '6px',
                 cursor: 'pointer',
-                fontSize: '13px',
-                color: c.text
+                fontSize: 'var(--text-sm)',
+                color: c.text,
+                fontFamily: 'var(--font-body)'
               }}
             >
               <span style={{ color: c.textMuted }}>Project:</span>
               <span style={{ fontWeight: 500 }}>{activeProject?.name || 'Select'}</span>
               {activeProject?.code && (
-                <span style={{ color: c.textMuted, fontSize: '11px' }}>({activeProject.code})</span>
+                <span style={{ color: c.textMuted, fontSize: 'var(--text-xs)' }}>({activeProject.code})</span>
               )}
               <ChevronDown size={14} style={{ color: c.textMuted }} />
             </button>
@@ -313,7 +314,7 @@ export default function DataPage() {
                 top: '100%',
                 left: 0,
                 marginTop: '4px',
-                minWidth: '280px',
+                minWidth: '250px',
                 background: c.cardBg,
                 border: `1px solid ${c.border}`,
                 borderRadius: '8px',
@@ -332,28 +333,25 @@ export default function DataPage() {
                     style={{
                       display: 'flex',
                       alignItems: 'center',
-                      gap: '0.75rem',
+                      justifyContent: 'space-between',
                       width: '100%',
-                      padding: '0.75rem 1rem',
+                      padding: '0.625rem 1rem',
                       border: 'none',
                       background: proj.id === activeProject?.id ? `${c.primary}10` : 'transparent',
                       cursor: 'pointer',
                       textAlign: 'left',
                       borderBottom: `1px solid ${c.border}`,
-                      transition: 'background 0.15s'
+                      transition: 'background 0.15s',
+                      fontFamily: 'var(--font-body)',
+                      fontSize: 'var(--text-sm)',
+                      color: c.text
                     }}
                     onMouseOver={(e) => e.currentTarget.style.background = `${c.primary}08`}
                     onMouseOut={(e) => e.currentTarget.style.background = proj.id === activeProject?.id ? `${c.primary}10` : 'transparent'}
                   >
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 500, color: c.text, fontSize: '0.9rem' }}>{proj.name}</div>
-                      <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
-                        {proj.customer}
-                        {proj.code && <span style={{ marginLeft: '0.5rem' }}>({proj.code})</span>}
-                      </div>
-                    </div>
+                    <span>{proj.customer || proj.name}</span>
                     {proj.id === activeProject?.id && (
-                      <CheckCircle size={16} style={{ color: c.primary }} />
+                      <CheckCircle size={14} style={{ color: c.primary }} />
                     )}
                   </button>
                 ))}
@@ -369,8 +367,9 @@ export default function DataPage() {
               style={{ 
                 display: 'flex', alignItems: 'center', gap: '0.5rem',
                 padding: '0.5rem 1rem', background: `${c.accent}15`, border: `1px solid ${c.accent}40`,
-                borderRadius: 8, color: c.accent, fontSize: '0.85rem', textDecoration: 'none',
-                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap'
+                borderRadius: 8, color: c.accent, fontSize: 'var(--text-sm)', textDecoration: 'none',
+                transition: 'all 0.2s', fontWeight: 500, whiteSpace: 'nowrap',
+                fontFamily: 'var(--font-body)'
               }}
             >
               <Search size={16} />
@@ -596,20 +595,17 @@ function UploadPanel({ c, project, targetScope }) {
     <div style={{ 
       position: 'sticky', top: '1rem',
       background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 12,
-      boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      boxShadow: 'var(--shadow-sm)'
     }}>
-      {/* Header - Project Files only */}
+      {/* Header */}
       <div style={{ 
-        padding: '0.875rem 1rem', 
-        background: c.background, 
-        borderTopLeftRadius: 12, 
-        borderTopRightRadius: 12,
+        padding: '1rem', 
         borderBottom: `1px solid ${c.border}`
       }}>
-        <span style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+        <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: c.text, fontFamily: 'var(--font-body)' }}>
           Project Data
         </span>
-        <span style={{ fontSize: '0.75rem', color: c.textMuted, marginLeft: '0.5rem' }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: c.textMuted, marginLeft: '0.5rem' }}>
           Customer-specific documents
         </span>
       </div>
@@ -618,9 +614,10 @@ function UploadPanel({ c, project, targetScope }) {
         {/* Truth Type Selection */}
         <div style={{ marginBottom: '1rem' }}>
           <label style={{ 
-            fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, 
+            fontSize: 'var(--text-xs)', fontWeight: 600, color: c.textMuted, 
             textTransform: 'uppercase', letterSpacing: '0.05em', 
-            display: 'block', marginBottom: '0.5rem' 
+            display: 'block', marginBottom: '0.5rem',
+            fontFamily: 'var(--font-body)'
           }}>
             Document Type
           </label>
@@ -640,27 +637,27 @@ function UploadPanel({ c, project, targetScope }) {
                   <button
                     onClick={() => setTruthType(tt.value)}
                     style={{
-                      display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
-                      padding: '0.75rem', borderRadius: 8, textAlign: 'left',
+                      display: 'flex', alignItems: 'center', gap: '0.75rem',
+                      padding: '0.625rem 0.75rem', borderRadius: 'var(--radius-md)', textAlign: 'left',
                       border: isSelected 
                         ? `2px solid ${truthColor}` 
                         : `1px solid ${c.border}`,
-                      borderLeft: `4px solid ${truthColor}`,
-                      background: isSelected ? `${truthColor}12` : 'transparent',
-                      cursor: 'pointer', transition: 'all 0.15s', width: '100%'
+                      background: isSelected ? `${truthColor}10` : 'transparent',
+                      cursor: 'pointer', transition: 'all 0.15s', width: '100%',
+                      fontFamily: 'var(--font-body)'
                     }}
                   >
                     <div style={{
-                      width: 32, height: 32, borderRadius: 6,
+                      width: 28, height: 28, borderRadius: 'var(--radius-sm)',
                       background: isSelected ? truthColor : `${truthColor}15`,
                       display: 'flex', alignItems: 'center', justifyContent: 'center',
                       flexShrink: 0
                     }}>
-                      <TruthIcon size={16} color={isSelected ? '#ffffff' : truthColor} />
+                      <TruthIcon size={14} color={isSelected ? '#ffffff' : truthColor} />
                     </div>
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', color: c.text }}>{tt.label}</div>
-                      <div style={{ fontSize: '0.75rem', color: c.textMuted, marginTop: '0.15rem' }}>{tt.desc}</div>
+                      <div style={{ fontWeight: 500, fontSize: 'var(--text-sm)', color: c.text }}>{tt.label}</div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: c.textMuted, marginTop: '1px' }}>{tt.desc}</div>
                     </div>
                   </button>
                 </Tooltip>
@@ -673,9 +670,10 @@ function UploadPanel({ c, project, targetScope }) {
         {(truthType === 'reality' || truthType === 'configuration') && targetScope === 'project' && (
           <div style={{ marginBottom: '1rem' }}>
             <label style={{ 
-              fontSize: '0.7rem', fontWeight: 600, color: c.textMuted, 
+              fontSize: 'var(--text-xs)', fontWeight: 600, color: c.textMuted, 
               textTransform: 'uppercase', letterSpacing: '0.05em', 
-              display: 'block', marginBottom: '0.5rem' 
+              display: 'block', marginBottom: '0.5rem',
+              fontFamily: 'var(--font-body)'
             }}>
               Domain (optional)
             </label>
@@ -684,15 +682,15 @@ function UploadPanel({ c, project, targetScope }) {
               onChange={(e) => setSelectedDomain(e.target.value)}
               style={{
                 width: '100%',
-                padding: '0.6rem 0.75rem',
-                borderRadius: 8,
-                border: `2px solid ${selectedDomain === 'auto' ? c.primary : c.border}`,
-                background: selectedDomain === 'auto' ? `${c.primary}20` : c.background,
+                padding: '0.5rem 0.75rem',
+                borderRadius: 'var(--radius-md)',
+                border: `1px solid ${selectedDomain === 'auto' ? c.primary : c.border}`,
+                background: selectedDomain === 'auto' ? `${c.primary}10` : c.cardBg,
                 color: c.text,
-                fontSize: '0.85rem',
+                fontSize: 'var(--text-sm)',
                 cursor: 'pointer',
-                marginBottom: '0.5rem',
-                fontWeight: 600
+                fontFamily: 'var(--font-body)',
+                fontWeight: 500
               }}
             >
               {builtInDomains.map(d => (
@@ -706,27 +704,6 @@ function UploadPanel({ c, project, targetScope }) {
                 </optgroup>
               )}
             </select>
-            <button
-              onClick={() => setShowDomainModal(true)}
-              style={{
-                width: '100%',
-                padding: '0.6rem',
-                borderRadius: 8,
-                border: `2px solid ${c.accent}`,
-                background: `${c.accent}`,
-                color: c.white,
-                fontSize: '0.85rem',
-                fontWeight: 600,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: '0.35rem',
-                transition: 'all 0.2s'
-              }}
-            >
-              <Sparkles size={14} /> Create Custom Domain
-            </button>
           </div>
         )}
 
