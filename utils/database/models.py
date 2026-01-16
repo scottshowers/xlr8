@@ -24,16 +24,36 @@ class ProjectModel:
     """Project database operations"""
     
     @staticmethod
+    def generate_project_code(customer: str) -> str:
+        """Generate a unique project code from customer name.
+        
+        Format: First 3 letters of customer (uppercase) + 4 random digits
+        Example: "Team Inc" -> "TEA1234"
+        """
+        import random
+        prefix = ''.join(c for c in customer.upper() if c.isalpha())[:3]
+        if len(prefix) < 3:
+            prefix = prefix.ljust(3, 'X')
+        suffix = str(random.randint(1000, 9999))
+        return f"{prefix}{suffix}"
+    
+    @staticmethod
     def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
-              notes: str = None, product: str = None) -> Optional[Dict[str, Any]]:
+              notes: str = None, product: str = None, code: str = None) -> Optional[Dict[str, Any]]:
         """Create a new project"""
         supabase = get_supabase()
         if not supabase:
             return None
         
         try:
+            # Generate code if not provided
+            project_code = code
+            if not project_code and client_name:
+                project_code = ProjectModel.generate_project_code(client_name)
+            
             data = {
                 'name': name,
+                'code': project_code,
                 'customer': client_name or '',
                 'status': 'active',
                 'metadata': {
