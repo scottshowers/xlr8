@@ -1260,9 +1260,7 @@ function FilesPanel({ c, project, targetScope }) {
                       {file.sheets?.length || 1} table(s) • {(file.row_count || 0).toLocaleString()} rows
                       {file.domain && ` • ${file.domain}`}
                       {file.truth_type && !file.domain && ` • ${getTruthLabel(file.truth_type)}`}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.15rem' }}>
-                      {(file.uploaded_at || file.loaded_at) && new Date(file.uploaded_at || file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {(file.uploaded_at || file.loaded_at) && ` • ${new Date(file.uploaded_at || file.loaded_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                       {file.uploaded_by && ` • ${file.uploaded_by.split('@')[0]}`}
                     </div>
                   </div>
@@ -1308,9 +1306,7 @@ function FilesPanel({ c, project, targetScope }) {
                     <div style={{ fontSize: '0.75rem', color: c.textMuted }}>
                       {doc.chunk_count || doc.chunks || 0} chunks
                       {doc.truth_type && ` • ${getTruthLabel(doc.truth_type)}`}
-                    </div>
-                    <div style={{ fontSize: '0.7rem', color: c.textMuted, marginTop: '0.15rem' }}>
-                      {doc.created_at && new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}
+                      {doc.created_at && ` • ${new Date(doc.created_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`}
                       {doc.uploaded_by && ` • ${doc.uploaded_by.split('@')[0]}`}
                     </div>
                   </div>
