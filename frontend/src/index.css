@@ -9,15 +9,39 @@
    ============================================================ */
 
 :root {
-  /* Brand Colors */
+  /* ==========================================
+     HCMPACT BRAND PALETTE
+     ========================================== */
   --white: #ffffff;
   --off-white: #f4f5f7;
-  --grass-green: #5a8a4a;
-  --grass-green-hover: #4a7a3a;
-  --grass-green-light: #84b26d;
-  --grass-green-alpha-5: rgba(90, 138, 74, 0.05);
-  --grass-green-alpha-10: rgba(90, 138, 74, 0.1);
-  --grass-green-alpha-20: rgba(90, 138, 74, 0.2);
+  
+  /* Primary Brand */
+  --grass-green: #83b16d;
+  --grass-green-dark: #5a8a4a;
+  --grass-green-hover: #6b9b5a;
+  --grass-green-alpha-5: rgba(131, 177, 109, 0.05);
+  --grass-green-alpha-10: rgba(131, 177, 109, 0.1);
+  --grass-green-alpha-20: rgba(131, 177, 109, 0.2);
+
+  /* Blues */
+  --electric-blue: #2766b1;
+  --electric-blue-alpha-10: rgba(39, 102, 177, 0.1);
+  --sky-blue: #93abd9;
+  --accent: #285390;
+  --accent-alpha-10: rgba(40, 83, 144, 0.1);
+  
+  /* Cool Neutrals */
+  --ice-flow: #c9d3d4;
+  --clearwater: #b2d6de;
+  --aquamarine: #a1c3d4;
+  
+  /* Accent Colors */
+  --scarlet: #993c44;
+  --scarlet-light: rgba(153, 60, 68, 0.1);
+  --purple: #5f4282;
+  --purple-light: rgba(95, 66, 130, 0.1);
+  --amber: #d97706;
+  --amber-light: rgba(217, 119, 6, 0.1);
 
   /* Semantic Colors */
   --bg-primary: #f4f5f7;
@@ -29,15 +53,19 @@
   --border: #e1e4e8;
   --border-light: #f0f4f7;
 
-  /* Status Colors */
-  --critical: #dc2626;
-  --critical-light: rgba(220, 38, 38, 0.1);
+  /* Status Colors (using brand) */
+  --critical: #993c44;
+  --critical-light: rgba(153, 60, 68, 0.1);
   --warning: #d97706;
   --warning-light: rgba(217, 119, 6, 0.1);
-  --info: #0ea5e9;
-  --info-light: rgba(14, 165, 233, 0.1);
-  --success: #16a34a;
-  --success-light: rgba(22, 163, 74, 0.1);
+  --info: #2766b1;
+  --info-light: rgba(39, 102, 177, 0.1);
+  --success: #83b16d;
+  --success-light: rgba(131, 177, 109, 0.1);
+
+  /* Flow Bar (Electric Blue - pops against green) */
+  --flow-blue: #2766b1;
+  --flow-blue-alpha-10: rgba(39, 102, 177, 0.1);
 
   /* Typography */
   --font-body: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -495,18 +523,18 @@ body {
 
 .xlr8-flow-step__label { font-size: var(--text-sm); }
 
-.xlr8-flow-step--completed { color: var(--grass-green); }
+.xlr8-flow-step--completed { color: var(--flow-blue); }
 .xlr8-flow-step--completed .xlr8-flow-step__num {
-  background: var(--grass-green);
+  background: var(--flow-blue);
   color: var(--white);
 }
 
 .xlr8-flow-step--current {
-  background: var(--grass-green-alpha-10);
-  color: var(--grass-green);
+  background: var(--flow-blue-alpha-10);
+  color: var(--flow-blue);
 }
 .xlr8-flow-step--current .xlr8-flow-step__num {
-  background: var(--grass-green);
+  background: var(--flow-blue);
   color: var(--white);
 }
 
