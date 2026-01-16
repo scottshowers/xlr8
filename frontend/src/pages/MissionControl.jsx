@@ -344,15 +344,16 @@ const MissionControl = () => {
                   </div>
                 </div>
 
-                <Badge 
-                  variant={finding.severity} 
-                  dot
-                >
-                  {finding.severity}
-                </Badge>
-
-                <div className="finding-affected">
-                  {finding.affectedCount} {finding.affectedLabel}
+                <div className="finding-severity-col">
+                  <Badge 
+                    variant={finding.severity} 
+                    dot
+                  >
+                    {finding.severity}
+                  </Badge>
+                  <div className="finding-affected">
+                    {finding.affectedCount} {finding.affectedLabel}
+                  </div>
                 </div>
               </div>
             ))}
