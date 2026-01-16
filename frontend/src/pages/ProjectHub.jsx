@@ -53,7 +53,8 @@ export default function ProjectHub() {
 
   useEffect(() => {
     // Find project from context or fetch
-    const found = projects?.find(p => p.id === id);
+    // Convert to string for comparison since URL params are strings
+    const found = projects?.find(p => String(p.id) === String(id));
     if (found) {
       setProject(found);
       setActiveProject(found);
