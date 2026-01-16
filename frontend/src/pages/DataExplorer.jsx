@@ -15,7 +15,7 @@ import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { 
   Database, FileSpreadsheet, ChevronDown, ChevronRight,
-  ArrowLeft, RefreshCw, Loader2, Network, Search, FolderOpen
+  ArrowLeft, RefreshCw, Loader2, Network, Search, FolderOpen, Trash2
 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import api from '../services/api';
@@ -33,6 +33,7 @@ function TablesFieldsTab({ tables, loading, projectCode, onRefresh }) {
   const [selectedTable, setSelectedTable] = useState(null);
   const [tableDetails, setTableDetails] = useState(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
+  const [deleting, setDeleting] = useState(null);
 
   // Group tables by source file
   const tablesByFile = tables.reduce((acc, table) => {
@@ -66,6 +67,33 @@ function TablesFieldsTab({ tables, loading, projectCode, onRefresh }) {
       setTableDetails(null);
     } finally {
       setLoadingDetails(false);
+    }
+  };
+
+  const handleDeleteTable = async (e, tableName, displayName) => {
+    e.stopPropagation(); // Don't trigger row selection
+    
+    if (!window.confirm(`Delete table "${displayName || tableName}"?\n\nThis will:\n• Remove the table from DuckDB\n• Clean up all metadata\n• Recalculate relationships\n\nThis cannot be undone.`)) {
+      return;
+    }
+    
+    setDeleting(tableName);
+    try {
+      await api.delete(`/status/structured/table/${encodeURIComponent(tableName)}`);
+      
+      // Clear selection if deleted table was selected
+      if (selectedTable === tableName) {
+        setSelectedTable(null);
+        setTableDetails(null);
+      }
+      
+      // Refresh the table list
+      if (onRefresh) onRefresh();
+    } catch (err) {
+      console.error('Failed to delete table:', err);
+      alert('Failed to delete table: ' + (err.response?.data?.detail || err.message));
+    } finally {
+      setDeleting(null);
     }
   };
 
@@ -153,30 +181,59 @@ function TablesFieldsTab({ tables, loading, projectCode, onRefresh }) {
 
               {/* Tables in File */}
               {expandedTables[filename] && fileTables.map(table => (
-                <button
+                <div
                   key={table.table_name}
-                  onClick={() => loadTableDetails(table.table_name)}
                   style={{
                     display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
-                    width: '100%', padding: 'var(--space-2) var(--space-3) var(--space-2) var(--space-6)',
+                    padding: 'var(--space-2) var(--space-3) var(--space-2) var(--space-6)',
                     background: selectedTable === table.table_name ? 'var(--grass-green-alpha-10)' : 'transparent',
-                    border: 'none', borderBottom: '1px solid var(--border-light)',
-                    cursor: 'pointer', textAlign: 'left'
+                    borderBottom: '1px solid var(--border-light)'
                   }}
                 >
-                  <Database size={12} style={{ color: 'var(--accent)' }} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ 
-                      fontSize: 'var(--text-sm)', color: 'var(--text-primary)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
-                    }}>
-                      {table.display_name || table.table_name}
+                  <button
+                    onClick={() => loadTableDetails(table.table_name)}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+                      flex: 1, minWidth: 0,
+                      background: 'none', border: 'none',
+                      cursor: 'pointer', textAlign: 'left', padding: 0
+                    }}
+                  >
+                    <Database size={12} style={{ color: 'var(--accent)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ 
+                        fontSize: 'var(--text-sm)', color: 'var(--text-primary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'
+                      }}>
+                        {table.display_name || table.table_name}
+                      </div>
+                      <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+                        {table.row_count?.toLocaleString() || 0} rows • {table.column_count || table.columns?.length || 0} cols
+                      </div>
                     </div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                      {table.row_count?.toLocaleString() || 0} rows • {table.column_count || table.columns?.length || 0} cols
-                    </div>
-                  </div>
-                </button>
+                  </button>
+                  <button
+                    onClick={(e) => handleDeleteTable(e, table.table_name, table.display_name)}
+                    disabled={deleting === table.table_name}
+                    style={{
+                      padding: 'var(--space-1)',
+                      background: 'transparent',
+                      border: 'none',
+                      cursor: deleting === table.table_name ? 'wait' : 'pointer',
+                      color: 'var(--text-muted)',
+                      borderRadius: 'var(--radius-sm)',
+                      opacity: deleting === table.table_name ? 0.5 : 1,
+                      flexShrink: 0
+                    }}
+                    title="Delete table"
+                  >
+                    {deleting === table.table_name ? (
+                      <Loader2 size={14} className="spin" />
+                    ) : (
+                      <Trash2 size={14} />
+                    )}
+                  </button>
+                </div>
               ))}
             </div>
           ))}
