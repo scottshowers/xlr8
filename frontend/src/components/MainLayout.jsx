@@ -149,7 +149,7 @@ const Sidebar = () => {
     { 
       section: 'Main',
       items: [
-        { icon: LayoutDashboard, label: 'Mission Control', path: '/mission-control' },
+        { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
         { icon: FolderKanban, label: 'Projects', path: '/projects' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' }
       ]
