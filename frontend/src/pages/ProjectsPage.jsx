@@ -1,42 +1,49 @@
 /**
  * ProjectsPage.jsx - Projects List
- * =================================
  * 
- * Full list of all projects with:
- * - Search/filter
- * - Status indicators
- * - Quick stats per project
- * - New Project button
- * - Unique customer colors
+ * WIRED TO REAL API - Fetches projects from /api/projects/list
+ * Displays real projects + demo stats where available.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Plus, Search } from 'lucide-react';
+import { Plus, Search, Loader2 } from 'lucide-react';
+
+const API_BASE = import.meta.env.VITE_API_URL || '';
 
 // Generate a consistent color based on string (customer name)
-// Uses HCMPACT brand palette
 const getCustomerColor = (name) => {
   const colors = [
-    '#83b16d', // grass green (primary)
-    '#2766b1', // electric blue
-    '#285390', // accent (deep blue)
-    '#5f4282', // purple
-    '#993c44', // scarlet
-    '#d97706', // amber
-    '#93abd9', // sky blue
-    '#a1c3d4', // aquamarine
-    '#b2d6de', // clearwater
-    '#6b9b5a', // grass green dark
+    '#83b16d', '#2766b1', '#285390', '#5f4282', '#993c44',
+    '#d97706', '#93abd9', '#a1c3d4', '#b2d6de', '#6b9b5a',
   ];
-  
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
+  for (let i = 0; i < (name || '').length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
+};
+
+// Parse demo stats from notes field
+const parseDemoStats = (notes) => {
+  if (!notes) return null;
+  const match = notes.match(/\[DEMO_STATS\](.*?)\[\/DEMO_STATS\]/s);
+  if (match) {
+    try {
+      return JSON.parse(match[1]);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+// Get initials from name
+const getInitials = (name) => {
+  if (!name) return '??';
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
 };
 
 const ProjectsPage = () => {
@@ -44,6 +51,7 @@ const ProjectsPage = () => {
   const [projects, setProjects] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchProjects();
@@ -51,75 +59,34 @@ const ProjectsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      // TODO: Replace with actual API call
-      setProjects([
-        {
-          id: 'proj-acme',
-          name: 'Acme Corp',
-          initials: 'AC',
-          system: 'UKG Pro',
-          type: 'Implementation',
-          status: 'active',
-          goLive: 'March 15, 2026',
-          findings: { critical: 8, warning: 12, info: 12, total: 32 },
-          progress: 75
-        },
-        {
-          id: 'proj-techstart',
-          name: 'TechStart Inc',
-          initials: 'TS',
-          system: 'Workday',
-          type: 'Data Migration',
-          status: 'active',
-          goLive: 'February 28, 2026',
-          findings: { critical: 5, warning: 7, info: 14, total: 26 },
-          progress: 54
-        },
-        {
-          id: 'proj-global',
-          name: 'Global Retail Co',
-          initials: 'GR',
-          system: 'UKG Pro',
-          type: 'Year-End',
-          status: 'active',
-          goLive: 'January 31, 2026',
-          findings: { critical: 2, warning: 3, info: 22, total: 27 },
-          progress: 81
-        },
-        {
-          id: 'proj-metro',
-          name: 'Metro Health',
-          initials: 'MH',
-          system: 'Workday',
-          type: 'Implementation',
-          status: 'active',
-          goLive: 'April 1, 2026',
-          findings: { critical: 0, warning: 4, info: 8, total: 12 },
-          progress: 38
-        },
-        {
-          id: 'proj-first',
-          name: 'First National Bank',
-          initials: 'FN',
-          system: 'UKG Pro',
-          type: 'Optimization',
-          status: 'completed',
-          goLive: 'December 15, 2025',
-          findings: { critical: 0, warning: 0, info: 5, total: 45 },
-          progress: 100
-        }
-      ]);
+      const res = await fetch(`${API_BASE}/api/projects/list`);
+      if (!res.ok) throw new Error('Failed to fetch projects');
+      const data = await res.json();
       
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching projects:', error);
+      // Process projects with demo stats
+      const processed = data.map(p => {
+        const demoStats = parseDemoStats(p.notes);
+        return {
+          ...p,
+          initials: getInitials(p.customer || p.name),
+          demoStats,
+          findings: demoStats?.findings || { critical: 0, warning: 0, info: 0, total: 0 },
+          progress: demoStats?.progress || 0,
+        };
+      });
+      
+      setProjects(processed);
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+      setError(err.message);
+    } finally {
       setLoading(false);
     }
   };
 
   const filteredProjects = projects.filter(project => 
-    project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    project.system.toLowerCase().includes(searchTerm.toLowerCase())
+    (project.name || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (project.customer || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const handleProjectClick = (project) => {
@@ -129,6 +96,7 @@ const ProjectsPage = () => {
   if (loading) {
     return (
       <div className="page-loading">
+        <Loader2 size={24} className="spin" />
         <p>Loading projects...</p>
       </div>
     );
@@ -136,7 +104,6 @@ const ProjectsPage = () => {
 
   return (
     <div className="projects-page">
-      {/* Page Header */}
       <div className="page-header flex justify-between items-center">
         <div>
           <h1 className="page-title">Projects</h1>
@@ -148,7 +115,12 @@ const ProjectsPage = () => {
         </button>
       </div>
 
-      {/* Search */}
+      {error && (
+        <div className="alert alert--error mb-4">
+          {error}
+        </div>
+      )}
+
       <div className="card mb-6">
         <div className="card-body" style={{ padding: 'var(--space-3)' }}>
           <div className="flex items-center gap-2" style={{ color: 'var(--text-muted)' }}>
@@ -156,7 +128,7 @@ const ProjectsPage = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search projects by name or system..."
+              placeholder="Search projects by name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ border: 'none', padding: 0, background: 'transparent' }}
@@ -165,15 +137,14 @@ const ProjectsPage = () => {
         </div>
       </div>
 
-      {/* Projects Table */}
       <div className="table-container">
         <table className="table">
           <thead>
             <tr>
               <th>Project</th>
-              <th>System</th>
+              <th>Systems</th>
               <th>Type</th>
-              <th>Go-Live</th>
+              <th>Go-Live / End</th>
               <th>Findings</th>
               <th>Progress</th>
               <th>Status</th>
@@ -194,18 +165,22 @@ const ProjectsPage = () => {
                         width: '32px', 
                         height: '32px', 
                         fontSize: 'var(--text-sm)',
-                        background: getCustomerColor(project.name),
+                        background: getCustomerColor(project.customer || project.name),
                         flexShrink: 0
                       }}
                     >
                       {project.initials}
                     </div>
-                    <span style={{ fontWeight: 'var(--weight-semibold)', marginLeft: '4px' }}>{project.name}</span>
+                    <span style={{ fontWeight: 'var(--weight-semibold)', marginLeft: '4px' }}>
+                      {project.customer || project.name}
+                    </span>
                   </div>
                 </td>
-                <td>{project.system}</td>
-                <td>{project.type}</td>
-                <td>{project.goLive}</td>
+                <td>
+                  {(project.systems || []).map(s => s.replace(/-/g, ' ')).join(', ') || project.product || '-'}
+                </td>
+                <td>{project.engagement_type || project.type || '-'}</td>
+                <td>{project.target_go_live || '-'}</td>
                 <td>
                   <div className="flex items-center gap-2">
                     {project.findings.critical > 0 && (
@@ -214,23 +189,29 @@ const ProjectsPage = () => {
                     {project.findings.warning > 0 && (
                       <span className="badge badge--warning">{project.findings.warning}</span>
                     )}
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
-                      {project.findings.total} total
-                    </span>
+                    {project.findings.total > 0 && (
+                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
+                        {project.findings.total} total
+                      </span>
+                    )}
+                    {project.findings.total === 0 && (
+                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>-</span>
+                    )}
                   </div>
                 </td>
                 <td>
-                  <div className="flex items-center gap-2">
-                    <div className="progress-bar" style={{ width: '80px' }}>
-                      <div 
-                        className="progress-bar__fill" 
-                        style={{ width: `${project.progress}%` }}
-                      />
+                  {project.progress > 0 ? (
+                    <div className="flex items-center gap-2">
+                      <div className="progress-bar" style={{ width: '80px' }}>
+                        <div className="progress-bar__fill" style={{ width: `${project.progress}%` }} />
+                      </div>
+                      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                        {project.progress}%
+                      </span>
                     </div>
-                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-                      {project.progress}%
-                    </span>
-                  </div>
+                  ) : (
+                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>-</span>
+                  )}
                 </td>
                 <td>
                   <span className={`badge badge--${project.status === 'completed' ? 'success' : 'info'}`}>
@@ -243,10 +224,12 @@ const ProjectsPage = () => {
         </table>
       </div>
 
-      {filteredProjects.length === 0 && (
+      {filteredProjects.length === 0 && !loading && (
         <div className="card mt-4">
           <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-            <p className="text-muted">No projects found matching "{searchTerm}"</p>
+            <p className="text-muted">
+              {searchTerm ? `No projects found matching "${searchTerm}"` : 'No projects yet. Create your first project!'}
+            </p>
           </div>
         </div>
       )}

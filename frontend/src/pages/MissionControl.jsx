@@ -1,142 +1,119 @@
 /**
  * MissionControl.jsx - Dashboard / Home
- * ======================================
  * 
- * Overview dashboard for consultants showing:
- * - High-level stats across all projects
- * - Items needing attention
- * - Recent projects for quick access
- * - Unique customer colors
+ * WIRED TO REAL API - Fetches projects from /api/projects/list
+ * Aggregates stats from demo data where available.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Loader2 } from 'lucide-react';
 
-// Generate a consistent color based on string (customer name)
-// Uses HCMPACT brand palette
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
+// Generate a consistent color based on string
 const getCustomerColor = (name) => {
   const colors = [
-    '#83b16d', // grass green (primary)
-    '#2766b1', // electric blue
-    '#285390', // accent (deep blue)
-    '#5f4282', // purple
-    '#993c44', // scarlet
-    '#d97706', // amber
-    '#93abd9', // sky blue
-    '#a1c3d4', // aquamarine
-    '#b2d6de', // clearwater
-    '#6b9b5a', // grass green dark
+    '#83b16d', '#2766b1', '#285390', '#5f4282', '#993c44',
+    '#d97706', '#93abd9', '#a1c3d4', '#b2d6de', '#6b9b5a',
   ];
-  
   let hash = 0;
-  for (let i = 0; i < name.length; i++) {
+  for (let i = 0; i < (name || '').length; i++) {
     hash = name.charCodeAt(i) + ((hash << 5) - hash);
   }
   return colors[Math.abs(hash) % colors.length];
 };
 
+// Parse demo stats from notes field
+const parseDemoStats = (notes) => {
+  if (!notes) return null;
+  const match = notes.match(/\[DEMO_STATS\](.*?)\[\/DEMO_STATS\]/s);
+  if (match) {
+    try {
+      return JSON.parse(match[1]);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+// Get initials from name
+const getInitials = (name) => {
+  if (!name) return '??';
+  return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+};
+
 const MissionControl = () => {
   const navigate = useNavigate();
-  const [stats, setStats] = useState({
-    activeProjects: 0,
-    pendingFindings: 0,
-    approvedThisWeek: 0,
-    upcomingGoLives: 0
-  });
-  const [attentionItems, setAttentionItems] = useState([]);
-  const [recentProjects, setRecentProjects] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetchDashboardData();
+    fetchProjects();
   }, []);
 
-  const fetchDashboardData = async () => {
+  const fetchProjects = async () => {
     try {
-      setStats({
-        activeProjects: 7,
-        pendingFindings: 23,
-        approvedThisWeek: 47,
-        upcomingGoLives: 2
+      const res = await fetch(`${API_BASE}/api/projects/list`);
+      if (!res.ok) throw new Error('Failed to fetch');
+      const data = await res.json();
+      
+      // Process projects with demo stats
+      const processed = data.map(p => {
+        const demoStats = parseDemoStats(p.notes);
+        return {
+          ...p,
+          initials: getInitials(p.customer || p.name),
+          demoStats,
+          findings: demoStats?.findings || { critical: 0, warning: 0, info: 0, total: 0 },
+          progress: demoStats?.progress || 0,
+        };
       });
-
-      setAttentionItems([
-        {
-          id: 'a1',
-          type: 'critical',
-          title: 'Acme Corp - 8 critical findings awaiting review',
-          meta: 'Year-End Playbook - Go-live: March 15, 2026',
-          projectId: 'proj-acme'
-        },
-        {
-          id: 'a2',
-          type: 'warning',
-          title: 'TechStart Inc - Analysis complete, 12 findings ready',
-          meta: 'Data Quality Assessment - Started: Jan 10, 2026',
-          projectId: 'proj-techstart'
-        },
-        {
-          id: 'a3',
-          type: 'critical',
-          title: 'Global Retail Co - Go-live in 15 days, 5 items pending',
-          meta: 'Year-End Playbook - Due: Jan 31, 2026',
-          projectId: 'proj-global'
-        }
-      ]);
-
-      setRecentProjects([
-        {
-          id: 'proj-acme',
-          name: 'Acme Corp',
-          initials: 'AC',
-          system: 'UKG Pro',
-          type: 'Implementation',
-          pending: 8,
-          approved: 24,
-          total: 32
-        },
-        {
-          id: 'proj-techstart',
-          name: 'TechStart Inc',
-          initials: 'TS',
-          system: 'Workday',
-          type: 'Migration',
-          pending: 12,
-          approved: 14,
-          total: 26
-        },
-        {
-          id: 'proj-global',
-          name: 'Global Retail Co',
-          initials: 'GR',
-          system: 'UKG Pro',
-          type: 'Year-End',
-          pending: 5,
-          approved: 22,
-          total: 27
-        }
-      ]);
-
-      setLoading(false);
-    } catch (error) {
-      console.error('Error fetching dashboard data:', error);
+      
+      setProjects(processed);
+    } catch (err) {
+      console.error('Failed to load projects:', err);
+    } finally {
       setLoading(false);
     }
   };
 
-  const handleAttentionClick = (item) => {
-    navigate(`/projects/${item.projectId}/hub`);
-  };
+  // Calculate aggregated stats
+  const activeProjects = projects.filter(p => p.status !== 'completed');
+  const totalFindings = projects.reduce((sum, p) => sum + (p.findings.total || 0), 0);
+  const pendingFindings = projects.reduce((sum, p) => sum + (p.findings.critical || 0) + (p.findings.warning || 0), 0);
+  const criticalFindings = projects.reduce((sum, p) => sum + (p.findings.critical || 0), 0);
+  
+  // Items needing attention (projects with critical findings)
+  const attentionItems = projects
+    .filter(p => p.findings.critical > 0)
+    .map(p => ({
+      id: p.id,
+      type: 'critical',
+      title: `${p.customer || p.name} - ${p.findings.critical} critical findings`,
+      meta: `${p.engagement_type || p.type || 'Engagement'} - ${p.target_go_live ? `Due: ${p.target_go_live}` : 'No deadline set'}`,
+      projectId: p.id
+    }));
 
-  const handleProjectClick = (project) => {
-    navigate(`/projects/${project.id}/hub`);
-  };
+  // Recent projects (last 4)
+  const recentProjects = projects.slice(0, 4).map(p => ({
+    id: p.id,
+    name: p.customer || p.name,
+    initials: p.initials,
+    system: (p.systems || []).map(s => s.replace(/-/g, ' ')).join(', ') || p.product || 'Unknown',
+    type: p.engagement_type || p.type || 'Engagement',
+    pending: (p.findings.critical || 0) + (p.findings.warning || 0),
+    approved: Math.round((p.findings.total || 0) * (p.progress || 0) / 100),
+    total: p.findings.total || 0
+  }));
 
   if (loading) {
     return (
       <div className="page-loading">
+        <Loader2 size={24} className="spin" />
         <p>Loading dashboard...</p>
       </div>
     );
@@ -144,7 +121,6 @@ const MissionControl = () => {
 
   return (
     <div className="mission-control">
-      {/* Page Header */}
       <div className="page-header">
         <h1 className="page-title">Mission Control</h1>
         <p className="page-subtitle">Overview of your active projects and items needing attention</p>
@@ -154,50 +130,54 @@ const MissionControl = () => {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-label">Active Projects</div>
-          <div className="stat-value">{stats.activeProjects}</div>
-          <div className="stat-detail">3 in implementation phase</div>
+          <div className="stat-value">{activeProjects.length}</div>
+          <div className="stat-detail">{projects.length} total</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Findings Pending Review</div>
-          <div className="stat-value stat-value--critical">{stats.pendingFindings}</div>
-          <div className="stat-detail">8 critical, 15 warning</div>
+          <div className="stat-label">Pending Review</div>
+          <div className="stat-value stat-value--critical">{pendingFindings}</div>
+          <div className="stat-detail">{criticalFindings} critical</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Approved This Week</div>
-          <div className="stat-value stat-value--success">{stats.approvedThisWeek}</div>
-          <div className="stat-detail">+12% from last week</div>
+          <div className="stat-label">Total Findings</div>
+          <div className="stat-value">{totalFindings}</div>
+          <div className="stat-detail">Across all projects</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Upcoming Go-Lives</div>
-          <div className="stat-value stat-value--warning">{stats.upcomingGoLives}</div>
-          <div className="stat-detail">Within 30 days</div>
+          <div className="stat-label">Projects with Critical</div>
+          <div className="stat-value stat-value--warning">{attentionItems.length}</div>
+          <div className="stat-detail">Need attention</div>
         </div>
       </div>
 
       {/* Needs Attention */}
-      <div className="section-header">
-        <h2 className="section-title">Needs Attention</h2>
-        <button className="btn btn-secondary" onClick={() => navigate('/findings')}>
-          View All Findings
-        </button>
-      </div>
-
-      <div className="attention-list">
-        {attentionItems.map(item => (
-          <div 
-            key={item.id} 
-            className="attention-item"
-            onClick={() => handleAttentionClick(item)}
-          >
-            <div className={`attention-indicator attention-indicator--${item.type}`} />
-            <div className="attention-content">
-              <div className="attention-title">{item.title}</div>
-              <div className="attention-meta">{item.meta}</div>
-            </div>
-            <div className="attention-action">Review</div>
+      {attentionItems.length > 0 && (
+        <>
+          <div className="section-header">
+            <h2 className="section-title">Needs Attention</h2>
+            <button className="btn btn-secondary" onClick={() => navigate('/findings')}>
+              View All Findings
+            </button>
           </div>
-        ))}
-      </div>
+
+          <div className="attention-list">
+            {attentionItems.map(item => (
+              <div 
+                key={item.id} 
+                className="attention-item"
+                onClick={() => navigate(`/projects/${item.projectId}/hub`)}
+              >
+                <div className={`attention-indicator attention-indicator--${item.type}`} />
+                <div className="attention-content">
+                  <div className="attention-title">{item.title}</div>
+                  <div className="attention-meta">{item.meta}</div>
+                </div>
+                <div className="attention-action">Review</div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {/* Recent Projects */}
       <div className="section-header">
@@ -207,44 +187,55 @@ const MissionControl = () => {
         </button>
       </div>
 
-      <div className="projects-grid">
-        {recentProjects.map(project => (
-          <div 
-            key={project.id} 
-            className="project-card"
-            onClick={() => handleProjectClick(project)}
-          >
-            <div className="project-card__header">
-              <div 
-                className="project-card__avatar"
-                style={{ background: getCustomerColor(project.name) }}
-              >
-                {project.initials}
-              </div>
-              <div>
-                <div className="project-card__name">{project.name}</div>
-                <div className="project-card__system">{project.system} - {project.type}</div>
-              </div>
-            </div>
-            <div className="project-card__stats">
-              <div className="project-stat">
-                <div className={`project-stat__value ${project.pending > 5 ? 'project-stat__value--critical' : 'project-stat__value--warning'}`}>
-                  {project.pending}
-                </div>
-                <div className="project-stat__label">Pending</div>
-              </div>
-              <div className="project-stat">
-                <div className="project-stat__value project-stat__value--success">{project.approved}</div>
-                <div className="project-stat__label">Approved</div>
-              </div>
-              <div className="project-stat">
-                <div className="project-stat__value">{project.total}</div>
-                <div className="project-stat__label">Total</div>
-              </div>
-            </div>
+      {recentProjects.length === 0 ? (
+        <div className="card">
+          <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
+            <p className="text-muted">No projects yet.</p>
+            <button className="btn btn-primary mt-4" onClick={() => navigate('/projects/new')}>
+              Create Your First Project
+            </button>
           </div>
-        ))}
-      </div>
+        </div>
+      ) : (
+        <div className="projects-grid">
+          {recentProjects.map(project => (
+            <div 
+              key={project.id} 
+              className="project-card"
+              onClick={() => navigate(`/projects/${project.id}/hub`)}
+            >
+              <div className="project-card__header">
+                <div 
+                  className="project-card__avatar"
+                  style={{ background: getCustomerColor(project.name) }}
+                >
+                  {project.initials}
+                </div>
+                <div>
+                  <div className="project-card__name">{project.name}</div>
+                  <div className="project-card__system">{project.system} - {project.type}</div>
+                </div>
+              </div>
+              <div className="project-card__stats">
+                <div className="project-stat">
+                  <div className={`project-stat__value ${project.pending > 5 ? 'project-stat__value--critical' : 'project-stat__value--warning'}`}>
+                    {project.pending}
+                  </div>
+                  <div className="project-stat__label">Pending</div>
+                </div>
+                <div className="project-stat">
+                  <div className="project-stat__value project-stat__value--success">{project.approved}</div>
+                  <div className="project-stat__label">Approved</div>
+                </div>
+                <div className="project-stat">
+                  <div className="project-stat__value">{project.total}</div>
+                  <div className="project-stat__label">Total</div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 };
