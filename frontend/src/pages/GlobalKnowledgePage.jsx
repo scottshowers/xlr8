@@ -301,12 +301,12 @@ export default function GlobalKnowledgePage() {
                           </div>
                         </div>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
-                          {doc.status === 'processed' ? (
-                            <CheckCircle size={16} style={{ color: 'var(--success)' }} />
-                          ) : doc.status === 'error' ? (
+                          {doc.status === 'error' ? (
                             <XCircle size={16} style={{ color: 'var(--critical)' }} />
-                          ) : (
+                          ) : doc.status === 'processing' ? (
                             <Loader2 size={16} className="spin" style={{ color: 'var(--warning)' }} />
+                          ) : (
+                            <CheckCircle size={16} style={{ color: 'var(--success)' }} />
                           )}
                           <button
                             className="btn btn--ghost btn--sm"
