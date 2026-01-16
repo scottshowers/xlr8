@@ -31,7 +31,7 @@ export default function ProjectsPage() {
 
   const handleProjectClick = (project) => {
     setActiveProject(project);
-    navigate('/findings');
+    navigate(`/projects/${project.id}/hub`);
   };
 
   const handleDelete = async (e, project) => {
@@ -149,7 +149,7 @@ export default function ProjectsPage() {
             {/* Table Header */}
             <div style={{
               display: 'grid',
-              gridTemplateColumns: '1fr 150px 150px 120px 40px',
+              gridTemplateColumns: '1fr 120px 120px 150px 100px 40px',
               gap: 16,
               padding: '12px 16px',
               borderBottom: '1px solid #e1e8ed',
@@ -160,8 +160,9 @@ export default function ProjectsPage() {
               letterSpacing: '0.05em',
             }}>
               <div>Project</div>
-              <div>System</div>
-              <div>Type</div>
+              <div>Vendor</div>
+              <div>Product</div>
+              <div>Playbooks</div>
               <div>Updated</div>
               <div></div>
             </div>
@@ -173,13 +174,14 @@ export default function ProjectsPage() {
                 onClick={() => handleProjectClick(project)}
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 150px 150px 120px 40px',
+                  gridTemplateColumns: '1fr 120px 120px 150px 100px 40px',
                   gap: 16,
                   padding: 16,
                   alignItems: 'center',
                   borderBottom: '1px solid #e1e8ed',
                   cursor: 'pointer',
                   transition: 'background 0.2s',
+                  position: 'relative',
                 }}
                 onMouseEnter={(e) => {
                   e.currentTarget.style.background = 'rgba(131, 177, 109, 0.05)';
@@ -222,14 +224,30 @@ export default function ProjectsPage() {
                   </div>
                 </div>
 
-                {/* System */}
+                {/* Vendor */}
                 <div style={{ fontSize: 14, color: '#5f6c7b' }}>
-                  {project.system_type || 'UKG Pro'}
+                  {project.vendor || 'UKG'}
                 </div>
 
-                {/* Type */}
+                {/* Product */}
                 <div style={{ fontSize: 14, color: '#5f6c7b' }}>
-                  {project.engagement_type || 'Implementation'}
+                  {project.system_type || 'Pro'}
+                </div>
+
+                {/* Playbooks */}
+                <div style={{ fontSize: 13, color: '#5f6c7b' }}>
+                  {project.playbooks?.length > 0 ? (
+                    <span style={{
+                      background: '#f0f4f7',
+                      padding: '4px 8px',
+                      borderRadius: 4,
+                      fontSize: 12,
+                    }}>
+                      {project.playbooks.length} assigned
+                    </span>
+                  ) : (
+                    <span style={{ color: '#94a3b8' }}>None</span>
+                  )}
                 </div>
 
                 {/* Updated */}
@@ -265,16 +283,60 @@ export default function ProjectsPage() {
 
                   {menuOpen === project.id && (
                     <div style={{
-                      position: 'absolute',
-                      right: 0,
-                      top: '100%',
+                      position: 'fixed',
                       background: '#fff',
                       border: '1px solid #e1e8ed',
                       borderRadius: 8,
-                      boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                      zIndex: 100,
+                      boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                      zIndex: 9999,
                       minWidth: 140,
                     }}>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/projects/${project.id}/hub`);
+                          setMenuOpen(null);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '10px 16px',
+                          width: '100%',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontSize: 14,
+                          color: '#2a3441',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <ChevronRight size={14} />
+                        Open
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          navigate(`/projects/${project.id}/edit`);
+                          setMenuOpen(null);
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '10px 16px',
+                          width: '100%',
+                          border: 'none',
+                          background: 'transparent',
+                          cursor: 'pointer',
+                          fontSize: 14,
+                          color: '#2a3441',
+                          textAlign: 'left',
+                        }}
+                      >
+                        <Edit2 size={14} />
+                        Edit
+                      </button>
                       <button
                         onClick={(e) => handleDelete(e, project)}
                         style={{
