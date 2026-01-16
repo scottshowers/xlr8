@@ -29,6 +29,7 @@ import MissionControl from './pages/MissionControl';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectHub from './pages/ProjectHub';
+import EditProjectPage from './pages/EditProjectPage';
 import CreateProjectPage from './pages/CreateProjectPage';
 import DataPage from './pages/DataPage';
 import DataExplorer from './pages/DataExplorer';
@@ -152,6 +153,9 @@ function AppRoutes() {
         {/* Projects - specific routes first */}
         <Route path="/projects/:id/hub" element={
           <ProtectedRoute><FlowPage step={1}><ProjectHub /></FlowPage></ProtectedRoute>
+        } />
+        <Route path="/projects/:id/edit" element={
+          <ProtectedRoute><FlowPage step={1}><EditProjectPage /></FlowPage></ProtectedRoute>
         } />
         <Route path="/projects" element={
           <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
