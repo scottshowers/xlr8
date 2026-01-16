@@ -1,19 +1,10 @@
 /**
  * App.jsx - Main Application Entry
  * 
- * NAV STRUCTURE:
- * Main: Mission Control | Projects | Data | Reference Library | Playbooks | Workspace
- * Admin: Admin | Learning (System moved to Admin tab)
+ * ALL routes now use MainLayout (unified sidebar + header).
+ * showFlowBar=true for 8-step workflow pages.
  * 
- * PROVIDERS:
- * - AuthProvider
- * - ProjectProvider  
- * - ThemeProvider (consistent dark/light)
- * - UploadProvider (background uploads)
- * - OnboardingProvider (Joyride tours)
- * - TooltipProvider (global tooltip toggle)
- * 
- * Updated: January 15, 2026 - Added Mission Control (Phase 4A UX Overhaul)
+ * Phase 4A UX Overhaul - January 15, 2026
  */
 
 import React from 'react';
@@ -27,16 +18,13 @@ import { UploadProvider } from './context/UploadContext';
 import { OnboardingProvider } from './context/OnboardingContext';
 import { TooltipProvider } from './context/TooltipContext';
 
-// Auth Components
+// Auth & Layout
 import ProtectedRoute from './components/ProtectedRoute';
-
-// Layout
-import Layout from './components/Layout';
+import MainLayout from './components/MainLayout';
 
 // Pages
 import Landing from './pages/Landing';
 import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
 import MissionControl from './pages/MissionControl';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
@@ -79,200 +67,177 @@ import MetricsPipelinePage from './pages/MetricsPipelinePage';
 // CSS
 import './index.css';
 
-// Inner app with router hooks available
+// Helper wrapper - MainLayout with no flow bar
+const Page = ({ children }) => (
+  <MainLayout>{children}</MainLayout>
+);
+
+// Helper wrapper - MainLayout with flow bar
+const FlowPage = ({ children, step }) => (
+  <MainLayout showFlowBar currentStep={step}>{children}</MainLayout>
+);
+
 function AppRoutes() {
   return (
     <OnboardingProvider>
       <Routes>
-        {/* Public routes */}
+        {/* ====== PUBLIC ROUTES ====== */}
         <Route path="/" element={<Landing />} />
         <Route path="/login" element={<LoginPage />} />
         
-        {/* ====== SALES / ONBOARDING PAGES ====== */}
-        
-        {/* Welcome - Sales landing with 3 presentation options */}
+        {/* ====== SALES / ONBOARDING (No layout) ====== */}
         <Route path="/welcome" element={<WelcomePage />} />
-        
-        {/* Story - Narrative chapter experience */}
         <Route path="/story" element={<StoryPage />} />
-        
-        {/* Journey - Visual infographic */}
         <Route path="/journey" element={<JourneyPage />} />
-        
-        {/* Intelligence Demo - Watch XLR8 Think */}
-        
-        {/* Hype Video */}
         <Route path="/hype" element={<HypeVideo />} />
-        
-        {/* Architecture - Level 5 DFD */}
         <Route path="/architecture" element={<ArchitecturePage />} />
-        
-        {/* Metrics Pipeline - Data flow explainer */}
         <Route path="/architecture/metrics-pipeline" element={<MetricsPipelinePage />} />
         
-        {/* ====== MAIN NAV ====== */}
-        
-        {/* Mission Control - Cross-project review queue */}
+        {/* ====== MISSION CONTROL (Hub - no flow bar) ====== */}
         <Route path="/mission-control" element={
-          <ProtectedRoute><MissionControl /></ProtectedRoute>
+          <ProtectedRoute><Page><MissionControl /></Page></ProtectedRoute>
         } />
-        
-        {/* Dashboard - Points to Mission Control */}
         <Route path="/dashboard" element={
-          <ProtectedRoute><MissionControl /></ProtectedRoute>
+          <ProtectedRoute><Page><MissionControl /></Page></ProtectedRoute>
         } />
         
-        {/* Projects */}
-        <Route path="/projects" element={
-          <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
-        } />
+        {/* ====== 8-STEP WORKFLOW (with flow bar) ====== */}
+        
+        {/* Step 1: Create Project */}
         <Route path="/projects/new" element={
-          <ProtectedRoute><Layout><CreateProjectPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/projects/:id" element={
-          <ProtectedRoute><Layout><ProjectsPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={1}><CreateProjectPage /></FlowPage></ProtectedRoute>
         } />
         
-        {/* Data */}
-        <Route path="/data" element={
-          <ProtectedRoute><Layout><DataPage /></Layout></ProtectedRoute>
-        } />
-        <Route path="/data/explorer" element={
-          <ProtectedRoute><Layout><DataExplorer /></Layout></ProtectedRoute>
-        } />
-        <Route path="/data/model" element={
-          <ProtectedRoute><Layout><DataModelPage /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Upload Data - Phase 4A Screen 2 */}
+        {/* Step 2: Upload Data */}
         <Route path="/upload" element={
-          <ProtectedRoute><Layout><UploadDataPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={2}><UploadDataPage /></FlowPage></ProtectedRoute>
         } />
-
-        {/* Vacuum (sub-pages of Data) */}
-        <Route path="/vacuum" element={
-          <ProtectedRoute><Layout><VacuumUploadPage /></Layout></ProtectedRoute>
+        
+        {/* Step 3: Select Playbooks */}
+        <Route path="/playbooks/select" element={
+          <ProtectedRoute><FlowPage step={3}><PlaybookSelectPage /></FlowPage></ProtectedRoute>
         } />
-        <Route path="/vacuum/explore/:jobId" element={
-          <ProtectedRoute><Layout><VacuumExplore /></Layout></ProtectedRoute>
-        } />
-        <Route path="/vacuum/mapping/:jobId" element={
-          <ProtectedRoute><Layout><VacuumColumnMapping /></Layout></ProtectedRoute>
-        } />
-
-        {/* Processing Feedback - Phase 4A.3 */}
+        
+        {/* Step 4: Analysis/Processing */}
         <Route path="/processing" element={
-          <ProtectedRoute><Layout><ProcessingPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={4}><ProcessingPage /></FlowPage></ProtectedRoute>
         } />
         <Route path="/processing/:jobId" element={
-          <ProtectedRoute><Layout><ProcessingPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={4}><ProcessingPage /></FlowPage></ProtectedRoute>
         } />
-
-        {/* Reference Library (was Standards) */}
-        <Route path="/reference-library" element={
-          <ProtectedRoute><Layout><ReferenceLibraryPage /></Layout></ProtectedRoute>
+        
+        {/* Step 5: Findings Dashboard */}
+        <Route path="/findings" element={
+          <ProtectedRoute><FlowPage step={5}><FindingsDashboard /></FlowPage></ProtectedRoute>
+        } />
+        
+        {/* Step 6: Drill-In (Finding Detail) */}
+        <Route path="/findings/:findingId" element={
+          <ProtectedRoute><FlowPage step={6}><FindingDetailPage /></FlowPage></ProtectedRoute>
+        } />
+        
+        {/* Step 7: Track Progress */}
+        <Route path="/progress/:playbookId" element={
+          <ProtectedRoute><FlowPage step={7}><ProgressTrackerPage /></FlowPage></ProtectedRoute>
+        } />
+        
+        {/* Step 8: Export */}
+        <Route path="/export" element={
+          <ProtectedRoute><FlowPage step={8}><ExportPage /></FlowPage></ProtectedRoute>
+        } />
+        
+        {/* ====== OTHER PAGES (no flow bar) ====== */}
+        
+        {/* Projects List */}
+        <Route path="/projects" element={
+          <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/projects/:id" element={
+          <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
+        } />
+        
+        {/* Data Pages */}
+        <Route path="/data" element={
+          <ProtectedRoute><Page><DataPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/data/explorer" element={
+          <ProtectedRoute><Page><DataExplorer /></Page></ProtectedRoute>
+        } />
+        <Route path="/data/model" element={
+          <ProtectedRoute><Page><DataModelPage /></Page></ProtectedRoute>
+        } />
+        
+        {/* Vacuum Pages */}
+        <Route path="/vacuum" element={
+          <ProtectedRoute><Page><VacuumUploadPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/vacuum/explore/:jobId" element={
+          <ProtectedRoute><Page><VacuumExplore /></Page></ProtectedRoute>
+        } />
+        <Route path="/vacuum/mapping/:jobId" element={
+          <ProtectedRoute><Page><VacuumColumnMapping /></Page></ProtectedRoute>
         } />
         
         {/* Playbooks */}
         <Route path="/playbooks" element={
-          <ProtectedRoute><Layout><PlaybooksPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><PlaybooksPage /></Page></ProtectedRoute>
         } />
-        
-        {/* Playbook Selection - Step 3 of Flow */}
-        <Route path="/playbooks/select" element={
-          <ProtectedRoute><PlaybookSelectPage /></ProtectedRoute>
-        } />
-        
-        {/* Build Playbook - Phase 4A.6 */}
         <Route path="/build-playbook" element={
-          <ProtectedRoute><Layout><PlaybookWireupPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><PlaybookWireupPage /></Page></ProtectedRoute>
         } />
         
-        {/* Progress Tracker - Phase 4A.7 */}
-        <Route path="/progress/:playbookId" element={
-          <ProtectedRoute><ProgressTrackerPage /></ProtectedRoute>
-        } />
-        
-        {/* Export - Step 8 of Flow */}
-        <Route path="/export" element={
-          <ProtectedRoute><ExportPage /></ProtectedRoute>
-        } />
-        
-        {/* Findings Dashboard - Phase 4A.4 */}
-        <Route path="/findings" element={
-          <ProtectedRoute><Layout><FindingsDashboard /></Layout></ProtectedRoute>
-        } />
-
-        {/* Finding Detail - Phase 4A.5 */}
-        <Route path="/findings/:findingId" element={
-          <ProtectedRoute><Layout><FindingDetailPage /></Layout></ProtectedRoute>
-        } />
-
         {/* Workspace (Chat) */}
         <Route path="/workspace" element={
-          <ProtectedRoute><Layout><WorkspacePage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><WorkspacePage /></Page></ProtectedRoute>
         } />
         
-        {/* Analytics Explorer - 3-way mode: Natural Language, Visual Builder, SQL */}
+        {/* Analytics */}
         <Route path="/analytics" element={
-          <ProtectedRoute><Layout><AnalyticsPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><AnalyticsPage /></Page></ProtectedRoute>
         } />
         
-        {/* ====== ADMIN NAV ====== */}
-        
-        {/* Admin Hub - Card navigation */}
-        <Route path="/admin" element={
-          <ProtectedRoute><Layout><AdminHub /></Layout></ProtectedRoute>
+        {/* Reference Library */}
+        <Route path="/reference-library" element={
+          <ProtectedRoute><Page><ReferenceLibraryPage /></Page></ProtectedRoute>
         } />
         
-        {/* Admin Settings - Tabbed interface */}
-        <Route path="/admin/settings" element={
-          <ProtectedRoute><Layout><AdminPage /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Learning Admin */}
-        <Route path="/learning-admin" element={
-          <ProtectedRoute><Layout><AdminDashboard /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Data Cleanup - Admin tool for mass delete */}
-        <Route path="/admin/data-cleanup" element={
-          <ProtectedRoute><Layout><DataCleanup /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Admin Endpoints - API testing */}
-        <Route path="/admin/endpoints" element={
-          <ProtectedRoute><Layout><AdminEndpoints /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Intelligence Test - Pipeline testing */}
-        <Route path="/admin/intelligence-test" element={
-          <ProtectedRoute><Layout><IntelligenceTestPage /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Playbook Builder - Create/Edit Playbooks */}
-        <Route path="/admin/playbook-builder" element={
-          <ProtectedRoute><Layout><PlaybookBuilderPage /></Layout></ProtectedRoute>
-        } />
-        
-        {/* Standards - Compliance document management */}
+        {/* Standards */}
         <Route path="/standards" element={
-          <ProtectedRoute><Layout><StandardsPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><StandardsPage /></Page></ProtectedRoute>
         } />
         
-        {/* ====== UTILITY ROUTES ====== */}
-        
-        {/* Data Health (renamed from Data Model) */}
+        {/* Data Health */}
         <Route path="/data-health" element={
-          <ProtectedRoute><Layout><DataHealthPage /></Layout></ProtectedRoute>
+          <ProtectedRoute><Page><DataHealthPage /></Page></ProtectedRoute>
+        } />
+        
+        {/* ====== ADMIN PAGES (no flow bar) ====== */}
+        
+        <Route path="/admin" element={
+          <ProtectedRoute><Page><AdminHub /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/settings" element={
+          <ProtectedRoute><Page><AdminPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/data-cleanup" element={
+          <ProtectedRoute><Page><DataCleanup /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/endpoints" element={
+          <ProtectedRoute><Page><AdminEndpoints /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/intelligence-test" element={
+          <ProtectedRoute><Page><IntelligenceTestPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/playbook-builder" element={
+          <ProtectedRoute><Page><PlaybookBuilderPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/learning-admin" element={
+          <ProtectedRoute><Page><AdminDashboard /></Page></ProtectedRoute>
         } />
         
         {/* ====== LEGACY REDIRECTS ====== */}
-        
-        {/* Old admin tool paths redirect to new locations */}
         <Route path="/data-cleanup" element={<Navigate to="/admin/data-cleanup" replace />} />
         <Route path="/admin-endpoints" element={<Navigate to="/admin/endpoints" replace />} />
-        
         <Route path="/data-model" element={<Navigate to="/data-health" replace />} />
         <Route path="/chat" element={<Navigate to="/workspace" replace />} />
         <Route path="/status" element={<Navigate to="/admin" replace />} />
