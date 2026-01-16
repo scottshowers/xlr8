@@ -213,7 +213,7 @@ const Sidebar = () => {
 // FLOW BAR COMPONENT
 // ============================================================
 
-const FlowBar = ({ currentStep = 1, completedSteps = [] }) => {
+const FlowBar = ({ currentStep = 1, completedSteps = [], hasActiveProject = false }) => {
   const navigate = useNavigate();
 
   const getStepStatus = (stepNum) => {
@@ -225,6 +225,14 @@ const FlowBar = ({ currentStep = 1, completedSteps = [] }) => {
   const handleStepClick = (step) => {
     if (!step.path) return;
     navigate(step.path);
+  };
+  
+  // Dynamic label for step 1 based on whether project exists
+  const getStepLabel = (step) => {
+    if (step.num === 1 && hasActiveProject) {
+      return 'Modify';
+    }
+    return step.label;
   };
 
   return (
@@ -241,7 +249,7 @@ const FlowBar = ({ currentStep = 1, completedSteps = [] }) => {
                 <span className="xlr8-flow-step__num">
                   {status === 'completed' ? <Check size={12} /> : step.num}
                 </span>
-                <span className="xlr8-flow-step__label">{step.label}</span>
+                <span className="xlr8-flow-step__label">{getStepLabel(step)}</span>
               </div>
               {index < FLOW_STEPS.length - 1 && (
                 <span className="xlr8-flow-bar__arrow">-</span>
@@ -259,13 +267,15 @@ const FlowBar = ({ currentStep = 1, completedSteps = [] }) => {
 // ============================================================
 
 const MainLayout = ({ children, showFlowBar = false, currentStep = 1, completedSteps = [] }) => {
+  const { hasActiveProject } = useProject();
+  
   return (
     <div className="xlr8-app">
       <Header />
       <Sidebar />
       
       {showFlowBar && (
-        <FlowBar currentStep={currentStep} completedSteps={completedSteps} />
+        <FlowBar currentStep={currentStep} completedSteps={completedSteps} hasActiveProject={hasActiveProject} />
       )}
       
       <main className={`xlr8-main ${showFlowBar ? 'xlr8-main--with-flow' : ''}`}>
