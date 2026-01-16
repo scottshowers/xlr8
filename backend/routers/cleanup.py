@@ -572,28 +572,43 @@ async def clear_all_system_tables():
 @router.delete("/status/project/{project_id}/all")
 async def delete_all_project_data(project_id: str):
     """
-    Delete ALL data for a project. Use with caution!
+    Delete ALL data for a project - complete cascade cleanup.
     
-    FIXED: Now cleans _schema_metadata and _pdf_tables
+    Cleans:
+    - DuckDB tables (all tables prefixed with project)
+    - DuckDB metadata (_column_profiles, _column_mappings, _schema_metadata, etc.)
+    - ChromaDB chunks (documents)
+    - Supabase: document_registry, jobs, project_relationships, files
     """
     logger.info(f"[CLEANUP] Deleting ALL data for project: {project_id}")
     
-    deleted = {"tables": 0, "documents": 0, "jobs": 0, "metadata": {}}
+    deleted = {
+        "tables": 0, 
+        "documents": 0, 
+        "jobs": 0, 
+        "registry": 0,
+        "files": 0,
+        "relationships": 0,
+        "metadata": {}
+    }
+    
+    # Build project prefixes for matching (handle variations)
+    project_lower = project_id.lower()
+    project_prefixes = [
+        project_lower + '__',
+        project_lower + '_',
+        project_lower.replace('-', '') + '__',
+        project_lower.replace('_', '') + '__',
+    ]
     
     # 1. DuckDB tables
     conn = _get_duckdb(project_id)
     if conn:
         try:
             tables = conn.execute("SHOW TABLES").fetchall()
-            system_tables = {'_schema_metadata', '_pdf_tables', 'file_metadata', 'column_profiles', 'schema_info'}
-            
-            # Build project prefixes for matching
-            project_lower = project_id.lower()
-            project_prefixes = [
-                project_lower + '__',
-                project_lower.replace('-', '') + '__',
-                project_lower.replace('_', '') + '__',
-            ]
+            system_tables = {'_schema_metadata', '_pdf_tables', 'file_metadata', '_column_profiles', 
+                           '_column_mappings', '_table_classifications', '_term_index', 
+                           '_column_relationships', 'schema_info'}
             
             for (table_name,) in tables:
                 # Skip system/metadata tables
@@ -620,44 +635,67 @@ async def delete_all_project_data(project_id: str):
     collection = _get_chromadb()
     if collection:
         try:
-            # Try both field names - some chunks use project_id, others use project
-            results = collection.get(where={"project_id": project_id})
-            if results and results['ids']:
-                collection.delete(ids=results['ids'])
-                deleted["documents"] = len(results['ids'])
-                logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (project_id)")
-        except Exception as e1:
-            logger.debug(f"[CLEANUP] project_id query failed: {e1}")
-        
-        # Also try 'project' field
-        if deleted["documents"] == 0:
-            try:
-                results = collection.get(where={"project": project_id})
-                if results and results['ids']:
-                    collection.delete(ids=results['ids'])
-                    deleted["documents"] = len(results['ids'])
-                    logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (project)")
-            except Exception as e2:
-                logger.debug(f"[CLEANUP] project query failed: {e2}")
+            # Get all docs and filter by project (ChromaDB where clause is finicky)
+            all_docs = collection.get(include=["metadatas"])
+            ids_to_delete = []
+            
+            for i, metadata in enumerate(all_docs.get("metadatas", [])):
+                if not metadata:
+                    continue
+                doc_project = metadata.get("project_id") or metadata.get("project") or ""
+                if doc_project.lower() == project_lower:
+                    ids_to_delete.append(all_docs["ids"][i])
+            
+            if ids_to_delete:
+                collection.delete(ids=ids_to_delete)
+                deleted["documents"] = len(ids_to_delete)
+                logger.info(f"[CLEANUP] Deleted {len(ids_to_delete)} ChromaDB chunks")
+        except Exception as e:
+            logger.warning(f"[CLEANUP] ChromaDB cleanup error: {e}")
     
-    # 3. Jobs and Relationships in Supabase
+    # 3. Supabase cleanup
     supabase = _get_supabase()
     if supabase:
+        # Jobs
         try:
             result = supabase.table("jobs").delete().eq("project_id", project_id).execute()
             deleted["jobs"] = len(result.data) if result.data else 0
         except Exception as e:
-            logger.debug(f"Suppressed jobs cleanup: {e}")
+            logger.debug(f"[CLEANUP] Jobs cleanup: {e}")
         
-        # Clean project_relationships (context graph relationships)
+        # Document Registry - try both project_id (UUID) and project name match
+        try:
+            # First try by project code in filename prefix
+            result = supabase.table("document_registry").delete().ilike("filename", f"{project_id}%").execute()
+            deleted["registry"] = len(result.data) if result.data else 0
+            logger.info(f"[CLEANUP] Deleted {deleted['registry']} from document_registry")
+        except Exception as e:
+            logger.debug(f"[CLEANUP] Registry cleanup: {e}")
+        
+        # Files table
+        try:
+            result = supabase.table("files").delete().eq("project", project_id).execute()
+            deleted["files"] = len(result.data) if result.data else 0
+            logger.info(f"[CLEANUP] Deleted {deleted['files']} from files table")
+        except Exception as e:
+            logger.debug(f"[CLEANUP] Files cleanup: {e}")
+        
+        # Also try files by project_id
+        if deleted["files"] == 0:
+            try:
+                result = supabase.table("files").delete().eq("project_id", project_id).execute()
+                deleted["files"] = len(result.data) if result.data else 0
+            except Exception as e:
+                logger.debug(f"[CLEANUP] Files cleanup (project_id): {e}")
+        
+        # Project Relationships (context graph)
         try:
             result = supabase.table("project_relationships").delete().eq("project_name", project_id).execute()
             deleted["relationships"] = len(result.data) if result.data else 0
-            logger.info(f"[CLEANUP] Deleted {deleted['relationships']} relationships from Supabase")
         except Exception as e:
-            logger.debug(f"Suppressed relationships cleanup: {e}")
+            logger.debug(f"[CLEANUP] Relationships cleanup: {e}")
     
-    logger.info(f"[CLEANUP] Deleted for {project_id}: {deleted}")
+    logger.info(f"[CLEANUP] Complete cascade delete for {project_id}: {deleted}")
     return {"success": True, "deleted": deleted, "project_id": project_id}
 
 
