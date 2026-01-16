@@ -111,10 +111,8 @@ function AppRoutes() {
           <ProtectedRoute><FlowPage step={1}><CreateProjectPage /></FlowPage></ProtectedRoute>
         } />
         
-        {/* Step 2: Upload Data */}
-        <Route path="/upload" element={
-          <ProtectedRoute><FlowPage step={2}><UploadDataPage /></FlowPage></ProtectedRoute>
-        } />
+        {/* Step 2: Upload Data - Now redirects to /data */}
+        <Route path="/upload" element={<Navigate to="/data" replace />} />
         
         {/* Step 3: Select Playbooks */}
         <Route path="/playbooks/select" element={
@@ -162,15 +160,15 @@ function AppRoutes() {
           <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
         } />
         
-        {/* Data Pages */}
+        {/* Data Pages - Step 2 of flow */}
         <Route path="/data" element={
-          <ProtectedRoute><Page><DataPage /></Page></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={2}><DataPage /></FlowPage></ProtectedRoute>
         } />
         <Route path="/data/explorer" element={
-          <ProtectedRoute><Page><DataExplorer /></Page></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={2}><DataExplorer /></FlowPage></ProtectedRoute>
         } />
         <Route path="/data/model" element={
-          <ProtectedRoute><Page><DataModelPage /></Page></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={2}><DataModelPage /></FlowPage></ProtectedRoute>
         } />
         
         {/* Vacuum Pages */}
