@@ -1,8 +1,8 @@
 /**
  * ProjectHub.jsx - Project Workspace
  * 
- * WIRED TO REAL API - Fetches project from /api/projects/{id}
- * Displays demo stats from notes field where available.
+ * WIRED TO REAL API - Fetches from /api/projects/list to get full metadata
+ * Displays real project stats OR demo stats.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
@@ -12,7 +12,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { 
   Upload, BookOpen, Play, Search, Download, MessageSquare,
-  Users, MapPin, DollarSign, Building2, Loader2
+  Users, MapPin, DollarSign, Building2, Loader2, Settings,
+  Database, Columns, Layers
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
@@ -65,24 +66,45 @@ export default function ProjectHub() {
 
   const fetchProject = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${id}`);
-      if (!res.ok) throw new Error('Project not found');
-      const data = await res.json();
+      // Fetch from /list to get full metadata (single project endpoint doesn't include it)
+      const res = await fetch(`${API_BASE}/api/projects/list`);
+      if (!res.ok) throw new Error('Failed to fetch projects');
+      const projects = await res.json();
       
-      // Parse demo stats
-      const demoStats = parseDemoStats(data.notes);
+      const found = projects.find(p => p.id === id);
+      if (!found) throw new Error('Project not found');
       
-      const processed = {
-        ...data,
-        demoStats,
-        snapshot: demoStats ? {
+      // Parse demo stats OR use real metadata
+      const demoStats = parseDemoStats(found.notes);
+      const metadata = found.metadata || {};
+      const detectedDomains = metadata.detected_domains || {};
+      
+      // Build snapshot from real data if available
+      let snapshot = null;
+      if (demoStats) {
+        snapshot = {
           employees: demoStats.employees,
           locations: demoStats.locations,
           annualPayroll: demoStats.annual_payroll,
           departments: demoStats.departments,
-        } : null,
+        };
+      } else if (detectedDomains.tables_analyzed) {
+        // Use real analysis data
+        snapshot = {
+          tables: detectedDomains.tables_analyzed,
+          columns: detectedDomains.columns_analyzed,
+          primaryDomain: detectedDomains.primary_domain,
+          domains: (detectedDomains.domains || []).slice(0, 4),
+        };
+      }
+      
+      const processed = {
+        ...found,
+        demoStats,
+        snapshot,
         findings: demoStats?.findings || { total: 0, critical: 0, warning: 0, info: 0 },
         progress: demoStats?.progress || 0,
+        hasRealData: !!detectedDomains.tables_analyzed,
       };
       
       setProject(processed);
@@ -119,7 +141,7 @@ export default function ProjectHub() {
   }
 
   const customerColor = getCustomerColor(project.customer || project.name);
-  const systemNames = (project.systems || []).map(s => s.replace(/-/g, ' ')).join(', ') || project.product || 'Unknown';
+  const systemNames = (project.systems || []).map(s => s.replace(/_/g, ' ').replace(/-/g, ' ')).join(', ') || project.product || 'Unknown';
 
   return (
     <div className="project-hub-page">
@@ -145,6 +167,10 @@ export default function ProjectHub() {
           </div>
         </div>
         <div className="hub-actions">
+          <button className="btn btn-secondary" onClick={() => navigate(`/projects/${id}/edit`)}>
+            <Settings size={16} />
+            Edit
+          </button>
           <button className="btn btn-secondary" onClick={() => navigate('/workspace')}>
             <MessageSquare size={16} />
             Ask AI
@@ -155,8 +181,8 @@ export default function ProjectHub() {
         </div>
       </div>
 
-      {/* Customer Snapshot */}
-      {project.snapshot && (
+      {/* Customer Snapshot - Demo Data */}
+      {project.snapshot && !project.hasRealData && (
         <div className="card mb-6" style={{ borderLeft: `4px solid ${customerColor}` }}>
           <div className="card-body">
             <div className="flex items-center gap-6" style={{ flexWrap: 'wrap' }}>
@@ -189,6 +215,58 @@ export default function ProjectHub() {
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Data Analysis Snapshot - Real Data */}
+      {project.hasRealData && project.snapshot && (
+        <div className="card mb-6" style={{ borderLeft: `4px solid ${customerColor}` }}>
+          <div className="card-header">
+            <h3 className="card-title">Data Analysis Summary</h3>
+            <span className="badge badge--success">Analyzed</span>
+          </div>
+          <div className="card-body">
+            <div className="flex items-center gap-8" style={{ flexWrap: 'wrap' }}>
+              <div className="flex items-center gap-2">
+                <Database size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{project.snapshot.tables}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Tables</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Columns size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{project.snapshot.columns}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Columns</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Layers size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', textTransform: 'capitalize' }}>{project.snapshot.primaryDomain}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Primary Domain</div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Detected Domains */}
+            {project.snapshot.domains && project.snapshot.domains.length > 0 && (
+              <div className="mt-4">
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', marginBottom: 'var(--space-2)' }}>
+                  Detected Domains
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {project.snapshot.domains.map(d => (
+                    <div key={d.domain} className="flex items-center gap-2 px-3 py-1" style={{ background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)' }}>
+                      <span style={{ textTransform: 'capitalize', fontWeight: 'var(--weight-medium)' }}>{d.domain}</span>
+                      <span style={{ color: 'var(--text-muted)' }}>{Math.round(d.confidence * 100)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -303,6 +381,12 @@ export default function ProjectHub() {
                   <span className="text-muted">Domains</span>
                   <span>{(project.domains || []).join(', ') || '-'}</span>
                 </div>
+                {project.playbooks && project.playbooks.length > 0 && (
+                  <div className="flex justify-between">
+                    <span className="text-muted">Playbooks</span>
+                    <span>{project.playbooks.length} assigned</span>
+                  </div>
+                )}
                 <div className="flex justify-between">
                   <span className="text-muted">Status</span>
                   <span className={`badge badge--${project.status === 'completed' ? 'success' : 'info'}`}>
@@ -313,31 +397,28 @@ export default function ProjectHub() {
             </div>
           </div>
 
-          {/* Uploaded Data */}
-          <div className="card">
-            <div className="card-header">
-              <h3 className="card-title">Uploaded Data</h3>
-            </div>
-            <div className="card-body">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-2">
-                  <Upload size={20} style={{ color: customerColor }} />
-                  <span style={{ fontWeight: 'var(--weight-semibold)' }}>0 files</span>
-                  <span style={{ color: 'var(--text-muted)' }}>-</span>
-                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
-                    No uploads yet
-                  </span>
+          {/* Functional Areas */}
+          {project.functional_areas && project.functional_areas.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">Functional Areas</h3>
+              </div>
+              <div className="card-body">
+                <div className="flex flex-wrap gap-2">
+                  {project.functional_areas.slice(0, 8).map((fa, idx) => (
+                    <span key={idx} className="badge" style={{ textTransform: 'capitalize' }}>
+                      {fa.area?.replace(/_/g, ' ')}
+                    </span>
+                  ))}
+                  {project.functional_areas.length > 8 && (
+                    <span className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>
+                      +{project.functional_areas.length - 8} more
+                    </span>
+                  )}
                 </div>
               </div>
-              <button 
-                className="btn btn-secondary" 
-                style={{ width: '100%', justifyContent: 'center' }}
-                onClick={() => navigate('/upload')}
-              >
-                Upload Data
-              </button>
             </div>
-          </div>
+          )}
         </div>
       </div>
     </div>

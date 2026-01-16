@@ -1,15 +1,15 @@
 /**
  * MissionControl.jsx - Dashboard / Home
  * 
- * WIRED TO REAL API - Fetches projects from /api/projects/list
- * Aggregates stats from demo data where available.
+ * WIRED TO REAL API - Shows ALL projects (real + demo)
+ * Aggregates stats from metadata.detected_domains for real projects.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Plus } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -61,15 +61,26 @@ const MissionControl = () => {
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       
-      // Process projects with demo stats
+      // Process all projects
       const processed = data.map(p => {
         const demoStats = parseDemoStats(p.notes);
+        const metadata = p.metadata || {};
+        const detectedDomains = metadata.detected_domains || {};
+        
+        // Use demo stats if available, otherwise use real metadata
+        const hasRealData = !!detectedDomains.tables_analyzed;
+        
         return {
           ...p,
           initials: getInitials(p.customer || p.name),
           demoStats,
+          hasRealData,
+          // Stats - prefer demo, fallback to real data indicators
           findings: demoStats?.findings || { critical: 0, warning: 0, info: 0, total: 0 },
           progress: demoStats?.progress || 0,
+          tablesAnalyzed: detectedDomains.tables_analyzed || 0,
+          columnsAnalyzed: detectedDomains.columns_analyzed || 0,
+          primaryDomain: detectedDomains.primary_domain || null,
         };
       });
       
@@ -83,32 +94,47 @@ const MissionControl = () => {
 
   // Calculate aggregated stats
   const activeProjects = projects.filter(p => p.status !== 'completed');
+  const projectsWithData = projects.filter(p => p.hasRealData || p.demoStats);
   const totalFindings = projects.reduce((sum, p) => sum + (p.findings.total || 0), 0);
   const pendingFindings = projects.reduce((sum, p) => sum + (p.findings.critical || 0) + (p.findings.warning || 0), 0);
-  const criticalFindings = projects.reduce((sum, p) => sum + (p.findings.critical || 0), 0);
+  const totalTablesAnalyzed = projects.reduce((sum, p) => sum + (p.tablesAnalyzed || 0), 0);
   
-  // Items needing attention (projects with critical findings)
-  const attentionItems = projects
-    .filter(p => p.findings.critical > 0)
-    .map(p => ({
-      id: p.id,
+  // Items needing attention
+  const attentionItems = [
+    // Projects with critical findings (demo)
+    ...projects.filter(p => p.findings.critical > 0).map(p => ({
+      id: `critical-${p.id}`,
       type: 'critical',
       title: `${p.customer || p.name} - ${p.findings.critical} critical findings`,
-      meta: `${p.engagement_type || p.type || 'Engagement'} - ${p.target_go_live ? `Due: ${p.target_go_live}` : 'No deadline set'}`,
+      meta: `${p.engagement_type || p.type || 'Engagement'}`,
       projectId: p.id
-    }));
+    })),
+    // Projects with real data but no playbooks yet
+    ...projects.filter(p => p.hasRealData && (!p.playbooks || p.playbooks.length === 0)).map(p => ({
+      id: `noplaybook-${p.id}`,
+      type: 'warning',
+      title: `${p.customer || p.name} - No playbooks assigned`,
+      meta: `${p.tablesAnalyzed} tables analyzed, ready for playbook selection`,
+      projectId: p.id
+    })),
+  ].slice(0, 5);
 
-  // Recent projects (last 4)
-  const recentProjects = projects.slice(0, 4).map(p => ({
-    id: p.id,
-    name: p.customer || p.name,
-    initials: p.initials,
-    system: (p.systems || []).map(s => s.replace(/-/g, ' ')).join(', ') || p.product || 'Unknown',
-    type: p.engagement_type || p.type || 'Engagement',
-    pending: (p.findings.critical || 0) + (p.findings.warning || 0),
-    approved: Math.round((p.findings.total || 0) * (p.progress || 0) / 100),
-    total: p.findings.total || 0
-  }));
+  // Recent projects (all, sorted by updated_at)
+  const recentProjects = [...projects]
+    .sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at))
+    .slice(0, 4)
+    .map(p => ({
+      id: p.id,
+      name: p.customer || p.name,
+      initials: p.initials,
+      system: (p.systems || []).map(s => s.replace(/_/g, ' ').replace(/-/g, ' ')).join(', ') || p.product || 'Unknown',
+      type: p.engagement_type || p.type || 'Engagement',
+      hasData: p.hasRealData,
+      tablesAnalyzed: p.tablesAnalyzed,
+      pending: (p.findings.critical || 0) + (p.findings.warning || 0),
+      approved: Math.round((p.findings.total || 0) * (p.progress || 0) / 100),
+      total: p.findings.total || 0
+    }));
 
   if (loading) {
     return (
@@ -121,9 +147,15 @@ const MissionControl = () => {
 
   return (
     <div className="mission-control">
-      <div className="page-header">
-        <h1 className="page-title">Mission Control</h1>
-        <p className="page-subtitle">Overview of your active projects and items needing attention</p>
+      <div className="page-header flex justify-between items-center">
+        <div>
+          <h1 className="page-title">Mission Control</h1>
+          <p className="page-subtitle">Overview of your active projects</p>
+        </div>
+        <button className="btn btn-primary btn-lg" onClick={() => navigate('/projects/new')}>
+          <Plus size={18} />
+          New Project
+        </button>
       </div>
 
       {/* Stats Grid */}
@@ -134,19 +166,19 @@ const MissionControl = () => {
           <div className="stat-detail">{projects.length} total</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Pending Review</div>
-          <div className="stat-value stat-value--critical">{pendingFindings}</div>
-          <div className="stat-detail">{criticalFindings} critical</div>
+          <div className="stat-label">Tables Analyzed</div>
+          <div className="stat-value">{totalTablesAnalyzed}</div>
+          <div className="stat-detail">{projectsWithData.length} projects with data</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Findings</div>
           <div className="stat-value">{totalFindings}</div>
-          <div className="stat-detail">Across all projects</div>
+          <div className="stat-detail">{pendingFindings} pending review</div>
         </div>
         <div className="stat-card">
-          <div className="stat-label">Projects with Critical</div>
+          <div className="stat-label">Needs Attention</div>
           <div className="stat-value stat-value--warning">{attentionItems.length}</div>
-          <div className="stat-detail">Need attention</div>
+          <div className="stat-detail">Items requiring action</div>
         </div>
       </div>
 
@@ -155,9 +187,6 @@ const MissionControl = () => {
         <>
           <div className="section-header">
             <h2 className="section-title">Needs Attention</h2>
-            <button className="btn btn-secondary" onClick={() => navigate('/findings')}>
-              View All Findings
-            </button>
           </div>
 
           <div className="attention-list">
@@ -213,24 +242,51 @@ const MissionControl = () => {
                 </div>
                 <div>
                   <div className="project-card__name">{project.name}</div>
-                  <div className="project-card__system">{project.system} - {project.type}</div>
+                  <div className="project-card__system">{project.system}</div>
                 </div>
               </div>
               <div className="project-card__stats">
-                <div className="project-stat">
-                  <div className={`project-stat__value ${project.pending > 5 ? 'project-stat__value--critical' : 'project-stat__value--warning'}`}>
-                    {project.pending}
+                {project.hasData ? (
+                  <>
+                    <div className="project-stat">
+                      <div className="project-stat__value">{project.tablesAnalyzed}</div>
+                      <div className="project-stat__label">Tables</div>
+                    </div>
+                    <div className="project-stat">
+                      <div className={`project-stat__value ${project.pending > 0 ? 'project-stat__value--warning' : ''}`}>
+                        {project.pending}
+                      </div>
+                      <div className="project-stat__label">Pending</div>
+                    </div>
+                    <div className="project-stat">
+                      <div className="project-stat__value project-stat__value--success">{project.approved}</div>
+                      <div className="project-stat__label">Approved</div>
+                    </div>
+                  </>
+                ) : project.total > 0 ? (
+                  <>
+                    <div className="project-stat">
+                      <div className={`project-stat__value ${project.pending > 5 ? 'project-stat__value--critical' : 'project-stat__value--warning'}`}>
+                        {project.pending}
+                      </div>
+                      <div className="project-stat__label">Pending</div>
+                    </div>
+                    <div className="project-stat">
+                      <div className="project-stat__value project-stat__value--success">{project.approved}</div>
+                      <div className="project-stat__label">Approved</div>
+                    </div>
+                    <div className="project-stat">
+                      <div className="project-stat__value">{project.total}</div>
+                      <div className="project-stat__label">Total</div>
+                    </div>
+                  </>
+                ) : (
+                  <div className="project-stat" style={{ flex: 1, textAlign: 'center' }}>
+                    <div className="project-stat__label" style={{ color: 'var(--text-muted)' }}>
+                      {project.type}
+                    </div>
                   </div>
-                  <div className="project-stat__label">Pending</div>
-                </div>
-                <div className="project-stat">
-                  <div className="project-stat__value project-stat__value--success">{project.approved}</div>
-                  <div className="project-stat__label">Approved</div>
-                </div>
-                <div className="project-stat">
-                  <div className="project-stat__value">{project.total}</div>
-                  <div className="project-stat__label">Total</div>
-                </div>
+                )}
               </div>
             </div>
           ))}
