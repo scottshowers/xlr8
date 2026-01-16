@@ -41,7 +41,7 @@ import logo from '../assets/logo.svg';
 
 const FLOW_STEPS = [
   { num: 1, key: 'create', label: 'Create', path: '/projects/new' },
-  { num: 2, key: 'upload', label: 'Upload', path: '/upload' },
+  { num: 2, key: 'upload', label: 'Upload', path: '/data' },
   { num: 3, key: 'playbooks', label: 'Playbooks', path: '/playbooks/select' },
   { num: 4, key: 'analysis', label: 'Analysis', path: '/processing' },
   { num: 5, key: 'findings', label: 'Findings', path: '/findings' },
