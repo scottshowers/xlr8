@@ -342,12 +342,15 @@ body {
   border-right: 1px solid var(--border);
   padding: var(--space-4) 0;
   overflow-y: auto;
-  overflow-x: hidden;
+  overflow-x: visible;
   z-index: 90;
   transition: width var(--transition-base);
 }
 
-.xlr8-sidebar--collapsed { width: var(--sidebar-collapsed); }
+.xlr8-sidebar--collapsed { 
+  width: var(--sidebar-collapsed); 
+  overflow: visible;
+}
 
 .xlr8-sidebar__section { margin-bottom: var(--space-6); }
 
