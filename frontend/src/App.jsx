@@ -25,7 +25,7 @@ import MainLayout from './components/MainLayout';
 // Pages
 import Landing from './pages/Landing';
 import LoginPage from './pages/LoginPage';
-import MissionControl from './pages/MissionControl';
+import Dashboard from './pages/Dashboard';
 import WorkspacePage from './pages/WorkspacePage';
 import ProjectsPage from './pages/ProjectsPage';
 import ProjectHub from './pages/ProjectHub';
@@ -95,12 +95,12 @@ function AppRoutes() {
         <Route path="/architecture" element={<ArchitecturePage />} />
         <Route path="/architecture/metrics-pipeline" element={<MetricsPipelinePage />} />
         
-        {/* ====== MISSION CONTROL (Hub - no flow bar) ====== */}
+        {/* ====== DASHBOARD (Hub - no flow bar) ====== */}
         <Route path="/mission-control" element={
-          <ProtectedRoute><Page><MissionControl /></Page></ProtectedRoute>
+          <ProtectedRoute><Page><Dashboard /></Page></ProtectedRoute>
         } />
         <Route path="/dashboard" element={
-          <ProtectedRoute><Page><MissionControl /></Page></ProtectedRoute>
+          <ProtectedRoute><Page><Dashboard /></Page></ProtectedRoute>
         } />
         
         {/* ====== 8-STEP WORKFLOW (with flow bar) ====== */}

@@ -1658,3 +1658,32 @@ body {
   .domain-columns { grid-template-columns: repeat(2, 1fr); }
   .engagement-grid { grid-template-columns: 1fr; }
 }
+
+/* ============================================================
+   DASHBOARD - Clickable Stat Cards
+   ============================================================ */
+
+.stat-card--clickable {
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  position: relative;
+}
+
+.stat-card--clickable:hover {
+  border-color: var(--grass-green);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.stat-card__icon {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-4);
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.stat-card--clickable:hover .stat-card__icon {
+  color: var(--grass-green);
+  opacity: 1;
+}
