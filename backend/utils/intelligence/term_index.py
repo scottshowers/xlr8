@@ -912,10 +912,8 @@ class TermIndex:
                 logger.warning(f"[TERM_INDEX] Skipping term '{term_lower}' (stop word or too short)")
                 continue
             
-            # Skip domain indicator words - they indicate the domain, not a filter value
-            if term_lower in DOMAIN_INDICATOR_WORDS:
-                logger.warning(f"[TERM_INDEX] Skipping domain indicator word '{term_lower}'")
-                continue
+            # Domain indicator words - resolve to find target table but mark as domain context
+            is_domain_indicator = term_lower in DOMAIN_INDICATOR_WORDS
             
             # Look up in term index
             results = self.conn.execute("""
@@ -927,8 +925,14 @@ class TermIndex:
             """, [self.project, term_lower]).fetchall()
             
             if results:
-                logger.warning(f"[TERM_INDEX] Term '{term_lower}' found {len(results)} matches (fast path)")
+                logger.warning(f"[TERM_INDEX] Term '{term_lower}' found {len(results)} matches (fast path), is_domain_indicator={is_domain_indicator}")
                 for row in results:
+                    term_type = row[8]
+                    # For domain indicators, only use 'concept' type entries (table identification)
+                    # Skip 'lookup' and 'lookup_partial' (filter values)
+                    if is_domain_indicator and term_type not in ('concept', 'synonym'):
+                        logger.warning(f"[TERM_INDEX] Skipping non-concept match for domain indicator '{term_lower}': type={term_type}")
+                        continue
                     matches.append(TermMatch(
                         term=row[0],
                         table_name=row[1],
@@ -938,7 +942,7 @@ class TermIndex:
                         domain=row[5],
                         entity=row[6],
                         confidence=row[7],
-                        term_type=row[8],
+                        term_type=term_type,
                         source=row[9] if len(row) > 9 else None
                     ))
             else:
