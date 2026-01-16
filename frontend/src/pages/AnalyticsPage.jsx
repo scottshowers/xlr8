@@ -830,187 +830,87 @@ function AnalyticsPageInner() {
   // ===========================================
   
   return (
-    <div>
+    <div style={{ padding: '1.5rem', background: '#f0f2f5', minHeight: 'calc(100vh - 60px)' }}>
       {/* Header - Standard Pattern */}
-      <div style={{ marginBottom: '20px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
-        <div>
-          <h1 style={{ 
-            margin: 0, 
-            fontSize: '20px', 
-            fontWeight: 600, 
-            color: 'var(--text-primary)', 
+      <div style={{ marginBottom: '20px' }}>
+        <h1 style={{ 
+          margin: 0, 
+          fontSize: '20px', 
+          fontWeight: 600, 
+          color: '#1a2332', 
+          display: 'flex', 
+          alignItems: 'center', 
+          gap: '10px',
+          fontFamily: "'Sora', sans-serif"
+        }}>
+          <div style={{ 
+            width: '36px', 
+            height: '36px', 
+            borderRadius: '10px', 
+            backgroundColor: '#83b16d', 
             display: 'flex', 
             alignItems: 'center', 
-            gap: '10px',
-            fontFamily: "'Sora', var(--font-body)"
+            justifyContent: 'center' 
           }}>
-            <div style={{ 
-              width: '36px', 
-              height: '36px', 
-              borderRadius: '10px', 
-              backgroundColor: 'var(--grass-green)', 
-              display: 'flex', 
-              alignItems: 'center', 
-              justifyContent: 'center' 
-            }}>
-              <BarChart3 size={20} color="#ffffff" />
-            </div>
-            Smart Analytics
-          </h1>
-          <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-            Build queries visually or write SQL directly
-          </p>
-        </div>
-        
-        {/* Mode Toggle */}
-        <div style={{ 
-          display: 'flex', 
-          gap: 'var(--space-1)', 
-          background: 'var(--bg-tertiary)', 
-          padding: 'var(--space-1)', 
-          borderRadius: 'var(--radius-lg)' 
-        }}>
-          <button
-            onClick={() => setMode('visual')}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              border: 'none',
-              background: mode === 'visual' ? 'var(--bg-secondary)' : 'transparent',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 500,
-              color: mode === 'visual' ? 'var(--grass-green)' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              boxShadow: mode === 'visual' ? 'var(--shadow-sm)' : 'none',
-              fontFamily: 'var(--font-body)'
-            }}
-          >
-            Visual Builder
-          </button>
-          <button
-            onClick={() => setMode('sql')}
-            style={{
-              padding: 'var(--space-2) var(--space-4)',
-              border: 'none',
-              background: mode === 'sql' ? 'var(--bg-secondary)' : 'transparent',
-              borderRadius: 'var(--radius-md)',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 500,
-              color: mode === 'sql' ? 'var(--grass-green)' : 'var(--text-secondary)',
-              cursor: 'pointer',
-              boxShadow: mode === 'sql' ? 'var(--shadow-sm)' : 'none',
-              fontFamily: 'var(--font-body)'
-            }}
-          >
-            <Code size={14} style={{ marginRight: '6px', verticalAlign: 'middle' }} />
-            SQL
-          </button>
-        </div>
+            <BarChart3 size={20} color="#ffffff" />
+          </div>
+          Smart Analytics
+        </h1>
+        <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: '#64748b' }}>
+          Build queries visually or write SQL directly
+        </p>
       </div>
 
       {/* Main Content */}
-      <div style={{ 
-        display: 'flex', 
-        background: 'var(--bg-secondary)', 
-        fontSize: 'var(--text-sm)', 
-        overflow: 'hidden', 
-        borderRadius: 'var(--radius-lg)', 
-        border: '1px solid var(--border)',
-        height: 'calc(100vh - 220px)'
-      }}>
-        {/* LEFT PANEL: Data Catalog */}
-        <div style={{ 
-          width: '320px', 
-          background: 'var(--bg-secondary)', 
-          borderRight: '1px solid var(--border)', 
-          display: 'flex', 
-          flexDirection: 'column', 
-          overflow: 'hidden',
-          flexShrink: 0
-        }}>
-          {/* Catalog Header */}
-          <div style={{ 
-            padding: 'var(--space-3)', 
-            borderBottom: '1px solid var(--border)', 
-            background: 'var(--bg-tertiary)',
-            flexShrink: 0
-          }}>
-            <h2 style={{ 
-              margin: 0, 
-              fontWeight: 600, 
-              color: 'var(--text-primary)', 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: 'var(--space-2)', 
-              fontSize: 'var(--text-sm)',
-              fontFamily: 'var(--font-body)'
-            }}>
-              <Layers size={14} style={{ color: 'var(--grass-green)' }} />
-              Data Catalog
-            </h2>
-            {Array.isArray(catalog) && catalog.length > 0 && (
-              <p style={{ margin: '4px 0 0', fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
-                {catalog.reduce((sum, t) => sum + (t?.tableCount || 0), 0)} tables available
-              </p>
-            )}
+      <div className="flex bg-white text-sm overflow-hidden rounded-xl border border-gray-200" style={{ height: 'calc(100vh - 180px)' }}>
+        {/* ================================================================
+            LEFT PANEL: Data Catalog
+            ================================================================ */}
+        <div className="w-96 bg-white border-r flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-3 border-b bg-gray-50 flex-shrink-0">
+          <h2 className="font-semibold text-gray-800 flex items-center gap-2 text-sm">
+            <Layers size={14} className="text-[#83b16d]" />
+            Data Catalog <span className="text-xs text-gray-400 ml-1">v5.0</span>
+          </h2>
+          {Array.isArray(catalog) && catalog.length > 0 && (
+            <p className="text-xs text-gray-400 mt-0.5">
+              {catalog.reduce((sum, t) => sum + (t?.tableCount || 0), 0)} tables
+            </p>
+          )}
+        </div>
+        
+        {/* Search */}
+        <div className="p-2 border-b flex-shrink-0">
+          <div className="relative">
+            <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              placeholder="Search tables..."
+              value={catalogSearch}
+              onChange={(e) => setCatalogSearch(e.target.value)}
+              className="w-full pl-7 pr-2 py-1.5 text-xs border rounded focus:outline-none focus:ring-1 focus:ring-[#83b16d] focus:border-[#83b16d]"
+            />
           </div>
-          
-          {/* Search */}
-          <div style={{ padding: 'var(--space-2)', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
-            <div style={{ position: 'relative' }}>
-              <Search size={12} style={{ 
-                position: 'absolute', 
-                left: '10px', 
-                top: '50%', 
-                transform: 'translateY(-50%)', 
-                color: 'var(--text-muted)' 
-              }} />
-              <input
-                type="text"
-                placeholder="Search tables..."
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                style={{
-                  width: '100%',
-                  padding: 'var(--space-2) var(--space-2) var(--space-2) 30px',
-                  fontSize: 'var(--text-xs)',
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)',
-                  background: 'var(--bg-tertiary)',
-                  outline: 'none',
-                  color: 'var(--text-primary)',
-                  fontFamily: 'var(--font-body)'
-                }}
-              />
-            </div>
-          </div>
-          
-          {/* Catalog List */}
-          <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+        </div>
+        
+        {/* Catalog List - scrolls independently */}
+        <div className="flex-1 overflow-y-auto min-h-0">
+          {console.log('[Analytics] Rendering catalog, filteredCatalog length:', filteredCatalog?.length)}
           {catalogLoading && (
-            <div style={{ padding: 'var(--space-4)', textAlign: 'center', color: 'var(--text-muted)' }}>
-              <Loader2 size={20} className="spin" style={{ margin: '0 auto var(--space-2)' }} />
-              <span style={{ fontSize: 'var(--text-xs)' }}>Loading catalog...</span>
+            <div className="p-4 text-center text-gray-400">
+              <Loader2 size={20} className="animate-spin mx-auto mb-2" />
+              <span className="text-xs">Loading catalog...</span>
             </div>
           )}
           
           {catalogError && (
-            <div style={{ padding: 'var(--space-4)', textAlign: 'center' }}>
-              <AlertCircle size={20} style={{ margin: '0 auto var(--space-2)', color: 'var(--critical)' }} />
-              <p style={{ fontSize: 'var(--text-xs)', color: 'var(--critical)', marginBottom: 'var(--space-2)' }}>{catalogError}</p>
+            <div className="p-4 text-center">
+              <AlertCircle size={20} className="mx-auto mb-2 text-[#993c44]" />
+              <p className="text-xs text-[#993c44] mb-2">{catalogError}</p>
               <button
                 onClick={loadCatalog}
-                style={{ 
-                  fontSize: 'var(--text-xs)', 
-                  color: 'var(--grass-green)', 
-                  background: 'none', 
-                  border: 'none', 
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  margin: '0 auto'
-                }}
+                className="text-xs text-[#83b16d] hover:underline flex items-center gap-1 mx-auto"
               >
                 <RefreshCw size={10} /> Retry
               </button>
@@ -1023,38 +923,28 @@ function AnalyticsPageInner() {
             const files = Array.isArray(truthTypeGroup.files) ? truthTypeGroup.files : []
             
             return (
-              <div key={truthTypeGroup.truthType} style={{ borderBottom: '1px solid var(--border)' }}>
+              <div key={truthTypeGroup.truthType} className="border-b border-gray-200">
                 {/* Truth Type Header */}
                 <button
                   onClick={() => toggleTruthType(truthTypeGroup.truthType)}
-                  style={{ 
-                    width: '100%', 
-                    padding: 'var(--space-2) var(--space-3)', 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: 'var(--space-2)',
-                    background: 'none',
-                    border: 'none',
-                    borderLeft: `3px solid ${truthTypeGroup.color || 'var(--grass-green)'}`,
-                    cursor: 'pointer',
-                    textAlign: 'left'
-                  }}
+                  className="w-full px-3 py-2.5 flex items-center gap-2 hover:bg-gray-50 transition-colors"
+                  style={{ borderLeft: `3px solid ${truthTypeGroup.color || '#83b16d'}` }}
                 >
-                  {truthTypeGroup.icon && React.createElement(truthTypeGroup.icon, { size: 16, color: truthTypeGroup.color || 'var(--grass-green)' })}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 'var(--text-sm)', fontWeight: 600, color: 'var(--text-primary)' }}>{truthTypeGroup.label}</div>
-                    <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>{truthTypeGroup.tableCount} tables • {files.length} files</div>
+                  {truthTypeGroup.icon && React.createElement(truthTypeGroup.icon, { size: 16, color: truthTypeGroup.color || '#83b16d' })}
+                  <div className="flex-1 text-left min-w-0">
+                    <div className="text-sm font-semibold text-gray-800">{truthTypeGroup.label}</div>
+                    <div className="text-xs text-gray-400">{truthTypeGroup.tableCount} tables • {files.length} files</div>
                   </div>
                   {isTruthExpanded ? (
-                    <ChevronDown size={14} style={{ color: 'var(--text-muted)' }} />
+                    <ChevronDown size={14} className="text-gray-400" />
                   ) : (
-                    <ChevronRight size={14} style={{ color: 'var(--text-muted)' }} />
+                    <ChevronRight size={14} className="text-gray-400" />
                   )}
                 </button>
                 
                 {/* Files within Truth Type */}
                 {isTruthExpanded && (
-                  <div style={{ background: 'var(--bg-tertiary)' }}>
+                  <div className="bg-gray-50/50">
                     {files.map(fileGroup => {
                       if (!fileGroup) return null
                       const fileKey = `${truthTypeGroup.truthType}:${fileGroup.fileName}`
@@ -1062,21 +952,11 @@ function AnalyticsPageInner() {
                       const domains = Array.isArray(fileGroup.domains) ? fileGroup.domains : []
                       
                       return (
-                        <div key={fileGroup.fileName} style={{ borderTop: '1px solid var(--border-light)' }}>
+                        <div key={fileGroup.fileName} className="border-t border-gray-100">
                           {/* File Header */}
                           <button
                             onClick={() => toggleFile(truthTypeGroup.truthType, fileGroup.fileName)}
-                            style={{
-                              width: '100%',
-                              padding: 'var(--space-2) var(--space-3) var(--space-2) var(--space-6)',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 'var(--space-2)',
-                              background: 'none',
-                              border: 'none',
-                              cursor: 'pointer',
-                              textAlign: 'left'
-                            }}
+                            className="w-full px-3 py-2 pl-6 flex items-center gap-2 hover:bg-gray-100 transition-colors"
                           >
                             <div className="w-5 h-5 rounded flex items-center justify-center bg-white border border-gray-200">
                               <FileText size={10} className="text-gray-500" />
