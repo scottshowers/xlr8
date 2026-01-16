@@ -2169,17 +2169,33 @@ DO NOT:
             
             # If no term matches and no aggregation matches, fall back to local LLM
             # This handles general questions that don't relate to loaded data
+            # ALSO fall back if ALL matches are low-confidence "reasoned" matches (MetadataReasoner guesses)
+            all_reasoned_low_conf = (
+                term_matches and 
+                all(getattr(m, 'term_type', '') == 'reasoned' for m in term_matches) and
+                all(getattr(m, 'confidence', 1.0) < 0.8 for m in term_matches)
+            )
+            
             if not term_matches and not agg_matches:
-                logger.warning(f"[DETERMINISTIC] No term matches found - falling back to local LLM")
-                
+                logger.warning(f"[DETERMINISTIC] No term matches found - checking for Pure Chat fallback")
+                should_fallback = True
+            elif all_reasoned_low_conf:
+                logger.warning(f"[DETERMINISTIC] All matches are low-confidence reasoned - checking for Pure Chat fallback")
+                should_fallback = True
+            else:
+                should_fallback = False
+            
+            if should_fallback:
                 # Check if this looks like a data question or a general question
-                data_keywords = ['how many', 'count', 'list', 'show', 'employees', 'workers', 
-                                 'in texas', 'in california', 'our ', 'my ', 'total', 'sum']
+                data_keywords = ['how many', 'count', 'list', 'show me', 'display', 'give me',
+                                 'employees', 'workers', 'deductions', 'earnings', 'payroll',
+                                 'in texas', 'in california', 'our ', 'my ', 'total', 'sum',
+                                 'report', 'export', 'table']
                 is_data_question = any(kw in question.lower() for kw in data_keywords)
                 
                 if is_data_question:
                     # This was a data question but we can't find the data
-                    logger.warning(f"[DETERMINISTIC] Data question with no matches - returning resolution failure")
+                    logger.warning(f"[DETERMINISTIC] Data question with no/weak matches - returning resolution failure")
                     return build_cannot_resolve_response(
                         question=question,
                         reason="Could not resolve any terms to database columns",
