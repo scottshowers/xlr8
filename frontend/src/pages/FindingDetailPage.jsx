@@ -1,332 +1,183 @@
 /**
- * FindingDetailPage.jsx - Step 6: Drill-In Detail
+ * FindingDetailPage.jsx - Step 6: Review (Drill-In)
  * 
- * Sixth step in the 8-step consultant workflow.
- * Deep dive into a specific finding with impact analysis and recommendations.
+ * Detailed view of a single finding with affected data.
+ * Uses design system classes - NO emojis.
  * 
- * Flow: ... → Findings → [DRILL-IN] → Track Progress → Export
- * 
- * Updated: January 15, 2026 - Phase 4A UX Overhaul (proper rebuild)
+ * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { PageHeader } from '../components/ui/PageHeader';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
-import { LoadingSpinner } from '../components/ui/LoadingSpinner';
-import { useProject } from '../context/ProjectContext';
+import { ArrowLeft, AlertCircle, AlertTriangle, Info, Check, X, Download } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-// Severity configuration
-const SEVERITY_CONFIG = {
-  critical: { icon: '🔴', label: 'Critical', variant: 'critical', description: 'Requires immediate attention' },
-  warning: { icon: '🟡', label: 'Warning', variant: 'warning', description: 'Should be addressed soon' },
-  info: { icon: '🔵', label: 'Info', variant: 'info', description: 'For your awareness' },
-};
-
-// Mock finding data
 const MOCK_FINDING = {
   id: 'f1',
   title: '457 employees missing tax filing status',
-  description: 'Employee records are missing required federal tax filing status, which will cause W-2 generation errors during year-end processing.',
+  description: 'Employee records are missing required federal tax filing status, which will cause W-2 generation errors. This field is required for year-end processing.',
   severity: 'critical',
-  category: 'data_quality',
-  affected_count: 457,
-  affected_label: 'employees',
+  affected: '457 employees',
   playbook: 'Year-End Playbook',
   action: 'Action 3A: Employee Data Validation',
-  detected_at: '2026-01-14',
-  why_it_matters: 'Missing tax filing status will prevent W-2 generation for affected employees. This could result in IRS penalties and delays in employee tax filing.',
-  who_affected: [
-    { department: 'Sales', count: 234 },
-    { department: 'Engineering', count: 156 },
-    { department: 'Operations', count: 67 },
-  ],
-  recommended_actions: [
-    { id: 1, action: 'Export affected employee list', status: 'pending', effort: '5 min' },
-    { id: 2, action: 'Send correction request to HR', status: 'pending', effort: '15 min' },
-    { id: 3, action: 'Verify corrections in system', status: 'pending', effort: '30 min' },
-    { id: 4, action: 'Re-run validation check', status: 'pending', effort: '5 min' },
-  ],
-  provenance: {
-    source_table: 'EMPLOYEE_MASTER',
-    source_column: 'TAX_FILING_STATUS',
-    rule_applied: 'Required field check for year-end processing',
-    detection_method: 'NULL value scan + business rule validation',
-  },
-  related_findings: [
-    { id: 'f2', title: 'Missing state tax codes', severity: 'warning' },
-    { id: 'f6', title: 'Missing supervisor assignments', severity: 'info' },
+  recommendation: 'Export the affected employee list and work with HR to update tax filing status before W-2 generation deadline.',
+  affectedRecords: [
+    { id: 'E001', name: 'John Smith', department: 'Engineering', hire_date: '2023-05-15' },
+    { id: 'E002', name: 'Sarah Johnson', department: 'Marketing', hire_date: '2022-08-01' },
+    { id: 'E003', name: 'Michael Brown', department: 'Sales', hire_date: '2024-01-10' },
+    { id: 'E004', name: 'Emily Davis', department: 'HR', hire_date: '2023-11-20' },
+    { id: 'E005', name: 'Robert Wilson', department: 'Finance', hire_date: '2022-03-05' },
   ],
 };
 
 const FindingDetailPage = () => {
   const navigate = useNavigate();
   const { findingId } = useParams();
-  const { activeProject } = useProject();
-
   const [finding, setFinding] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [status, setStatus] = useState('pending'); // pending, approved, rejected
 
-  // Fetch finding details
   useEffect(() => {
     fetchFinding();
   }, [findingId]);
 
   const fetchFinding = async () => {
     try {
-      setLoading(true);
       const res = await fetch(`${API_BASE}/api/findings/${findingId}`);
       if (res.ok) {
-        const data = await res.json();
-        setFinding(data);
+        setFinding(await res.json());
       } else {
-        setFinding(MOCK_FINDING);
+        setFinding({ ...MOCK_FINDING, id: findingId });
       }
-    } catch (err) {
-      console.error('Failed to fetch finding:', err);
-      setFinding(MOCK_FINDING);
+    } catch {
+      setFinding({ ...MOCK_FINDING, id: findingId });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleApprove = async () => {
-    console.log('Approving finding:', findingId);
-    navigate('/findings');
-  };
+  const handleApprove = () => setStatus('approved');
+  const handleReject = () => setStatus('rejected');
 
-  const handleReject = async () => {
-    console.log('Rejecting finding:', findingId);
-    navigate('/findings');
-  };
+  if (loading) return <div className="page-loading"><p>Loading finding...</p></div>;
+  if (!finding) return <div className="page-loading"><p>Finding not found</p></div>;
 
-  const handleMarkFalsePositive = async () => {
-    console.log('Marking as false positive:', findingId);
-    navigate('/findings');
-  };
-
-  if (loading) {
-    return (
-      
-        <div className="finding-detail finding-detail--loading">
-          <LoadingSpinner />
-          <p>Loading finding details...</p>
-        </div>
-      
-    );
-  }
-
-  if (!finding) {
-    return (
-      
-        <div className="finding-detail finding-detail--error">
-          <h2>Finding not found</h2>
-          <Button variant="secondary" onClick={() => navigate('/findings')}>
-            ← Back to Findings
-          </Button>
-        </div>
-      
-    );
-  }
-
-  const severityConfig = SEVERITY_CONFIG[finding.severity] || SEVERITY_CONFIG.info;
+  const SeverityIcon = { critical: AlertCircle, warning: AlertTriangle, info: Info }[finding.severity] || Info;
 
   return (
-    
-      <div className="finding-detail">
-        <PageHeader
-          title="Finding Detail"
-          subtitle="Step 6 of 8 • Review and take action"
-          actions={
-            <Button variant="secondary" onClick={() => navigate('/findings')}>
-              ← Back to Findings
-            </Button>
-          }
-        />
+    <div className="finding-detail-page">
+      {/* Back Button */}
+      <button className="btn btn-secondary mb-4" onClick={() => navigate('/findings')}>
+        <ArrowLeft size={16} />
+        Back to Findings
+      </button>
 
-        <div className="finding-detail__content">
-          {/* Main Content */}
-          <div className="finding-detail__main">
-            {/* Finding Header Card */}
-            <Card className="finding-detail__header-card">
-              <div className="finding-header">
-                <div className={`finding-severity-icon finding-severity-icon--${finding.severity}`}>
-                  {severityConfig.icon}
-                </div>
-                <div className="finding-header-content">
-                  <div className="finding-header-badges">
-                    <Badge variant={severityConfig.variant}>{severityConfig.label}</Badge>
-                    <Badge variant="neutral">{finding.category?.replace('_', ' ')}</Badge>
-                    <Badge variant="info">{finding.playbook}</Badge>
-                  </div>
-                  <h1 className="finding-title">{finding.title}</h1>
-                  <p className="finding-description">{finding.description}</p>
-                  <div className="finding-meta">
-                    <span>📅 Detected: {finding.detected_at}</span>
-                    <span>•</span>
-                    <span>⚙️ {finding.action}</span>
-                  </div>
-                </div>
+      {/* Header */}
+      <div className="card mb-6">
+        <div className="card-body">
+          <div className="flex items-center gap-4 mb-4">
+            <div className={`finding-item__indicator finding-item__indicator--${finding.severity}`}>
+              <SeverityIcon size={20} />
+            </div>
+            <div style={{ flex: 1 }}>
+              <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)', marginBottom: '4px' }}>{finding.title}</h1>
+              <div className="flex gap-4" style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                <span>{finding.affected}</span>
+                <span>-</span>
+                <span>{finding.playbook}</span>
+                <span>-</span>
+                <span>{finding.action}</span>
               </div>
-            </Card>
+            </div>
+            <span className={`badge badge--${finding.severity}`}>{finding.severity}</span>
+          </div>
+          <p style={{ color: 'var(--text-secondary)', lineHeight: 1.6 }}>{finding.description}</p>
+        </div>
+      </div>
 
-            {/* Impact Analysis */}
-            <Card className="finding-detail__impact-card">
-              <CardHeader>
-                <CardTitle icon="📊">Impact Analysis</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="impact-stats">
-                  <div className="impact-stat impact-stat--primary">
-                    <div className="impact-value">{finding.affected_count}</div>
-                    <div className="impact-label">{finding.affected_label} affected</div>
-                  </div>
-                </div>
-                
-                {finding.who_affected && finding.who_affected.length > 0 && (
-                  <div className="impact-breakdown">
-                    <h4>Breakdown by Department</h4>
-                    <div className="breakdown-list">
-                      {finding.who_affected.map((dept, idx) => (
-                        <div key={idx} className="breakdown-row">
-                          <span className="breakdown-name">{dept.department}</span>
-                          <div className="breakdown-bar-container">
-                            <div 
-                              className="breakdown-bar" 
-                              style={{ width: `${(dept.count / finding.affected_count) * 100}%` }}
-                            />
-                          </div>
-                          <span className="breakdown-count">{dept.count}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            {/* Why It Matters */}
-            <Card className="finding-detail__why-card">
-              <CardHeader>
-                <CardTitle icon="⚠️">Why It Matters</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="why-text">{finding.why_it_matters}</p>
-              </CardContent>
-            </Card>
-
-            {/* Recommended Actions */}
-            <Card className="finding-detail__actions-card">
-              <CardHeader>
-                <CardTitle icon="✅">Recommended Actions</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="action-list">
-                  {finding.recommended_actions?.map((action, idx) => (
-                    <div key={action.id} className="action-item">
-                      <div className="action-number">{idx + 1}</div>
-                      <div className="action-content">
-                        <div className="action-text">{action.action}</div>
-                        <div className="action-meta">
-                          <Badge variant="neutral" size="sm">{action.effort}</Badge>
-                        </div>
-                      </div>
-                    </div>
+      <div className="hub-grid">
+        <div className="hub-main">
+          {/* Affected Records */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">Affected Records</h3>
+              <button className="btn btn-secondary btn-sm">
+                <Download size={14} />
+                Export
+              </button>
+            </div>
+            <div className="table-container" style={{ border: 'none' }}>
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Name</th>
+                    <th>Department</th>
+                    <th>Hire Date</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {finding.affectedRecords?.map(record => (
+                    <tr key={record.id}>
+                      <td>{record.id}</td>
+                      <td>{record.name}</td>
+                      <td>{record.department}</td>
+                      <td>{record.hire_date}</td>
+                    </tr>
                   ))}
-                </div>
-              </CardContent>
-            </Card>
+                </tbody>
+              </table>
+            </div>
+            {finding.affectedRecords?.length > 5 && (
+              <div className="card-body" style={{ borderTop: '1px solid var(--border)', textAlign: 'center' }}>
+                <span className="text-muted">Showing 5 of {finding.affected}</span>
+              </div>
+            )}
+          </div>
+        </div>
 
-            {/* Provenance */}
-            <Card className="finding-detail__provenance-card">
-              <CardHeader>
-                <CardTitle icon="🔍">Data Provenance</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="provenance-grid">
-                  <div className="provenance-item">
-                    <div className="provenance-label">Source Table</div>
-                    <div className="provenance-value">{finding.provenance?.source_table}</div>
-                  </div>
-                  <div className="provenance-item">
-                    <div className="provenance-label">Source Column</div>
-                    <div className="provenance-value">{finding.provenance?.source_column}</div>
-                  </div>
-                  <div className="provenance-item provenance-item--wide">
-                    <div className="provenance-label">Rule Applied</div>
-                    <div className="provenance-value">{finding.provenance?.rule_applied}</div>
-                  </div>
-                  <div className="provenance-item provenance-item--wide">
-                    <div className="provenance-label">Detection Method</div>
-                    <div className="provenance-value">{finding.provenance?.detection_method}</div>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+        <div className="hub-sidebar">
+          {/* Recommendation */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">Recommendation</h3>
+            </div>
+            <div className="card-body">
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)', lineHeight: 1.6 }}>
+                {finding.recommendation}
+              </p>
+            </div>
           </div>
 
-          {/* Sidebar */}
-          <div className="finding-detail__sidebar">
-            {/* Actions Card */}
-            <Card className="finding-detail__decision-card">
-              <CardHeader>
-                <CardTitle icon="⚡">Take Action</CardTitle>
-              </CardHeader>
-              <div className="decision-actions">
-                <Button variant="primary" onClick={handleApprove} className="decision-btn">
-                  ✓ Approve Finding
-                </Button>
-                <Button variant="secondary" onClick={handleReject} className="decision-btn">
-                  ✗ Reject Finding
-                </Button>
-                <Button variant="ghost" onClick={handleMarkFalsePositive} className="decision-btn">
-                  🚫 False Positive
-                </Button>
-              </div>
-            </Card>
-
-            {/* Related Findings */}
-            {finding.related_findings && finding.related_findings.length > 0 && (
-              <Card className="finding-detail__related-card">
-                <CardHeader>
-                  <CardTitle icon="🔗">Related Findings</CardTitle>
-                </CardHeader>
-                <div className="related-list">
-                  {finding.related_findings.map(related => (
-                    <div 
-                      key={related.id} 
-                      className="related-item"
-                      onClick={() => navigate(`/findings/${related.id}`)}
-                    >
-                      <span className="related-severity">
-                        {SEVERITY_CONFIG[related.severity]?.icon}
-                      </span>
-                      <span className="related-title">{related.title}</span>
-                    </div>
-                  ))}
+          {/* Actions */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">Review Status</h3>
+            </div>
+            <div className="card-body">
+              {status === 'pending' ? (
+                <div className="flex flex-col gap-2">
+                  <button className="btn btn-primary" onClick={handleApprove} style={{ width: '100%', justifyContent: 'center' }}>
+                    <Check size={16} />
+                    Approve Finding
+                  </button>
+                  <button className="btn btn-secondary" onClick={handleReject} style={{ width: '100%', justifyContent: 'center' }}>
+                    <X size={16} />
+                    Reject / Not Applicable
+                  </button>
                 </div>
-              </Card>
-            )}
-
-            {/* Next Step */}
-            <Card className="finding-detail__next-card">
-              <div className="next-step-preview">
-                <div className="next-step-label">Next Step</div>
-                <div className="next-step-title">📈 Track Progress</div>
-                <div className="next-step-description">
-                  Monitor remediation progress and track risk mitigation.
+              ) : (
+                <div className={`alert alert--${status === 'approved' ? 'info' : 'warning'}`}>
+                  {status === 'approved' ? <Check size={16} /> : <X size={16} />}
+                  {status === 'approved' ? 'Finding approved' : 'Finding rejected'}
                 </div>
-              </div>
-            </Card>
+              )}
+            </div>
           </div>
         </div>
       </div>
-    
+    </div>
   );
 };
 

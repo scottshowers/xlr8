@@ -1,32 +1,18 @@
 /**
  * UploadDataPage.jsx - Step 2: Upload Data
  * 
- * Second step in the 8-step consultant workflow.
  * Drag-and-drop file upload with progress tracking.
+ * Uses design system classes - NO emojis.
  * 
- * Flow: Create Project → [UPLOAD DATA] → Select Playbooks → Analysis → ...
- * 
- * Updated: January 15, 2026 - Phase 4A UX Overhaul (proper rebuild)
+ * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PageHeader } from '../components/ui/PageHeader';
-import { Card, CardHeader, CardTitle } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
+import { Upload, FileSpreadsheet, FileText, File, X, Check, AlertCircle, ChevronRight } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
-
-// File type configuration
-const FILE_TYPES = {
-  xlsx: { label: 'XLS', color: 'info', icon: '📊' },
-  xls: { label: 'XLS', color: 'info', icon: '📊' },
-  csv: { label: 'CSV', color: 'success', icon: '📄' },
-  pdf: { label: 'PDF', color: 'warning', icon: '📑' },
-  default: { label: 'FILE', color: 'neutral', icon: '📁' },
-};
 
 const UploadDataPage = () => {
   const navigate = useNavigate();
@@ -39,9 +25,12 @@ const UploadDataPage = () => {
   const [error, setError] = useState(null);
 
   // Get file type config
-  const getFileTypeConfig = (filename) => {
+  const getFileType = (filename) => {
     const ext = filename.split('.').pop().toLowerCase();
-    return FILE_TYPES[ext] || FILE_TYPES.default;
+    if (['xlsx', 'xls'].includes(ext)) return { label: 'XLS', variant: 'info', Icon: FileSpreadsheet };
+    if (ext === 'csv') return { label: 'CSV', variant: 'success', Icon: FileText };
+    if (ext === 'pdf') return { label: 'PDF', variant: 'warning', Icon: FileText };
+    return { label: 'FILE', variant: 'info', Icon: File };
   };
 
   // Drag handlers
@@ -58,14 +47,11 @@ const UploadDataPage = () => {
   const handleDrop = useCallback((e) => {
     e.preventDefault();
     setIsDragging(false);
-    const droppedFiles = Array.from(e.dataTransfer.files);
-    addFiles(droppedFiles);
+    addFiles(Array.from(e.dataTransfer.files));
   }, []);
 
-  // File selection
   const handleFileSelect = (e) => {
-    const selectedFiles = Array.from(e.target.files);
-    addFiles(selectedFiles);
+    addFiles(Array.from(e.target.files));
   };
 
   const addFiles = (newFiles) => {
@@ -74,11 +60,10 @@ const UploadDataPage = () => {
       file,
       name: file.name,
       size: file.size,
-      typeConfig: getFileTypeConfig(file.name),
-      status: 'queued', // queued, uploading, uploaded, error
+      type: getFileType(file.name),
+      status: 'queued',
       progress: 0,
       rows: null,
-      error: null,
     }));
     setFiles((prev) => [...prev, ...fileObjects]);
     setError(null);
@@ -88,32 +73,22 @@ const UploadDataPage = () => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  // Upload simulation (replace with real API call)
+  // Upload simulation
   const uploadFile = async (fileObj) => {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       let progress = 0;
       const interval = setInterval(() => {
         progress += Math.random() * 30 + 10;
         if (progress >= 100) {
-          progress = 100;
           clearInterval(interval);
-          // Simulate row count
           const rows = Math.floor(Math.random() * 50000) + 1000;
           setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileObj.id
-                ? { ...f, status: 'uploaded', progress: 100, rows }
-                : f
-            )
+            prev.map((f) => f.id === fileObj.id ? { ...f, status: 'uploaded', progress: 100, rows } : f)
           );
           resolve();
         } else {
           setFiles((prev) =>
-            prev.map((f) =>
-              f.id === fileObj.id
-                ? { ...f, status: 'uploading', progress: Math.min(progress, 99) }
-                : f
-            )
+            prev.map((f) => f.id === fileObj.id ? { ...f, status: 'uploading', progress: Math.min(progress, 99) } : f)
           );
         }
       }, 200);
@@ -121,245 +96,195 @@ const UploadDataPage = () => {
   };
 
   const uploadAllFiles = async () => {
-    const queuedFiles = files.filter((f) => f.status === 'queued');
-    for (const fileObj of queuedFiles) {
-      try {
-        await uploadFile(fileObj);
-      } catch (err) {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === fileObj.id
-              ? { ...f, status: 'error', error: err.message }
-              : f
-          )
-        );
-      }
+    for (const fileObj of files.filter((f) => f.status === 'queued')) {
+      await uploadFile(fileObj);
     }
   };
 
-  // Start analysis
-  const handleStartAnalysis = async () => {
+  const handleContinue = async () => {
     if (files.length === 0) {
       setError('Please upload at least one file');
       return;
     }
-
-    setError(null);
     setUploading(true);
-
-    // Upload any queued files first
     await uploadAllFiles();
-
-    // Navigate to playbook selection (Step 3)
-    setTimeout(() => {
-      navigate('/playbooks/select');
-    }, 500);
+    setTimeout(() => navigate('/playbooks/select'), 500);
   };
 
-  // Stats
-  const totalFiles = files.length;
-  const uploadedFiles = files.filter((f) => f.status === 'uploaded').length;
-  const totalRows = files.reduce((sum, f) => sum + (f.rows || 0), 0);
-  const allUploaded = totalFiles > 0 && uploadedFiles === totalFiles;
-
-  // Format file size
   const formatSize = (bytes) => {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
 
+  const totalFiles = files.length;
+  const uploadedFiles = files.filter((f) => f.status === 'uploaded').length;
+  const totalRows = files.reduce((sum, f) => sum + (f.rows || 0), 0);
+  const allUploaded = totalFiles > 0 && uploadedFiles === totalFiles;
+
   return (
-    
-      <div className="upload-data">
-        <PageHeader
-          title={customerName || activeProject?.customer || 'Upload Data'}
-          subtitle={`Step 2 of 8 • ${activeProject?.system_type || 'UKG Pro'} · ${activeProject?.engagement_type || 'Implementation'}`}
-        />
+    <div className="upload-page">
+      <div className="page-header">
+        <h1 className="page-title">Upload Data</h1>
+        <p className="page-subtitle">
+          {customerName || activeProject?.customer || 'Project'} - {activeProject?.system_type || 'UKG Pro'}
+        </p>
+      </div>
 
-        <div className="upload-data__content">
-          {/* Main Upload Card */}
-          <Card className="upload-data__main-card">
-            <CardHeader>
-              <CardTitle icon="📤">Upload Client Data</CardTitle>
+      <div className="hub-grid">
+        {/* Main Upload Area */}
+        <div className="hub-main">
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">Upload Client Data</h3>
               {totalFiles > 0 && (
-                <Badge variant="info">
-                  {uploadedFiles}/{totalFiles} files
-                </Badge>
+                <span className="badge badge--info">{uploadedFiles}/{totalFiles} files</span>
               )}
-            </CardHeader>
-
-            {/* Drop Zone */}
-            <div
-              className={`upload-data__dropzone ${isDragging ? 'upload-data__dropzone--active' : ''}`}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <div className="dropzone-icon">↑</div>
-              <h3 className="dropzone-title">Drop files here or click to browse</h3>
-              <p className="dropzone-hint">Excel, CSV, PDF — we'll figure out what's what</p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept=".xlsx,.xls,.csv,.pdf"
-                onChange={handleFileSelect}
-                style={{ display: 'none' }}
-              />
             </div>
-
-            {/* File List */}
-            {files.length > 0 && (
-              <div className="upload-data__files">
-                {files.map((fileObj) => (
-                  <div key={fileObj.id} className={`file-row file-row--${fileObj.status}`}>
-                    {/* File Type Badge */}
-                    <div className={`file-type-badge file-type-badge--${fileObj.typeConfig.color}`}>
-                      {fileObj.typeConfig.label}
-                    </div>
-
-                    {/* File Info */}
-                    <div className="file-info">
-                      <div className="file-name">{fileObj.name}</div>
-                      <div className="file-meta">
-                        {fileObj.status === 'uploaded' && fileObj.rows && (
-                          <span>{fileObj.rows.toLocaleString()} rows</span>
-                        )}
-                        {fileObj.status === 'uploading' && (
-                          <span>Uploading... {Math.round(fileObj.progress)}%</span>
-                        )}
-                        {fileObj.status === 'queued' && (
-                          <span>Queued • {formatSize(fileObj.size)}</span>
-                        )}
-                        {fileObj.status === 'error' && (
-                          <span className="file-error">{fileObj.error || 'Upload failed'}</span>
-                        )}
-                      </div>
-                      {/* Progress Bar */}
-                      <div className="file-progress">
-                        <div 
-                          className="file-progress-bar" 
-                          style={{ width: `${fileObj.progress}%` }} 
-                        />
-                      </div>
-                    </div>
-
-                    {/* Status / Actions */}
-                    <div className="file-actions">
-                      {fileObj.status === 'uploaded' && (
-                        <span className="file-status file-status--success">✓</span>
-                      )}
-                      {fileObj.status === 'error' && (
-                        <span className="file-status file-status--error">✗</span>
-                      )}
-                      {(fileObj.status === 'queued' || fileObj.status === 'error') && (
-                        <button 
-                          className="file-remove"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            removeFile(fileObj.id);
-                          }}
-                        >
-                          ×
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Error Message */}
-            {error && (
-              <div className="upload-data__error">
-                <span className="error-icon">⚠️</span>
-                {error}
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="upload-data__actions">
-              <Button
-                variant="primary"
-                onClick={handleStartAnalysis}
-                disabled={files.length === 0 || uploading}
-              >
-                {uploading ? 'Uploading...' : allUploaded ? 'Continue to Playbooks →' : 'Upload & Continue →'}
-              </Button>
-              <Button
-                variant="secondary"
+            <div className="card-body">
+              {/* Drop Zone */}
+              <div
+                className={`dropzone ${isDragging ? 'dropzone--active' : ''}`}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
                 onClick={() => fileInputRef.current?.click()}
               >
-                Add More Files
-              </Button>
-            </div>
-          </Card>
-
-          {/* Sidebar */}
-          <div className="upload-data__sidebar">
-            {/* Stats Card */}
-            {files.length > 0 && (
-              <Card className="upload-data__stats-card">
-                <CardHeader>
-                  <CardTitle icon="📊">Upload Summary</CardTitle>
-                </CardHeader>
-                <div className="stats-grid">
-                  <div className="stat-item">
-                    <div className="stat-value">{totalFiles}</div>
-                    <div className="stat-label">Files</div>
-                  </div>
-                  <div className="stat-item">
-                    <div className="stat-value">{uploadedFiles}</div>
-                    <div className="stat-label">Uploaded</div>
-                  </div>
-                  <div className="stat-item stat-item--wide">
-                    <div className="stat-value">{totalRows.toLocaleString()}</div>
-                    <div className="stat-label">Total Rows</div>
-                  </div>
+                <Upload size={32} style={{ color: 'var(--grass-green)', marginBottom: 'var(--space-3)' }} />
+                <div style={{ fontSize: 'var(--text-lg)', fontWeight: 'var(--weight-semibold)', marginBottom: 'var(--space-1)' }}>
+                  Drop files here or click to browse
                 </div>
-              </Card>
-            )}
+                <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                  Excel, CSV, PDF - we'll figure out what's what
+                </div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".xlsx,.xls,.csv,.pdf"
+                  onChange={handleFileSelect}
+                  style={{ display: 'none' }}
+                />
+              </div>
 
-            {/* Help Card */}
-            <Card className="upload-data__help-card">
-              <CardHeader>
-                <CardTitle icon="💡">Supported Formats</CardTitle>
-              </CardHeader>
-              <ul className="format-list">
-                <li>
-                  <Badge variant="info" size="sm">XLS</Badge>
-                  <span>Excel spreadsheets (.xlsx, .xls)</span>
-                </li>
-                <li>
-                  <Badge variant="success" size="sm">CSV</Badge>
-                  <span>Comma-separated values</span>
-                </li>
-                <li>
-                  <Badge variant="warning" size="sm">PDF</Badge>
-                  <span>Configuration exports, reports</span>
-                </li>
-              </ul>
-              <p className="help-note">
-                No special formatting required. Just export from your system and drop here.
-              </p>
-            </Card>
+              {/* File List */}
+              {files.length > 0 && (
+                <div className="file-list mt-4">
+                  {files.map((fileObj) => {
+                    const { Icon } = fileObj.type;
+                    return (
+                      <div key={fileObj.id} className="file-item">
+                        <div className="flex items-center gap-3" style={{ flex: 1 }}>
+                          <span className={`badge badge--${fileObj.type.variant}`}>{fileObj.type.label}</span>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ fontWeight: 'var(--weight-medium)' }}>{fileObj.name}</div>
+                            <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
+                              {fileObj.status === 'uploaded' && `${fileObj.rows?.toLocaleString()} rows`}
+                              {fileObj.status === 'uploading' && `Uploading... ${Math.round(fileObj.progress)}%`}
+                              {fileObj.status === 'queued' && `${formatSize(fileObj.size)}`}
+                            </div>
+                            {fileObj.status === 'uploading' && (
+                              <div className="progress-bar mt-2" style={{ height: '4px' }}>
+                                <div className="progress-bar__fill" style={{ width: `${fileObj.progress}%` }} />
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          {fileObj.status === 'uploaded' && <Check size={18} style={{ color: 'var(--success)' }} />}
+                          {fileObj.status === 'queued' && (
+                            <button className="btn-icon" onClick={() => removeFile(fileObj.id)}>
+                              <X size={16} />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
 
-            {/* Next Step Preview */}
-            <Card className="upload-data__next-card">
-              <div className="next-step-preview">
-                <div className="next-step-label">Next Step</div>
-                <div className="next-step-title">📋 Select Playbooks</div>
-                <div className="next-step-description">
-                  Choose which analysis playbooks to run against your data.
+              {/* Error */}
+              {error && (
+                <div className="alert alert--error mt-4">
+                  <AlertCircle size={16} />
+                  {error}
+                </div>
+              )}
+
+              {/* Actions */}
+              <div className="flex gap-4 mt-6">
+                <button
+                  className="btn btn-primary btn-lg"
+                  onClick={handleContinue}
+                  disabled={files.length === 0 || uploading}
+                >
+                  {uploading ? 'Uploading...' : allUploaded ? 'Continue to Playbooks' : 'Upload & Continue'}
+                  <ChevronRight size={18} />
+                </button>
+                <button className="btn btn-secondary" onClick={() => fileInputRef.current?.click()}>
+                  Add More Files
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Sidebar */}
+        <div className="hub-sidebar">
+          {/* Stats */}
+          {files.length > 0 && (
+            <div className="card">
+              <div className="card-header">
+                <h3 className="card-title">Upload Summary</h3>
+              </div>
+              <div className="card-body">
+                <div className="flex gap-6">
+                  <div className="finding-stat">
+                    <div className="finding-stat__value">{totalFiles}</div>
+                    <div className="finding-stat__label">Files</div>
+                  </div>
+                  <div className="finding-stat">
+                    <div className="finding-stat__value finding-stat__value--info">{uploadedFiles}</div>
+                    <div className="finding-stat__label">Uploaded</div>
+                  </div>
+                  <div className="finding-stat">
+                    <div className="finding-stat__value">{totalRows.toLocaleString()}</div>
+                    <div className="finding-stat__label">Rows</div>
+                  </div>
                 </div>
               </div>
-            </Card>
+            </div>
+          )}
+
+          {/* Supported Formats */}
+          <div className="card">
+            <div className="card-header">
+              <h3 className="card-title">Supported Formats</h3>
+            </div>
+            <div className="card-body">
+              <div className="flex flex-col gap-3">
+                <div className="flex items-center gap-2">
+                  <span className="badge badge--info">XLS</span>
+                  <span style={{ fontSize: 'var(--text-sm)' }}>Excel spreadsheets</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge--success">CSV</span>
+                  <span style={{ fontSize: 'var(--text-sm)' }}>Comma-separated values</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="badge badge--warning">PDF</span>
+                  <span style={{ fontSize: 'var(--text-sm)' }}>Configuration exports</span>
+                </div>
+              </div>
+              <p style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)', marginTop: 'var(--space-4)' }}>
+                No special formatting required. Just export and drop.
+              </p>
+            </div>
           </div>
         </div>
       </div>
-    
+    </div>
   );
 };
 

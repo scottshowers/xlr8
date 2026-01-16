@@ -1,286 +1,143 @@
 /**
  * ExportPage.jsx - Step 8: Export
  * 
- * Final step in the 8-step consultant workflow.
- * Generate and download client-ready deliverables.
+ * Export findings and reports.
+ * Uses design system classes - NO emojis.
  * 
- * Flow: ... → Track Progress → [EXPORT]
- * 
- * Created: January 15, 2026 - Phase 4A UX Overhaul
+ * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { PageHeader } from '../components/ui/PageHeader';
-import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
-import { Button } from '../components/ui/Button';
-import { Badge } from '../components/ui/Badge';
+import { ArrowLeft, FileText, Table, FileSpreadsheet, Download, Check, Loader2 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
-
-// Export format options
-const EXPORT_FORMATS = [
-  {
-    id: 'excel',
-    name: 'Excel Workbook',
-    description: 'Complete findings with all data in spreadsheet format',
-    icon: '📊',
-    extension: '.xlsx',
-    recommended: true,
-  },
-  {
-    id: 'pdf',
-    name: 'PDF Report',
-    description: 'Formatted executive summary for client presentation',
-    icon: '📄',
-    extension: '.pdf',
-  },
-  {
-    id: 'powerpoint',
-    name: 'PowerPoint Deck',
-    description: 'Presentation-ready slides with key findings',
-    icon: '📽️',
-    extension: '.pptx',
-  },
-  {
-    id: 'csv',
-    name: 'CSV Data',
-    description: 'Raw findings data for further analysis',
-    icon: '📋',
-    extension: '.csv',
-  },
-];
-
-// Export content options
-const CONTENT_OPTIONS = [
-  { id: 'findings', label: 'All Findings', description: 'Complete list of identified issues', default: true },
-  { id: 'recommendations', label: 'Recommendations', description: 'Suggested actions and remediation steps', default: true },
-  { id: 'affected_records', label: 'Affected Records', description: 'Detailed list of impacted data', default: false },
-  { id: 'provenance', label: 'Data Provenance', description: 'Source tables and detection methods', default: false },
-  { id: 'progress', label: 'Progress Summary', description: 'Current remediation status', default: true },
-  { id: 'executive_summary', label: 'Executive Summary', description: 'High-level overview for leadership', default: true },
+const EXPORT_OPTIONS = [
+  { id: 'pdf', name: 'Executive Summary (PDF)', desc: 'High-level findings for stakeholders', Icon: FileText },
+  { id: 'xlsx', name: 'Full Report (Excel)', desc: 'Detailed findings with affected records', Icon: FileSpreadsheet },
+  { id: 'csv', name: 'Raw Data (CSV)', desc: 'All findings data for further analysis', Icon: Table },
 ];
 
 const ExportPage = () => {
   const navigate = useNavigate();
-  const { activeProject, customerName } = useProject();
+  const { activeProject } = useProject();
+  const [selectedFormat, setSelectedFormat] = useState(null);
+  const [exporting, setExporting] = useState(false);
+  const [exported, setExported] = useState(false);
 
-  const [selectedFormat, setSelectedFormat] = useState('excel');
-  const [selectedContent, setSelectedContent] = useState(
-    new Set(CONTENT_OPTIONS.filter(o => o.default).map(o => o.id))
-  );
-  const [generating, setGenerating] = useState(false);
-  const [downloadUrl, setDownloadUrl] = useState(null);
-
-  const toggleContent = (id) => {
-    setSelectedContent(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
+  const handleExport = async () => {
+    if (!selectedFormat) return;
+    setExporting(true);
+    // Simulate export
+    await new Promise(r => setTimeout(r, 2000));
+    setExporting(false);
+    setExported(true);
   };
-
-  const handleGenerate = async () => {
-    setGenerating(true);
-    setDownloadUrl(null);
-
-    try {
-      // Simulate export generation
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      
-      // In real implementation, call API:
-      // const res = await fetch(`${API_BASE}/api/export`, {
-      //   method: 'POST',
-      //   headers: { 'Content-Type': 'application/json' },
-      //   body: JSON.stringify({
-      //     project_id: activeProject?.id,
-      //     format: selectedFormat,
-      //     content: Array.from(selectedContent),
-      //   }),
-      // });
-      // const data = await res.json();
-      // setDownloadUrl(data.download_url);
-
-      // Mock download URL
-      setDownloadUrl(`/exports/findings-report-${Date.now()}.${EXPORT_FORMATS.find(f => f.id === selectedFormat)?.extension || 'xlsx'}`);
-    } catch (err) {
-      console.error('Export failed:', err);
-    } finally {
-      setGenerating(false);
-    }
-  };
-
-  const handleDownload = () => {
-    if (downloadUrl) {
-      // Trigger download
-      const link = document.createElement('a');
-      link.href = downloadUrl;
-      link.download = `${customerName || 'Project'}-Findings-Report${EXPORT_FORMATS.find(f => f.id === selectedFormat)?.extension || '.xlsx'}`;
-      link.click();
-    }
-  };
-
-  const selectedFormatConfig = EXPORT_FORMATS.find(f => f.id === selectedFormat);
 
   return (
-    
-      <div className="export-page">
-        <PageHeader
-          title="Export Report"
-          subtitle={`Step 8 of 8 • Generate client-ready deliverables${customerName ? ` for ${customerName}` : ''}`}
-        />
+    <div className="export-page">
+      <button className="btn btn-secondary mb-4" onClick={() => navigate('/findings')}>
+        <ArrowLeft size={16} />
+        Back to Findings
+      </button>
 
-        <div className="export-page__content">
-          {/* Main Content */}
-          <div className="export-page__main">
-            {/* Format Selection */}
-            <Card className="export-page__format-card">
-              <CardHeader>
-                <CardTitle icon="📥">Export Format</CardTitle>
-              </CardHeader>
-              <div className="format-grid">
-                {EXPORT_FORMATS.map(format => (
-                  <button
-                    key={format.id}
-                    className={`format-option ${selectedFormat === format.id ? 'format-option--selected' : ''}`}
-                    onClick={() => setSelectedFormat(format.id)}
-                  >
-                    <div className="format-icon">{format.icon}</div>
-                    <div className="format-content">
-                      <div className="format-name">
-                        {format.name}
-                        {format.recommended && <Badge variant="success" size="sm">Recommended</Badge>}
-                      </div>
-                      <div className="format-description">{format.description}</div>
-                    </div>
-                    <div className="format-check">
-                      {selectedFormat === format.id ? '✓' : '○'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            </Card>
+      <div className="page-header">
+        <h1 className="page-title">Export Report</h1>
+        <p className="page-subtitle">{activeProject?.customer || 'Project'} - Final deliverables</p>
+      </div>
 
-            {/* Content Selection */}
-            <Card className="export-page__content-card">
-              <CardHeader>
-                <CardTitle icon="📋">Include in Export</CardTitle>
-              </CardHeader>
-              <div className="content-options">
-                {CONTENT_OPTIONS.map(option => (
-                  <label key={option.id} className="content-option">
-                    <input
-                      type="checkbox"
-                      checked={selectedContent.has(option.id)}
-                      onChange={() => toggleContent(option.id)}
-                    />
-                    <div className="content-option-info">
-                      <div className="content-option-label">{option.label}</div>
-                      <div className="content-option-description">{option.description}</div>
-                    </div>
-                  </label>
-                ))}
-              </div>
-            </Card>
-
-            {/* Generate / Download */}
-            <Card className="export-page__action-card">
-              {!downloadUrl ? (
-                <div className="export-action">
-                  <div className="export-summary">
-                    <div className="export-summary-icon">{selectedFormatConfig?.icon}</div>
-                    <div className="export-summary-info">
-                      <div className="export-summary-format">{selectedFormatConfig?.name}</div>
-                      <div className="export-summary-content">
-                        {selectedContent.size} sections selected
-                      </div>
-                    </div>
+      {/* Export Options */}
+      <div className="card mb-6">
+        <div className="card-header">
+          <h3 className="card-title">Select Export Format</h3>
+        </div>
+        <div className="card-body">
+          <div className="export-options">
+            {EXPORT_OPTIONS.map(option => {
+              const isSelected = selectedFormat === option.id;
+              return (
+                <div
+                  key={option.id}
+                  className={`export-option ${isSelected ? 'export-option--selected' : ''}`}
+                  onClick={() => { setSelectedFormat(option.id); setExported(false); }}
+                >
+                  <div className="export-option__icon">
+                    <option.Icon size={24} />
                   </div>
-                  <Button
-                    variant="primary"
-                    onClick={handleGenerate}
-                    disabled={generating || selectedContent.size === 0}
-                    className="export-btn"
-                  >
-                    {generating ? '⏳ Generating...' : '✨ Generate Export'}
-                  </Button>
-                </div>
-              ) : (
-                <div className="export-ready">
-                  <div className="export-ready-icon">✅</div>
-                  <div className="export-ready-info">
-                    <div className="export-ready-title">Export Ready!</div>
-                    <div className="export-ready-subtitle">Your report has been generated</div>
+                  <div className="export-option__content">
+                    <div className="export-option__name">{option.name}</div>
+                    <div className="export-option__desc">{option.desc}</div>
                   </div>
-                  <div className="export-ready-actions">
-                    <Button variant="primary" onClick={handleDownload}>
-                      📥 Download {selectedFormatConfig?.extension}
-                    </Button>
-                    <Button variant="secondary" onClick={() => setDownloadUrl(null)}>
-                      Generate Another
-                    </Button>
+                  <div className="export-option__check">
+                    {isSelected && <Check size={16} />}
                   </div>
                 </div>
-              )}
-            </Card>
-          </div>
-
-          {/* Sidebar */}
-          <div className="export-page__sidebar">
-            {/* Export History */}
-            <Card className="export-page__history-card">
-              <CardHeader>
-                <CardTitle icon="📁">Recent Exports</CardTitle>
-              </CardHeader>
-              <div className="history-list">
-                <div className="history-item">
-                  <span className="history-icon">📊</span>
-                  <div className="history-info">
-                    <div className="history-name">Findings Report</div>
-                    <div className="history-date">Jan 14, 2026 • Excel</div>
-                  </div>
-                </div>
-                <div className="history-item">
-                  <span className="history-icon">📄</span>
-                  <div className="history-info">
-                    <div className="history-name">Executive Summary</div>
-                    <div className="history-date">Jan 12, 2026 • PDF</div>
-                  </div>
-                </div>
-              </div>
-            </Card>
-
-            {/* Help Card */}
-            <Card className="export-page__help-card">
-              <CardHeader>
-                <CardTitle icon="💡">Export Tips</CardTitle>
-              </CardHeader>
-              <ul className="help-list">
-                <li><strong>Excel</strong> - Best for detailed analysis and data manipulation</li>
-                <li><strong>PDF</strong> - Best for client presentations and formal documentation</li>
-                <li><strong>PowerPoint</strong> - Best for steering committee meetings</li>
-              </ul>
-            </Card>
-
-            {/* Complete Card */}
-            <Card className="export-page__complete-card">
-              <div className="complete-preview">
-                <div className="complete-icon">🎉</div>
-                <div className="complete-title">Workflow Complete!</div>
-                <div className="complete-description">
-                  You've completed the full analysis workflow. Export your deliverables and share with the client.
-                </div>
-                <Button variant="secondary" onClick={() => navigate('/mission-control')}>
-                  ← Back to Mission Control
-                </Button>
-              </div>
-            </Card>
+              );
+            })}
           </div>
         </div>
       </div>
-    
+
+      {/* Export Button */}
+      <div className="flex gap-4">
+        <button
+          className="btn btn-primary btn-lg"
+          onClick={handleExport}
+          disabled={!selectedFormat || exporting}
+        >
+          {exporting ? (
+            <>
+              <Loader2 size={18} className="spin" />
+              Generating...
+            </>
+          ) : exported ? (
+            <>
+              <Check size={18} />
+              Download Ready
+            </>
+          ) : (
+            <>
+              <Download size={18} />
+              Generate Export
+            </>
+          )}
+        </button>
+      </div>
+
+      {exported && (
+        <div className="alert alert--info mt-4">
+          <Check size={16} />
+          Your export is ready! Click the button above to download.
+        </div>
+      )}
+
+      {/* Summary */}
+      <div className="card mt-6">
+        <div className="card-header">
+          <h3 className="card-title">Export Summary</h3>
+        </div>
+        <div className="card-body">
+          <div className="flex gap-6">
+            <div className="finding-stat">
+              <div className="finding-stat__value">32</div>
+              <div className="finding-stat__label">Total Findings</div>
+            </div>
+            <div className="finding-stat">
+              <div className="finding-stat__value finding-stat__value--critical">8</div>
+              <div className="finding-stat__label">Critical</div>
+            </div>
+            <div className="finding-stat">
+              <div className="finding-stat__value finding-stat__value--warning">12</div>
+              <div className="finding-stat__label">Warning</div>
+            </div>
+            <div className="finding-stat">
+              <div className="finding-stat__value finding-stat__value--info">12</div>
+              <div className="finding-stat__label">Info</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   );
 };
 
