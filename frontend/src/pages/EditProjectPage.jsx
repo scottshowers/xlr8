@@ -164,7 +164,7 @@ const EditProjectPage = () => {
       const engagementLabel = ENGAGEMENT_TYPES.find(t => t.value === formData.engagement_type)?.label || formData.engagement_type;
       
       const res = await fetch(`${API_BASE}/api/projects/${id}`, {
-        method: 'PATCH',
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           name: `${formData.customer} - ${engagementLabel}`,

@@ -2,7 +2,7 @@
  * ProjectsPage.jsx - Projects List
  * 
  * WIRED TO REAL API - Fetches projects from /api/projects/list
- * Displays real projects + demo stats where available.
+ * Shows Start Date and Projected End as separate columns.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
@@ -13,37 +13,30 @@ import { Plus, Search, Loader2 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
-// Generate a consistent color based on string (customer name)
 const getCustomerColor = (name) => {
-  const colors = [
-    '#83b16d', '#2766b1', '#285390', '#5f4282', '#993c44',
-    '#d97706', '#93abd9', '#a1c3d4', '#b2d6de', '#6b9b5a',
-  ];
+  const colors = ['#83b16d', '#2766b1', '#285390', '#5f4282', '#993c44', '#d97706', '#93abd9', '#a1c3d4', '#b2d6de', '#6b9b5a'];
   let hash = 0;
-  for (let i = 0; i < (name || '').length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash);
-  }
+  for (let i = 0; i < (name || '').length; i++) hash = name.charCodeAt(i) + ((hash << 5) - hash);
   return colors[Math.abs(hash) % colors.length];
 };
 
-// Parse demo stats from notes field
 const parseDemoStats = (notes) => {
   if (!notes) return null;
   const match = notes.match(/\[DEMO_STATS\](.*?)\[\/DEMO_STATS\]/s);
-  if (match) {
-    try {
-      return JSON.parse(match[1]);
-    } catch {
-      return null;
-    }
-  }
+  if (match) { try { return JSON.parse(match[1]); } catch { return null; } }
   return null;
 };
 
-// Get initials from name
 const getInitials = (name) => {
   if (!name) return '??';
   return name.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2);
+};
+
+const formatDate = (dateStr) => {
+  if (!dateStr) return '-';
+  try {
+    return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch { return dateStr; }
 };
 
 const ProjectsPage = () => {
@@ -53,9 +46,7 @@ const ProjectsPage = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
+  useEffect(() => { fetchProjects(); }, []);
 
   const fetchProjects = async () => {
     try {
@@ -63,21 +54,24 @@ const ProjectsPage = () => {
       if (!res.ok) throw new Error('Failed to fetch projects');
       const data = await res.json();
       
-      // Process projects with demo stats
       const processed = data.map(p => {
         const demoStats = parseDemoStats(p.notes);
+        const metadata = p.metadata || {};
+        const detectedDomains = metadata.detected_domains || {};
+        
         return {
           ...p,
           initials: getInitials(p.customer || p.name),
           demoStats,
           findings: demoStats?.findings || { critical: 0, warning: 0, info: 0, total: 0 },
           progress: demoStats?.progress || 0,
+          tablesAnalyzed: detectedDomains.tables_analyzed || 0,
+          hasRealData: !!detectedDomains.tables_analyzed,
         };
       });
       
       setProjects(processed);
     } catch (err) {
-      console.error('Failed to load projects:', err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -89,17 +83,8 @@ const ProjectsPage = () => {
     (project.customer || '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  const handleProjectClick = (project) => {
-    navigate(`/projects/${project.id}/hub`);
-  };
-
   if (loading) {
-    return (
-      <div className="page-loading">
-        <Loader2 size={24} className="spin" />
-        <p>Loading projects...</p>
-      </div>
-    );
+    return <div className="page-loading"><Loader2 size={24} className="spin" /><p>Loading projects...</p></div>;
   }
 
   return (
@@ -115,11 +100,7 @@ const ProjectsPage = () => {
         </button>
       </div>
 
-      {error && (
-        <div className="alert alert--error mb-4">
-          {error}
-        </div>
-      )}
+      {error && <div className="alert alert--error mb-4">{error}</div>}
 
       <div className="card mb-6">
         <div className="card-body" style={{ padding: 'var(--space-3)' }}>
@@ -128,7 +109,7 @@ const ProjectsPage = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search projects by name..."
+              placeholder="Search projects..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ border: 'none', padding: 0, background: 'transparent' }}
@@ -144,78 +125,60 @@ const ProjectsPage = () => {
               <th>Project</th>
               <th>Systems</th>
               <th>Type</th>
-              <th>Go-Live / End</th>
-              <th>Findings</th>
+              <th>Start</th>
+              <th>End</th>
+              <th>Data / Findings</th>
               <th>Progress</th>
               <th>Status</th>
             </tr>
           </thead>
           <tbody>
             {filteredProjects.map(project => (
-              <tr 
-                key={project.id} 
-                onClick={() => handleProjectClick(project)}
-                style={{ cursor: 'pointer' }}
-              >
+              <tr key={project.id} onClick={() => navigate(`/projects/${project.id}/hub`)} style={{ cursor: 'pointer' }}>
                 <td>
                   <div className="flex items-center gap-3">
-                    <div 
-                      className="project-card__avatar" 
-                      style={{ 
-                        width: '32px', 
-                        height: '32px', 
-                        fontSize: 'var(--text-sm)',
-                        background: getCustomerColor(project.customer || project.name),
-                        flexShrink: 0
-                      }}
-                    >
+                    <div className="project-card__avatar" style={{ width: '32px', height: '32px', fontSize: 'var(--text-sm)', background: getCustomerColor(project.customer || project.name), flexShrink: 0 }}>
                       {project.initials}
                     </div>
-                    <span style={{ fontWeight: 'var(--weight-semibold)', marginLeft: '4px' }}>
-                      {project.customer || project.name}
-                    </span>
+                    <span style={{ fontWeight: 'var(--weight-semibold)' }}>{project.customer || project.name}</span>
                   </div>
                 </td>
-                <td>
-                  {(project.systems || []).map(s => s.replace(/-/g, ' ')).join(', ') || project.product || '-'}
-                </td>
+                <td>{(project.systems || []).map(s => s.replace(/_/g, ' ').replace(/-/g, ' ')).join(', ') || project.product || '-'}</td>
                 <td>{project.engagement_type || project.type || '-'}</td>
-                <td>{project.target_go_live || '-'}</td>
+                <td>{formatDate(project.start_date)}</td>
+                <td>{formatDate(project.target_go_live)}</td>
                 <td>
-                  <div className="flex items-center gap-2">
-                    {project.findings.critical > 0 && (
-                      <span className="badge badge--critical">{project.findings.critical}</span>
-                    )}
-                    {project.findings.warning > 0 && (
-                      <span className="badge badge--warning">{project.findings.warning}</span>
-                    )}
-                    {project.findings.total > 0 && (
-                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>
-                        {project.findings.total} total
-                      </span>
-                    )}
-                    {project.findings.total === 0 && (
-                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>-</span>
-                    )}
-                  </div>
+                  {project.hasRealData ? (
+                    <span style={{ color: 'var(--grass-green)', fontWeight: 'var(--weight-medium)' }}>
+                      {project.tablesAnalyzed} tables
+                    </span>
+                  ) : project.findings.total > 0 ? (
+                    <div className="flex items-center gap-2">
+                      {project.findings.critical > 0 && <span className="badge badge--critical">{project.findings.critical}</span>}
+                      {project.findings.warning > 0 && <span className="badge badge--warning">{project.findings.warning}</span>}
+                      <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>{project.findings.total} total</span>
+                    </div>
+                  ) : (
+                    <span className="text-muted">-</span>
+                  )}
                 </td>
                 <td>
                   {project.progress > 0 ? (
                     <div className="flex items-center gap-2">
-                      <div className="progress-bar" style={{ width: '80px' }}>
+                      <div className="progress-bar" style={{ width: '60px' }}>
                         <div className="progress-bar__fill" style={{ width: `${project.progress}%` }} />
                       </div>
-                      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-                        {project.progress}%
-                      </span>
+                      <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{project.progress}%</span>
                     </div>
+                  ) : project.hasRealData ? (
+                    <span className="badge badge--success">Analyzed</span>
                   ) : (
-                    <span style={{ color: 'var(--text-muted)', fontSize: 'var(--text-sm)' }}>-</span>
+                    <span className="text-muted">-</span>
                   )}
                 </td>
                 <td>
                   <span className={`badge badge--${project.status === 'completed' ? 'success' : 'info'}`}>
-                    {project.status === 'completed' ? 'Completed' : 'Active'}
+                    {project.status || 'Active'}
                   </span>
                 </td>
               </tr>
@@ -227,9 +190,7 @@ const ProjectsPage = () => {
       {filteredProjects.length === 0 && !loading && (
         <div className="card mt-4">
           <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-            <p className="text-muted">
-              {searchTerm ? `No projects found matching "${searchTerm}"` : 'No projects yet. Create your first project!'}
-            </p>
+            <p className="text-muted">{searchTerm ? `No projects found matching "${searchTerm}"` : 'No projects yet.'}</p>
           </div>
         </div>
       )}
