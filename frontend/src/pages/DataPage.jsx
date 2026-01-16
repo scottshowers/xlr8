@@ -597,15 +597,22 @@ function UploadPanel({ c, project, targetScope }) {
       background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 12,
       boxShadow: 'var(--shadow-sm)'
     }}>
-      {/* Header */}
+      {/* Header with grey background */}
       <div style={{ 
         padding: '1rem', 
-        borderBottom: `1px solid ${c.border}`
+        background: c.background,
+        borderTopLeftRadius: 12,
+        borderTopRightRadius: 12,
+        borderBottom: `1px solid ${c.border}`,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 'var(--space-2)'
       }}>
+        <Database size={18} style={{ color: c.primary }} />
         <span style={{ fontWeight: 600, fontSize: 'var(--text-sm)', color: c.text, fontFamily: 'var(--font-body)' }}>
           Project Data
         </span>
-        <span style={{ fontSize: 'var(--text-xs)', color: c.textMuted, marginLeft: '0.5rem' }}>
+        <span style={{ fontSize: 'var(--text-xs)', color: c.textMuted }}>
           Customer-specific documents
         </span>
       </div>
@@ -1058,61 +1065,17 @@ function FilesPanel({ c, project, targetScope }) {
 
   return (
     <div>
-      {/* Stats Bar */}
+      {/* Header with Refresh */}
       <div style={{ 
-        display: 'flex', gap: '1.5rem', marginBottom: '1rem',
-        padding: '0.875rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 10
+        display: 'flex', justifyContent: 'flex-end', marginBottom: '1rem'
       }}>
-        {isGlobalScope ? (
-          <>
-            <Tooltip title="Reference Files" detail="Global documents in the Reference Library." action="Standards, laws, vendor docs">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <FileText size={18} style={{ color: c.accent }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.length}</strong> files</span>
-              </div>
-            </Tooltip>
-            <Tooltip title="Extracted Rules" detail="Compliance rules extracted from regulatory documents." action="Used in Compliance Check">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <AlertCircle size={18} style={{ color: c.electricBlue }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{extractedRules.length}</strong> rules</span>
-              </div>
-            </Tooltip>
-            <Tooltip title="Documents" detail="Global docs chunked for AI retrieval." action="Referenced across all projects">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <Database size={18} style={{ color: c.electricBlue }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{refFiles.reduce((sum, f) => sum + (f.chunk_count || 0), 0)}</strong> chunks</span>
-              </div>
-            </Tooltip>
-          </>
-        ) : (
-          <>
-            <Tooltip title="Tables" detail="Total structured tables created from uploaded files." action="Click Data Explorer to view details">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <Database size={18} style={{ color: c.primary }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalTables}</strong> tables</span>
-              </div>
-            </Tooltip>
-            <Tooltip title="Rows" detail="Total data rows available for querying." action="Query in AI Chat">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <HardDrive size={18} style={{ color: c.electricBlue }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{totalRows.toLocaleString()}</strong> rows</span>
-              </div>
-            </Tooltip>
-            <Tooltip title="Documents" detail="Documents chunked for AI retrieval." action="Referenced in AI responses">
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'help' }}>
-                <FileText size={18} style={{ color: c.accent }} />
-                <span style={{ fontSize: '0.9rem', color: c.text }}><strong>{docs.length}</strong> documents</span>
-              </div>
-            </Tooltip>
-          </>
-        )}
-        <div style={{ flex: 1 }} />
         <button 
           onClick={loadData}
           style={{
             display: 'flex', alignItems: 'center', gap: '0.35rem',
-            padding: '0.4rem 0.75rem', background: 'transparent', border: `1px solid ${c.border}`,
-            borderRadius: 6, fontSize: '0.8rem', color: c.textMuted, cursor: 'pointer'
+            padding: '0.5rem 1rem', background: c.cardBg, border: `1px solid ${c.border}`,
+            borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', color: c.textMuted, cursor: 'pointer',
+            fontFamily: 'var(--font-body)'
           }}
         >
           <RefreshCw size={14} /> Refresh
@@ -1214,8 +1177,12 @@ function FilesPanel({ c, project, targetScope }) {
         >
           {expandedSections.structured ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
           <FileSpreadsheet size={18} style={{ color: c.primary }} />
-          <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Structured Data</span>
-          <span style={{ background: `${c.primary}15`, color: c.primary, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+          <span style={{ fontWeight: 600, color: c.text, fontFamily: 'var(--font-body)', fontSize: 'var(--text-sm)' }}>Structured Data</span>
+          <span style={{ color: c.textMuted, fontSize: 'var(--text-xs)', fontWeight: 400 }}>
+            {structuredFiles.length} files • {totalTables} tables • {totalRows.toLocaleString()} rows
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ background: `${c.primary}15`, color: c.primary, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: 'var(--text-xs)', fontWeight: 600 }}>
             {structuredFiles.length}
           </span>
         </button>
@@ -1261,8 +1228,12 @@ function FilesPanel({ c, project, targetScope }) {
         >
           {expandedSections.documents ? <ChevronDown size={18} style={{ color: c.textMuted }} /> : <ChevronRight size={18} style={{ color: c.textMuted }} />}
           <FileText size={18} style={{ color: c.accent }} />
-          <span style={{ fontWeight: 600, color: c.text, flex: 1 }}>Documents</span>
-          <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: '0.75rem', fontWeight: 600 }}>
+          <span style={{ fontWeight: 600, color: c.text, fontFamily: 'var(--font-body)', fontSize: 'var(--text-sm)' }}>Documents</span>
+          <span style={{ color: c.textMuted, fontSize: 'var(--text-xs)', fontWeight: 400 }}>
+            {docs.reduce((sum, d) => sum + (d.chunk_count || d.chunks || 0), 0)} chunks
+          </span>
+          <span style={{ flex: 1 }} />
+          <span style={{ background: `${c.accent}15`, color: c.accent, padding: '0.2rem 0.6rem', borderRadius: 10, fontSize: 'var(--text-xs)', fontWeight: 600 }}>
             {docs.length}
           </span>
         </button>
