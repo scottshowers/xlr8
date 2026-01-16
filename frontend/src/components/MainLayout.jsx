@@ -28,6 +28,7 @@ import {
   HardDrive,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Search,
   Bell,
   LogOut,
@@ -215,6 +216,8 @@ const Sidebar = () => {
 
 const FlowBar = ({ currentStep = 1, completedSteps = [], hasActiveProject = false }) => {
   const navigate = useNavigate();
+  const { activeProject, projects, selectProject } = useProject();
+  const [showDropdown, setShowDropdown] = useState(false);
 
   const getStepStatus = (stepNum) => {
     if (completedSteps.includes(stepNum)) return 'completed';
@@ -237,6 +240,82 @@ const FlowBar = ({ currentStep = 1, completedSteps = [], hasActiveProject = fals
 
   return (
     <div className="xlr8-flow-bar">
+      {/* Project Selector on left */}
+      <div style={{ 
+        display: 'flex', 
+        alignItems: 'center', 
+        gap: 'var(--space-2)',
+        paddingRight: 'var(--space-4)',
+        borderRight: '1px solid var(--border)',
+        marginRight: 'var(--space-4)',
+        position: 'relative'
+      }}>
+        <button
+          onClick={() => setShowDropdown(!showDropdown)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 'var(--space-2)',
+            padding: 'var(--space-1) var(--space-3)',
+            background: 'var(--grass-green-alpha-10)',
+            border: '1px solid var(--grass-green)',
+            borderRadius: 'var(--radius-md)',
+            cursor: 'pointer',
+            fontSize: 'var(--text-sm)',
+            fontWeight: 500,
+            color: 'var(--grass-green)',
+            fontFamily: 'var(--font-body)'
+          }}
+        >
+          <FolderKanban size={14} />
+          <span>{activeProject?.customer || activeProject?.name || 'Select Project'}</span>
+          <ChevronDown size={12} />
+        </button>
+        
+        {showDropdown && (
+          <div style={{
+            position: 'absolute',
+            top: '100%',
+            left: 0,
+            marginTop: '4px',
+            minWidth: '220px',
+            background: 'var(--bg-secondary)',
+            border: '1px solid var(--border)',
+            borderRadius: 'var(--radius-lg)',
+            boxShadow: 'var(--shadow-lg)',
+            zIndex: 1000,
+            maxHeight: '300px',
+            overflowY: 'auto'
+          }}>
+            {projects.map(proj => (
+              <button
+                key={proj.id}
+                onClick={() => { selectProject(proj); setShowDropdown(false); }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  width: '100%',
+                  padding: 'var(--space-2) var(--space-3)',
+                  border: 'none',
+                  background: proj.id === activeProject?.id ? 'var(--grass-green-alpha-10)' : 'transparent',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  borderBottom: '1px solid var(--border-light)',
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-body)'
+                }}
+              >
+                <span>{proj.customer || proj.name}</span>
+                {proj.id === activeProject?.id && (
+                  <Check size={14} style={{ color: 'var(--grass-green)' }} />
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      
+      {/* Flow Steps */}
       <div className="xlr8-flow-bar__steps">
         {FLOW_STEPS.map((step, index) => {
           const status = getStepStatus(step.num);
