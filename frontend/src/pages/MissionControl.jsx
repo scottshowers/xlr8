@@ -4,16 +4,38 @@
  * 
  * Overview dashboard for consultants showing:
  * - High-level stats across all projects
- * - Items needing attention (projects with critical findings, approaching deadlines)
+ * - Items needing attention
  * - Recent projects for quick access
- * 
- * This is INFORMATIONAL only - actual work happens in Project Hub.
+ * - Unique customer colors
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+
+// Generate a consistent color based on string (customer name)
+// Uses HCMPACT brand palette
+const getCustomerColor = (name) => {
+  const colors = [
+    '#83b16d', // grass green (primary)
+    '#2766b1', // electric blue
+    '#285390', // accent (deep blue)
+    '#5f4282', // purple
+    '#993c44', // scarlet
+    '#d97706', // amber
+    '#93abd9', // sky blue
+    '#a1c3d4', // aquamarine
+    '#b2d6de', // clearwater
+    '#6b9b5a', // grass green dark
+  ];
+  
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 const MissionControl = () => {
   const navigate = useNavigate();
@@ -33,7 +55,6 @@ const MissionControl = () => {
 
   const fetchDashboardData = async () => {
     try {
-      // TODO: Replace with actual API calls
       setStats({
         activeProjects: 7,
         pendingFindings: 23,
@@ -194,7 +215,12 @@ const MissionControl = () => {
             onClick={() => handleProjectClick(project)}
           >
             <div className="project-card__header">
-              <div className="project-card__avatar">{project.initials}</div>
+              <div 
+                className="project-card__avatar"
+                style={{ background: getCustomerColor(project.name) }}
+              >
+                {project.initials}
+              </div>
               <div>
                 <div className="project-card__name">{project.name}</div>
                 <div className="project-card__system">{project.system} - {project.type}</div>

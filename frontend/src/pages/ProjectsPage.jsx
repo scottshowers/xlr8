@@ -7,6 +7,7 @@
  * - Status indicators
  * - Quick stats per project
  * - New Project button
+ * - Unique customer colors
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
@@ -14,6 +15,29 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Plus, Search } from 'lucide-react';
+
+// Generate a consistent color based on string (customer name)
+// Uses HCMPACT brand palette
+const getCustomerColor = (name) => {
+  const colors = [
+    '#83b16d', // grass green (primary)
+    '#2766b1', // electric blue
+    '#285390', // accent (deep blue)
+    '#5f4282', // purple
+    '#993c44', // scarlet
+    '#d97706', // amber
+    '#93abd9', // sky blue
+    '#a1c3d4', // aquamarine
+    '#b2d6de', // clearwater
+    '#6b9b5a', // grass green dark
+  ];
+  
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 const ProjectsPage = () => {
   const navigate = useNavigate();
@@ -28,16 +52,11 @@ const ProjectsPage = () => {
   const fetchProjects = async () => {
     try {
       // TODO: Replace with actual API call
-      // const response = await fetch('/api/projects');
-      // const data = await response.json();
-      
-      // Mock data
       setProjects([
         {
           id: 'proj-acme',
           name: 'Acme Corp',
           initials: 'AC',
-          client: 'Acme Corporation',
           system: 'UKG Pro',
           type: 'Implementation',
           status: 'active',
@@ -49,7 +68,6 @@ const ProjectsPage = () => {
           id: 'proj-techstart',
           name: 'TechStart Inc',
           initials: 'TS',
-          client: 'TechStart Inc',
           system: 'Workday',
           type: 'Data Migration',
           status: 'active',
@@ -61,7 +79,6 @@ const ProjectsPage = () => {
           id: 'proj-global',
           name: 'Global Retail Co',
           initials: 'GR',
-          client: 'Global Retail Company',
           system: 'UKG Pro',
           type: 'Year-End',
           status: 'active',
@@ -73,7 +90,6 @@ const ProjectsPage = () => {
           id: 'proj-metro',
           name: 'Metro Health',
           initials: 'MH',
-          client: 'Metro Health Systems',
           system: 'Workday',
           type: 'Implementation',
           status: 'active',
@@ -83,9 +99,8 @@ const ProjectsPage = () => {
         },
         {
           id: 'proj-first',
-          name: 'First National',
+          name: 'First National Bank',
           initials: 'FN',
-          client: 'First National Bank',
           system: 'UKG Pro',
           type: 'Optimization',
           status: 'completed',
@@ -104,7 +119,6 @@ const ProjectsPage = () => {
 
   const filteredProjects = projects.filter(project => 
     project.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    project.client.toLowerCase().includes(searchTerm.toLowerCase()) ||
     project.system.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
@@ -142,7 +156,7 @@ const ProjectsPage = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search projects by name, client, or system..."
+              placeholder="Search projects by name or system..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ border: 'none', padding: 0, background: 'transparent' }}
@@ -174,13 +188,18 @@ const ProjectsPage = () => {
               >
                 <td>
                   <div className="flex items-center gap-3">
-                    <div className="project-card__avatar" style={{ width: '32px', height: '32px', fontSize: 'var(--text-sm)' }}>
+                    <div 
+                      className="project-card__avatar" 
+                      style={{ 
+                        width: '32px', 
+                        height: '32px', 
+                        fontSize: 'var(--text-sm)',
+                        background: getCustomerColor(project.name)
+                      }}
+                    >
                       {project.initials}
                     </div>
-                    <div>
-                      <div style={{ fontWeight: 'var(--weight-semibold)' }}>{project.name}</div>
-                      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>{project.client}</div>
-                    </div>
+                    <span style={{ fontWeight: 'var(--weight-semibold)' }}>{project.name}</span>
                   </div>
                 </td>
                 <td>{project.system}</td>

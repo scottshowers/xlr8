@@ -3,12 +3,11 @@
  * ===================================
  * 
  * Dedicated hub for a specific project showing:
- * - Project header with details
+ * - Project header with customer color
+ * - Customer Snapshot (key metrics from their data)
  * - Quick actions grid
  * - Findings summary
  * - Progress and assigned playbooks
- * 
- * Flow bar is shown via MainLayout (showFlowBar prop from App.jsx)
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
@@ -22,8 +21,35 @@ import {
   Play, 
   Search, 
   Download,
-  MessageSquare
+  MessageSquare,
+  Users,
+  Building2,
+  DollarSign,
+  MapPin
 } from 'lucide-react';
+
+// Generate a consistent color based on string (customer name)
+// Uses HCMPACT brand palette
+const getCustomerColor = (name) => {
+  const colors = [
+    '#83b16d', // grass green (primary)
+    '#2766b1', // electric blue
+    '#285390', // accent (deep blue)
+    '#5f4282', // purple
+    '#993c44', // scarlet
+    '#d97706', // amber
+    '#93abd9', // sky blue
+    '#a1c3d4', // aquamarine
+    '#b2d6de', // clearwater
+    '#6b9b5a', // grass green dark
+  ];
+  
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 export default function ProjectHub() {
   const { id } = useParams();
@@ -35,13 +61,13 @@ export default function ProjectHub() {
   const [progress, setProgress] = useState({ reviewed: 0, total: 0, percent: 0 });
   const [playbooks, setPlaybooks] = useState([]);
   const [dataFiles, setDataFiles] = useState({ count: 0, lastUpload: null });
+  const [customerSnapshot, setCustomerSnapshot] = useState(null);
 
   useEffect(() => {
     const found = projects?.find(p => String(p.id) === String(id));
     if (found) {
       setProject(found);
       selectProject(found);
-      // Load project-specific data
       loadProjectData(found);
     } else {
       // Mock project for demo
@@ -69,6 +95,15 @@ export default function ProjectHub() {
       { id: 'pb2', name: 'Data Quality Assessment' }
     ]);
     setDataFiles({ count: 12, lastUpload: 'Jan 14, 2026' });
+    
+    // Customer Snapshot - key metrics from their data
+    // TODO: These would come from DuckDB queries on uploaded data
+    setCustomerSnapshot({
+      employees: '4,287',
+      locations: '23',
+      annualPayroll: '$412M',
+      departments: '47'
+    });
   };
 
   const getInitials = (name) => {
@@ -98,12 +133,14 @@ export default function ProjectHub() {
     );
   }
 
+  const customerColor = getCustomerColor(project.customer || project.name);
+
   return (
     <div className="project-hub-page">
       {/* Hub Header */}
       <div className="hub-header">
         <div className="hub-header__left">
-          <div className="hub-avatar">
+          <div className="hub-avatar" style={{ background: customerColor }}>
             {getInitials(project.customer || project.name)}
           </div>
           <div>
@@ -133,6 +170,44 @@ export default function ProjectHub() {
           </button>
         </div>
       </div>
+
+      {/* Customer Snapshot - Key metrics at a glance */}
+      {customerSnapshot && (
+        <div className="card mb-6" style={{ borderLeft: `4px solid ${customerColor}` }}>
+          <div className="card-body">
+            <div className="flex items-center gap-6" style={{ flexWrap: 'wrap' }}>
+              <div className="flex items-center gap-2">
+                <Users size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{customerSnapshot.employees}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Employees</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <MapPin size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{customerSnapshot.locations}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Locations</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <DollarSign size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{customerSnapshot.annualPayroll}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Annual Payroll</div>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Building2 size={18} style={{ color: customerColor }} />
+                <div>
+                  <div style={{ fontSize: 'var(--text-xl)', fontWeight: 'var(--weight-bold)' }}>{customerSnapshot.departments}</div>
+                  <div style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>Departments</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hub Grid */}
       <div className="hub-grid">
@@ -250,7 +325,7 @@ export default function ProjectHub() {
                       fontSize: 'var(--text-sm)'
                     }}
                   >
-                    <BookOpen size={16} style={{ color: 'var(--grass-green)' }} />
+                    <BookOpen size={16} style={{ color: customerColor }} />
                     {pb.name}
                   </div>
                 ))}
@@ -265,7 +340,7 @@ export default function ProjectHub() {
             </div>
             <div className="card-body">
               <div className="flex items-center gap-3 mb-4">
-                <Upload size={24} style={{ color: 'var(--grass-green)' }} />
+                <Upload size={24} style={{ color: customerColor }} />
                 <div>
                   <div style={{ fontWeight: 'var(--weight-semibold)' }}>{dataFiles.count} files</div>
                   <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
