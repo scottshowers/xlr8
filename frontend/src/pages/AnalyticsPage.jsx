@@ -294,17 +294,38 @@ function CatalogPanel({ tables, loading, selectedTable, onSelectTable, onSelectC
 // =============================================================================
 // QUERY BUILDER PANEL
 // =============================================================================
-function BuilderPanel({ selectedTable, selectedColumns, filters, sql, onSqlChange, onRun, running, onRemoveColumn, onFiltersChange }) {
+function BuilderPanel({ selectedTable, selectedColumns, filters, groupBy, aggregations, sql, onSqlChange, onRun, running, onRemoveColumn, onFiltersChange, onGroupByChange, onAggregationsChange }) {
   const [mode, setMode] = useState('visual'); // 'visual' or 'sql'
 
   const generateSql = useCallback(() => {
     if (!selectedTable) return '';
-    const cols = selectedColumns.length > 0 ? selectedColumns.join(', ') : '*';
     
-    let query = `SELECT ${cols}\nFROM "${selectedTable.full_name}"`;
+    // Build SELECT clause
+    let selectParts = [];
+    
+    if (groupBy.length > 0) {
+      // When grouping, include group by columns and aggregations
+      selectParts = [...groupBy.map(col => `"${col}"`)];
+      aggregations.forEach(agg => {
+        if (agg.column && agg.function) {
+          const fn = agg.function.toUpperCase();
+          if (fn === 'COUNT') {
+            selectParts.push(`COUNT(*) as count`);
+          } else {
+            selectParts.push(`${fn}("${agg.column}") as ${fn.toLowerCase()}_${agg.column}`);
+          }
+        }
+      });
+    } else if (selectedColumns.length > 0) {
+      selectParts = selectedColumns.map(col => `"${col}"`);
+    } else {
+      selectParts = ['*'];
+    }
+    
+    let query = `SELECT ${selectParts.join(', ')}\nFROM "${selectedTable.full_name}"`;
     
     // Add WHERE clauses from filters
-    const activeFilters = filters.filter(f => f.column && f.value);
+    const activeFilters = filters.filter(f => f.column && (f.value || ['null', 'notnull'].includes(f.operator)));
     if (activeFilters.length > 0) {
       const whereClauses = activeFilters.map(f => {
         const val = isNaN(f.value) ? `'${f.value.replace(/'/g, "''")}'` : f.value;
@@ -315,9 +336,10 @@ function BuilderPanel({ selectedTable, selectedColumns, filters, sql, onSqlChang
           case '<': return `"${f.column}" < ${val}`;
           case '>=': return `"${f.column}" >= ${val}`;
           case '<=': return `"${f.column}" <= ${val}`;
-          case 'contains': return `"${f.column}" LIKE '%${f.value.replace(/'/g, "''")}%'`;
-          case 'starts': return `"${f.column}" LIKE '${f.value.replace(/'/g, "''")}%'`;
-          case 'ends': return `"${f.column}" LIKE '%${f.value.replace(/'/g, "''")}'`;
+          // Use ILIKE for case-insensitive matching (DuckDB supports this)
+          case 'contains': return `"${f.column}" ILIKE '%${f.value.replace(/'/g, "''")}%'`;
+          case 'starts': return `"${f.column}" ILIKE '${f.value.replace(/'/g, "''")}%'`;
+          case 'ends': return `"${f.column}" ILIKE '%${f.value.replace(/'/g, "''")}'`;
           case 'null': return `"${f.column}" IS NULL`;
           case 'notnull': return `"${f.column}" IS NOT NULL`;
           default: return `"${f.column}" = ${val}`;
@@ -326,16 +348,21 @@ function BuilderPanel({ selectedTable, selectedColumns, filters, sql, onSqlChang
       query += `\nWHERE ${whereClauses.join('\n  AND ')}`;
     }
     
+    // Add GROUP BY
+    if (groupBy.length > 0) {
+      query += `\nGROUP BY ${groupBy.map(col => `"${col}"`).join(', ')}`;
+    }
+    
     query += '\nLIMIT 100';
     return query;
-  }, [selectedTable, selectedColumns, filters]);
+  }, [selectedTable, selectedColumns, filters, groupBy, aggregations]);
 
   // Auto-generate SQL when selections change in visual mode
   useEffect(() => {
     if (mode === 'visual' && selectedTable) {
       onSqlChange(generateSql());
     }
-  }, [mode, selectedTable, selectedColumns, filters, generateSql, onSqlChange]);
+  }, [mode, selectedTable, selectedColumns, filters, groupBy, aggregations, generateSql, onSqlChange]);
 
   const addFilter = () => {
     onFiltersChange([...filters, { column: '', operator: '=', value: '' }]);
@@ -532,6 +559,148 @@ function BuilderPanel({ selectedTable, selectedColumns, filters, sql, onSqlChang
                 </button>
               )}
             </div>
+
+            {/* GROUP BY */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
+                GROUP BY {groupBy.length > 0 && `(${groupBy.length})`}
+              </label>
+              
+              {groupBy.length > 0 && (
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                  {groupBy.map(col => (
+                    <div key={col} style={{ ...styles.chip, background: 'rgba(245, 158, 11, 0.1)', borderColor: 'rgba(245, 158, 11, 0.3)' }}>
+                      {col}
+                      <button
+                        onClick={() => onGroupByChange(groupBy.filter(c => c !== col))}
+                        style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'flex' }}
+                      >
+                        <X size={12} style={{ color: 'var(--text-muted)' }} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {selectedTable && (
+                <select
+                  value=""
+                  onChange={(e) => {
+                    if (e.target.value && !groupBy.includes(e.target.value)) {
+                      onGroupByChange([...groupBy, e.target.value]);
+                    }
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-primary)',
+                    fontSize: '12px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  <option value="">+ Add group by column...</option>
+                  {selectedTable.columns?.filter(c => !groupBy.includes(c)).map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* AGGREGATIONS (only show when GROUP BY is active) */}
+            {groupBy.length > 0 && (
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
+                  AGGREGATIONS {aggregations.length > 0 && `(${aggregations.length})`}
+                </label>
+                
+                {aggregations.map((agg, idx) => (
+                  <div key={idx} style={{ display: 'flex', gap: '6px', marginBottom: '8px', alignItems: 'center' }}>
+                    <select
+                      value={agg.function}
+                      onChange={(e) => {
+                        const newAggs = [...aggregations];
+                        newAggs[idx] = { ...newAggs[idx], function: e.target.value };
+                        onAggregationsChange(newAggs);
+                      }}
+                      style={{
+                        width: '100px',
+                        padding: '6px 8px',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-primary)',
+                        fontSize: '12px',
+                        color: 'var(--text-primary)',
+                      }}
+                    >
+                      <option value="count">COUNT</option>
+                      <option value="sum">SUM</option>
+                      <option value="avg">AVG</option>
+                      <option value="min">MIN</option>
+                      <option value="max">MAX</option>
+                    </select>
+                    
+                    {agg.function !== 'count' && (
+                      <select
+                        value={agg.column}
+                        onChange={(e) => {
+                          const newAggs = [...aggregations];
+                          newAggs[idx] = { ...newAggs[idx], column: e.target.value };
+                          onAggregationsChange(newAggs);
+                        }}
+                        style={{
+                          flex: 1,
+                          padding: '6px 8px',
+                          border: '1px solid var(--border)',
+                          borderRadius: 'var(--radius-sm)',
+                          background: 'var(--bg-primary)',
+                          fontSize: '12px',
+                          color: 'var(--text-primary)',
+                        }}
+                      >
+                        <option value="">Select column...</option>
+                        {selectedTable?.columns?.map(col => (
+                          <option key={col} value={col}>{col}</option>
+                        ))}
+                      </select>
+                    )}
+                    
+                    <button
+                      onClick={() => onAggregationsChange(aggregations.filter((_, i) => i !== idx))}
+                      style={{
+                        padding: '6px',
+                        border: 'none',
+                        background: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--text-muted)',
+                        display: 'flex',
+                      }}
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                
+                <button
+                  onClick={() => onAggregationsChange([...aggregations, { function: 'count', column: '' }])}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '6px 10px',
+                    border: '1px dashed var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'transparent',
+                    fontSize: '12px',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Plus size={12} />
+                  Add Aggregation
+                </button>
+              </div>
+            )}
 
             {/* Generated SQL Preview */}
             {selectedTable && (
@@ -1006,6 +1175,8 @@ export default function AnalyticsPage() {
   const [selectedTable, setSelectedTable] = useState(null);
   const [selectedColumns, setSelectedColumns] = useState([]);
   const [filters, setFilters] = useState([]);
+  const [groupBy, setGroupBy] = useState([]);
+  const [aggregations, setAggregations] = useState([]);
   const [sql, setSql] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
@@ -1041,6 +1212,8 @@ export default function AnalyticsPage() {
     setSelectedTable(table);
     setSelectedColumns([]);
     setFilters([]);
+    setGroupBy([]);
+    setAggregations([]);
     setError(null);
   };
 
@@ -1190,12 +1363,16 @@ export default function AnalyticsPage() {
           selectedTable={selectedTable}
           selectedColumns={selectedColumns}
           filters={filters}
+          groupBy={groupBy}
+          aggregations={aggregations}
           sql={sql}
           onSqlChange={setSql}
           onRun={handleRun}
           running={running}
           onRemoveColumn={handleRemoveColumn}
           onFiltersChange={setFilters}
+          onGroupByChange={setGroupBy}
+          onAggregationsChange={setAggregations}
         />
         
         <ResultsPanel
