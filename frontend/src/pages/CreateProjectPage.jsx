@@ -1,15 +1,18 @@
 /**
  * CreateProjectPage.jsx - Step 1: Create Project
  * 
- * WIRED TO REAL API - Fetches domains and systems from backend.
- * Supports multi-domain, multi-system selection.
+ * WIRED TO REAL API:
+ * - Domains & Systems from /api/reference
+ * - Users from /api/auth/users
+ * 
+ * Layout: 6 domain columns, systems listed under each
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ChevronRight, AlertCircle, Check, X, Loader2 } from 'lucide-react';
+import { ChevronRight, AlertCircle, Check, Loader2, X } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 
@@ -27,11 +30,12 @@ const ENGAGEMENT_TYPES = [
 const CreateProjectPage = () => {
   const navigate = useNavigate();
   const { createProject } = useProject();
-  const { user } = useAuth();
+  const { user, token } = useAuth();
 
   // Reference data from API
   const [domains, setDomains] = useState([]);
   const [systems, setSystems] = useState([]);
+  const [users, setUsers] = useState([]);
   const [loadingRef, setLoadingRef] = useState(true);
 
   // Form state
@@ -40,8 +44,10 @@ const CreateProjectPage = () => {
     selectedDomains: [],
     selectedSystems: [],
     engagement_type: 'implementation',
-    target_go_live: '',
-    project_lead: user?.full_name || user?.email?.split('@')[0] || '',
+    engagement_start: '',
+    projected_end: '',
+    pm_id: '',
+    consultant_ids: [],
     notes: '',
   });
   const [saving, setSaving] = useState(false);
@@ -54,40 +60,32 @@ const CreateProjectPage = () => {
 
   const fetchReferenceData = async () => {
     try {
-      const [domainsRes, systemsRes] = await Promise.all([
+      const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+      
+      const [domainsRes, systemsRes, usersRes] = await Promise.all([
         fetch(`${API_BASE}/api/reference/domains`),
         fetch(`${API_BASE}/api/reference/systems`),
+        fetch(`${API_BASE}/api/auth/users`, { headers }).catch(() => ({ ok: false })),
       ]);
       
-      if (domainsRes.ok) {
-        const domainsData = await domainsRes.json();
-        setDomains(domainsData);
-      }
-      
-      if (systemsRes.ok) {
-        const systemsData = await systemsRes.json();
-        setSystems(systemsData);
+      if (domainsRes.ok) setDomains(await domainsRes.json());
+      if (systemsRes.ok) setSystems(await systemsRes.json());
+      if (usersRes.ok) {
+        const usersData = await usersRes.json();
+        setUsers(usersData.filter(u => u.role !== 'customer'));
       }
     } catch (err) {
       console.error('Failed to load reference data:', err);
-      setError('Failed to load configuration. Please refresh.');
     } finally {
       setLoadingRef(false);
     }
   };
 
-  // Filter systems by selected domains
-  const filteredSystems = formData.selectedDomains.length === 0
-    ? systems
-    : systems.filter(s => 
-        formData.selectedDomains.includes(s.domain_code) ||
-        (s.additional_domains && s.additional_domains.some(d => formData.selectedDomains.includes(d)))
-      );
-
-  // Group systems by vendor for display
-  const systemsByVendor = filteredSystems.reduce((acc, sys) => {
-    if (!acc[sys.vendor]) acc[sys.vendor] = [];
-    acc[sys.vendor].push(sys);
+  // Group systems by domain
+  const systemsByDomain = systems.reduce((acc, sys) => {
+    const domainCode = sys.domain_code || 'other';
+    if (!acc[domainCode]) acc[domainCode] = [];
+    acc[domainCode].push(sys);
     return acc;
   }, {});
 
@@ -102,13 +100,10 @@ const CreateProjectPage = () => {
         ? prev.selectedDomains.filter(d => d !== code)
         : [...prev.selectedDomains, code];
       
-      // Clear systems that are no longer in selected domains
+      // Clear systems from deselected domains
       const validSystems = prev.selectedSystems.filter(sysCode => {
         const sys = systems.find(s => s.code === sysCode);
-        if (!sys) return false;
-        if (selected.length === 0) return true;
-        return selected.includes(sys.domain_code) || 
-          (sys.additional_domains && sys.additional_domains.some(d => selected.includes(d)));
+        return sys && selected.includes(sys.domain_code);
       });
       
       return { ...prev, selectedDomains: selected, selectedSystems: validSystems };
@@ -121,6 +116,15 @@ const CreateProjectPage = () => {
       selectedSystems: prev.selectedSystems.includes(code)
         ? prev.selectedSystems.filter(s => s !== code)
         : [...prev.selectedSystems, code]
+    }));
+  };
+
+  const toggleConsultant = (userId) => {
+    setFormData(prev => ({
+      ...prev,
+      consultant_ids: prev.consultant_ids.includes(userId)
+        ? prev.consultant_ids.filter(id => id !== userId)
+        : [...prev.consultant_ids, userId]
     }));
   };
 
@@ -140,24 +144,24 @@ const CreateProjectPage = () => {
     setError(null);
 
     try {
-      const selectedSystemsData = systems.filter(s => formData.selectedSystems.includes(s.code));
       const engagementLabel = ENGAGEMENT_TYPES.find(t => t.value === formData.engagement_type)?.label || formData.engagement_type;
-      const systemNames = selectedSystemsData.map(s => s.name).join(', ');
+      const selectedSystemsData = systems.filter(s => formData.selectedSystems.includes(s.code));
       
       await createProject({
         name: `${formData.customer} - ${engagementLabel}`,
         customer: formData.customer,
-        // New multi-select fields
         systems: formData.selectedSystems,
         domains: formData.selectedDomains,
         engagement_type: formData.engagement_type,
-        // Legacy fields for backwards compatibility
-        product: selectedSystemsData[0]?.name || '',
         type: engagementLabel,
-        // Additional fields
-        target_go_live: formData.target_go_live || null,
-        lead_name: formData.project_lead || null,
+        product: selectedSystemsData[0]?.name || '',
+        start_date: formData.engagement_start || null,
+        target_go_live: formData.projected_end || null,
+        lead_name: users.find(u => u.id === formData.pm_id)?.full_name || null,
         notes: formData.notes || null,
+        // New fields for team
+        pm_id: formData.pm_id || null,
+        consultant_ids: formData.consultant_ids,
       });
       
       navigate('/upload');
@@ -181,65 +185,83 @@ const CreateProjectPage = () => {
     <div className="create-project-page">
       <div className="page-header">
         <h1 className="page-title">Create New Project</h1>
-        <p className="page-subtitle">Step 1: Define your client engagement scope</p>
+        <p className="page-subtitle">Define your client engagement scope</p>
       </div>
 
       <form onSubmit={handleSubmit}>
-        {/* Client Name */}
+        {/* Client Information */}
         <div className="card mb-6">
           <div className="card-header">
             <h3 className="card-title">Client Information</h3>
           </div>
           <div className="card-body">
-            <div className="form-row">
-              <div className="form-group" style={{ flex: 2 }}>
-                <label className="form-label">Client Name *</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="e.g., Acme Corporation"
-                  value={formData.customer}
-                  onChange={(e) => handleChange('customer', e.target.value)}
-                />
-              </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Project Lead</label>
-                <input
-                  type="text"
-                  className="form-input"
-                  placeholder="Your name"
-                  value={formData.project_lead}
-                  onChange={(e) => handleChange('project_lead', e.target.value)}
-                />
-              </div>
+            <div className="form-group">
+              <label className="form-label">Client Name *</label>
+              <input
+                type="text"
+                className="form-input"
+                placeholder="e.g., Acme Corporation"
+                value={formData.customer}
+                onChange={(e) => handleChange('customer', e.target.value)}
+                style={{ maxWidth: '400px' }}
+              />
             </div>
           </div>
         </div>
 
-        {/* Domain Selection */}
+        {/* Systems by Domain - 6 Column Layout */}
         <div className="card mb-6">
           <div className="card-header">
-            <h3 className="card-title">Domain</h3>
+            <h3 className="card-title">Domain & Systems *</h3>
             <span className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>
-              Select one or more domains
+              Select domain(s) to enable systems, then select system(s)
             </span>
           </div>
           <div className="card-body">
-            <div className="domain-grid">
+            <div className="domain-columns">
               {domains.map(domain => {
-                const isSelected = formData.selectedDomains.includes(domain.code);
+                const isActive = formData.selectedDomains.includes(domain.code);
+                const domainSystems = systemsByDomain[domain.code] || [];
+                
                 return (
-                  <div
-                    key={domain.code}
-                    className={`domain-card ${isSelected ? 'domain-card--selected' : ''}`}
-                    onClick={() => toggleDomain(domain.code)}
-                    style={{ '--domain-color': domain.color }}
+                  <div 
+                    key={domain.code} 
+                    className={`domain-column ${isActive ? 'domain-column--active' : ''}`}
                   >
-                    <div className="domain-card__check">
-                      {isSelected && <Check size={14} />}
+                    {/* Domain Header */}
+                    <div 
+                      className="domain-column__header"
+                      onClick={() => toggleDomain(domain.code)}
+                      style={{ '--domain-color': domain.color }}
+                    >
+                      <div className="domain-column__check">
+                        {isActive && <Check size={12} />}
+                      </div>
+                      <span className="domain-column__name">{domain.name}</span>
                     </div>
-                    <div className="domain-card__name">{domain.name}</div>
-                    <div className="domain-card__desc">{domain.description}</div>
+                    
+                    {/* Systems List */}
+                    <div className={`domain-column__systems ${!isActive ? 'domain-column__systems--disabled' : ''}`}>
+                      {domainSystems.length === 0 ? (
+                        <div className="domain-column__empty">No systems</div>
+                      ) : (
+                        domainSystems.map(sys => {
+                          const isSelected = formData.selectedSystems.includes(sys.code);
+                          return (
+                            <div
+                              key={sys.code}
+                              className={`system-row ${isSelected ? 'system-row--selected' : ''} ${!isActive ? 'system-row--disabled' : ''}`}
+                              onClick={() => isActive && toggleSystem(sys.code)}
+                            >
+                              <div className="system-row__check">
+                                {isSelected && <Check size={10} />}
+                              </div>
+                              <span className="system-row__name">{sys.name}</span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
                   </div>
                 );
               })}
@@ -247,98 +269,124 @@ const CreateProjectPage = () => {
           </div>
         </div>
 
-        {/* System Selection */}
-        <div className="card mb-6">
-          <div className="card-header">
-            <h3 className="card-title">System(s) *</h3>
-            <span className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>
-              {filteredSystems.length} systems available
-              {formData.selectedSystems.length > 0 && ` • ${formData.selectedSystems.length} selected`}
-            </span>
-          </div>
-          <div className="card-body">
-            {Object.keys(systemsByVendor).length === 0 ? (
-              <p className="text-muted">No systems found. Try selecting a domain first.</p>
-            ) : (
-              <div className="system-list">
-                {Object.entries(systemsByVendor).sort(([a], [b]) => a.localeCompare(b)).map(([vendor, vendorSystems]) => (
-                  <div key={vendor} className="system-vendor-group">
-                    <div className="system-vendor-label">{vendor}</div>
-                    <div className="system-options">
-                      {vendorSystems.map(sys => {
-                        const isSelected = formData.selectedSystems.includes(sys.code);
-                        return (
-                          <div
-                            key={sys.code}
-                            className={`system-option ${isSelected ? 'system-option--selected' : ''}`}
-                            onClick={() => toggleSystem(sys.code)}
-                          >
-                            <div className="system-option__check">
-                              {isSelected && <Check size={12} />}
-                            </div>
-                            <span>{sys.name}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Engagement Type & Go-Live */}
+        {/* Engagement Details */}
         <div className="card mb-6">
           <div className="card-header">
             <h3 className="card-title">Engagement Details</h3>
           </div>
           <div className="card-body">
-            <div className="form-row">
-              <div className="form-group" style={{ flex: 2 }}>
-                <label className="form-label">Engagement Type</label>
-                <div className="engagement-grid">
-                  {ENGAGEMENT_TYPES.map(type => {
-                    const isSelected = formData.engagement_type === type.value;
-                    return (
-                      <div
-                        key={type.value}
-                        className={`engagement-option ${isSelected ? 'engagement-option--selected' : ''}`}
-                        onClick={() => handleChange('engagement_type', type.value)}
-                      >
-                        <div className="engagement-option__check">
-                          {isSelected && <Check size={12} />}
-                        </div>
-                        <div>
-                          <div className="engagement-option__label">{type.label}</div>
-                          <div className="engagement-option__desc">{type.desc}</div>
-                        </div>
+            {/* Engagement Type */}
+            <div className="form-group mb-6">
+              <label className="form-label">Engagement Type</label>
+              <div className="engagement-grid">
+                {ENGAGEMENT_TYPES.map(type => {
+                  const isSelected = formData.engagement_type === type.value;
+                  return (
+                    <div
+                      key={type.value}
+                      className={`engagement-option ${isSelected ? 'engagement-option--selected' : ''}`}
+                      onClick={() => handleChange('engagement_type', type.value)}
+                    >
+                      <div className="engagement-option__check">
+                        {isSelected && <Check size={12} />}
                       </div>
-                    );
-                  })}
-                </div>
+                      <div>
+                        <div className="engagement-option__label">{type.label}</div>
+                        <div className="engagement-option__desc">{type.desc}</div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-              <div className="form-group" style={{ flex: 1 }}>
-                <label className="form-label">Target Go-Live</label>
+            </div>
+
+            {/* Dates */}
+            <div className="form-row">
+              <div className="form-group">
+                <label className="form-label">Engagement Start</label>
                 <input
                   type="date"
                   className="form-input"
-                  value={formData.target_go_live}
-                  onChange={(e) => handleChange('target_go_live', e.target.value)}
+                  value={formData.engagement_start}
+                  onChange={(e) => handleChange('engagement_start', e.target.value)}
                 />
-                <div className="form-group mt-4">
-                  <label className="form-label">Notes (optional)</label>
-                  <textarea
-                    className="form-input"
-                    rows={3}
-                    placeholder="Any additional context..."
-                    value={formData.notes}
-                    onChange={(e) => handleChange('notes', e.target.value)}
-                    style={{ resize: 'vertical' }}
-                  />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Projected End</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={formData.projected_end}
+                  onChange={(e) => handleChange('projected_end', e.target.value)}
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Team Assignment */}
+        <div className="card mb-6">
+          <div className="card-header">
+            <h3 className="card-title">Team Assignment</h3>
+          </div>
+          <div className="card-body">
+            <div className="form-row">
+              {/* PM */}
+              <div className="form-group">
+                <label className="form-label">Project Manager</label>
+                <select
+                  className="form-select"
+                  value={formData.pm_id}
+                  onChange={(e) => handleChange('pm_id', e.target.value)}
+                >
+                  <option value="">Select PM...</option>
+                  {users.map(u => (
+                    <option key={u.id} value={u.id}>{u.full_name || u.email}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Consultants */}
+              <div className="form-group" style={{ flex: 2 }}>
+                <label className="form-label">Consultants</label>
+                <div className="consultant-chips">
+                  {users.map(u => {
+                    const isSelected = formData.consultant_ids.includes(u.id);
+                    return (
+                      <div
+                        key={u.id}
+                        className={`consultant-chip ${isSelected ? 'consultant-chip--selected' : ''}`}
+                        onClick={() => toggleConsultant(u.id)}
+                      >
+                        {isSelected && <Check size={12} />}
+                        <span>{u.full_name || u.email}</span>
+                        {isSelected && <X size={12} className="consultant-chip__remove" />}
+                      </div>
+                    );
+                  })}
+                  {users.length === 0 && (
+                    <span className="text-muted" style={{ fontSize: 'var(--text-sm)' }}>No team members available</span>
+                  )}
                 </div>
               </div>
             </div>
+          </div>
+        </div>
+
+        {/* Notes */}
+        <div className="card mb-6">
+          <div className="card-header">
+            <h3 className="card-title">Notes</h3>
+          </div>
+          <div className="card-body">
+            <textarea
+              className="form-input"
+              rows={3}
+              placeholder="Any additional context about this engagement..."
+              value={formData.notes}
+              onChange={(e) => handleChange('notes', e.target.value)}
+              style={{ resize: 'vertical' }}
+            />
           </div>
         </div>
 
