@@ -149,15 +149,12 @@ function AppRoutes() {
         
         {/* ====== OTHER PAGES (no flow bar) ====== */}
         
-        {/* Projects List */}
-        <Route path="/projects" element={
-          <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
-        } />
-        <Route path="/projects/:id" element={
-          <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
-        } />
+        {/* Projects - specific routes first */}
         <Route path="/projects/:id/hub" element={
           <ProtectedRoute><Page><ProjectHub /></Page></ProtectedRoute>
+        } />
+        <Route path="/projects" element={
+          <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
         } />
         
         {/* Data Pages */}
