@@ -1,90 +1,46 @@
 /**
  * Chat.jsx - Intelligent Chat Interface
  * 
- * v14: Full theme conversion - inline styles, consistent sizing
+ * Modern, polished AI assistant interface.
+ * Uses CSS classes from index.css for consistent styling.
  * 
  * Features:
- * - INTELLIGENT MODE: Three Truths synthesis, smart clarification, proactive insights
- * - Standard Mode: Original chat functionality
+ * - INTELLIGENT MODE: Five Truths synthesis, smart clarification, proactive insights
  * - Scope selector: project, global, all
  * - Thumbs up/down feedback
- * - Personas, Excel export, PII indicators
+ * - Export to Excel
+ * 
+ * Phase 4A UX Overhaul - January 16, 2026
  */
 
 import { useState, useEffect, useRef } from 'react'
 import api from '../services/api'
 import { useProject } from '../context/ProjectContext'
-import { useTheme } from '../context/ThemeContext'
-import PersonaSwitcher from '../components/PersonaSwitcher'
-import PersonaCreator from '../components/PersonaCreator'
 import { 
-  Zap, Brain, Database, FileText, BookOpen, AlertTriangle, 
-  CheckCircle, ChevronDown, ChevronRight, Lightbulb, Download,
-  ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2, Eye, EyeOff
+  Brain, Database, FileText, BookOpen, AlertTriangle, 
+  ChevronDown, ChevronRight, Lightbulb, Download,
+  ThumbsUp, ThumbsDown, Copy, RefreshCw, Send, Trash2,
+  Check, Zap, AlertCircle
 } from 'lucide-react'
 import { Tooltip } from './ui'
 
-// Theme-aware colors - Mission Control palette
-const getColors = (dark) => ({
-  bg: dark ? '#1a1f2e' : '#f0f2f5',
-  card: dark ? '#242b3d' : '#ffffff',
-  cardBorder: dark ? '#2d3548' : '#e2e8f0',
-  text: dark ? '#e8eaed' : '#1a2332',
-  textMuted: dark ? '#8b95a5' : '#64748b',
-  textLight: dark ? '#5f6a7d' : '#94a3b8',
-  primary: '#83b16d',
-  primaryDark: '#6b9b5a',
-  primaryLight: dark ? 'rgba(131, 177, 109, 0.15)' : 'rgba(131, 177, 109, 0.1)',
-  primaryBorder: 'rgba(131, 177, 109, 0.3)',
-  accent: '#285390',
-  accentLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
-  warning: '#d97706',
-  warningLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
-  red: '#993c44',
-  redLight: dark ? 'rgba(153, 60, 68, 0.15)' : 'rgba(153, 60, 68, 0.1)',
-  success: '#10b981',
-  successLight: dark ? 'rgba(16, 185, 129, 0.15)' : '#ecfdf5',
-  divider: dark ? '#2d3548' : '#e2e8f0',
-  inputBg: dark ? '#1a1f2e' : '#f8fafc',
-  messageBg: dark ? '#2d3548' : '#f1f5f9',
-  // Aliases for backward compatibility
-  blue: '#285390',
-  blueLight: dark ? 'rgba(40, 83, 144, 0.15)' : 'rgba(40, 83, 144, 0.1)',
-  amber: '#d97706',
-  amberLight: dark ? 'rgba(217, 119, 6, 0.15)' : 'rgba(217, 119, 6, 0.1)',
-})
-
 export default function Chat({ functionalAreas = [] }) {
   const { activeProject, projectName } = useProject()
-  const { darkMode } = useTheme()
-  const colors = getColors(darkMode)
   
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
   const [expandedSources, setExpandedSources] = useState({})
-  const [modelInfo, setModelInfo] = useState(null)
   const messagesEndRef = useRef(null)
   const messagesAreaRef = useRef(null)
   
   // Scope state
   const [scope, setScope] = useState('project')
   
-  // INTELLIGENT MODE
-  const [intelligentMode, setIntelligentMode] = useState(true)
+  // Intelligent mode state
   const [sessionId, setSessionId] = useState(null)
   const [pendingClarification, setPendingClarification] = useState(null)
   const [learningStats, setLearningStats] = useState(null)
-  
-  // Persona state
-  const [currentPersona, setCurrentPersona] = useState({
-    id: 'bessie',
-    name: 'Bessie',
-    icon: 'AI',
-    description: 'Your friendly payroll expert'
-  })
-  const [showPersonaCreator, setShowPersonaCreator] = useState(false)
 
   const scopeLabels = {
     project: 'Project',
@@ -93,7 +49,6 @@ export default function Chat({ functionalAreas = [] }) {
   }
 
   useEffect(() => {
-    loadModelInfo()
     loadLearningStats()
     setSessionId(`session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`)
   }, [])
@@ -101,11 +56,6 @@ export default function Chat({ functionalAreas = [] }) {
   useEffect(() => {
     scrollToBottom()
   }, [messages])
-
-  useEffect(() => {
-    window.openPersonaCreator = () => setShowPersonaCreator(true)
-    return () => { delete window.openPersonaCreator }
-  }, [])
 
   const scrollToBottom = () => {
     if (messagesAreaRef.current) {
@@ -148,34 +98,41 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  const loadModelInfo = async () => {
-    try {
-      const response = await api.get('/chat/models')
-      setModelInfo(response.data)
-    } catch (err) {
-      console.error('Failed to load model info:', err)
-    }
+  const clearChat = () => {
+    setMessages([])
+    setPendingClarification(null)
   }
 
-  const toggleSources = (messageIndex) => {
-    setExpandedSources(prev => ({ ...prev, [messageIndex]: !prev[messageIndex] }))
-  }
-
-  const submitFeedback = async (jobId, feedbackType, messageContent, responseContent) => {
+  const handleFeedback = async (index, feedbackType) => {
+    const message = messages[index]
+    if (!message?.job_id) return
+    
     try {
       await api.post('/chat/unified/feedback', {
-        job_id: jobId,
+        job_id: message.job_id,
         feedback: feedbackType,
-        message: messageContent,
-        response: responseContent
+        message: messages[index - 1]?.content || '',
+        response: message.content
       })
+      
+      setMessages(prev => prev.map((m, i) => 
+        i === index ? { ...m, feedbackGiven: feedbackType } : m
+      ))
     } catch (err) {
       console.error('Failed to submit feedback:', err)
     }
   }
 
-  // INTELLIGENT MESSAGE HANDLER
-  const sendIntelligentMessage = async (clarifications = null) => {
+  const copyToClipboard = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text)
+    } catch (err) {
+      console.error('Failed to copy:', err)
+    }
+  }
+
+  // Send message handler
+  const sendMessage = async (clarifications = null) => {
     const messageText = clarifications ? pendingClarification?.originalQuestion : input.trim()
     if (!messageText) return
 
@@ -196,7 +153,7 @@ export default function Chat({ functionalAreas = [] }) {
       const response = await api.post('/chat/unified', {
         message: messageText,
         project: projectName || null,
-        persona: currentPersona?.id || 'bessie',
+        persona: 'bessie',
         scope: scope,
         session_id: sessionId,
         clarifications: clarifications,
@@ -207,6 +164,7 @@ export default function Chat({ functionalAreas = [] }) {
 
       const data = response.data
 
+      // Handle file export
       if (data.export) {
         const { filename, data: base64Data, mime_type } = data.export
         const link = document.createElement('a')
@@ -233,9 +191,7 @@ export default function Chat({ functionalAreas = [] }) {
         }])
       } else {
         // Remove any pending clarification messages when we get an answer
-        console.log('[CHAT DEBUG] Adding intelligent response, removing clarification')
         setMessages(prev => {
-          // Filter out clarification messages for this question
           const filtered = prev.filter(m => m.type !== 'clarification')
           return [...filtered, {
             role: 'assistant',
@@ -248,39 +204,29 @@ export default function Chat({ functionalAreas = [] }) {
             conflicts: data.conflicts || [],
             insights: data.insights || [],
             reasoning: data.reasoning || [],
-            structured_output: data.structured_output,
-            auto_applied_note: data.auto_applied_note || null,
-            auto_applied_facts: data.auto_applied_facts || null,
-            can_reset_preferences: data.can_reset_preferences || false,
-            quality_alerts: data.quality_alerts || null,
-            follow_up_suggestions: data.follow_up_suggestions || [],
-            citations: data.citations || null,
-            export: data.export || null,
+            citations: data.citations || [],
+            quality_alerts: data.quality_alerts || [],
+            follow_ups: data.follow_ups || [],
+            auto_applied_note: data.auto_applied_note,
+            can_reset_preferences: data.can_reset_preferences,
+            used_learning: data.used_learning,
+            export: data.export,
+            job_id: data.job_id,
             timestamp: new Date().toISOString()
           }]
         })
       }
-
-      if (data.session_id) {
-        setSessionId(data.session_id)
-      }
-
     } catch (err) {
-      console.error('Intelligent chat error:', err)
+      console.error('Chat error:', err)
       setMessages(prev => [...prev, {
         role: 'assistant',
-        content: '' +  + (err.response?.data?.detail || err.message || 'Failed to get intelligent response'),
-        error: true,
+        type: 'error',
+        content: err.response?.data?.detail || err.message || 'Failed to get response',
         timestamp: new Date().toISOString()
       }])
     } finally {
       setLoading(false)
     }
-  }
-
-  const sendMessage = () => {
-    // Always use intelligent mode - standard mode endpoints don't exist
-    sendIntelligentMessage()
   }
 
   const handleKeyPress = (e) => {
@@ -290,107 +236,35 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  const clearChat = () => {
-    setMessages([])
-    setPendingClarification(null)
-  }
-
-  const handleFeedback = (messageIndex, feedbackType) => {
-    setMessages(prev => prev.map((msg, idx) => 
-      idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
-    ))
-    
-    const message = messages[messageIndex]
-    if (message?.type === 'intelligent' && sessionId) {
-      api.post('/chat/intelligent/feedback', {
-        session_id: sessionId,
-        message_index: messageIndex,
-        feedback: feedbackType,
-        question: messages[messageIndex - 1]?.content || ''
-      }).catch(console.error)
-    } else if (message?.job_id) {
-      submitFeedback(message.job_id, feedbackType, message.userQuery, message.content)
-    }
-  }
-
-  const isDisabled = loading || (!input.trim()) || (scope === 'project' && !activeProject)
+  const canSend = input.trim() && !loading && (scope !== 'project' || activeProject)
 
   return (
-    <div style={{
-      height: 'calc(100vh - 200px)', // Account for Layout header, PageHeader, and padding
-      minHeight: 400,
-      display: 'flex',
-      flexDirection: 'column',
-      background: colors.card,
-      borderRadius: 12,
-      border: `1px solid ${colors.divider}`,
-      overflow: 'hidden',
-    }}>
-      {/* Header */}
-      <div style={{
-        padding: '0.75rem 1rem',
-        background: colors.card,
-        borderBottom: `1px solid ${colors.divider}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '0.75rem',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          {/* PersonaSwitcher hidden for now - future feature
-          <PersonaSwitcher 
-            currentPersona={currentPersona}
-            onPersonaChange={setCurrentPersona}
-            onCreateNew={() => setShowPersonaCreator(true)}
-          />
-          */}
-          
-          {/* Always using Intelligent Mode - indicator badge */}
+    <div className="chat">
+      {/* Toolbar */}
+      <div className="chat__toolbar">
+        <div className="chat__toolbar-left">
           <Tooltip 
             title="Intelligent Mode" 
-            detail="AI synthesizes answers from your structured data, documents, and reference library for comprehensive responses."
+            detail="AI synthesizes answers from your structured data, documents, and reference library."
             action="Uses all available sources"
           >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.375rem 0.75rem',
-                borderRadius: 8,
-                fontSize: '0.85rem',
-                fontWeight: 500,
-                background: colors.primary,
-                color: 'white',
-                cursor: 'help',
-              }}
-            >
+            <div className="chat__mode-badge">
               <Brain size={16} />
               Intelligent
             </div>
           </Tooltip>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          {/* Scope Selector */}
+        <div className="chat__toolbar-right">
           <Tooltip 
             title="Query Scope" 
             detail="Project: Current project data only. Global: Reference library only. All: Both sources combined."
             action="Select data sources to search"
           >
             <select
+              className="chat__scope-select"
               value={scope}
               onChange={(e) => setScope(e.target.value)}
-              style={{
-                padding: '0.375rem 0.75rem',
-                fontSize: '0.85rem',
-                border: `1px solid ${colors.divider}`,
-                borderRadius: 8,
-                background: colors.card,
-                color: colors.text,
-                cursor: 'pointer',
-              }}
             >
               {Object.entries(scopeLabels).map(([value, label]) => (
                 <option key={value} value={value}>{label}</option>
@@ -398,515 +272,190 @@ export default function Chat({ functionalAreas = [] }) {
             </select>
           </Tooltip>
 
-          <Tooltip title="Clear Chat" detail="Remove all messages from this conversation." action="Start fresh">
-            <button
-              onClick={clearChat}
-              style={{
-                padding: '0.5rem',
-                background: 'transparent',
-                border: 'none',
-                borderRadius: 8,
-                cursor: 'pointer',
-                color: colors.textMuted,
-              }}
-            >
+          <Tooltip title="Clear Chat" detail="Remove all messages from this conversation.">
+            <button className="chat__icon-btn" onClick={clearChat}>
               <Trash2 size={18} />
             </button>
           </Tooltip>
         </div>
       </div>
 
-      {/* Intelligent Mode Banner */}
-      {intelligentMode && (
-        <div style={{
-          padding: '0.5rem 1rem',
-          background: colors.primaryLight,
-          borderBottom: `1px solid ${colors.divider}`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          fontSize: '0.85rem',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-            <Zap size={16} style={{ color: colors.primary }} />
-            <span style={{ color: colors.primary }}>
-              <strong>Intelligent Mode:</strong> Synthesizes data + documents + reference library
-            </span>
-          </div>
-          {learningStats?.available && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '0.75rem', color: colors.primary }}>
-              <span title="Learned query patterns">{learningStats.learned_queries || 0} patterns</span>
-              <span title="Feedback records">{learningStats.feedback_records || 0} feedback</span>
-            </div>
-          )}
+      {/* Intel Banner */}
+      <div className="chat__intel-banner">
+        <div className="chat__intel-banner-text">
+          <Zap size={16} />
+          <span><strong>Intelligent Mode:</strong> Synthesizes data + documents + reference library</span>
         </div>
-      )}
+        {learningStats?.available && (
+          <div className="chat__intel-stats">
+            <span title="Learned query patterns">{learningStats.learned_queries || 0} patterns</span>
+            <span title="Feedback records">{learningStats.feedback_records || 0} feedback</span>
+          </div>
+        )}
+      </div>
 
-      {/* Messages Area */}
-      <div 
-        ref={messagesAreaRef}
-        style={{
-          flex: 1,
-          overflowY: 'auto',
-          padding: '1rem',
-          background: colors.messageBg,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '1rem',
-        }}
-      >
+      {/* Messages */}
+      <div className="chat__messages" ref={messagesAreaRef}>
         {messages.length === 0 ? (
-          <div style={{
-            height: '100%',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: colors.textMuted,
-          }}>
-            <div style={{ fontSize: '3.5rem', marginBottom: '1rem', opacity: 0.5 }}>
-              {intelligentMode ? 'AI' : 'Chat'}
+          <div className="chat__empty-state">
+            <div className="chat__empty-icon">
+              <Brain />
             </div>
-            <h3 style={{ fontSize: '1rem', fontWeight: 600, color: colors.text, marginBottom: '0.5rem' }}>
-              {intelligentMode ? 'Intelligent Analysis Ready' : 'Start a Conversation'}
-            </h3>
-            <p style={{ fontSize: '0.85rem', textAlign: 'center', maxWidth: 400 }}>
-              {intelligentMode 
-                ? 'Ask questions and I\'ll synthesize answers from your data, documents, and reference library.'
-                : 'Ask questions about your uploaded data and documents.'
-              }
-            </p>
-            {intelligentMode && (
-              <div style={{ marginTop: '1rem', display: 'flex', gap: '1rem', fontSize: '0.75rem' }}>
-                <Tooltip title="Structured Data" detail="SQL queries against your uploaded tables - employee records, payroll data, configurations." action="DuckDB analytics">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.blue, cursor: 'help' }}>
-                    <Database size={14} /> Data
-                  </div>
-                </Tooltip>
-                <Tooltip title="Documents" detail="Semantic search across uploaded PDFs, Word docs, and text files." action="ChromaDB retrieval">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.primary, cursor: 'help' }}>
-                    <FileText size={14} /> Docs
-                  </div>
-                </Tooltip>
-                <Tooltip title="Reference Library" detail="Global knowledge base - vendor documentation, regulatory guides, best practices." action="Shared across projects">
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.25rem', color: colors.amber, cursor: 'help' }}>
-                    <BookOpen size={14} /> Reference
-                  </div>
-                </Tooltip>
-              </div>
-            )}
+            <h3>Intelligent Analysis Ready</h3>
+            <p>Ask questions and I'll synthesize answers from your data, documents, and reference library.</p>
+            <div className="chat__empty-sources">
+              <Tooltip title="Structured Data" detail="SQL queries against your uploaded tables - employee records, payroll data, configurations.">
+                <div style={{ color: 'var(--electric-blue)' }}>
+                  <Database size={14} /> Data
+                </div>
+              </Tooltip>
+              <Tooltip title="Documents" detail="Semantic search across uploaded PDFs, Word docs, and text files.">
+                <div style={{ color: 'var(--grass-green)' }}>
+                  <FileText size={14} /> Docs
+                </div>
+              </Tooltip>
+              <Tooltip title="Reference Library" detail="Global knowledge base - vendor documentation, regulatory guides, best practices.">
+                <div style={{ color: 'var(--amber)' }}>
+                  <BookOpen size={14} /> Reference
+                </div>
+              </Tooltip>
+            </div>
           </div>
         ) : (
           messages.map((message, index) => (
-            <MessageBubble
+            <MessageRenderer
               key={index}
               message={message}
               index={index}
-              persona={currentPersona}
               expandedSources={expandedSources}
-              toggleSources={toggleSources}
+              setExpandedSources={setExpandedSources}
               onFeedback={handleFeedback}
-              onClarificationSubmit={(answers) => sendIntelligentMessage(answers)}
+              onClarificationSubmit={(answers) => sendMessage(answers)}
               onResetPreferences={resetPreferences}
-              colors={colors}
+              onCopy={copyToClipboard}
             />
           ))
         )}
         
         {loading && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: colors.textMuted, fontSize: '0.85rem' }}>
-            <RefreshCw size={16} style={{ animation: 'spin 1s linear infinite' }} />
-            {intelligentMode ? 'Analyzing sources...' : 'Processing...'}
+          <div className="chat__loading">
+            <RefreshCw size={16} />
+            Analyzing sources...
           </div>
         )}
         
         <div ref={messagesEndRef} />
       </div>
 
-      {/* Input Area */}
-      <div style={{
-        padding: '1rem',
-        background: colors.card,
-        borderTop: `1px solid ${colors.divider}`,
-      }}>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
+      {/* Input */}
+      <div className="chat__input-area">
+        <div className="chat__input-row">
           <textarea
+            className="chat__textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={handleKeyPress}
             placeholder={
               scope === 'project' && !activeProject 
                 ? "Select a project first..." 
-                : intelligentMode
-                  ? "Ask anything - I'll synthesize from all sources..."
-                  : "Type your question..."
+                : "Ask anything - I'll synthesize from all sources..."
             }
-            style={{
-              flex: 1,
-              padding: '0.75rem 1rem',
-              border: `1px solid ${colors.divider}`,
-              borderRadius: 12,
-              resize: 'none',
-              fontSize: '0.85rem',
-              background: colors.card,
-              color: colors.text,
-              outline: 'none',
-            }}
-            rows={2}
-            disabled={scope === 'project' && !activeProject}
+            rows={1}
           />
           <button
-            onClick={sendMessage}
-            disabled={isDisabled}
-            style={{
-              padding: '0.75rem 1.25rem',
-              borderRadius: 12,
-              fontWeight: 500,
-              fontSize: '0.85rem',
-              border: 'none',
-              cursor: isDisabled ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              transition: 'all 0.15s ease',
-              ...(isDisabled ? {
-                background: colors.inputBg,
-                color: colors.textLight,
-              } : {
-                background: colors.primary,
-                color: 'white',
-              })
-            }}
+            className="chat__send-btn"
+            onClick={() => sendMessage()}
+            disabled={!canSend}
           >
-            <Send size={18} />
-            {intelligentMode ? 'Analyze' : 'Send'}
+            <Send size={20} />
           </button>
         </div>
       </div>
-
-      {/* Persona Creator Modal */}
-      {showPersonaCreator && (
-        <PersonaCreator
-          onClose={() => setShowPersonaCreator(false)}
-          onSave={(newPersona) => {
-            setCurrentPersona(newPersona)
-            setShowPersonaCreator(false)
-          }}
-        />
-      )}
-      
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-      `}</style>
     </div>
   )
 }
 
 
-// MESSAGE BUBBLE COMPONENT
-function MessageBubble({ message, index, persona, expandedSources, toggleSources, onFeedback, onClarificationSubmit, onResetPreferences, colors }) {
-  const isUser = message.role === 'user'
-  
-  // System message
+// ============================================================
+// MESSAGE RENDERER - Routes to appropriate component
+// ============================================================
+
+function MessageRenderer({ message, index, expandedSources, setExpandedSources, onFeedback, onClarificationSubmit, onResetPreferences, onCopy }) {
   if (message.type === 'system') {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', margin: '0.5rem 0' }}>
-        <div style={{
-          padding: '0.5rem 1rem',
-          background: colors.inputBg,
-          color: colors.textMuted,
-          fontSize: '0.85rem',
-          borderRadius: 20,
-        }}>
+      <div className="chat-msg chat-msg--system">
+        <div className="chat-msg__bubble">{message.content}</div>
+      </div>
+    )
+  }
+  
+  if (message.type === 'clarification') {
+    return (
+      <ClarificationCard 
+        questions={message.questions} 
+        originalQuestion={message.originalQuestion} 
+        onSubmit={onClarificationSubmit} 
+      />
+    )
+  }
+  
+  if (message.type === 'intelligent') {
+    return (
+      <IntelligentResponse 
+        message={message} 
+        index={index} 
+        expandedSources={expandedSources}
+        setExpandedSources={setExpandedSources}
+        onFeedback={onFeedback} 
+        onResetPreferences={onResetPreferences}
+        onCopy={onCopy}
+      />
+    )
+  }
+
+  if (message.type === 'error') {
+    return (
+      <div className="chat-msg chat-msg--assistant">
+        <div className="chat-msg__avatar"><AlertCircle size={18} /></div>
+        <div className="chat-msg__bubble" style={{ background: 'var(--scarlet-light)', borderColor: 'var(--scarlet)', color: 'var(--scarlet)' }}>
           {message.content}
         </div>
       </div>
     )
   }
   
-  // Clarification message
-  if (message.type === 'clarification') {
-    return <ClarificationCard questions={message.questions} originalQuestion={message.originalQuestion} onSubmit={onClarificationSubmit} colors={colors} />
-  }
+  // Standard user/assistant message
+  const isUser = message.role === 'user'
   
-  // Intelligent response
-  if (message.type === 'intelligent') {
-    return <IntelligentResponse message={message} index={index} onFeedback={onFeedback} onResetPreferences={onResetPreferences} colors={colors} />
-  }
-  
-  // Standard message
   return (
-    <div style={{ display: 'flex', gap: '0.75rem', flexDirection: isUser ? 'row-reverse' : 'row' }}>
-      {/* Avatar */}
-      <div style={{
-        width: 36,
-        height: 36,
-        borderRadius: '50%',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        flexShrink: 0,
-        fontSize: '1rem',
-        ...(isUser ? {
-          background: `linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark})`,
-          color: 'white'
-        } : {
-          background: colors.primaryLight,
-          color: colors.primary
-        })
-      }}>
-        {isUser ? 'U' : persona?.icon || 'AI'}
+    <div className={`chat-msg ${isUser ? 'chat-msg--user' : 'chat-msg--assistant'}`}>
+      <div className="chat-msg__avatar">
+        {isUser ? 'U' : 'AI'}
       </div>
-      
-      {/* Bubble */}
-      <div style={{
-        maxWidth: '75%',
-        borderRadius: 12,
-        padding: '0.75rem 1rem',
-        ...(isUser ? {
-          background: `linear-gradient(135deg, ${colors.primary}, ${colors.primaryDark})`,
-          color: 'white',
-          borderBottomRightRadius: 4,
-        } : message.error ? {
-          background: colors.redLight,
-          border: `1px solid ${colors.red}40`,
-          color: colors.red,
-          borderBottomLeftRadius: 4,
-        } : {
-          background: colors.card,
-          border: `1px solid ${colors.divider}`,
-          borderBottomLeftRadius: 4,
-        })
-      }}>
-        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.6, color: isUser ? 'white' : colors.text }}>
-          {message.content}
-        </div>
-        
-        {/* Sources */}
-        {message.sources?.length > 0 && (
-          <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: `1px solid ${colors.divider}` }}>
-            <button 
-              onClick={() => toggleSources(index)}
-              style={{
-                fontSize: '0.75rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                color: colors.primary,
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              {expandedSources[index] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              {message.sources.length} sources
-            </button>
-            {expandedSources[index] && (
-              <div style={{ marginTop: '0.5rem', display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                {message.sources.slice(0, 5).map((src, i) => (
-                  <div key={i} style={{ fontSize: '0.75rem', color: colors.textMuted, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {src.filename || src.source || 'Unknown'}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-        
-        {/* Feedback */}
-        {!isUser && !message.error && !message.isStatus && message.type === 'standard' && (
-          <div style={{ marginTop: '0.5rem', paddingTop: '0.5rem', borderTop: `1px solid ${colors.divider}`, display: 'flex', gap: '0.5rem' }}>
-            <button
-              onClick={() => onFeedback(index, 'positive')}
-              style={{
-                padding: '0.25rem',
-                borderRadius: 4,
-                background: message.feedbackGiven === 'positive' ? colors.primaryLight : 'transparent',
-                color: message.feedbackGiven === 'positive' ? colors.primary : colors.textLight,
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <ThumbsUp size={14} />
-            </button>
-            <button
-              onClick={() => onFeedback(index, 'negative')}
-              style={{
-                padding: '0.25rem',
-                borderRadius: 4,
-                background: message.feedbackGiven === 'negative' ? colors.redLight : 'transparent',
-                color: message.feedbackGiven === 'negative' ? colors.red : colors.textLight,
-                border: 'none',
-                cursor: 'pointer',
-              }}
-            >
-              <ThumbsDown size={14} />
-            </button>
-          </div>
-        )}
+      <div className="chat-msg__bubble">
+        {message.content}
       </div>
     </div>
   )
 }
 
 
-// CLARIFICATION CARD
-function ClarificationCard({ questions, originalQuestion, onSubmit, colors }) {
-  const [answers, setAnswers] = useState({})
-  
-  const handleChange = (questionId, value, type) => {
-    if (type === 'checkbox') {
-      setAnswers(prev => ({
-        ...prev,
-        [questionId]: prev[questionId]?.includes(value)
-          ? prev[questionId].filter(v => v !== value)
-          : [...(prev[questionId] || []), value]
-      }))
-    } else {
-      setAnswers(prev => ({ ...prev, [questionId]: value }))
-    }
-  }
-  
-  useEffect(() => {
-    const defaults = {}
-    questions?.forEach(q => {
-      const defaultOpt = q.options?.find(o => o.default)
-      if (defaultOpt) {
-        if (q.type === 'checkbox') {
-          defaults[q.id] = [defaultOpt.id]
-        } else {
-          defaults[q.id] = defaultOpt.id
-        }
-      }
-    })
-    setAnswers(defaults)
-  }, [questions])
-  
-  return (
-    <div style={{
-      borderRadius: 12,
-      padding: '1.25rem',
-      maxWidth: 480,
-      background: colors.primaryLight,
-      border: `1px solid ${colors.primaryBorder}`,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-        <div style={{
-          width: 40,
-          height: 40,
-          borderRadius: '50%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          background: colors.card,
-        }}>
-          <Brain size={20} style={{ color: colors.primary }} />
-        </div>
-        <div>
-          <h3 style={{ fontWeight: 600, color: colors.primary, margin: 0, fontSize: '0.9rem' }}>Let me clarify</h3>
-          <p style={{ fontSize: '0.85rem', color: colors.primary, margin: 0, opacity: 0.8 }}>Quick questions for a better answer</p>
-        </div>
-      </div>
-      
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-        {questions?.map((q) => (
-          <div key={q.id} style={{
-            background: colors.card,
-            borderRadius: 8,
-            padding: '1rem',
-            border: `1px solid ${colors.primaryBorder}`,
-          }}>
-            <div style={{ fontWeight: 500, color: colors.text, marginBottom: '0.75rem', fontSize: '0.85rem' }}>{q.question}</div>
-            
-            {q.type === 'radio' && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-                {q.options?.map((opt) => (
-                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', cursor: 'pointer' }}>
-                    <input
-                      type="radio"
-                      name={q.id}
-                      checked={answers[q.id] === opt.id}
-                      onChange={() => handleChange(q.id, opt.id, 'radio')}
-                      style={{ accentColor: colors.primary }}
-                    />
-                    <span style={{ fontSize: '0.85rem', color: colors.text }}>{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-            
-            {q.type === 'checkbox' && (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem' }}>
-                {q.options?.map((opt) => (
-                  <label key={opt.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={answers[q.id]?.includes(opt.id)}
-                      onChange={() => handleChange(q.id, opt.id, 'checkbox')}
-                      style={{ accentColor: colors.primary }}
-                    />
-                    <span style={{ fontSize: '0.85rem', color: colors.text }}>{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-      
-      <div style={{ marginTop: '1.25rem', display: 'flex', gap: '0.75rem' }}>
-        <button
-          onClick={() => onSubmit(answers)}
-          style={{
-            padding: '0.5rem 1.25rem',
-            background: colors.primary,
-            color: 'white',
-            border: 'none',
-            borderRadius: 8,
-            fontWeight: 500,
-            fontSize: '0.85rem',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-          }}
-        >
-          <Zap size={16} /> Get Answer
-        </button>
-        <button
-          onClick={() => onSubmit(null)}
-          style={{
-            padding: '0.5rem 1rem',
-            background: 'transparent',
-            color: colors.textMuted,
-            border: 'none',
-            borderRadius: 8,
-            fontSize: '0.85rem',
-            cursor: 'pointer',
-          }}
-        >
-          Skip
-        </button>
-      </div>
-    </div>
-  )
-}
+// ============================================================
+// INTELLIGENT RESPONSE CARD
+// ============================================================
 
-
-// INTELLIGENT RESPONSE COMPONENT
-function IntelligentResponse({ message, index, onFeedback, onResetPreferences, colors }) {
+function IntelligentResponse({ message, index, expandedSources, setExpandedSources, onFeedback, onResetPreferences, onCopy }) {
   const [showSources, setShowSources] = useState(false)
   const [expandedSection, setExpandedSection] = useState(null)
   const [resetting, setResetting] = useState(false)
+  const [copied, setCopied] = useState(false)
   
   const hasReality = message.from_reality?.length > 0
   const hasIntent = message.from_intent?.length > 0
   const hasBestPractice = message.from_best_practice?.length > 0
   const hasConflicts = message.conflicts?.length > 0
   const hasInsights = message.insights?.length > 0
+  const hasSources = hasReality || hasIntent || hasBestPractice
   
   const handleReset = async (resetType) => {
     setResetting(true)
@@ -916,93 +465,57 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
       setResetting(false)
     }
   }
+
+  const handleCopy = async () => {
+    await onCopy(message.content)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
+  const confidenceLevel = message.confidence >= 0.8 ? 'high' : message.confidence >= 0.6 ? 'medium' : 'low'
   
   return (
-    <div style={{
-      background: colors.card,
-      borderRadius: 12,
-      border: `1px solid ${colors.divider}`,
-      maxWidth: 640,
-    }}>
+    <div className="chat-intel">
       {/* Auto-Applied Banner */}
       {message.auto_applied_note && message.can_reset_preferences && (
-        <div style={{
-          padding: '0.5rem 1rem',
-          background: colors.amberLight,
-          borderBottom: `1px solid ${colors.amber}40`,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-        }}>
-          <span style={{ fontSize: '0.85rem', color: colors.amber }}>{message.auto_applied_note}</span>
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
-            <button
-              onClick={() => handleReset('session')}
-              disabled={resetting}
-              style={{ fontSize: '0.75rem', color: colors.amber, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-            >
+        <div className="chat-intel__auto-banner">
+          <span>{message.auto_applied_note}</span>
+          <div className="chat-intel__auto-actions">
+            <button onClick={() => handleReset('session')} disabled={resetting}>
               {resetting ? '...' : 'Reset'}
             </button>
-            <button
-              onClick={() => handleReset('learned')}
-              disabled={resetting}
-              style={{ fontSize: '0.75rem', color: colors.red, background: 'none', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}
-            >
+            <button onClick={() => handleReset('learned')} disabled={resetting} style={{ color: 'var(--scarlet)' }}>
               {resetting ? '...' : 'Forget'}
             </button>
           </div>
         </div>
       )}
       
-      {/* Confidence Header */}
-      <div style={{
-        padding: '0.5rem 1rem',
-        background: colors.primaryLight,
-        borderBottom: `1px solid ${colors.divider}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Brain size={16} style={{ color: colors.primary }} />
-          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: colors.primary }}>Intelligent Analysis</span>
+      {/* Header */}
+      <div className="chat-intel__header">
+        <div className="chat-intel__header-left">
+          <Brain size={18} className="chat-intel__header-icon" />
+          <span className="chat-intel__header-title">Intelligent Analysis</span>
           {message.used_learning && (
-            <span style={{
-              padding: '0.125rem 0.5rem',
-              background: colors.primaryLight,
-              color: colors.primary,
-              fontSize: '0.75rem',
-              borderRadius: 12,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.25rem',
-            }}>
-              Learned
-            </span>
+            <span className="chat-intel__learned-badge">Learned</span>
           )}
         </div>
-        <div style={{
-          padding: '0.125rem 0.5rem',
-          borderRadius: 4,
-          fontSize: '0.75rem',
-          fontWeight: 500,
-          background: message.confidence >= 0.8 ? colors.primaryLight : message.confidence >= 0.6 ? colors.blueLight : colors.amberLight,
-          color: message.confidence >= 0.8 ? colors.primary : message.confidence >= 0.6 ? colors.blue : colors.amber,
-        }}>
+        <div className={`chat-intel__confidence chat-intel__confidence--${confidenceLevel}`}>
           {Math.round((message.confidence || 0) * 100)}% confidence
         </div>
       </div>
       
       {/* Main Answer */}
-      <div style={{ padding: '1rem' }}>
-        <div style={{ whiteSpace: 'pre-wrap', fontSize: '0.85rem', lineHeight: 1.6, color: colors.text }}>
-          {message.content}
+      <div className="chat-intel__content">
+        <div className="chat-intel__answer">
+          <FormattedContent content={message.content} />
         </div>
         
         {/* Export Button */}
         {message.export && (
-          <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: `1px solid ${colors.divider}` }}>
+          <div className="chat-intel__export">
             <button
+              className="chat-intel__export-btn"
               onClick={() => {
                 const { filename, data, mime_type } = message.export
                 const link = document.createElement('a')
@@ -1011,19 +524,6 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
                 document.body.appendChild(link)
                 link.click()
                 document.body.removeChild(link)
-              }}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.5rem',
-                padding: '0.5rem 0.75rem',
-                borderRadius: 8,
-                fontSize: '0.85rem',
-                fontWeight: 500,
-                background: colors.primaryLight,
-                color: colors.primary,
-                border: `1px solid ${colors.primary}40`,
-                cursor: 'pointer',
               }}
             >
               <Download size={16} />
@@ -1035,49 +535,35 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
       
       {/* Insights */}
       {hasInsights && (
-        <div style={{
-          margin: '0 1rem 1rem',
-          background: colors.amberLight,
-          border: `1px solid ${colors.amber}40`,
-          borderRadius: 8,
-          padding: '0.75rem',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <Lightbulb size={16} style={{ color: colors.amber }} />
-            <span style={{ fontWeight: 500, color: colors.amber, fontSize: '0.85rem' }}>Proactive Insights</span>
+        <div className="chat-intel__insights">
+          <div className="chat-intel__insights-header">
+            <Lightbulb size={16} />
+            <span className="chat-intel__insights-title">Proactive Insights</span>
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-            {message.insights.map((insight, i) => (
-              <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', fontSize: '0.85rem' }}>
-                <span style={{ flexShrink: 0, color: insight.severity === 'high' ? colors.red : colors.amber }}>
-                  {insight.severity === 'high' ? '🔴' : '🟡'}
-                </span>
-                <span style={{ color: colors.text }}>
-                  <strong>{insight.title}:</strong> {insight.description}
-                </span>
-              </div>
-            ))}
-          </div>
+          {message.insights.map((insight, i) => (
+            <div key={i} className="chat-intel__insight">
+              <span className={`chat-intel__insight-dot chat-intel__insight-dot--${insight.severity === 'high' ? 'high' : 'medium'}`}>
+                {insight.severity === 'high' ? '●' : '○'}
+              </span>
+              <span>
+                <strong>{insight.title}:</strong> {insight.description}
+              </span>
+            </div>
+          ))}
         </div>
       )}
       
       {/* Conflicts */}
       {hasConflicts && (
-        <div style={{
-          margin: '0 1rem 1rem',
-          background: colors.redLight,
-          border: `1px solid ${colors.red}40`,
-          borderRadius: 8,
-          padding: '0.75rem',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem' }}>
-            <AlertTriangle size={16} style={{ color: colors.red }} />
-            <span style={{ fontWeight: 500, color: colors.red, fontSize: '0.85rem' }}>Conflicts Detected</span>
+        <div className="chat-intel__conflicts">
+          <div className="chat-intel__conflicts-header">
+            <AlertTriangle size={16} />
+            <span className="chat-intel__conflicts-title">Conflicts Detected</span>
           </div>
           {message.conflicts.map((conflict, i) => (
-            <div key={i} style={{ fontSize: '0.85rem', color: colors.text, marginBottom: '0.5rem' }}>
+            <div key={i} className="chat-intel__conflict">
               <div>{conflict.description}</div>
-              <div style={{ color: colors.red, fontSize: '0.75rem', marginTop: '0.25rem' }}>
+              <div className="chat-intel__conflict-rec">
                 Recommendation: {conflict.recommendation}
               </div>
             </div>
@@ -1086,66 +572,51 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
       )}
       
       {/* Sources Toggle */}
-      {(hasReality || hasIntent || hasBestPractice) && (
-        <div style={{ borderTop: `1px solid ${colors.divider}` }}>
-          <button
+      {hasSources && (
+        <div className="chat-intel__sources">
+          <button 
+            className="chat-intel__sources-toggle"
             onClick={() => setShowSources(!showSources)}
-            style={{
-              width: '100%',
-              padding: '0.5rem 1rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              background: 'transparent',
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '0.85rem',
-            }}
           >
-            <span style={{ color: colors.textMuted }}>Sources of Truth</span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              {hasReality && <span style={{ color: colors.blue, fontSize: '0.75rem' }}>Data</span>}
-              {hasIntent && <span style={{ color: colors.primary, fontSize: '0.75rem' }}>Docs</span>}
-              {hasBestPractice && <span style={{ color: colors.amber, fontSize: '0.75rem' }}>📘 Reference</span>}
-              {showSources ? <ChevronDown size={16} style={{ color: colors.textMuted }} /> : <ChevronRight size={16} style={{ color: colors.textMuted }} />}
+            <div className="chat-intel__sources-toggle-left">
+              {showSources ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+              <span>View Sources</span>
             </div>
+            <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-muted)' }}>
+              {(message.from_reality?.length || 0) + (message.from_intent?.length || 0) + (message.from_best_practice?.length || 0)} sources
+            </span>
           </button>
           
           {showSources && (
-            <div style={{ padding: '0 1rem 1rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <div className="chat-intel__sources-content">
               {hasReality && (
                 <SourceSection
-                  title="Customer Data"
-                  icon={<Database size={14} style={{ color: colors.blue }} />}
-                  colorScheme="blue"
+                  title="From Your Data"
+                  icon={<Database size={14} style={{ color: 'var(--electric-blue)' }} />}
+                  variant="reality"
                   items={message.from_reality}
                   expanded={expandedSection === 'reality'}
                   onToggle={() => setExpandedSection(expandedSection === 'reality' ? null : 'reality')}
-                  colors={colors}
                 />
               )}
-              
               {hasIntent && (
                 <SourceSection
-                  title="Customer Documents"
-                  icon={<FileText size={14} style={{ color: colors.primary }} />}
-                  colorScheme="green"
+                  title="From Documents"
+                  icon={<FileText size={14} style={{ color: 'var(--grass-green)' }} />}
+                  variant="intent"
                   items={message.from_intent}
                   expanded={expandedSection === 'intent'}
                   onToggle={() => setExpandedSection(expandedSection === 'intent' ? null : 'intent')}
-                  colors={colors}
                 />
               )}
-              
               {hasBestPractice && (
                 <SourceSection
-                  title="Reference Library"
-                  icon={<BookOpen size={14} style={{ color: colors.amber }} />}
-                  colorScheme="amber"
+                  title="From Reference Library"
+                  icon={<BookOpen size={14} style={{ color: 'var(--amber)' }} />}
+                  variant="reference"
                   items={message.from_best_practice}
-                  expanded={expandedSection === 'best_practice'}
-                  onToggle={() => setExpandedSection(expandedSection === 'best_practice' ? null : 'best_practice')}
-                  colors={colors}
+                  expanded={expandedSection === 'reference'}
+                  onToggle={() => setExpandedSection(expandedSection === 'reference' ? null : 'reference')}
                 />
               )}
             </div>
@@ -1154,108 +625,56 @@ function IntelligentResponse({ message, index, onFeedback, onResetPreferences, c
       )}
       
       {/* Feedback */}
-      <div style={{
-        padding: '0.5rem 1rem',
-        borderTop: `1px solid ${colors.divider}`,
-        background: colors.inputBg,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-      }}>
-        <span style={{ fontSize: '0.75rem', color: colors.textMuted }}>Was this helpful?</span>
-        <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button
-            onClick={() => onFeedback(index, 'positive')}
-            style={{
-              padding: '0.375rem',
-              borderRadius: 8,
-              background: message.feedbackGiven === 'positive' ? colors.primaryLight : 'transparent',
-              color: message.feedbackGiven === 'positive' ? colors.primary : colors.textLight,
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <ThumbsUp size={16} />
-          </button>
-          <button
-            onClick={() => onFeedback(index, 'negative')}
-            style={{
-              padding: '0.375rem',
-              borderRadius: 8,
-              background: message.feedbackGiven === 'negative' ? colors.redLight : 'transparent',
-              color: message.feedbackGiven === 'negative' ? colors.red : colors.textLight,
-              border: 'none',
-              cursor: 'pointer',
-            }}
-          >
-            <ThumbsDown size={16} />
-          </button>
-        </div>
+      <div className="chat-intel__feedback">
+        <button
+          className={`chat-intel__feedback-btn ${message.feedbackGiven === 'positive' ? 'chat-intel__feedback-btn--active-positive' : ''}`}
+          onClick={() => onFeedback(index, 'positive')}
+        >
+          <ThumbsUp size={14} />
+        </button>
+        <button
+          className={`chat-intel__feedback-btn ${message.feedbackGiven === 'negative' ? 'chat-intel__feedback-btn--active-negative' : ''}`}
+          onClick={() => onFeedback(index, 'negative')}
+        >
+          <ThumbsDown size={14} />
+        </button>
+        <button className="chat-intel__copy-btn" onClick={handleCopy}>
+          {copied ? <Check size={12} /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
       </div>
     </div>
   )
 }
 
 
-// SOURCE SECTION COMPONENT
-function SourceSection({ title, icon, colorScheme, items, expanded, onToggle, colors }) {
-  const schemeColors = {
-    blue: { bg: colors.blueLight, border: `${colors.blue}40` },
-    green: { bg: colors.primaryLight, border: colors.primaryBorder },
-    amber: { bg: colors.amberLight, border: `${colors.amber}40` },
-  }
-  
-  const scheme = schemeColors[colorScheme] || schemeColors.green
-  
+// ============================================================
+// SOURCE SECTION
+// ============================================================
+
+function SourceSection({ title, icon, variant, items, expanded, onToggle }) {
   return (
-    <div style={{
-      borderRadius: 8,
-      border: `1px solid ${scheme.border}`,
-      background: scheme.bg,
-      overflow: 'hidden',
-    }}>
-      <button
-        onClick={onToggle}
-        style={{
-          width: '100%',
-          padding: '0.5rem 0.75rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          background: 'transparent',
-          border: 'none',
-          cursor: 'pointer',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+    <div className={`chat-intel__source-section chat-intel__source-section--${variant}`}>
+      <button className="chat-intel__source-header" onClick={onToggle}>
+        <div className="chat-intel__source-header-left">
           {icon}
-          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: colors.text }}>{title}</span>
-          <span style={{ fontSize: '0.75rem', color: colors.textLight }}>({items.length})</span>
+          <span className="chat-intel__source-title">{title}</span>
+          <span className="chat-intel__source-count">({items.length})</span>
         </div>
-        {expanded ? <ChevronDown size={14} style={{ color: colors.textMuted }} /> : <ChevronRight size={14} style={{ color: colors.textMuted }} />}
+        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
       </button>
       
       {expanded && (
-        <div style={{ padding: '0 0.75rem 0.75rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-          {items.slice(0, 3).map((item, i) => (
-            <div key={i} style={{
-              background: colors.card,
-              borderRadius: 6,
-              padding: '0.5rem',
-              fontSize: '0.75rem',
-            }}>
-              <div style={{ fontWeight: 500, color: colors.text }}>{item.source_name}</div>
-              <div style={{
-                color: colors.textMuted,
-                marginTop: '0.25rem',
-                overflow: 'hidden',
-                display: '-webkit-box',
-                WebkitLineClamp: 3,
-                WebkitBoxOrient: 'vertical',
-              }}>
+        <div className="chat-intel__source-items">
+          {items.slice(0, 5).map((item, i) => (
+            <div key={i} className="chat-intel__source-item">
+              <div className="chat-intel__source-item-name">
+                {item.source_name || item.table_name || 'Source'}
+              </div>
+              <div className="chat-intel__source-item-content">
                 {typeof item.content === 'string' 
                   ? item.content.slice(0, 200) 
-                  : JSON.stringify(item.content).slice(0, 200)
+                  : JSON.stringify(item.content || item.data || '').slice(0, 200)
                 }...
               </div>
             </div>
@@ -1263,5 +682,140 @@ function SourceSection({ title, icon, colorScheme, items, expanded, onToggle, co
         </div>
       )}
     </div>
+  )
+}
+
+
+// ============================================================
+// CLARIFICATION CARD
+// ============================================================
+
+function ClarificationCard({ questions, originalQuestion, onSubmit }) {
+  const [answers, setAnswers] = useState({})
+  
+  useEffect(() => {
+    const defaults = {}
+    questions?.forEach(q => {
+      const defaultOpt = q.options?.find(o => o.default)
+      if (defaultOpt) {
+        defaults[q.id] = q.type === 'checkbox' ? [defaultOpt.id] : defaultOpt.id
+      }
+    })
+    setAnswers(defaults)
+  }, [questions])
+
+  const handleOptionClick = (questionId, optionId, type) => {
+    if (type === 'checkbox') {
+      setAnswers(prev => ({
+        ...prev,
+        [questionId]: prev[questionId]?.includes(optionId)
+          ? prev[questionId].filter(v => v !== optionId)
+          : [...(prev[questionId] || []), optionId]
+      }))
+    } else {
+      setAnswers(prev => ({ ...prev, [questionId]: optionId }))
+    }
+  }
+
+  const isSelected = (questionId, optionId, type) => {
+    if (type === 'checkbox') {
+      return answers[questionId]?.includes(optionId)
+    }
+    return answers[questionId] === optionId
+  }
+  
+  return (
+    <div className="chat-clarify">
+      <div className="chat-clarify__header">
+        <div className="chat-clarify__avatar">
+          <Brain size={22} />
+        </div>
+        <div>
+          <h4 className="chat-clarify__title">Quick clarification needed</h4>
+          <p className="chat-clarify__subtitle">Help me give you a more precise answer</p>
+        </div>
+      </div>
+      
+      <div className="chat-clarify__questions">
+        {questions?.map((q) => (
+          <div key={q.id} className="chat-clarify__question">
+            <label className="chat-clarify__question-label">{q.question}</label>
+            <div className="chat-clarify__options">
+              {q.options?.map((opt) => (
+                <button
+                  key={opt.id}
+                  className={`chat-clarify__option ${isSelected(q.id, opt.id, q.type) ? 'chat-clarify__option--selected' : ''}`}
+                  onClick={() => handleOptionClick(q.id, opt.id, q.type)}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      
+      <button 
+        className="chat-clarify__submit"
+        onClick={() => onSubmit(answers)}
+        disabled={Object.keys(answers).length === 0}
+      >
+        Get Answer
+      </button>
+    </div>
+  )
+}
+
+
+// ============================================================
+// FORMATTED CONTENT - Simple markdown-like rendering
+// ============================================================
+
+function FormattedContent({ content }) {
+  if (!content) return null
+  
+  // Split into paragraphs and render
+  const paragraphs = content.split('\n\n').filter(p => p.trim())
+  
+  return (
+    <>
+      {paragraphs.map((para, i) => {
+        // Check for bullet lists
+        if (para.includes('\n- ') || para.startsWith('- ')) {
+          const items = para.split('\n').filter(line => line.trim())
+          return (
+            <ul key={i}>
+              {items.map((item, j) => (
+                <li key={j}>{item.replace(/^-\s*/, '')}</li>
+              ))}
+            </ul>
+          )
+        }
+        
+        // Check for numbered lists
+        if (/^\d+\.\s/.test(para)) {
+          const items = para.split('\n').filter(line => line.trim())
+          return (
+            <ol key={i}>
+              {items.map((item, j) => (
+                <li key={j}>{item.replace(/^\d+\.\s*/, '')}</li>
+              ))}
+            </ol>
+          )
+        }
+        
+        // Regular paragraph - handle inline formatting
+        let text = para
+        // Bold: **text** or __text__
+        text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        text = text.replace(/__(.*?)__/g, '<strong>$1</strong>')
+        // Code: `code`
+        text = text.replace(/`([^`]+)`/g, '<code>$1</code>')
+        
+        return (
+          <p key={i} dangerouslySetInnerHTML={{ __html: text }} />
+        )
+      })}
+    </>
   )
 }

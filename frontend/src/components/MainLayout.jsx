@@ -24,6 +24,8 @@ import {
   Settings,
   BookOpen,
   Library,
+  MessageSquare,
+  HardDrive,
   ChevronLeft,
   ChevronRight,
   Search,
@@ -151,6 +153,8 @@ const Sidebar = () => {
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
         { icon: FolderKanban, label: 'Projects', path: '/projects' },
+        { icon: HardDrive, label: 'Data', path: '/data' },
+        { icon: MessageSquare, label: 'AI Assist', path: '/workspace' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' }
       ]
     },
