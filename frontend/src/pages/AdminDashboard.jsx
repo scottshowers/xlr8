@@ -9,16 +9,18 @@
  * - Global column mappings
  * - System statistics
  * 
- * Deploy to: frontend/src/pages/AdminDashboard.jsx
+ * Phase 4A UX Cleanup - January 2026
  */
 
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import api from '../services/api'
 import {
   Brain, Database, Users, MessageSquare, ThumbsUp, ThumbsDown,
   Trash2, RefreshCw, Download, Search, ChevronDown, ChevronRight,
   BarChart3, TrendingUp, Zap, Settings, Shield, Eye, EyeOff,
-  CheckCircle, XCircle, AlertTriangle, Filter, Calendar
+  CheckCircle, XCircle, AlertTriangle, Filter, Calendar, ArrowLeft,
+  GraduationCap
 } from 'lucide-react'
 
 export default function AdminDashboard() {
@@ -106,7 +108,24 @@ export default function AdminDashboard() {
   ]
 
   return (
-    <div style={{ padding: '1.5rem', background: '#ffffff', minHeight: 'calc(100vh - 60px)' }}>
+    <div style={{ padding: '1.5rem', background: 'var(--bg-primary)', minHeight: 'calc(100vh - 60px)' }}>
+      {/* Back Link */}
+      <Link 
+        to="/admin" 
+        style={{ 
+          display: 'inline-flex', 
+          alignItems: 'center', 
+          gap: '6px', 
+          color: 'var(--text-muted)', 
+          textDecoration: 'none', 
+          fontSize: '13px',
+          marginBottom: '16px'
+        }}
+      >
+        <ArrowLeft size={14} />
+        Back to Platform Settings
+      </Link>
+
       {/* Header - Standard Pattern */}
       <div style={{ marginBottom: '20px', display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
         <div>
@@ -114,7 +133,7 @@ export default function AdminDashboard() {
             margin: 0, 
             fontSize: '20px', 
             fontWeight: 600, 
-            color: '#1a2332', 
+            color: 'var(--text-primary)', 
             display: 'flex', 
             alignItems: 'center', 
             gap: '10px',
@@ -124,17 +143,17 @@ export default function AdminDashboard() {
               width: '36px', 
               height: '36px', 
               borderRadius: '10px', 
-              backgroundColor: '#83b16d', 
+              backgroundColor: '#10b981', 
               display: 'flex', 
               alignItems: 'center', 
               justifyContent: 'center' 
             }}>
-              <Brain size={20} color="#ffffff" />
+              <GraduationCap size={20} color="#ffffff" />
             </div>
-            Learning Admin
+            Learning Engine
           </h1>
-          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: '#64748b' }}>
-            Manage AI learning patterns and preferences
+          <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: 'var(--text-muted)' }}>
+            View and manage AI learning patterns, feedback, and preferences
           </p>
         </div>
         
@@ -144,8 +163,8 @@ export default function AdminDashboard() {
             disabled={loading}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem',
-              padding: '0.5rem 1rem', background: 'white', border: '1px solid #e2e8f0',
-              borderRadius: 8, cursor: loading ? 'wait' : 'pointer', color: '#64748b',
+              padding: '0.5rem 1rem', background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+              borderRadius: 8, cursor: loading ? 'wait' : 'pointer', color: 'var(--text-muted)',
               fontSize: '0.85rem'
             }}
           >
@@ -156,7 +175,7 @@ export default function AdminDashboard() {
             onClick={() => exportData('all')}
             style={{
               display: 'flex', alignItems: 'center', gap: '0.5rem',
-              padding: '0.5rem 1rem', background: '#83b16d', border: 'none',
+              padding: '0.5rem 1rem', background: 'var(--grass-green)', border: 'none',
               borderRadius: 8, cursor: 'pointer', color: 'white',
               fontSize: '0.85rem', fontWeight: 500
             }}
@@ -170,8 +189,8 @@ export default function AdminDashboard() {
       {/* Tabs */}
       <div style={{ 
         display: 'flex', gap: '4px', marginBottom: '1.5rem', 
-        background: 'white', borderRadius: 10, padding: '4px', 
-        border: '1px solid #e2e8f0', overflowX: 'auto'
+        background: 'var(--bg-secondary)', borderRadius: 10, padding: '4px', 
+        border: '1px solid var(--border)', overflowX: 'auto'
       }}>
         {tabs.map(tab => (
           <button
@@ -182,8 +201,8 @@ export default function AdminDashboard() {
               padding: '0.5rem 1rem', borderRadius: 8, border: 'none',
               fontSize: '0.85rem', fontWeight: 500, whiteSpace: 'nowrap',
               cursor: 'pointer', transition: 'all 0.15s',
-              background: activeTab === tab.id ? '#83b16d' : 'transparent',
-              color: activeTab === tab.id ? 'white' : '#64748b'
+              background: activeTab === tab.id ? 'var(--grass-green)' : 'transparent',
+              color: activeTab === tab.id ? 'white' : 'var(--text-muted)'
             }}
           >
             <tab.icon size={16} />
@@ -193,10 +212,10 @@ export default function AdminDashboard() {
       </div>
 
       {/* Content */}
-      <div style={{ background: 'white', borderRadius: 10, border: '1px solid #e2e8f0', padding: '1.5rem' }}>
+      <div style={{ background: 'var(--bg-secondary)', borderRadius: 10, border: '1px solid var(--border)', padding: '1.5rem' }}>
         {loading ? (
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '5rem' }}>
-            <RefreshCw className="animate-spin" size={32} style={{ color: '#83b16d' }} />
+            <RefreshCw className="animate-spin" size={32} style={{ color: 'var(--grass-green)' }} />
           </div>
         ) : (
           <>
