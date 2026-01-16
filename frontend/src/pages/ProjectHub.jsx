@@ -9,7 +9,7 @@ import { useProject } from '../context/ProjectContext';
 export default function ProjectHub() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { projects, setActiveProject } = useProject();
+  const { projects, selectProject } = useProject();
   
   // Find project - handle string/number mismatch
   const project = projects?.find(p => String(p.id) === String(id));
@@ -35,9 +35,9 @@ export default function ProjectHub() {
   // Set as active project
   React.useEffect(() => {
     if (project) {
-      setActiveProject(project);
+      selectProject(project);
     }
-  }, [project, setActiveProject]);
+  }, [project, selectProject]);
 
   return (
     <div style={{ padding: 40 }}>

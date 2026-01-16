@@ -34,7 +34,7 @@ const getDisplayName = (user) => {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
-  const { projects, loading, setActiveProject } = useProject();
+  const { projects, loading, selectProject } = useProject();
   const { user } = useAuth();
 
   const displayName = getDisplayName(user);
@@ -45,7 +45,7 @@ export default function DashboardPage() {
     .slice(0, 5);
 
   const handleProjectClick = (project) => {
-    setActiveProject(project);
+    selectProject(project);
     navigate('/findings');
   };
 

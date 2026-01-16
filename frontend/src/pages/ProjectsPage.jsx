@@ -15,7 +15,7 @@ import { useProject } from '../context/ProjectContext';
 
 export default function ProjectsPage() {
   const navigate = useNavigate();
-  const { projects, loading, setActiveProject, deleteProject } = useProject();
+  const { projects, loading, selectProject, deleteProject } = useProject();
   const [searchQuery, setSearchQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(null);
 
@@ -30,7 +30,7 @@ export default function ProjectsPage() {
   });
 
   const handleProjectClick = (project) => {
-    setActiveProject(project);
+    selectProject(project);
     navigate(`/projects/${project.id}/hub`);
   };
 

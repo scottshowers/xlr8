@@ -383,7 +383,7 @@ const MissionControl = () => {
               <div 
                 key={project.id}
                 className="project-card"
-                onClick={() => navigate(`/projects/${project.id}`)}
+                onClick={() => navigate(`/projects/${project.id}/hub`)}
               >
                 <div className="project-name">{project.name}</div>
                 <div className="project-meta">
