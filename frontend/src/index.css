@@ -1278,10 +1278,10 @@ select:focus-visible {
   display: flex;
   gap: var(--space-3);
   padding: var(--space-3) var(--space-5);
-  background: var(--bg-secondary);
+  background: linear-gradient(135deg, var(--grass-green-alpha-10), var(--grass-green-alpha-20));
   border-radius: var(--radius-xl);
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
-  border: 1px solid var(--border);
+  border: 1px solid var(--grass-green-alpha-30);
   z-index: 50;
 }
 
@@ -1391,6 +1391,11 @@ select:focus-visible {
   grid-template-columns: repeat(3, 1fr);
   gap: var(--space-4);
   padding: var(--space-4);
+}
+
+/* Add spacing before Projects with Pending Work card */
+.mission-control > .xlr8-card:last-child {
+  margin-top: var(--space-6);
 }
 
 .project-card {
