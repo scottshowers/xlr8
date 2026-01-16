@@ -133,7 +133,7 @@ export default function ProjectHub() {
     );
   }
 
-  const customerColor = getCustomerColor(project.customer || project.name);
+  const customerColor = getCustomerColor(project.name);
 
   return (
     <div className="project-hub-page">
@@ -339,13 +339,14 @@ export default function ProjectHub() {
               <h3 className="card-title">Uploaded Data</h3>
             </div>
             <div className="card-body">
-              <div className="flex items-center gap-3 mb-4">
-                <Upload size={24} style={{ color: customerColor }} />
-                <div>
-                  <div style={{ fontWeight: 'var(--weight-semibold)' }}>{dataFiles.count} files</div>
-                  <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <Upload size={20} style={{ color: customerColor }} />
+                  <span style={{ fontWeight: 'var(--weight-semibold)' }}>{dataFiles.count} files</span>
+                  <span style={{ color: 'var(--text-muted)' }}>-</span>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
                     Last upload: {dataFiles.lastUpload}
-                  </div>
+                  </span>
                 </div>
               </div>
               <button 

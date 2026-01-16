@@ -194,12 +194,13 @@ const ProjectsPage = () => {
                         width: '32px', 
                         height: '32px', 
                         fontSize: 'var(--text-sm)',
-                        background: getCustomerColor(project.name)
+                        background: getCustomerColor(project.name),
+                        flexShrink: 0
                       }}
                     >
                       {project.initials}
                     </div>
-                    <span style={{ fontWeight: 'var(--weight-semibold)' }}>{project.name}</span>
+                    <span style={{ fontWeight: 'var(--weight-semibold)', marginLeft: '4px' }}>{project.name}</span>
                   </div>
                 </td>
                 <td>{project.system}</td>
