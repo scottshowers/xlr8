@@ -187,7 +187,7 @@ export default function IntelligenceTestPage() {
             width: '36px', 
             height: '36px', 
             borderRadius: '10px', 
-            backgroundColor: '#8b5cf6', 
+            backgroundColor: 'var(--grass-green)', 
             display: 'flex', 
             alignItems: 'center', 
             justifyContent: 'center' 
@@ -197,7 +197,7 @@ export default function IntelligenceTestPage() {
           Intelligence Pipeline Test
         </h1>
         <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-          Test MetadataReasoner and term resolution for project: <strong style={{ color: '#8b5cf6' }}>{projectId}</strong>
+          Test MetadataReasoner and term resolution for project: <strong style={{ color: 'var(--grass-green)' }}>{projectId}</strong>
         </p>
       </div>
 
@@ -233,7 +233,7 @@ export default function IntelligenceTestPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ 
               width: 32, height: 32, borderRadius: '50%', 
-              background: '#8b5cf6', color: '#fff',
+              background: 'var(--grass-green)', color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', 
               fontWeight: 600, fontSize: '14px' 
             }}>1</div>
@@ -249,7 +249,7 @@ export default function IntelligenceTestPage() {
           disabled={analyzeStatus.loading}
           style={{
             padding: '10px 20px',
-            background: analyzeStatus.loading ? 'var(--border)' : '#8b5cf6',
+            background: analyzeStatus.loading ? 'var(--border)' : 'var(--grass-green)',
             color: '#fff',
             border: 'none',
             borderRadius: 'var(--radius-md)',
@@ -288,7 +288,7 @@ export default function IntelligenceTestPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ 
               width: 32, height: 32, borderRadius: '50%', 
-              background: '#8b5cf6', color: '#fff',
+              background: 'var(--grass-green)', color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', 
               fontWeight: 600, fontSize: '14px' 
             }}>2</div>
@@ -304,7 +304,7 @@ export default function IntelligenceTestPage() {
           disabled={recalcStatus.loading}
           style={{
             padding: '10px 20px',
-            background: recalcStatus.loading ? 'var(--border)' : '#8b5cf6',
+            background: recalcStatus.loading ? 'var(--border)' : 'var(--grass-green)',
             color: '#fff',
             border: 'none',
             borderRadius: 'var(--radius-md)',
@@ -342,7 +342,7 @@ export default function IntelligenceTestPage() {
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <div style={{ 
               width: 32, height: 32, borderRadius: '50%', 
-              background: '#8b5cf6', color: '#fff',
+              background: 'var(--grass-green)', color: '#fff',
               display: 'flex', alignItems: 'center', justifyContent: 'center', 
               fontWeight: 600, fontSize: '14px' 
             }}>3</div>
@@ -399,7 +399,7 @@ export default function IntelligenceTestPage() {
             disabled={!customQuery}
             style={{
               padding: '10px 20px',
-              background: customQuery ? '#8b5cf6' : 'var(--border)',
+              background: customQuery ? 'var(--grass-green)' : 'var(--border)',
               color: '#fff',
               border: 'none',
               borderRadius: 'var(--radius-md)',
@@ -442,7 +442,7 @@ export default function IntelligenceTestPage() {
                     <div style={{ width: 16 }} />
                   )}
                   <div style={{ flex: 1 }}>
-                    <code style={{ fontSize: 'var(--text-sm)', color: '#8b5cf6', fontFamily: 'monospace' }}>{sample.query}</code>
+                    <code style={{ fontSize: 'var(--text-sm)', color: 'var(--grass-green)', fontFamily: 'monospace' }}>{sample.query}</code>
                     <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{sample.description}</div>
                   </div>
                   <StatusBadge status={status} />
@@ -489,7 +489,7 @@ export default function IntelligenceTestPage() {
                             <span style={{ color: 'var(--text-muted)' }}>→</span>
                             <span style={{ color: '#f59e0b' }}>{match.table}</span>
                             <span style={{ color: 'var(--text-muted)' }}>.</span>
-                            <span style={{ color: '#8b5cf6' }}>{match.column}</span>
+                            <span style={{ color: 'var(--grass-green)' }}>{match.column}</span>
                             <span style={{ color: 'var(--text-muted)' }}>{match.operator}</span>
                             <span style={{ color: 'var(--text-primary)' }}>'{match.match_value}'</span>
                             <span style={{ 
@@ -591,7 +591,7 @@ export default function IntelligenceTestPage() {
               background: 'var(--bg-primary)', 
               borderRadius: 'var(--radius-md)', 
               overflow: 'hidden', 
-              border: '2px solid #8b5cf6' 
+              border: '2px solid var(--grass-green)' 
             }}>
               <div style={{ 
                 display: 'flex', 
@@ -608,7 +608,7 @@ export default function IntelligenceTestPage() {
                   <div style={{ width: 16 }} />
                 )}
                 <div style={{ flex: 1 }}>
-                  <code style={{ fontSize: 'var(--text-sm)', color: '#8b5cf6', fontFamily: 'monospace' }}>{customQuery}</code>
+                  <code style={{ fontSize: 'var(--text-sm)', color: 'var(--grass-green)', fontFamily: 'monospace' }}>{customQuery}</code>
                   <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Custom query</div>
                 </div>
                 <StatusBadge status={queryResults[customQuery]} />
@@ -637,7 +637,7 @@ export default function IntelligenceTestPage() {
                           <span style={{ color: 'var(--text-muted)' }}>→</span>
                           <span style={{ color: '#f59e0b' }}>{match.table}</span>
                           <span style={{ color: 'var(--text-muted)' }}>.</span>
-                          <span style={{ color: '#8b5cf6' }}>{match.column}</span>
+                          <span style={{ color: 'var(--grass-green)' }}>{match.column}</span>
                           <span style={{ color: 'var(--text-muted)' }}>{match.operator}</span>
                           <span style={{ color: 'var(--text-primary)' }}>'{match.match_value}'</span>
                           <span style={{ 
