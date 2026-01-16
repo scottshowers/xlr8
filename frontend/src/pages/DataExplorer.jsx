@@ -296,7 +296,7 @@ export default function DataExplorer() {
       {/* Breadcrumb */}
       <div style={{ marginBottom: '1rem' }}>
         <Link to="/data" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: c.textMuted, textDecoration: 'none', fontSize: '0.85rem' }}>
-          <ArrowLeft size={16} /> Back to Data Management
+          <ArrowLeft size={16} /> Back to Project Data
         </Link>
       </div>
       
