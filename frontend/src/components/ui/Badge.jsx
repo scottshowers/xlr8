@@ -1,5 +1,4 @@
 import React from 'react';
-import './Badge.css';
 
 /**
  * Reusable Badge Component

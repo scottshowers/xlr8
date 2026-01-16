@@ -1,5 +1,4 @@
 import React from 'react';
-import './PageHeader.css';
 
 /**
  * Reusable PageHeader Component

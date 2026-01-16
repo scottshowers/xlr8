@@ -1,6 +1,5 @@
 import React from 'react';
 import { Button } from './Button';
-import './ErrorState.css';
 
 /**
  * ErrorState Component
