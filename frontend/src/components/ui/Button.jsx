@@ -4,7 +4,7 @@ import React from 'react';
  * Reusable Button Component
  * 
  * Variants:
- * - primary: Grass green gradient (main actions)
+ * - primary: Grass green (main actions)
  * - secondary: White with border (secondary actions)
  * - danger: Red (destructive actions)
  * - ghost: Transparent (subtle actions)
@@ -27,11 +27,12 @@ export const Button = ({
   ...props 
 }) => {
   const classes = [
-    'xlr8-button',
-    `xlr8-button--${variant}`,
-    `xlr8-button--${size}`,
-    disabled && 'xlr8-button--disabled',
-    loading && 'xlr8-button--loading',
+    'xlr8-btn',
+    `xlr8-btn--${variant}`,
+    size === 'sm' && 'xlr8-btn--sm',
+    size === 'lg' && 'xlr8-btn--lg',
+    disabled && 'xlr8-btn--disabled',
+    loading && 'xlr8-btn--loading',
     className
   ].filter(Boolean).join(' ');
 
@@ -41,13 +42,13 @@ export const Button = ({
       disabled={disabled || loading}
       {...props}
     >
-      {loading && <span className="xlr8-button__spinner" />}
+      {loading && <span className="xlr8-spinner xlr8-spinner--sm" />}
       {!loading && icon && iconPosition === 'left' && (
-        <span className="xlr8-button__icon xlr8-button__icon--left">{icon}</span>
+        <span className="xlr8-btn__icon">{icon}</span>
       )}
-      <span className="xlr8-button__text">{children}</span>
+      {children}
       {!loading && icon && iconPosition === 'right' && (
-        <span className="xlr8-button__icon xlr8-button__icon--right">{icon}</span>
+        <span className="xlr8-btn__icon">{icon}</span>
       )}
     </button>
   );
