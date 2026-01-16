@@ -151,7 +151,7 @@ function AppRoutes() {
         
         {/* Projects - specific routes first */}
         <Route path="/projects/:id/hub" element={
-          <ProtectedRoute><Page><ProjectHub /></Page></ProtectedRoute>
+          <ProtectedRoute><FlowPage step={1}><ProjectHub /></FlowPage></ProtectedRoute>
         } />
         <Route path="/projects" element={
           <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
