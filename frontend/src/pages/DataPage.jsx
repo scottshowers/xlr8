@@ -86,7 +86,7 @@ export default function DataPage() {
   const { activeProject } = useProject();
   
   // Shared state for scope toggle - lifted up so FilesPanel can filter accordingly
-  const [targetScope, setTargetScope] = useState('project');
+  const [targetScope] = useState('project'); // Project-only scope (global moved to Admin > Global Knowledge)
   
   // Merge theme colors with brand colors
   const c = { ...colors, ...brandColors };
@@ -160,7 +160,7 @@ export default function DataPage() {
 
       {/* Main Two-Column Layout */}
       <div style={{ display: 'grid', gridTemplateColumns: '380px 1fr', gap: '1.5rem', alignItems: 'start' }}>
-        <UploadPanel c={c} project={activeProject} targetScope={targetScope} setTargetScope={setTargetScope} />
+        <UploadPanel c={c} project={activeProject} targetScope={targetScope} />
         <FilesPanel c={c} project={activeProject} targetScope={targetScope} />
       </div>
     </div>
@@ -171,7 +171,7 @@ export default function DataPage() {
 // ============================================================================
 // UPLOAD PANEL (Left - Sticky)
 // ============================================================================
-function UploadPanel({ c, project, targetScope, setTargetScope }) {
+function UploadPanel({ c, project, targetScope }) {
   const { addUpload, uploads } = useUpload();
   const [truthType, setTruthType] = useState('reality');
   const [dragOver, setDragOver] = useState(false);
@@ -362,32 +362,20 @@ function UploadPanel({ c, project, targetScope, setTargetScope }) {
       background: c.cardBg, border: `1px solid ${c.border}`, borderRadius: 12,
       boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
     }}>
-      {/* Scope Toggle */}
-      <div style={{ display: 'flex', background: c.background, borderTopLeftRadius: 12, borderTopRightRadius: 12, overflow: 'hidden' }}>
-        {[
-          { value: 'project', label: 'Project Files', tooltip: 'Customer-specific documents for this project' },
-          { value: 'global', label: 'Reference Library', tooltip: 'Global docs shared across all projects' }
-        ].map(scope => (
-          <Tooltip 
-            key={scope.value}
-            title={scope.label} 
-            detail={scope.tooltip}
-            action={scope.value === 'project' ? 'Requirements & Config' : 'Vendor, Legal, Audit docs'}
-          >
-            <button
-              onClick={() => setTargetScope(scope.value)}
-              style={{
-                flex: 1, padding: '0.875rem', border: 'none',
-                background: targetScope === scope.value ? c.cardBg : 'transparent',
-                borderBottom: `3px solid ${targetScope === scope.value ? c.primary : 'transparent'}`,
-                color: targetScope === scope.value ? c.primary : c.textMuted,
-                fontWeight: 600, fontSize: '0.85rem', cursor: 'pointer', transition: 'all 0.2s'
-              }}
-            >
-              {scope.label}
-            </button>
-          </Tooltip>
-        ))}
+      {/* Header - Project Files only */}
+      <div style={{ 
+        padding: '0.875rem 1rem', 
+        background: c.background, 
+        borderTopLeftRadius: 12, 
+        borderTopRightRadius: 12,
+        borderBottom: `1px solid ${c.border}`
+      }}>
+        <span style={{ fontWeight: 600, fontSize: '0.9rem', color: c.text }}>
+          Project Data
+        </span>
+        <span style={{ fontSize: '0.75rem', color: c.textMuted, marginLeft: '0.5rem' }}>
+          Customer-specific documents
+        </span>
       </div>
 
       <div style={{ padding: '1rem' }}>
