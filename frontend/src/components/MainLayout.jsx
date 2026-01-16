@@ -165,6 +165,9 @@ const Sidebar = () => {
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
+  // Calculate toggle button position
+  const toggleLeft = isCollapsed ? 'calc(var(--sidebar-collapsed) - 12px)' : 'calc(var(--sidebar-width) - 12px)';
+
   return (
     <>
       <aside className={`xlr8-sidebar ${isCollapsed ? 'xlr8-sidebar--collapsed' : ''}`}>
@@ -175,6 +178,7 @@ const Sidebar = () => {
           <div 
             className={`xlr8-sidebar__item ${isActive('/mission-control') ? 'xlr8-sidebar__item--active' : ''}`}
             onClick={() => navigate('/mission-control')}
+            data-tooltip="Mission Control"
           >
             <span className="xlr8-sidebar__icon">🚀</span>
             <span className="xlr8-sidebar__label">Mission Control</span>
@@ -183,6 +187,7 @@ const Sidebar = () => {
           <div 
             className={`xlr8-sidebar__item ${isActive('/projects') ? 'xlr8-sidebar__item--active' : ''}`}
             onClick={() => navigate('/projects')}
+            data-tooltip="Projects"
           >
             <span className="xlr8-sidebar__icon">📁</span>
             <span className="xlr8-sidebar__label">Projects</span>
@@ -191,6 +196,7 @@ const Sidebar = () => {
           <div 
             className={`xlr8-sidebar__item ${isActive('/analytics') ? 'xlr8-sidebar__item--active' : ''}`}
             onClick={() => navigate('/analytics')}
+            data-tooltip="Analytics"
           >
             <span className="xlr8-sidebar__icon">📊</span>
             <span className="xlr8-sidebar__label">Analytics</span>
@@ -205,6 +211,7 @@ const Sidebar = () => {
             <div 
               className={`xlr8-sidebar__item ${isActive('/admin') ? 'xlr8-sidebar__item--active' : ''}`}
               onClick={() => navigate('/admin')}
+              data-tooltip="Platform Health"
             >
               <span className="xlr8-sidebar__icon">⚙️</span>
               <span className="xlr8-sidebar__label">Platform Health</span>
@@ -214,6 +221,7 @@ const Sidebar = () => {
           <div 
             className={`xlr8-sidebar__item ${isActive('/admin/playbook-builder') ? 'xlr8-sidebar__item--active' : ''}`}
             onClick={() => navigate('/admin/playbook-builder')}
+            data-tooltip="Playbook Builder"
           >
             <span className="xlr8-sidebar__icon">📚</span>
             <span className="xlr8-sidebar__label">Playbook Builder</span>
@@ -222,6 +230,7 @@ const Sidebar = () => {
           <div 
             className={`xlr8-sidebar__item ${isActive('/standards') ? 'xlr8-sidebar__item--active' : ''}`}
             onClick={() => navigate('/standards')}
+            data-tooltip="Standards Library"
           >
             <span className="xlr8-sidebar__icon">🗄️</span>
             <span className="xlr8-sidebar__label">Standards Library</span>
@@ -233,7 +242,7 @@ const Sidebar = () => {
         className="xlr8-sidebar-toggle"
         onClick={() => setIsCollapsed(!isCollapsed)}
         title={isCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        style={{ left: isCollapsed ? '48px' : 'calc(240px - 12px)' }}
+        style={{ left: toggleLeft }}
       >
         {isCollapsed ? '▶' : '◀'}
       </button>
