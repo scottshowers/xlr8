@@ -11,7 +11,6 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -20,7 +19,6 @@ import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { EmptyState } from '../components/ui/EmptyState';
 import { useProject } from '../context/ProjectContext';
 import api from '../services/api';
-import './FindingsDashboard.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -181,17 +179,17 @@ const FindingsDashboard = () => {
 
   if (loading) {
     return (
-      <MainLayout showFlowBar={true} currentStep={5}>
+      
         <div className="findings-dashboard findings-dashboard--loading">
           <LoadingSpinner />
           <p>Loading findings...</p>
         </div>
-      </MainLayout>
+      
     );
   }
 
   return (
-    <MainLayout showFlowBar={true} currentStep={5}>
+    
       <div className="findings-dashboard">
         <PageHeader
           title="Findings Dashboard"
@@ -341,7 +339,7 @@ const FindingsDashboard = () => {
           )}
         </Card>
       </div>
-    </MainLayout>
+    
   );
 };
 

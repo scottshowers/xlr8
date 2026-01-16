@@ -11,14 +11,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { useProject } from '../context/ProjectContext';
-import './FindingDetailPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -114,32 +112,32 @@ const FindingDetailPage = () => {
 
   if (loading) {
     return (
-      <MainLayout showFlowBar={true} currentStep={6}>
+      
         <div className="finding-detail finding-detail--loading">
           <LoadingSpinner />
           <p>Loading finding details...</p>
         </div>
-      </MainLayout>
+      
     );
   }
 
   if (!finding) {
     return (
-      <MainLayout showFlowBar={true} currentStep={6}>
+      
         <div className="finding-detail finding-detail--error">
           <h2>Finding not found</h2>
           <Button variant="secondary" onClick={() => navigate('/findings')}>
             ← Back to Findings
           </Button>
         </div>
-      </MainLayout>
+      
     );
   }
 
   const severityConfig = SEVERITY_CONFIG[finding.severity] || SEVERITY_CONFIG.info;
 
   return (
-    <MainLayout showFlowBar={true} currentStep={6}>
+    
       <div className="finding-detail">
         <PageHeader
           title="Finding Detail"
@@ -328,7 +326,7 @@ const FindingDetailPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 

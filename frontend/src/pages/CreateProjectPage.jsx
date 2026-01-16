@@ -11,13 +11,11 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
-import './CreateProjectPage.css';
 
 // System options
 const SYSTEMS = [
@@ -99,7 +97,7 @@ const CreateProjectPage = () => {
   const selectedEngagement = ENGAGEMENT_TYPES.find(e => e.value === formData.engagement_type);
 
   return (
-    <MainLayout showFlowBar={true} currentStep={1}>
+    
       <div className="create-project">
         <PageHeader
           title="Create New Project"
@@ -258,7 +256,7 @@ const CreateProjectPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 

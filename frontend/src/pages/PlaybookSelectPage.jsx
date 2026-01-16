@@ -11,14 +11,12 @@
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { useProject } from '../context/ProjectContext';
-import './PlaybookSelectPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -178,17 +176,17 @@ const PlaybookSelectPage = () => {
 
   if (loading) {
     return (
-      <MainLayout showFlowBar={true} currentStep={3}>
+      
         <div className="playbook-select playbook-select--loading">
           <LoadingSpinner />
           <p>Loading available playbooks...</p>
         </div>
-      </MainLayout>
+      
     );
   }
 
   return (
-    <MainLayout showFlowBar={true} currentStep={3}>
+    
       <div className="playbook-select">
         <PageHeader
           title="Select Playbooks"
@@ -361,7 +359,7 @@ const PlaybookSelectPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 

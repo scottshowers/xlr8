@@ -11,13 +11,11 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { useProject } from '../context/ProjectContext';
-import './UploadDataPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -172,7 +170,7 @@ const UploadDataPage = () => {
   };
 
   return (
-    <MainLayout showFlowBar={true} currentStep={2}>
+    
       <div className="upload-data">
         <PageHeader
           title={customerName || activeProject?.customer || 'Upload Data'}
@@ -361,7 +359,7 @@ const UploadDataPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 

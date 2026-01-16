@@ -11,14 +11,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { useProject } from '../context/ProjectContext';
-import './ProgressTrackerPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -106,19 +104,19 @@ const ProgressTrackerPage = () => {
 
   if (loading) {
     return (
-      <MainLayout showFlowBar={true} currentStep={7}>
+      
         <div className="progress-tracker progress-tracker--loading">
           <LoadingSpinner />
           <p>Loading progress data...</p>
         </div>
-      </MainLayout>
+      
     );
   }
 
   const { playbook, summary, findings } = progressData || MOCK_PROGRESS;
 
   return (
-    <MainLayout showFlowBar={true} currentStep={7}>
+    
       <div className="progress-tracker">
         <PageHeader
           title="Track Progress"
@@ -244,7 +242,7 @@ const ProgressTrackerPage = () => {
           </div>
         </Card>
       </div>
-    </MainLayout>
+    
   );
 };
 

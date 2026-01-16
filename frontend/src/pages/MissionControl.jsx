@@ -1,11 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
-import './MissionControl.css';
 
 /**
  * Mission Control Page
@@ -180,17 +178,17 @@ const MissionControl = () => {
 
   if (loading) {
     return (
-      <MainLayout showFlowBar={false}>
+      
         <div className="mission-control-loading">
           <div className="spinner" />
           <p>Loading Mission Control...</p>
         </div>
-      </MainLayout>
+      
     );
   }
 
   return (
-    <MainLayout showFlowBar={false}>
+    
       <div className="mission-control">
         {/* Page Header */}
         <PageHeader
@@ -421,7 +419,7 @@ const MissionControl = () => {
           </div>
         </Card>
       </div>
-    </MainLayout>
+    
   );
 };
 

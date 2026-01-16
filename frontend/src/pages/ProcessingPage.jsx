@@ -12,13 +12,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams, useLocation } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { useProject } from '../context/ProjectContext';
-import './ProcessingPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -142,7 +140,7 @@ const ProcessingPage = () => {
   };
 
   return (
-    <MainLayout showFlowBar={true} currentStep={4}>
+    
       <div className="processing-page">
         <PageHeader
           title={customerName || activeProject?.customer || 'Analyzing Data'}
@@ -267,7 +265,7 @@ const ProcessingPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 

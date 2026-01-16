@@ -11,13 +11,11 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import MainLayout from '../components/MainLayout';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 import { useProject } from '../context/ProjectContext';
-import './ExportPage.css';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -127,7 +125,7 @@ const ExportPage = () => {
   const selectedFormatConfig = EXPORT_FORMATS.find(f => f.id === selectedFormat);
 
   return (
-    <MainLayout showFlowBar={true} currentStep={8}>
+    
       <div className="export-page">
         <PageHeader
           title="Export Report"
@@ -282,7 +280,7 @@ const ExportPage = () => {
           </div>
         </div>
       </div>
-    </MainLayout>
+    
   );
 };
 
