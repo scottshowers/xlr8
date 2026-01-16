@@ -132,9 +132,8 @@ export default function VacuumUploadPage() {
       
       if (data.job_id) {
         setJobId(data.job_id);
-        setJobStatus({ status: 'processing', progress: 0, message: 'Starting...' });
-        // Navigate to processing page for better UX (Phase 4A.3)
-        navigate(`/processing/${data.job_id}`);
+        setJobStatus({ status: 'processing', progress: 0, message: 'Starting extraction...' });
+        // Stay on this page - poll for progress inline via useEffect
       } else {
         setResult(data); setUploading(false); loadExtracts();
       }
