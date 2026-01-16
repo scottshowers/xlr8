@@ -149,6 +149,7 @@ export function ProjectProvider({ children }) {
     // Computed
     hasActiveProject: !!activeProject,
     projectName: activeProject?.name || null,
+    projectCode: activeProject?.code || null,  // Project code for DuckDB/term index
     projectId: activeProject?.id || null,
     customerName: activeProject?.customer || null,
   };
