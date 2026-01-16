@@ -1415,3 +1415,193 @@ body {
   background: var(--grass-green);
   border-color: var(--grass-green);
 }
+
+/* ============================================================
+   CREATE PROJECT PAGE - Domain & System Selectors
+   ============================================================ */
+
+.domain-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-3);
+}
+
+.domain-card {
+  position: relative;
+  padding: var(--space-4);
+  border: 2px solid var(--border);
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.domain-card:hover {
+  border-color: var(--domain-color, var(--grass-green));
+}
+
+.domain-card--selected {
+  border-color: var(--domain-color, var(--grass-green));
+  background: color-mix(in srgb, var(--domain-color, var(--grass-green)) 5%, transparent);
+}
+
+.domain-card__check {
+  position: absolute;
+  top: var(--space-3);
+  right: var(--space-3);
+  width: 20px;
+  height: 20px;
+  border: 2px solid var(--border);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  color: var(--white);
+}
+
+.domain-card--selected .domain-card__check {
+  background: var(--domain-color, var(--grass-green));
+  border-color: var(--domain-color, var(--grass-green));
+}
+
+.domain-card__name {
+  font-weight: var(--weight-semibold);
+  margin-bottom: var(--space-1);
+  padding-right: 28px;
+}
+
+.domain-card__desc {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  line-height: 1.4;
+}
+
+/* System List */
+.system-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.system-vendor-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.system-vendor-label {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.system-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.system-option {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  transition: all var(--transition-fast);
+}
+
+.system-option:hover {
+  border-color: var(--grass-green);
+}
+
+.system-option--selected {
+  border-color: var(--grass-green);
+  background: var(--grass-green-alpha-10);
+}
+
+.system-option__check {
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  color: var(--white);
+  flex-shrink: 0;
+}
+
+.system-option--selected .system-option__check {
+  background: var(--grass-green);
+  border-color: var(--grass-green);
+}
+
+/* Engagement Type Grid */
+.engagement-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: var(--space-2);
+}
+
+.engagement-option {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.engagement-option:hover {
+  border-color: var(--grass-green);
+}
+
+.engagement-option--selected {
+  border-color: var(--grass-green);
+  background: var(--grass-green-alpha-5);
+}
+
+.engagement-option__check {
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--white);
+  color: var(--white);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.engagement-option--selected .engagement-option__check {
+  background: var(--grass-green);
+  border-color: var(--grass-green);
+}
+
+.engagement-option__label {
+  font-weight: var(--weight-medium);
+}
+
+.engagement-option__desc {
+  font-size: var(--text-xs);
+  color: var(--text-muted);
+}
+
+@media (max-width: 1024px) {
+  .domain-grid { grid-template-columns: repeat(2, 1fr); }
+  .engagement-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 640px) {
+  .domain-grid { grid-template-columns: 1fr; }
+}
