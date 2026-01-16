@@ -144,6 +144,10 @@ const Sidebar = () => {
     if (path === '/projects') {
       return location.pathname === '/projects' || location.pathname.startsWith('/projects/');
     }
+    // /admin should only match exactly, not /admin/*
+    if (path === '/admin') {
+      return location.pathname === '/admin' || location.pathname === '/admin/settings';
+    }
     return location.pathname === path || location.pathname.startsWith(path + '/');
   };
 
@@ -153,7 +157,7 @@ const Sidebar = () => {
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
         { icon: FolderKanban, label: 'Projects', path: '/projects' },
-        { icon: HardDrive, label: 'Data', path: '/data' },
+        { icon: HardDrive, label: 'Project Data', path: '/data' },
         { icon: MessageSquare, label: 'AI Assist', path: '/workspace' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' }
       ]
