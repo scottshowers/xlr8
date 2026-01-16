@@ -9,14 +9,18 @@
  * Created: January 16, 2026
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useProject } from '../context/ProjectContext';
 import api from '../services/api';
 import { 
   Database, Table, Columns, Search, Play, Code, BarChart3, 
   ChevronRight, ChevronDown, Loader2, AlertCircle, Download,
-  Plus, X, Filter, ArrowUpDown
+  Plus, X, Filter, ArrowUpDown, PieChart, TrendingUp, Hash
 } from 'lucide-react';
+import {
+  BarChart, Bar, LineChart, Line, PieChart as RechartsPie, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from 'recharts';
 
 // =============================================================================
 // STYLES
@@ -290,21 +294,62 @@ function CatalogPanel({ tables, loading, selectedTable, onSelectTable, onSelectC
 // =============================================================================
 // QUERY BUILDER PANEL
 // =============================================================================
-function BuilderPanel({ selectedTable, selectedColumns, sql, onSqlChange, onRun, running, onAddColumn, onRemoveColumn }) {
+function BuilderPanel({ selectedTable, selectedColumns, filters, sql, onSqlChange, onRun, running, onRemoveColumn, onFiltersChange }) {
   const [mode, setMode] = useState('visual'); // 'visual' or 'sql'
 
   const generateSql = useCallback(() => {
     if (!selectedTable) return '';
     const cols = selectedColumns.length > 0 ? selectedColumns.join(', ') : '*';
-    return `SELECT ${cols}\nFROM "${selectedTable.full_name}"\nLIMIT 100`;
-  }, [selectedTable, selectedColumns]);
+    
+    let query = `SELECT ${cols}\nFROM "${selectedTable.full_name}"`;
+    
+    // Add WHERE clauses from filters
+    const activeFilters = filters.filter(f => f.column && f.value);
+    if (activeFilters.length > 0) {
+      const whereClauses = activeFilters.map(f => {
+        const val = isNaN(f.value) ? `'${f.value.replace(/'/g, "''")}'` : f.value;
+        switch (f.operator) {
+          case '=': return `"${f.column}" = ${val}`;
+          case '!=': return `"${f.column}" != ${val}`;
+          case '>': return `"${f.column}" > ${val}`;
+          case '<': return `"${f.column}" < ${val}`;
+          case '>=': return `"${f.column}" >= ${val}`;
+          case '<=': return `"${f.column}" <= ${val}`;
+          case 'contains': return `"${f.column}" LIKE '%${f.value.replace(/'/g, "''")}%'`;
+          case 'starts': return `"${f.column}" LIKE '${f.value.replace(/'/g, "''")}%'`;
+          case 'ends': return `"${f.column}" LIKE '%${f.value.replace(/'/g, "''")}'`;
+          case 'null': return `"${f.column}" IS NULL`;
+          case 'notnull': return `"${f.column}" IS NOT NULL`;
+          default: return `"${f.column}" = ${val}`;
+        }
+      });
+      query += `\nWHERE ${whereClauses.join('\n  AND ')}`;
+    }
+    
+    query += '\nLIMIT 100';
+    return query;
+  }, [selectedTable, selectedColumns, filters]);
 
   // Auto-generate SQL when selections change in visual mode
   useEffect(() => {
     if (mode === 'visual' && selectedTable) {
       onSqlChange(generateSql());
     }
-  }, [mode, selectedTable, selectedColumns, generateSql, onSqlChange]);
+  }, [mode, selectedTable, selectedColumns, filters, generateSql, onSqlChange]);
+
+  const addFilter = () => {
+    onFiltersChange([...filters, { column: '', operator: '=', value: '' }]);
+  };
+
+  const updateFilter = (index, field, value) => {
+    const newFilters = [...filters];
+    newFilters[index] = { ...newFilters[index], [field]: value };
+    onFiltersChange(newFilters);
+  };
+
+  const removeFilter = (index) => {
+    onFiltersChange(filters.filter((_, i) => i !== index));
+  };
 
   return (
     <div style={styles.panel}>
@@ -370,6 +415,124 @@ function BuilderPanel({ selectedTable, selectedColumns, sql, onSqlChange, onRun,
               )}
             </div>
 
+            {/* Filters */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '6px' }}>
+                FILTERS {filters.length > 0 && `(${filters.length})`}
+              </label>
+              
+              {filters.map((filter, idx) => (
+                <div key={idx} style={{ 
+                  display: 'flex', 
+                  gap: '6px', 
+                  marginBottom: '8px',
+                  alignItems: 'center',
+                }}>
+                  {/* Column select */}
+                  <select
+                    value={filter.column}
+                    onChange={(e) => updateFilter(idx, 'column', e.target.value)}
+                    style={{
+                      flex: 1,
+                      padding: '6px 8px',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-primary)',
+                      fontSize: '12px',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    <option value="">Column...</option>
+                    {selectedTable?.columns?.map(col => (
+                      <option key={col} value={col}>{col}</option>
+                    ))}
+                  </select>
+                  
+                  {/* Operator select */}
+                  <select
+                    value={filter.operator}
+                    onChange={(e) => updateFilter(idx, 'operator', e.target.value)}
+                    style={{
+                      width: '90px',
+                      padding: '6px 8px',
+                      border: '1px solid var(--border)',
+                      borderRadius: 'var(--radius-sm)',
+                      background: 'var(--bg-primary)',
+                      fontSize: '12px',
+                      color: 'var(--text-primary)',
+                    }}
+                  >
+                    <option value="=">=</option>
+                    <option value="!=">≠</option>
+                    <option value=">">&gt;</option>
+                    <option value="<">&lt;</option>
+                    <option value=">=">&ge;</option>
+                    <option value="<=">&le;</option>
+                    <option value="contains">contains</option>
+                    <option value="starts">starts with</option>
+                    <option value="ends">ends with</option>
+                    <option value="null">is null</option>
+                    <option value="notnull">not null</option>
+                  </select>
+                  
+                  {/* Value input */}
+                  {!['null', 'notnull'].includes(filter.operator) && (
+                    <input
+                      type="text"
+                      value={filter.value}
+                      onChange={(e) => updateFilter(idx, 'value', e.target.value)}
+                      placeholder="Value..."
+                      style={{
+                        flex: 1,
+                        padding: '6px 8px',
+                        border: '1px solid var(--border)',
+                        borderRadius: 'var(--radius-sm)',
+                        background: 'var(--bg-primary)',
+                        fontSize: '12px',
+                        color: 'var(--text-primary)',
+                      }}
+                    />
+                  )}
+                  
+                  {/* Remove button */}
+                  <button
+                    onClick={() => removeFilter(idx)}
+                    style={{
+                      padding: '6px',
+                      border: 'none',
+                      background: 'none',
+                      cursor: 'pointer',
+                      color: 'var(--text-muted)',
+                      display: 'flex',
+                    }}
+                  >
+                    <X size={14} />
+                  </button>
+                </div>
+              ))}
+              
+              {selectedTable && (
+                <button
+                  onClick={addFilter}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: '6px 10px',
+                    border: '1px dashed var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'transparent',
+                    fontSize: '12px',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Plus size={12} />
+                  Add Filter
+                </button>
+              )}
+            </div>
+
             {/* Generated SQL Preview */}
             {selectedTable && (
               <div style={{ marginBottom: '16px' }}>
@@ -431,10 +594,75 @@ function BuilderPanel({ selectedTable, selectedColumns, sql, onSqlChange, onRun,
 }
 
 // =============================================================================
+// CHART COLORS
+// =============================================================================
+const CHART_COLORS = ['#83b16d', '#8b5cf6', '#f59e0b', '#ef4444', '#06b6d4', '#ec4899', '#10b981', '#6366f1'];
+
+// =============================================================================
 // RESULTS PANEL
 // =============================================================================
 function ResultsPanel({ results, error, executionTime }) {
   const [viewMode, setViewMode] = useState('table'); // 'table' or 'chart'
+  const [chartType, setChartType] = useState('bar'); // 'bar', 'line', 'pie'
+  const [xAxis, setXAxis] = useState('');
+  const [yAxis, setYAxis] = useState('');
+
+  // Detect column types and auto-select axes
+  const columnInfo = useMemo(() => {
+    if (!results?.data?.length || !results?.columns?.length) return { numeric: [], categorical: [] };
+    
+    const numeric = [];
+    const categorical = [];
+    
+    results.columns.forEach(col => {
+      const sample = results.data.slice(0, 10).map(row => row[col]).filter(v => v != null);
+      const isNumeric = sample.length > 0 && sample.every(v => !isNaN(Number(v)));
+      if (isNumeric) {
+        numeric.push(col);
+      } else {
+        categorical.push(col);
+      }
+    });
+    
+    return { numeric, categorical };
+  }, [results]);
+
+  // Auto-set axes when results change
+  useEffect(() => {
+    if (results?.columns?.length) {
+      // Pick first categorical for X, first numeric for Y
+      const newX = columnInfo.categorical[0] || results.columns[0];
+      const newY = columnInfo.numeric[0] || results.columns[1] || results.columns[0];
+      setXAxis(newX);
+      setYAxis(newY);
+    }
+  }, [results, columnInfo]);
+
+  // Prepare chart data
+  const chartData = useMemo(() => {
+    if (!results?.data?.length || !xAxis || !yAxis) return [];
+    
+    // For pie charts, aggregate by xAxis
+    if (chartType === 'pie') {
+      const aggregated = {};
+      results.data.forEach(row => {
+        const key = String(row[xAxis] ?? 'Unknown');
+        const val = Number(row[yAxis]) || 0;
+        aggregated[key] = (aggregated[key] || 0) + val;
+      });
+      return Object.entries(aggregated)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 10); // Top 10 for pie
+    }
+    
+    // For bar/line, use raw data (limit to 50 points)
+    return results.data.slice(0, 50).map(row => ({
+      name: String(row[xAxis] ?? ''),
+      value: Number(row[yAxis]) || 0,
+      ...row, // Include all fields for tooltip
+    }));
+  }, [results, xAxis, yAxis, chartType]);
 
   const exportCsv = () => {
     if (!results?.data?.length) return;
@@ -458,6 +686,114 @@ function ResultsPanel({ results, error, executionTime }) {
     a.href = url;
     a.download = 'query_results.csv';
     a.click();
+  };
+
+  const renderChart = () => {
+    if (!chartData.length) {
+      return (
+        <div style={styles.emptyState}>
+          <BarChart3 size={32} style={{ marginBottom: '8px', opacity: 0.5 }} />
+          <span>Select X and Y axes to visualize</span>
+        </div>
+      );
+    }
+
+    const commonProps = {
+      data: chartData,
+      margin: { top: 20, right: 30, left: 20, bottom: 60 },
+    };
+
+    switch (chartType) {
+      case 'line':
+        return (
+          <ResponsiveContainer width="100%" height={350}>
+            <LineChart {...commonProps}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis 
+                dataKey="name" 
+                tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                angle={-45}
+                textAnchor="end"
+                height={80}
+              />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'var(--bg-secondary)', 
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
+              />
+              <Line 
+                type="monotone" 
+                dataKey="value" 
+                stroke="#83b16d" 
+                strokeWidth={2}
+                dot={{ fill: '#83b16d', strokeWidth: 0, r: 4 }}
+                activeDot={{ r: 6, fill: '#83b16d' }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        );
+      
+      case 'pie':
+        return (
+          <ResponsiveContainer width="100%" height={350}>
+            <RechartsPie>
+              <Pie
+                data={chartData}
+                cx="50%"
+                cy="50%"
+                innerRadius={60}
+                outerRadius={120}
+                paddingAngle={2}
+                dataKey="value"
+                label={({ name, percent }) => `${name} (${(percent * 100).toFixed(0)}%)`}
+                labelLine={{ stroke: 'var(--text-muted)' }}
+              >
+                {chartData.map((entry, index) => (
+                  <Cell key={entry.name} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                ))}
+              </Pie>
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'var(--bg-secondary)', 
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
+              />
+            </RechartsPie>
+          </ResponsiveContainer>
+        );
+      
+      default: // bar
+        return (
+          <ResponsiveContainer width="100%" height={350}>
+            <BarChart {...commonProps}>
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+              <XAxis 
+                dataKey="name" 
+                tick={{ fontSize: 11, fill: 'var(--text-muted)' }}
+                angle={-45}
+                textAnchor="end"
+                height={80}
+              />
+              <YAxis tick={{ fontSize: 11, fill: 'var(--text-muted)' }} />
+              <Tooltip 
+                contentStyle={{ 
+                  background: 'var(--bg-secondary)', 
+                  border: '1px solid var(--border)',
+                  borderRadius: '8px',
+                  fontSize: '12px',
+                }}
+              />
+              <Bar dataKey="value" fill="#83b16d" radius={[4, 4, 0, 0]} />
+            </BarChart>
+          </ResponsiveContainer>
+        );
+    }
   };
 
   return (
@@ -545,10 +881,111 @@ function ResultsPanel({ results, error, executionTime }) {
             )}
           </div>
         ) : (
-          <div style={styles.emptyState}>
-            <BarChart3 size={32} style={{ marginBottom: '8px', opacity: 0.5 }} />
-            <span>Chart visualization coming soon</span>
-            <span style={{ fontSize: '12px', marginTop: '4px' }}>Use Table view for now</span>
+          <div>
+            {/* Chart Controls */}
+            <div style={{ 
+              display: 'flex', 
+              gap: '16px', 
+              marginBottom: '16px', 
+              padding: '12px',
+              background: 'var(--bg-tertiary)',
+              borderRadius: 'var(--radius-md)',
+              alignItems: 'flex-end',
+              flexWrap: 'wrap',
+            }}>
+              {/* Chart Type */}
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  CHART TYPE
+                </label>
+                <div style={{ display: 'flex', gap: '4px' }}>
+                  <button
+                    onClick={() => setChartType('bar')}
+                    style={{
+                      ...styles.tab(chartType === 'bar'),
+                      padding: '6px 10px',
+                    }}
+                  >
+                    <BarChart3 size={14} />
+                  </button>
+                  <button
+                    onClick={() => setChartType('line')}
+                    style={{
+                      ...styles.tab(chartType === 'line'),
+                      padding: '6px 10px',
+                    }}
+                  >
+                    <TrendingUp size={14} />
+                  </button>
+                  <button
+                    onClick={() => setChartType('pie')}
+                    style={{
+                      ...styles.tab(chartType === 'pie'),
+                      padding: '6px 10px',
+                    }}
+                  >
+                    <PieChart size={14} />
+                  </button>
+                </div>
+              </div>
+              
+              {/* X Axis */}
+              <div style={{ flex: 1, minWidth: '120px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  X AXIS (Category)
+                </label>
+                <select
+                  value={xAxis}
+                  onChange={(e) => setXAxis(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--bg-primary)',
+                    fontSize: '13px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {results.columns?.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+              
+              {/* Y Axis */}
+              <div style={{ flex: 1, minWidth: '120px' }}>
+                <label style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)', display: 'block', marginBottom: '4px' }}>
+                  Y AXIS (Value)
+                </label>
+                <select
+                  value={yAxis}
+                  onChange={(e) => setYAxis(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '6px 8px',
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-md)',
+                    background: 'var(--bg-primary)',
+                    fontSize: '13px',
+                    color: 'var(--text-primary)',
+                  }}
+                >
+                  {results.columns?.map(col => (
+                    <option key={col} value={col}>{col}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            
+            {/* Chart */}
+            {renderChart()}
+            
+            {chartData.length >= 50 && (
+              <div style={{ textAlign: 'center', color: 'var(--text-muted)', fontSize: '12px', marginTop: '8px' }}>
+                Showing first 50 data points
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -568,6 +1005,7 @@ export default function AnalyticsPage() {
   const [loading, setLoading] = useState(true);
   const [selectedTable, setSelectedTable] = useState(null);
   const [selectedColumns, setSelectedColumns] = useState([]);
+  const [filters, setFilters] = useState([]);
   const [sql, setSql] = useState('');
   const [running, setRunning] = useState(false);
   const [results, setResults] = useState(null);
@@ -602,6 +1040,7 @@ export default function AnalyticsPage() {
   const handleSelectTable = (table) => {
     setSelectedTable(table);
     setSelectedColumns([]);
+    setFilters([]);
     setError(null);
   };
 
@@ -750,11 +1189,13 @@ export default function AnalyticsPage() {
         <BuilderPanel
           selectedTable={selectedTable}
           selectedColumns={selectedColumns}
+          filters={filters}
           sql={sql}
           onSqlChange={setSql}
           onRun={handleRun}
           running={running}
           onRemoveColumn={handleRemoveColumn}
+          onFiltersChange={setFilters}
         />
         
         <ResultsPanel
