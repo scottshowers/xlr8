@@ -41,6 +41,7 @@ import VacuumColumnMapping from './pages/VacuumColumnMapping';
 import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookSelectPage from './pages/PlaybookSelectPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
+import EnginePlaybookBuilder from './pages/EnginePlaybookBuilder';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
 import ExportPage from './pages/ExportPage';
@@ -223,6 +224,9 @@ function AppRoutes() {
           <ProtectedRoute><Page><IntelligenceTestPage /></Page></ProtectedRoute>
         } />
         <Route path="/admin/playbook-builder" element={
+          <ProtectedRoute><Page><EnginePlaybookBuilder /></Page></ProtectedRoute>
+        } />
+        <Route path="/admin/playbook-builder-legacy" element={
           <ProtectedRoute><Page><PlaybookBuilderPage /></Page></ProtectedRoute>
         } />
         <Route path="/admin/global-knowledge" element={
