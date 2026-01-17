@@ -382,7 +382,8 @@ class AggregateEngine(BaseEngine):
         
         # GROUP BY clause
         if dimensions:
-            sql += f'\nGROUP BY {", ".join([f\'"{d}"\' for d in dimensions])}'
+            dim_cols = ", ".join([f'"{d}"' for d in dimensions])
+            sql += f'\nGROUP BY {dim_cols}'
         
         # ORDER BY clause
         if order_by:
