@@ -3,12 +3,14 @@
  * ========================
  * 
  * Interactive test page for the Intelligence Pipeline
+ * - Diagnose project data availability
  * - Run Analyze (populates _intelligence_lookups)
  * - Run Recalc (builds term index)
+ * - Test 5 engines
  * - Test query resolution with sample questions
  * 
  * Route: /admin/intelligence-test
- * Created: January 11, 2026
+ * Updated: January 17, 2026 - Matching platform UX
  */
 
 import React, { useState } from 'react';
@@ -22,19 +24,6 @@ import {
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
 
-// Color scheme matching your app
-const colors = {
-  background: 'transparent',
-  cardBg: 'rgba(255, 255, 255, 0.02)',
-  border: 'rgba(255, 255, 255, 0.1)',
-  text: '#e4e4e7',
-  textMuted: '#71717a',
-  primary: '#6366f1',
-  accent: '#22c55e',
-  warning: '#f59e0b',
-  danger: '#ef4444',
-};
-
 // Sample test questions
 const SAMPLE_QUESTIONS = [
   { query: 'employees in Texas', description: 'Term index fast path (state lookup)' },
@@ -46,7 +35,8 @@ const SAMPLE_QUESTIONS = [
 
 export default function IntelligenceTestPage() {
   const { activeProject } = useProject();
-  const projectId = activeProject?.name || 'TEA1000';
+  // Always use TEA1000 for testing - this is a test page
+  const projectId = 'TEA1000';
   
   // State for each operation
   const [analyzeStatus, setAnalyzeStatus] = useState({ loading: false, result: null, error: null });
@@ -99,39 +89,6 @@ export default function IntelligenceTestPage() {
       setRecalcStatus({ loading: false, result: data, error: null });
     } catch (err) {
       setRecalcStatus({ loading: false, result: null, error: err.message });
-    }
-  };
-
-  // Test a query
-  const testQuery = async (question) => {
-    setQueryResults(prev => ({
-      ...prev,
-      [question]: { loading: true, result: null, error: null }
-    }));
-    try {
-      const response = await fetch(
-        `${API_BASE}/api/projects/${projectId}/resolve-terms?question=${encodeURIComponent(question)}`,
-        { method: 'POST' }
-      );
-      const data = await response.json();
-      setQueryResults(prev => ({
-        ...prev,
-        [question]: { loading: false, result: data, error: null }
-      }));
-      // Auto-expand results
-      setExpandedResults(prev => ({ ...prev, [question]: true }));
-    } catch (err) {
-      setQueryResults(prev => ({
-        ...prev,
-        [question]: { loading: false, result: null, error: err.message }
-      }));
-    }
-  };
-
-  // Run all sample queries
-  const runAllQueries = async () => {
-    for (const sample of SAMPLE_QUESTIONS) {
-      await testQuery(sample.query);
     }
   };
 
@@ -221,6 +178,38 @@ export default function IntelligenceTestPage() {
     setEngineConfig(JSON.stringify(ENGINE_SAMPLE_CONFIGS[engine], null, 2));
   };
 
+  // Test a query
+  const testQuery = async (question) => {
+    setQueryResults(prev => ({
+      ...prev,
+      [question]: { loading: true, result: null, error: null }
+    }));
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/projects/${projectId}/resolve-terms?question=${encodeURIComponent(question)}`,
+        { method: 'POST' }
+      );
+      const data = await response.json();
+      setQueryResults(prev => ({
+        ...prev,
+        [question]: { loading: false, result: data, error: null }
+      }));
+      setExpandedResults(prev => ({ ...prev, [question]: true }));
+    } catch (err) {
+      setQueryResults(prev => ({
+        ...prev,
+        [question]: { loading: false, result: null, error: err.message }
+      }));
+    }
+  };
+
+  // Run all sample queries
+  const runAllQueries = async () => {
+    for (const sample of SAMPLE_QUESTIONS) {
+      await testQuery(sample.query);
+    }
+  };
+
   // Toggle result expansion
   const toggleExpanded = (question) => {
     setExpandedResults(prev => ({ ...prev, [question]: !prev[question] }));
@@ -230,45 +219,45 @@ export default function IntelligenceTestPage() {
   const StatusBadge = ({ status }) => {
     if (status.loading) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.warning }}>
-          <Loader2 size={14} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+        <span className="itp-status itp-status--loading">
+          <Loader2 size={14} className="itp-spin" />
           Running...
         </span>
       );
     }
     if (status.error) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.danger }}>
+        <span className="itp-status itp-status--error">
           <XCircle size={14} /> Error
         </span>
       );
     }
     if (status.result) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.accent }}>
+        <span className="itp-status itp-status--success">
           <CheckCircle size={14} /> Complete
         </span>
       );
     }
-    return <span style={{ color: colors.textMuted }}>Not run</span>;
+    return <span className="itp-status">Not run</span>;
   };
 
   return (
-    <div style={{ minHeight: '100vh', background: colors.background, padding: '1.5rem', color: colors.text }}>
-      {/* Header */}
-      <div style={{ marginBottom: '1.5rem' }}>
-        <Link to="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: colors.primary, textDecoration: 'none', marginBottom: '1rem' }}>
+    <div style={{ padding: 32, maxWidth: 1200, margin: '0 auto' }}>
+      {/* Page Header */}
+      <div className="page-header" style={{ marginBottom: 24 }}>
+        <Link to="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: 8, color: 'var(--grass-green)', textDecoration: 'none', marginBottom: 16, fontSize: 14 }}>
           <ArrowLeft size={16} /> Back to Admin
         </Link>
-        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-          <Brain size={28} color={colors.primary} />
+        <h1 style={{ margin: 0, fontSize: 24, fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <Brain size={28} style={{ color: 'var(--grass-green)' }} />
           Intelligence Pipeline Test
         </h1>
-        <p style={{ margin: '0.5rem 0 0', color: colors.textMuted }}>
-          Test MetadataReasoner and term resolution for project: <strong style={{ color: colors.primary }}>{projectId}</strong>
+        <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)' }}>
+          Test MetadataReasoner and term resolution for project: <strong style={{ color: 'var(--grass-green)' }}>{projectId}</strong>
           {activeProject?.id && activeProject.id !== projectId && (
-            <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}>
-              (UUID: <code style={{ color: colors.warning }}>{activeProject.id}</code>)
+            <span style={{ marginLeft: 8, fontSize: 12 }}>
+              (UUID: <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 3 }}>{activeProject.id}</code>)
             </span>
           )}
         </p>
@@ -276,108 +265,58 @@ export default function IntelligenceTestPage() {
 
       {/* Warning if no project */}
       {!activeProject && (
-        <div style={{ 
-          padding: '1rem', 
-          background: `${colors.warning}15`, 
-          border: `1px solid ${colors.warning}40`,
-          borderRadius: 8, 
-          marginBottom: '1.5rem',
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem'
-        }}>
-          <AlertTriangle size={20} color={colors.warning} />
+        <div className="itp-alert itp-alert--warning" style={{ marginBottom: 24 }}>
+          <AlertTriangle size={20} />
           <span>No project selected. Using default: <strong>TEA1000</strong>. Select a project from Projects page for different data.</span>
         </div>
       )}
 
       {/* Step 0: Diagnose Project */}
-      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.warning, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#000' }}>0</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Diagnose Project</div>
-              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Check what data exists for this project identifier</div>
-            </div>
+      <div className="itp-card" style={{ marginBottom: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">0</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Diagnose Project</div>
+            <div className="itp-step-desc">Check what data exists for this project identifier</div>
           </div>
           <StatusBadge status={diagnoseStatus} />
         </div>
-        <button
-          onClick={runDiagnose}
-          disabled={diagnoseStatus.loading}
-          style={{
-            padding: '0.6rem 1.25rem',
-            background: diagnoseStatus.loading ? colors.border : colors.warning,
-            color: '#000',
-            border: 'none',
-            borderRadius: 6,
-            cursor: diagnoseStatus.loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.9rem',
-            fontWeight: 600
-          }}
-        >
-          {diagnoseStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={16} />}
+        <button onClick={runDiagnose} disabled={diagnoseStatus.loading} className="btn btn-primary">
+          {diagnoseStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Search size={16} />}
           {diagnoseStatus.loading ? 'Checking...' : 'Diagnose'}
         </button>
-        {diagnoseStatus.error && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
-            {diagnoseStatus.error}
-          </div>
-        )}
+        {diagnoseStatus.error && <div className="itp-alert itp-alert--error" style={{ marginTop: 12 }}>{diagnoseStatus.error}</div>}
         {diagnoseStatus.result && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: 6 }}>
-            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
-              <strong>Input project:</strong> <code>{diagnoseStatus.result.input_project}</code>
-            </div>
-            
-            {/* Tables */}
-            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+          <div className="itp-result" style={{ marginTop: 12 }}>
+            <div className="itp-result-item"><strong>Input project:</strong> <code>{diagnoseStatus.result.input_project}</code></div>
+            <div className="itp-result-item">
               <strong>Tables found:</strong> {diagnoseStatus.result.tables?.count || 0}
               {diagnoseStatus.result.tables?.names?.length > 0 && (
-                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
-                  {diagnoseStatus.result.tables.names.slice(0, 5).join(', ')}
-                  {diagnoseStatus.result.tables.names.length > 5 && '...'}
-                </div>
+                <div className="itp-result-detail">{diagnoseStatus.result.tables.names.slice(0, 5).join(', ')}{diagnoseStatus.result.tables.names.length > 5 && '...'}</div>
               )}
             </div>
-            
-            {/* Classifications */}
-            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+            <div className="itp-result-item">
               <strong>Classifications:</strong> {diagnoseStatus.result.classifications?.found?.length > 0 
                 ? diagnoseStatus.result.classifications.found.map(c => `${c.project_name}: ${c.count}`).join(', ')
                 : 'None found'}
               {diagnoseStatus.result.classifications?.all_project_names && (
-                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
-                  All project_names in DB: {diagnoseStatus.result.classifications.all_project_names.join(', ') || 'none'}
-                </div>
+                <div className="itp-result-detail">All project_names in DB: {diagnoseStatus.result.classifications.all_project_names.join(', ') || 'none'}</div>
               )}
             </div>
-            
-            {/* Term Index */}
-            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+            <div className="itp-result-item">
               <strong>Term Index:</strong> {diagnoseStatus.result.term_index?.found?.length > 0 
                 ? diagnoseStatus.result.term_index.found.map(t => `${t.project}: ${t.count}`).join(', ')
                 : 'None found'}
               {diagnoseStatus.result.term_index?.all_projects && (
-                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
-                  All projects in term_index: {diagnoseStatus.result.term_index.all_projects.join(', ') || 'none'}
-                </div>
+                <div className="itp-result-detail">All projects in term_index: {diagnoseStatus.result.term_index.all_projects.join(', ') || 'none'}</div>
               )}
             </div>
-            
-            {/* Column Profiles */}
-            <div style={{ fontSize: '0.8rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+            <div className="itp-result-item">
               <strong>Column Profiles:</strong> {diagnoseStatus.result.column_profiles?.found?.length > 0 
                 ? diagnoseStatus.result.column_profiles.found.map(p => `${p.project}: ${p.count}`).join(', ')
                 : 'None found'}
               {diagnoseStatus.result.column_profiles?.all_projects && (
-                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
-                  All projects in profiles: {diagnoseStatus.result.column_profiles.all_projects.join(', ') || 'none'}
-                </div>
+                <div className="itp-result-detail">All projects in profiles: {diagnoseStatus.result.column_profiles.all_projects.join(', ') || 'none'}</div>
               )}
             </div>
           </div>
@@ -385,199 +324,103 @@ export default function IntelligenceTestPage() {
       </div>
 
       {/* Step 1: Analyze */}
-      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>1</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Run Analyze</div>
-              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Populates _intelligence_lookups, _table_classifications</div>
-            </div>
+      <div className="itp-card" style={{ marginBottom: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">1</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Run Analyze</div>
+            <div className="itp-step-desc">Populates _intelligence_lookups, _table_classifications</div>
           </div>
           <StatusBadge status={analyzeStatus} />
         </div>
-        <button
-          onClick={runAnalyze}
-          disabled={analyzeStatus.loading}
-          style={{
-            padding: '0.6rem 1.25rem',
-            background: analyzeStatus.loading ? colors.border : colors.primary,
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: analyzeStatus.loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.9rem',
-            fontWeight: 500
-          }}
-        >
-          {analyzeStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Database size={16} />}
+        <button onClick={runAnalyze} disabled={analyzeStatus.loading} className="btn btn-primary">
+          {analyzeStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Database size={16} />}
           {analyzeStatus.loading ? 'Analyzing...' : 'Run Analyze'}
         </button>
-        {analyzeStatus.error && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
-            {analyzeStatus.error}
-          </div>
-        )}
+        {analyzeStatus.error && <div className="itp-alert itp-alert--error" style={{ marginTop: 12 }}>{analyzeStatus.error}</div>}
         {analyzeStatus.result && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: colors.background, borderRadius: 6, fontSize: '0.8rem', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(analyzeStatus.result, null, 2)}</pre>
+          <div className="itp-result itp-result--code" style={{ marginTop: 12 }}>
+            <pre>{JSON.stringify(analyzeStatus.result, null, 2)}</pre>
           </div>
         )}
       </div>
 
       {/* Step 2: Recalc */}
-      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>2</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Run Recalc</div>
-              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Builds _term_index, _entity_tables, join_priority</div>
-            </div>
+      <div className="itp-card" style={{ marginBottom: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">2</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Run Recalc</div>
+            <div className="itp-step-desc">Builds _term_index, _entity_tables, join_priority</div>
           </div>
           <StatusBadge status={recalcStatus} />
         </div>
-        <button
-          onClick={runRecalc}
-          disabled={recalcStatus.loading}
-          style={{
-            padding: '0.6rem 1.25rem',
-            background: recalcStatus.loading ? colors.border : colors.primary,
-            color: '#fff',
-            border: 'none',
-            borderRadius: 6,
-            cursor: recalcStatus.loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.9rem',
-            fontWeight: 500
-          }}
-        >
-          {recalcStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
+        <button onClick={runRecalc} disabled={recalcStatus.loading} className="btn btn-primary">
+          {recalcStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <RefreshCw size={16} />}
           {recalcStatus.loading ? 'Recalculating...' : 'Run Recalc'}
         </button>
-        {recalcStatus.error && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
-            {recalcStatus.error}
-          </div>
-        )}
+        {recalcStatus.error && <div className="itp-alert itp-alert--error" style={{ marginTop: 12 }}>{recalcStatus.error}</div>}
         {recalcStatus.result && (
-          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: colors.background, borderRadius: 6, fontSize: '0.8rem', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(recalcStatus.result, null, 2)}</pre>
+          <div className="itp-result itp-result--code" style={{ marginTop: 12 }}>
+            <pre>{JSON.stringify(recalcStatus.result, null, 2)}</pre>
           </div>
         )}
       </div>
 
       {/* Step 3: Test 5 Engines */}
-      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#000' }}>3</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Test 5 Engines</div>
-              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Aggregate, Compare, Validate, Detect, Map</div>
-            </div>
+      <div className="itp-card" style={{ marginBottom: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">3</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Test 5 Engines</div>
+            <div className="itp-step-desc">Aggregate, Compare, Validate, Detect, Map</div>
           </div>
           <StatusBadge status={enginesStatus} />
         </div>
         
-        {/* Quick Test Button */}
-        <button
-          onClick={runEnginesQuickTest}
-          disabled={enginesStatus.loading}
-          style={{
-            padding: '0.6rem 1.25rem',
-            background: enginesStatus.loading ? colors.border : colors.accent,
-            color: '#000',
-            border: 'none',
-            borderRadius: 6,
-            cursor: enginesStatus.loading ? 'not-allowed' : 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            fontSize: '0.9rem',
-            fontWeight: 600,
-            marginBottom: '1rem'
-          }}
-        >
-          {enginesStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Zap size={16} />}
+        <button onClick={runEnginesQuickTest} disabled={enginesStatus.loading} className="btn btn-primary" style={{ marginBottom: 16 }}>
+          {enginesStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Zap size={16} />}
           {enginesStatus.loading ? 'Testing...' : 'Quick Test All Engines'}
         </button>
         
         {/* Quick Test Results */}
         {enginesStatus.result && (
-          <div style={{ marginBottom: '1rem' }}>
-            {/* Show error if present */}
+          <div style={{ marginBottom: 16 }}>
             {enginesStatus.result.error && (
-              <div style={{ 
-                padding: '0.75rem', 
-                background: `${colors.danger}15`, 
-                border: `1px solid ${colors.danger}40`,
-                borderRadius: 6, 
-                marginBottom: '0.75rem',
-                fontSize: '0.85rem', 
-                color: colors.danger 
-              }}>
+              <div className="itp-alert itp-alert--error" style={{ marginBottom: 12 }}>
                 <strong>Error:</strong> {enginesStatus.result.error}
                 {enginesStatus.result.traceback && (
-                  <pre style={{ marginTop: '0.5rem', fontSize: '0.7rem', whiteSpace: 'pre-wrap', opacity: 0.8 }}>
-                    {enginesStatus.result.traceback}
-                  </pre>
+                  <pre style={{ marginTop: 8, fontSize: 11, whiteSpace: 'pre-wrap', opacity: 0.8 }}>{enginesStatus.result.traceback}</pre>
                 )}
               </div>
             )}
             
-            {/* Summary */}
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: colors.text }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--text-primary)' }}>
               {enginesStatus.result.summary || 'No summary available'}
             </div>
             
-            {/* Test table info */}
             {enginesStatus.result.test_table && (
-              <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.5rem' }}>
+              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8 }}>
                 Test table: <code>{enginesStatus.result.test_table}</code>
               </div>
             )}
             
-            {/* Results grid */}
             {enginesStatus.result.results && Object.keys(enginesStatus.result.results).length > 0 ? (
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              <div className="itp-engines">
                 {Object.entries(enginesStatus.result.results).map(([engine, result]) => (
-                <div 
-                  key={engine}
-                  style={{
-                    padding: '0.5rem 0.75rem',
-                    borderRadius: 6,
-                    background: result.status === 'pass' ? `${colors.accent}20` : 
-                               result.status === 'error' ? `${colors.danger}20` : 
-                               `${colors.warning}20`,
-                    border: `1px solid ${result.status === 'pass' ? colors.accent : 
-                                        result.status === 'error' ? colors.danger : colors.warning}40`,
-                    fontSize: '0.8rem'
-                  }}
-                >
-                  <div style={{ fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.25rem' }}>
-                    {result.status === 'pass' && <CheckCircle size={12} style={{ marginRight: 4, color: colors.accent }} />}
-                    {result.status === 'error' && <XCircle size={12} style={{ marginRight: 4, color: colors.danger }} />}
-                    {result.status === 'skip' && <AlertTriangle size={12} style={{ marginRight: 4, color: colors.warning }} />}
-                    {engine}
+                  <div key={engine} className={`itp-engine itp-engine--${result.status}`}>
+                    <div className="itp-engine-name">
+                      {result.status === 'pass' && <CheckCircle size={12} />}
+                      {result.status === 'error' && <XCircle size={12} />}
+                      {result.status === 'skip' && <AlertTriangle size={12} />}
+                      {engine}
+                    </div>
+                    <div className="itp-engine-msg">{result.message}</div>
                   </div>
-                  <div style={{ color: colors.textMuted, fontSize: '0.75rem' }}>{result.message}</div>
-                </div>
-              ))}
+                ))}
               </div>
-            ) : (
-              <div style={{ 
-                padding: '0.75rem', 
-                background: `${colors.warning}15`, 
-                borderRadius: 6, 
-                fontSize: '0.85rem', 
-                color: colors.warning 
-              }}>
+            ) : !enginesStatus.result.error && (
+              <div className="itp-alert itp-alert--warning">
                 No engine results returned. Make sure the <code>backend/engines/</code> folder is deployed.
               </div>
             )}
@@ -585,180 +428,85 @@ export default function IntelligenceTestPage() {
         )}
         
         {enginesStatus.error && (
-          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
-            {enginesStatus.error}
-          </div>
+          <div className="itp-alert itp-alert--error" style={{ marginBottom: 16 }}>{enginesStatus.error}</div>
         )}
         
         {/* Individual Engine Test */}
-        <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: '1rem' }}>
-          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.75rem' }}>Test Individual Engine</div>
+        <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: 16 }}>
+          <div style={{ fontWeight: 600, marginBottom: 12, color: 'var(--text-primary)' }}>Test Individual Engine</div>
           
-          {/* Engine Selector */}
-          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+          <div className="itp-engine-btns">
             {['aggregate', 'compare', 'validate', 'detect', 'map'].map(eng => (
               <button
                 key={eng}
                 onClick={() => handleEngineChange(eng)}
-                style={{
-                  padding: '0.4rem 0.75rem',
-                  background: selectedEngine === eng ? colors.primary : colors.border,
-                  color: selectedEngine === eng ? '#fff' : colors.textMuted,
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  fontWeight: 500,
-                  textTransform: 'uppercase'
-                }}
+                className={`itp-engine-btn ${selectedEngine === eng ? 'itp-engine-btn--active' : ''}`}
               >
                 {eng}
               </button>
             ))}
           </div>
           
-          {/* Config Editor */}
-          <div style={{ marginBottom: '0.75rem' }}>
-            <label style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'block', marginBottom: '0.35rem' }}>
-              Config (JSON)
-            </label>
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 12, color: 'var(--text-secondary)', display: 'block', marginBottom: 4 }}>Config (JSON)</label>
             <textarea
               value={engineConfig}
               onChange={(e) => setEngineConfig(e.target.value)}
               placeholder="Enter engine config as JSON..."
-              style={{
-                width: '100%',
-                minHeight: 120,
-                padding: '0.75rem',
-                background: colors.background,
-                border: `1px solid ${colors.border}`,
-                borderRadius: 6,
-                color: colors.text,
-                fontSize: '0.8rem',
-                fontFamily: 'monospace',
-                resize: 'vertical'
-              }}
+              className="itp-textarea"
             />
           </div>
           
-          {/* Run Button */}
-          <button
-            onClick={runEngineTest}
-            disabled={engineTestResult.loading || !engineConfig}
-            style={{
-              padding: '0.5rem 1rem',
-              background: engineTestResult.loading ? colors.border : colors.primary,
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              cursor: engineTestResult.loading || !engineConfig ? 'not-allowed' : 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.85rem',
-              fontWeight: 500
-            }}
-          >
-            {engineTestResult.loading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}
+          <button onClick={runEngineTest} disabled={engineTestResult.loading || !engineConfig} className="btn btn-primary">
+            {engineTestResult.loading ? <Loader2 size={14} className="itp-spin" /> : <Play size={14} />}
             Run {selectedEngine.charAt(0).toUpperCase() + selectedEngine.slice(1)} Engine
           </button>
           
-          {/* Engine Test Result */}
           {engineTestResult.error && (
-            <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
-              {engineTestResult.error}
-            </div>
+            <div className="itp-alert itp-alert--error" style={{ marginTop: 12 }}>{engineTestResult.error}</div>
           )}
           
           {engineTestResult.result && (
-            <div style={{ marginTop: '0.75rem', background: colors.background, borderRadius: 6, overflow: 'hidden' }}>
-              {/* Status Header */}
-              <div style={{ 
-                padding: '0.75rem', 
-                borderBottom: `1px solid ${colors.border}`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {engineTestResult.result.result?.status === 'success' ? (
-                    <CheckCircle size={16} color={colors.accent} />
-                  ) : (
-                    <AlertTriangle size={16} color={colors.warning} />
-                  )}
-                  <span style={{ fontWeight: 600 }}>
-                    {engineTestResult.result.result?.status?.toUpperCase()}
-                  </span>
-                </div>
-                <span style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+            <div className="itp-result" style={{ marginTop: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingBottom: 8, borderBottom: '1px solid var(--border-color)', marginBottom: 8 }}>
+                {engineTestResult.result.result?.status === 'success' ? (
+                  <CheckCircle size={16} style={{ color: 'var(--grass-green)' }} />
+                ) : (
+                  <AlertTriangle size={16} style={{ color: 'var(--warning)' }} />
+                )}
+                <span style={{ fontWeight: 600 }}>{engineTestResult.result.result?.status?.toUpperCase()}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text-secondary)' }}>
                   {engineTestResult.result.result?.row_count} rows
                 </span>
               </div>
               
-              {/* Summary */}
               {engineTestResult.result.result?.summary && (
-                <div style={{ padding: '0.5rem 0.75rem', borderBottom: `1px solid ${colors.border}`, fontSize: '0.85rem' }}>
-                  {engineTestResult.result.result.summary}
-                </div>
+                <div className="itp-result-item">{engineTestResult.result.result.summary}</div>
               )}
               
-              {/* SQL */}
               {engineTestResult.result.result?.sql && (
-                <div style={{ padding: '0.75rem', borderBottom: `1px solid ${colors.border}` }}>
-                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>SQL</div>
-                  <pre style={{ 
-                    margin: 0, 
-                    padding: '0.5rem', 
-                    background: '#1a1a2e', 
-                    borderRadius: 4, 
-                    fontSize: '0.75rem', 
-                    overflow: 'auto',
-                    whiteSpace: 'pre-wrap',
-                    maxHeight: 100
-                  }}>
-                    {engineTestResult.result.result.sql}
-                  </pre>
+                <div className="itp-result-item">
+                  <div className="itp-result-label">SQL</div>
+                  <pre className="itp-code">{engineTestResult.result.result.sql}</pre>
                 </div>
               )}
               
-              {/* Findings */}
               {engineTestResult.result.result?.findings?.length > 0 && (
-                <div style={{ padding: '0.75rem', borderBottom: `1px solid ${colors.border}` }}>
-                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
-                    FINDINGS ({engineTestResult.result.result.findings.length})
-                  </div>
+                <div className="itp-result-item">
+                  <div className="itp-result-label">FINDINGS ({engineTestResult.result.result.findings.length})</div>
                   {engineTestResult.result.result.findings.map((f, i) => (
-                    <div key={i} style={{ 
-                      padding: '0.5rem', 
-                      background: f.severity === 'error' ? `${colors.danger}15` : `${colors.warning}15`,
-                      borderRadius: 4,
-                      marginBottom: '0.25rem',
-                      fontSize: '0.8rem'
-                    }}>
-                      <div style={{ fontWeight: 600 }}>{f.finding_type}</div>
-                      <div style={{ color: colors.textMuted }}>{f.message}</div>
+                    <div key={i} className={`itp-finding itp-finding--${f.severity}`}>
+                      <div style={{ fontWeight: 600, fontSize: 12 }}>{f.finding_type}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{f.message}</div>
                     </div>
                   ))}
                 </div>
               )}
               
-              {/* Data Preview */}
               {engineTestResult.result.result?.data?.length > 0 && (
-                <div style={{ padding: '0.75rem' }}>
-                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
-                    DATA (first {Math.min(5, engineTestResult.result.result.data.length)} rows)
-                  </div>
-                  <pre style={{ 
-                    margin: 0, 
-                    padding: '0.5rem', 
-                    background: '#1a1a2e', 
-                    borderRadius: 4, 
-                    fontSize: '0.7rem', 
-                    overflow: 'auto',
-                    maxHeight: 150
-                  }}>
-                    {JSON.stringify(engineTestResult.result.result.data.slice(0, 5), null, 2)}
-                  </pre>
+                <div className="itp-result-item">
+                  <div className="itp-result-label">DATA (first {Math.min(5, engineTestResult.result.result.data.length)} rows)</div>
+                  <pre className="itp-code">{JSON.stringify(engineTestResult.result.result.data.slice(0, 5), null, 2)}</pre>
                 </div>
               )}
             </div>
@@ -767,156 +515,79 @@ export default function IntelligenceTestPage() {
       </div>
 
       {/* Step 4: Test Queries */}
-      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>4</div>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Test Query Resolution</div>
-              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Test term_index + MetadataReasoner + SQLAssembler</div>
-            </div>
+      <div className="itp-card">
+        <div className="itp-card-header">
+          <div className="itp-step">4</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Test Query Resolution</div>
+            <div className="itp-step-desc">Test term_index + MetadataReasoner + SQLAssembler</div>
           </div>
-          <button
-            onClick={runAllQueries}
-            style={{
-              padding: '0.5rem 1rem',
-              background: colors.accent,
-              color: '#000',
-              border: 'none',
-              borderRadius: 6,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              fontSize: '0.85rem',
-              fontWeight: 600
-            }}
-          >
+          <button onClick={runAllQueries} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
             <Zap size={14} /> Run All Tests
           </button>
         </div>
 
         {/* Custom query input */}
-        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
           <input
             type="text"
             value={customQuery}
             onChange={(e) => setCustomQuery(e.target.value)}
-            placeholder="Enter custom query..."
-            style={{
-              flex: 1,
-              padding: '0.6rem 1rem',
-              background: colors.background,
-              border: `1px solid ${colors.border}`,
-              borderRadius: 6,
-              color: colors.text,
-              fontSize: '0.9rem'
-            }}
+            placeholder="Enter custom query to test..."
+            className="itp-input"
             onKeyDown={(e) => e.key === 'Enter' && customQuery && testQuery(customQuery)}
           />
-          <button
-            onClick={() => customQuery && testQuery(customQuery)}
-            disabled={!customQuery}
-            style={{
-              padding: '0.6rem 1rem',
-              background: customQuery ? colors.primary : colors.border,
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              cursor: customQuery ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem'
-            }}
-          >
-            <Search size={16} /> Test
+          <button onClick={() => customQuery && testQuery(customQuery)} disabled={!customQuery} className="btn btn-primary">
+            <Search size={14} /> Test
           </button>
         </div>
 
         {/* Sample queries */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+        <div className="itp-queries">
           {SAMPLE_QUESTIONS.map((sample, idx) => {
             const status = queryResults[sample.query] || {};
-            const isExpanded = expandedResults[sample.query];
-            
             return (
-              <div key={idx} style={{ background: colors.background, borderRadius: 8, overflow: 'hidden' }}>
-                {/* Query row */}
-                <div style={{ 
-                  display: 'flex', 
-                  alignItems: 'center', 
-                  gap: '0.75rem', 
-                  padding: '0.75rem 1rem',
-                  cursor: status.result ? 'pointer' : 'default'
-                }}
-                onClick={() => status.result && toggleExpanded(sample.query)}
+              <div key={idx} className="itp-query">
+                <div 
+                  className="itp-query-header"
+                  onClick={() => status.result && toggleExpanded(sample.query)}
+                  style={{ cursor: status.result ? 'pointer' : 'default' }}
                 >
                   {status.result ? (
-                    isExpanded ? <ChevronDown size={16} color={colors.textMuted} /> : <ChevronRight size={16} color={colors.textMuted} />
+                    expandedResults[sample.query] ? <ChevronDown size={16} /> : <ChevronRight size={16} />
                   ) : (
                     <div style={{ width: 16 }} />
                   )}
                   <div style={{ flex: 1 }}>
-                    <code style={{ fontSize: '0.85rem', color: colors.text }}>{sample.query}</code>
-                    <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{sample.description}</div>
+                    <code style={{ fontSize: 14, color: 'var(--grass-green)' }}>{sample.query}</code>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{sample.description}</div>
                   </div>
-                  <StatusBadge status={status} />
                   <button
                     onClick={(e) => { e.stopPropagation(); testQuery(sample.query); }}
                     disabled={status.loading}
-                    style={{
-                      padding: '0.4rem 0.75rem',
-                      background: status.loading ? colors.border : colors.primary,
-                      color: '#fff',
-                      border: 'none',
-                      borderRadius: 4,
-                      cursor: status.loading ? 'not-allowed' : 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '0.35rem',
-                      fontSize: '0.8rem'
-                    }}
+                    className="btn"
+                    style={{ padding: '4px 8px' }}
                   >
-                    {status.loading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={12} />}
-                    Run
+                    {status.loading ? <Loader2 size={12} className="itp-spin" /> : <Play size={12} />}
                   </button>
+                  <StatusBadge status={status} />
                 </div>
-
-                {/* Expanded results */}
-                {isExpanded && status.result && (
-                  <div style={{ padding: '0 1rem 1rem 2.75rem' }}>
-                    {/* Term matches */}
+                
+                {expandedResults[sample.query] && status.result && (
+                  <div style={{ padding: '0 12px 12px 40px' }}>
                     {status.result.term_matches && (
-                      <div style={{ marginBottom: '0.75rem' }}>
-                        <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
-                          TERM MATCHES ({status.result.term_matches.length})
-                        </div>
+                      <div className="itp-result-item">
+                        <div className="itp-result-label">TERM MATCHES ({status.result.term_matches.length})</div>
                         {status.result.term_matches.map((match, i) => (
-                          <div key={i} style={{ 
-                            display: 'flex', 
-                            alignItems: 'center', 
-                            gap: '0.5rem', 
-                            padding: '0.35rem 0.5rem',
-                            background: colors.cardBg,
-                            borderRadius: 4,
-                            marginBottom: '0.25rem',
-                            fontSize: '0.8rem'
-                          }}>
-                            <span style={{ color: colors.accent, fontWeight: 600 }}>{match.term}</span>
-                            <span style={{ color: colors.textMuted }}>→</span>
-                            <span style={{ color: colors.warning }}>{match.table}</span>
-                            <span style={{ color: colors.textMuted }}>.</span>
-                            <span style={{ color: colors.primary }}>{match.column}</span>
-                            <span style={{ color: colors.textMuted }}>{match.operator}</span>
-                            <span style={{ color: colors.text }}>'{match.match_value}'</span>
-                            <span style={{ 
-                              marginLeft: 'auto', 
-                              padding: '1px 6px', 
-                              background: match.source === 'reasoned' ? `${colors.warning}20` : `${colors.accent}20`,
-                              color: match.source === 'reasoned' ? colors.warning : colors.accent,
-                              borderRadius: 3,
-                              fontSize: '0.7rem'
-                            }}>
+                          <div key={i} className="itp-match">
+                            <span style={{ color: 'var(--grass-green)', fontWeight: 600 }}>{match.term}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>→</span>
+                            <span style={{ color: 'var(--warning)' }}>{match.table}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>.</span>
+                            <span style={{ color: 'var(--accent)' }}>{match.column}</span>
+                            <span style={{ color: 'var(--text-secondary)' }}>{match.operator}</span>
+                            <span>'{match.match_value}'</span>
+                            <span className={`itp-match-src itp-match-src--${match.source || 'term_index'}`}>
                               {match.source || 'term_index'}
                             </span>
                           </div>
@@ -924,176 +595,102 @@ export default function IntelligenceTestPage() {
                       </div>
                     )}
 
-                    {/* SQL */}
                     {status.result.assembly?.sql && (
-                      <div style={{ marginBottom: '0.75rem' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
-                          <div style={{ fontSize: '0.75rem', color: colors.textMuted, fontWeight: 600 }}>GENERATED SQL</div>
-                          <button
-                            onClick={() => copyToClipboard(status.result.assembly.sql)}
-                            style={{
-                              padding: '2px 6px',
-                              background: colors.border,
-                              border: 'none',
-                              borderRadius: 3,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '0.25rem',
-                              fontSize: '0.7rem',
-                              color: copiedText === status.result.assembly.sql ? colors.accent : colors.textMuted
-                            }}
-                          >
+                      <div className="itp-result-item">
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <div className="itp-result-label">GENERATED SQL</div>
+                          <button onClick={() => copyToClipboard(status.result.assembly.sql)} className="btn" style={{ padding: '2px 8px', fontSize: 11 }}>
                             {copiedText === status.result.assembly.sql ? <Check size={10} /> : <Copy size={10} />}
                             {copiedText === status.result.assembly.sql ? 'Copied!' : 'Copy'}
                           </button>
                         </div>
-                        <pre style={{ 
-                          margin: 0, 
-                          padding: '0.5rem', 
-                          background: '#1a1a2e', 
-                          borderRadius: 4, 
-                          fontSize: '0.75rem', 
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          color: colors.text,
-                          fontFamily: 'monospace'
-                        }}>
-                          {status.result.assembly.sql}
-                        </pre>
+                        <pre className="itp-code">{status.result.assembly.sql}</pre>
                       </div>
                     )}
 
-                    {/* Execution results */}
                     {status.result.execution && (
-                      <div>
-                        <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
-                          EXECUTION ({status.result.execution.row_count} rows)
-                        </div>
-                        <pre style={{ 
-                          margin: 0, 
-                          padding: '0.5rem', 
-                          background: '#1a1a2e', 
-                          borderRadius: 4, 
-                          fontSize: '0.7rem', 
-                          maxHeight: 150,
-                          overflow: 'auto',
-                          whiteSpace: 'pre-wrap',
-                          color: colors.text,
-                          fontFamily: 'monospace'
-                        }}>
+                      <div className="itp-result-item">
+                        <div className="itp-result-label">EXECUTION ({status.result.execution.row_count} rows)</div>
+                        <pre className="itp-code" style={{ maxHeight: 150 }}>
                           {JSON.stringify(status.result.execution.sample_rows || status.result.execution, null, 2)}
                         </pre>
                       </div>
                     )}
 
-                    {/* Error */}
                     {status.result.error && (
-                      <div style={{ padding: '0.5rem', background: `${colors.danger}15`, borderRadius: 4, fontSize: '0.8rem', color: colors.danger }}>
-                        {status.result.error}
-                      </div>
+                      <div className="itp-alert itp-alert--error">{status.result.error}</div>
                     )}
                   </div>
                 )}
               </div>
             );
           })}
-
-          {/* Show custom query results */}
-          {customQuery && queryResults[customQuery] && (
-            <div style={{ background: colors.background, borderRadius: 8, overflow: 'hidden', border: `1px solid ${colors.primary}` }}>
-              <div style={{ 
-                display: 'flex', 
-                alignItems: 'center', 
-                gap: '0.75rem', 
-                padding: '0.75rem 1rem',
-                cursor: queryResults[customQuery].result ? 'pointer' : 'default'
-              }}
-              onClick={() => queryResults[customQuery].result && toggleExpanded(customQuery)}
-              >
-                {queryResults[customQuery].result ? (
-                  expandedResults[customQuery] ? <ChevronDown size={16} color={colors.textMuted} /> : <ChevronRight size={16} color={colors.textMuted} />
-                ) : (
-                  <div style={{ width: 16 }} />
-                )}
-                <div style={{ flex: 1 }}>
-                  <code style={{ fontSize: '0.85rem', color: colors.primary }}>{customQuery}</code>
-                  <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>Custom query</div>
-                </div>
-                <StatusBadge status={queryResults[customQuery]} />
-              </div>
-              
-              {/* Custom query expanded results - same structure as samples */}
-              {expandedResults[customQuery] && queryResults[customQuery].result && (
-                <div style={{ padding: '0 1rem 1rem 2.75rem' }}>
-                  {queryResults[customQuery].result.term_matches && (
-                    <div style={{ marginBottom: '0.75rem' }}>
-                      <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
-                        TERM MATCHES ({queryResults[customQuery].result.term_matches.length})
-                      </div>
-                      {queryResults[customQuery].result.term_matches.map((match, i) => (
-                        <div key={i} style={{ 
-                          display: 'flex', 
-                          alignItems: 'center', 
-                          gap: '0.5rem', 
-                          padding: '0.35rem 0.5rem',
-                          background: colors.cardBg,
-                          borderRadius: 4,
-                          marginBottom: '0.25rem',
-                          fontSize: '0.8rem'
-                        }}>
-                          <span style={{ color: colors.accent, fontWeight: 600 }}>{match.term}</span>
-                          <span style={{ color: colors.textMuted }}>→</span>
-                          <span style={{ color: colors.warning }}>{match.table}</span>
-                          <span style={{ color: colors.textMuted }}>.</span>
-                          <span style={{ color: colors.primary }}>{match.column}</span>
-                          <span style={{ color: colors.textMuted }}>{match.operator}</span>
-                          <span style={{ color: colors.text }}>'{match.match_value}'</span>
-                          <span style={{ 
-                            marginLeft: 'auto', 
-                            padding: '1px 6px', 
-                            background: match.source === 'reasoned' ? `${colors.warning}20` : `${colors.accent}20`,
-                            color: match.source === 'reasoned' ? colors.warning : colors.accent,
-                            borderRadius: 3,
-                            fontSize: '0.7rem'
-                          }}>
-                            {match.source || 'term_index'}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                  {queryResults[customQuery].result.assembly?.sql && (
-                    <div>
-                      <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>GENERATED SQL</div>
-                      <pre style={{ 
-                        margin: 0, 
-                        padding: '0.5rem', 
-                        background: '#1a1a2e', 
-                        borderRadius: 4, 
-                        fontSize: '0.75rem', 
-                        overflow: 'auto',
-                        whiteSpace: 'pre-wrap',
-                        color: colors.text,
-                        fontFamily: 'monospace'
-                      }}>
-                        {queryResults[customQuery].result.assembly.sql}
-                      </pre>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
-      {/* CSS for spinner animation */}
+      {/* Scoped styles */}
       <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
+        .itp-spin { animation: itp-spin 1s linear infinite; }
+        @keyframes itp-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        
+        .itp-card { background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; }
+        .itp-card-header { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+        
+        .itp-step { width: 32px; height: 32px; border-radius: 50%; background: var(--grass-green); color: white; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 14px; flex-shrink: 0; }
+        .itp-step-info { flex: 1; }
+        .itp-step-title { font-weight: 600; font-size: 16px; color: var(--text-primary); }
+        .itp-step-desc { font-size: 13px; color: var(--text-secondary); }
+        
+        .itp-status { display: flex; align-items: center; gap: 4px; font-size: 13px; color: var(--text-secondary); }
+        .itp-status--loading { color: var(--warning); }
+        .itp-status--error { color: var(--error); }
+        .itp-status--success { color: var(--grass-green); }
+        
+        .itp-alert { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border-radius: 6px; font-size: 13px; }
+        .itp-alert--warning { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); color: #b45309; }
+        .itp-alert--error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #dc2626; }
+        
+        .itp-result { background: var(--bg-primary); border-radius: 6px; padding: 12px; }
+        .itp-result--code pre { margin: 0; font-size: 12px; white-space: pre-wrap; max-height: 150px; overflow: auto; }
+        .itp-result-item { margin-bottom: 8px; font-size: 13px; }
+        .itp-result-item:last-child { margin-bottom: 0; }
+        .itp-result-detail { font-size: 11px; color: var(--text-secondary); margin-top: 2px; }
+        .itp-result-label { font-size: 11px; color: var(--text-secondary); font-weight: 600; margin-bottom: 4px; text-transform: uppercase; }
+        
+        .itp-code { margin: 0; padding: 8px; background: rgba(0,0,0,0.03); border-radius: 4px; font-size: 12px; overflow: auto; white-space: pre-wrap; }
+        
+        .itp-engines { display: flex; flex-wrap: wrap; gap: 8px; }
+        .itp-engine { padding: 8px 12px; border-radius: 6px; font-size: 13px; }
+        .itp-engine--pass { background: rgba(131, 177, 109, 0.15); border: 1px solid rgba(131, 177, 109, 0.3); }
+        .itp-engine--error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); }
+        .itp-engine--skip { background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); }
+        .itp-engine-name { font-weight: 600; text-transform: uppercase; display: flex; align-items: center; gap: 4px; margin-bottom: 2px; }
+        .itp-engine--pass .itp-engine-name { color: var(--grass-green); }
+        .itp-engine--error .itp-engine-name { color: #dc2626; }
+        .itp-engine--skip .itp-engine-name { color: #b45309; }
+        .itp-engine-msg { font-size: 11px; color: var(--text-secondary); }
+        
+        .itp-engine-btns { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+        .itp-engine-btn { padding: 6px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; font-size: 12px; font-weight: 500; text-transform: uppercase; cursor: pointer; color: var(--text-secondary); }
+        .itp-engine-btn--active { background: var(--grass-green); border-color: var(--grass-green); color: white; }
+        
+        .itp-textarea { width: 100%; min-height: 120px; padding: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 13px; font-family: monospace; resize: vertical; color: var(--text-primary); }
+        
+        .itp-input { flex: 1; padding: 10px 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 14px; color: var(--text-primary); }
+        .itp-input:focus { outline: none; border-color: var(--grass-green); }
+        
+        .itp-queries { display: flex; flex-direction: column; gap: 8px; }
+        .itp-query { background: var(--bg-primary); border-radius: 6px; overflow: hidden; }
+        .itp-query-header { display: flex; align-items: center; gap: 12px; padding: 12px; }
+        
+        .itp-match { display: flex; align-items: center; gap: 6px; padding: 6px 8px; background: var(--bg-secondary); border-radius: 4px; margin-bottom: 4px; font-size: 12px; flex-wrap: wrap; }
+        .itp-match-src { margin-left: auto; padding: 1px 6px; border-radius: 3px; font-size: 10px; }
+        .itp-match-src--term_index { background: rgba(131, 177, 109, 0.2); color: var(--grass-green); }
+        .itp-match-src--reasoned { background: rgba(245, 158, 11, 0.2); color: #b45309; }
+        
+        .itp-finding { padding: 8px; border-radius: 4px; margin-bottom: 4px; }
+        .itp-finding--error { background: rgba(239, 68, 68, 0.1); }
+        .itp-finding--warning { background: rgba(245, 158, 11, 0.1); }
       `}</style>
     </div>
   );
