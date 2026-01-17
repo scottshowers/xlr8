@@ -32,7 +32,83 @@ const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-productio
 // =============================================================================
 
 const FEATURE_LIBRARY = [
-  // DETECT features
+  // =====================
+  // GENERIC BUILDING BLOCKS
+  // =====================
+  {
+    id: 'generic_compare',
+    name: 'Compare Two Tables',
+    description: 'Compare any two tables - select match keys and columns to compare',
+    engine: 'compare',
+    icon: GitCompare,
+    category: 'Building Blocks',
+    config: {
+      source_a: '{{table_a}}',
+      source_b: '{{table_b}}',
+      match_keys: ['{{match_key}}'],
+      compare_columns: ['{{column1}}', '{{column2}}']
+    }
+  },
+  {
+    id: 'generic_validate',
+    name: 'Validate Data',
+    description: 'Run validation rules against any table',
+    engine: 'validate',
+    icon: Shield,
+    category: 'Building Blocks',
+    config: {
+      source_table: '{{table}}',
+      rules: [
+        { field: '{{field}}', type: '{{rule_type}}' }
+      ],
+      sample_limit: 20
+    }
+  },
+  {
+    id: 'generic_detect',
+    name: 'Detect Patterns',
+    description: 'Find duplicates, outliers, or anomalies in any table',
+    engine: 'detect',
+    icon: Radar,
+    category: 'Building Blocks',
+    config: {
+      source_table: '{{table}}',
+      patterns: [
+        { type: '{{pattern_type}}', columns: ['{{column}}'] }
+      ],
+      sample_limit: 20
+    }
+  },
+  {
+    id: 'generic_aggregate',
+    name: 'Aggregate Data',
+    description: 'Count, sum, or average - grouped by any dimension',
+    engine: 'aggregate',
+    icon: Database,
+    category: 'Building Blocks',
+    config: {
+      source_table: '{{table}}',
+      measures: [{ function: '{{function}}', column: '{{measure_column}}' }],
+      dimensions: ['{{group_by}}']
+    }
+  },
+  {
+    id: 'generic_map',
+    name: 'Map Values',
+    description: 'Transform or crosswalk values between systems',
+    engine: 'map',
+    icon: Map,
+    category: 'Building Blocks',
+    config: {
+      mode: 'transform',
+      source_table: '{{table}}',
+      mappings: [{ column: '{{column}}', type: '{{mapping_type}}' }]
+    }
+  },
+
+  // =====================
+  // DETECT - Specific
+  // =====================
   {
     id: 'detect_duplicate_ssn',
     name: 'Duplicate SSN Check',
@@ -251,7 +327,8 @@ const ENGINE_COLORS = {
 
 export default function EnginePlaybookBuilder() {
   const { activeProject } = useProject();
-  const projectId = activeProject?.name || 'TEA1000';
+  // Use TEA1000 for testing - has actual data
+  const projectId = 'TEA1000';
   
   // Playbook state
   const [playbook, setPlaybook] = useState({
