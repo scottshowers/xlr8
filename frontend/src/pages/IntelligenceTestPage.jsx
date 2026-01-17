@@ -24,9 +24,9 @@ const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-productio
 
 // Color scheme matching your app
 const colors = {
-  background: '#0a0a0f',
-  cardBg: '#12121a',
-  border: '#1e1e2e',
+  background: 'transparent',
+  cardBg: 'rgba(255, 255, 255, 0.02)',
+  border: 'rgba(255, 255, 255, 0.1)',
   text: '#e4e4e7',
   textMuted: '#71717a',
   primary: '#6366f1',
@@ -61,6 +61,7 @@ export default function IntelligenceTestPage() {
   const [selectedEngine, setSelectedEngine] = useState('aggregate');
   const [engineConfig, setEngineConfig] = useState('');
   const [engineTestResult, setEngineTestResult] = useState({ loading: false, result: null, error: null });
+  const [diagnoseStatus, setDiagnoseStatus] = useState({ loading: false, result: null, error: null });
 
   // Helper to copy text
   const copyToClipboard = (text) => {
@@ -143,6 +144,18 @@ export default function IntelligenceTestPage() {
       setEnginesStatus({ loading: false, result: data, error: null });
     } catch (err) {
       setEnginesStatus({ loading: false, result: null, error: err.message });
+    }
+  };
+
+  // Diagnose project data
+  const runDiagnose = async () => {
+    setDiagnoseStatus({ loading: true, result: null, error: null });
+    try {
+      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/diagnose`);
+      const data = await response.json();
+      setDiagnoseStatus({ loading: false, result: data, error: null });
+    } catch (err) {
+      setDiagnoseStatus({ loading: false, result: null, error: err.message });
     }
   };
 
@@ -253,6 +266,11 @@ export default function IntelligenceTestPage() {
         </h1>
         <p style={{ margin: '0.5rem 0 0', color: colors.textMuted }}>
           Test MetadataReasoner and term resolution for project: <strong style={{ color: colors.primary }}>{projectId}</strong>
+          {activeProject?.id && activeProject.id !== projectId && (
+            <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem' }}>
+              (UUID: <code style={{ color: colors.warning }}>{activeProject.id}</code>)
+            </span>
+          )}
         </p>
       </div>
 
@@ -272,6 +290,99 @@ export default function IntelligenceTestPage() {
           <span>No project selected. Using default: <strong>TEA1000</strong>. Select a project from Projects page for different data.</span>
         </div>
       )}
+
+      {/* Step 0: Diagnose Project */}
+      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.warning, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#000' }}>0</div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Diagnose Project</div>
+              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Check what data exists for this project identifier</div>
+            </div>
+          </div>
+          <StatusBadge status={diagnoseStatus} />
+        </div>
+        <button
+          onClick={runDiagnose}
+          disabled={diagnoseStatus.loading}
+          style={{
+            padding: '0.6rem 1.25rem',
+            background: diagnoseStatus.loading ? colors.border : colors.warning,
+            color: '#000',
+            border: 'none',
+            borderRadius: 6,
+            cursor: diagnoseStatus.loading ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.9rem',
+            fontWeight: 600
+          }}
+        >
+          {diagnoseStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Search size={16} />}
+          {diagnoseStatus.loading ? 'Checking...' : 'Diagnose'}
+        </button>
+        {diagnoseStatus.error && (
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
+            {diagnoseStatus.error}
+          </div>
+        )}
+        {diagnoseStatus.result && (
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'rgba(0,0,0,0.2)', borderRadius: 6 }}>
+            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem' }}>
+              <strong>Input project:</strong> <code>{diagnoseStatus.result.input_project}</code>
+            </div>
+            
+            {/* Tables */}
+            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+              <strong>Tables found:</strong> {diagnoseStatus.result.tables?.count || 0}
+              {diagnoseStatus.result.tables?.names?.length > 0 && (
+                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
+                  {diagnoseStatus.result.tables.names.slice(0, 5).join(', ')}
+                  {diagnoseStatus.result.tables.names.length > 5 && '...'}
+                </div>
+              )}
+            </div>
+            
+            {/* Classifications */}
+            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+              <strong>Classifications:</strong> {diagnoseStatus.result.classifications?.found?.length > 0 
+                ? diagnoseStatus.result.classifications.found.map(c => `${c.project_name}: ${c.count}`).join(', ')
+                : 'None found'}
+              {diagnoseStatus.result.classifications?.all_project_names && (
+                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
+                  All project_names in DB: {diagnoseStatus.result.classifications.all_project_names.join(', ') || 'none'}
+                </div>
+              )}
+            </div>
+            
+            {/* Term Index */}
+            <div style={{ fontSize: '0.8rem', marginBottom: '0.5rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+              <strong>Term Index:</strong> {diagnoseStatus.result.term_index?.found?.length > 0 
+                ? diagnoseStatus.result.term_index.found.map(t => `${t.project}: ${t.count}`).join(', ')
+                : 'None found'}
+              {diagnoseStatus.result.term_index?.all_projects && (
+                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
+                  All projects in term_index: {diagnoseStatus.result.term_index.all_projects.join(', ') || 'none'}
+                </div>
+              )}
+            </div>
+            
+            {/* Column Profiles */}
+            <div style={{ fontSize: '0.8rem', padding: '0.5rem', background: 'rgba(255,255,255,0.05)', borderRadius: 4 }}>
+              <strong>Column Profiles:</strong> {diagnoseStatus.result.column_profiles?.found?.length > 0 
+                ? diagnoseStatus.result.column_profiles.found.map(p => `${p.project}: ${p.count}`).join(', ')
+                : 'None found'}
+              {diagnoseStatus.result.column_profiles?.all_projects && (
+                <div style={{ fontSize: '0.7rem', color: colors.textMuted, marginTop: '0.25rem' }}>
+                  All projects in profiles: {diagnoseStatus.result.column_profiles.all_projects.join(', ') || 'none'}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Step 1: Analyze */}
       <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
@@ -400,11 +511,42 @@ export default function IntelligenceTestPage() {
         {/* Quick Test Results */}
         {enginesStatus.result && (
           <div style={{ marginBottom: '1rem' }}>
+            {/* Show error if present */}
+            {enginesStatus.result.error && (
+              <div style={{ 
+                padding: '0.75rem', 
+                background: `${colors.danger}15`, 
+                border: `1px solid ${colors.danger}40`,
+                borderRadius: 6, 
+                marginBottom: '0.75rem',
+                fontSize: '0.85rem', 
+                color: colors.danger 
+              }}>
+                <strong>Error:</strong> {enginesStatus.result.error}
+                {enginesStatus.result.traceback && (
+                  <pre style={{ marginTop: '0.5rem', fontSize: '0.7rem', whiteSpace: 'pre-wrap', opacity: 0.8 }}>
+                    {enginesStatus.result.traceback}
+                  </pre>
+                )}
+              </div>
+            )}
+            
+            {/* Summary */}
             <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: colors.text }}>
-              {enginesStatus.result.summary}
+              {enginesStatus.result.summary || 'No summary available'}
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
-              {Object.entries(enginesStatus.result.results || {}).map(([engine, result]) => (
+            
+            {/* Test table info */}
+            {enginesStatus.result.test_table && (
+              <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.5rem' }}>
+                Test table: <code>{enginesStatus.result.test_table}</code>
+              </div>
+            )}
+            
+            {/* Results grid */}
+            {enginesStatus.result.results && Object.keys(enginesStatus.result.results).length > 0 ? (
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+                {Object.entries(enginesStatus.result.results).map(([engine, result]) => (
                 <div 
                   key={engine}
                   style={{
@@ -427,7 +569,18 @@ export default function IntelligenceTestPage() {
                   <div style={{ color: colors.textMuted, fontSize: '0.75rem' }}>{result.message}</div>
                 </div>
               ))}
-            </div>
+              </div>
+            ) : (
+              <div style={{ 
+                padding: '0.75rem', 
+                background: `${colors.warning}15`, 
+                borderRadius: 6, 
+                fontSize: '0.85rem', 
+                color: colors.warning 
+              }}>
+                No engine results returned. Make sure the <code>backend/engines/</code> folder is deployed.
+              </div>
+            )}
           </div>
         )}
         
