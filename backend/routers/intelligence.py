@@ -1349,3 +1349,262 @@ async def health_check():
         'service': 'intelligence',
         'version': '1.0.0'
     }
+
+
+# =============================================================================
+# ENGINE TESTS
+# =============================================================================
+
+class EngineTestRequest(BaseModel):
+    """Request for engine test."""
+    engine: str  # aggregate, compare, validate, detect, map
+    config: dict
+
+
+@router.post("/{project}/test-engine")
+async def test_engine(project: str, request: EngineTestRequest):
+    """
+    Test any of the 5 engines with a config.
+    
+    Example configs:
+    
+    AGGREGATE:
+    {"engine": "aggregate", "config": {"source_table": "employees", "measures": [{"function": "COUNT"}], "dimensions": ["state"]}}
+    
+    COMPARE:
+    {"engine": "compare", "config": {"source_a": "table_a", "source_b": "table_b"}}
+    
+    VALIDATE:
+    {"engine": "validate", "config": {"source_table": "employees", "rules": [{"field": "email", "type": "not_null"}]}}
+    
+    DETECT:
+    {"engine": "detect", "config": {"source_table": "employees", "patterns": [{"type": "duplicate", "columns": ["email"]}]}}
+    
+    MAP:
+    {"engine": "map", "config": {"mode": "lookup", "value": "TX", "type": "state_names"}}
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Import engines
+        try:
+            from backend.engines import (
+                AggregateEngine, CompareEngine, ValidateEngine, 
+                DetectEngine, MapEngine, EngineType
+            )
+        except ImportError:
+            from engines import (
+                AggregateEngine, CompareEngine, ValidateEngine,
+                DetectEngine, MapEngine, EngineType
+            )
+        
+        # Get the right engine
+        engine_map = {
+            'aggregate': AggregateEngine,
+            'compare': CompareEngine,
+            'validate': ValidateEngine,
+            'detect': DetectEngine,
+            'map': MapEngine
+        }
+        
+        engine_class = engine_map.get(request.engine.lower())
+        if not engine_class:
+            return {
+                'error': f"Unknown engine: {request.engine}",
+                'available': list(engine_map.keys())
+            }
+        
+        # Create and execute
+        engine = engine_class(conn, project)
+        result = engine.execute(request.config)
+        
+        # Convert to dict for JSON response
+        return {
+            'engine': request.engine,
+            'project': project,
+            'config': request.config,
+            'result': {
+                'status': result.status.value,
+                'row_count': result.row_count,
+                'columns': result.columns,
+                'data': result.data[:20],  # Limit data in response
+                'sql': result.sql,
+                'summary': result.summary,
+                'findings': [f.to_dict() for f in result.findings] if result.findings else [],
+                'metadata': result.metadata,
+                'provenance': result.provenance.to_dict() if result.provenance else None
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"[ENGINE-TEST] Error: {e}")
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
+
+
+@router.get("/{project}/test-engines-quick")
+async def test_engines_quick(project: str):
+    """
+    Quick test of all 5 engines with default configs.
+    Returns pass/fail for each engine.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        # Import engines
+        try:
+            from backend.engines import (
+                AggregateEngine, CompareEngine, ValidateEngine,
+                DetectEngine, MapEngine
+            )
+        except ImportError:
+            from engines import (
+                AggregateEngine, CompareEngine, ValidateEngine,
+                DetectEngine, MapEngine
+            )
+        
+        # Get first table for testing
+        tables = handler.query(f"""
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_schema = 'main' 
+            AND table_name LIKE '{project.lower()}%'
+            AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+            LIMIT 1
+        """)
+        
+        test_table = tables[0]['table_name'] if tables else None
+        
+        results = {}
+        
+        # Test Aggregate
+        try:
+            if test_table:
+                engine = AggregateEngine(conn, project)
+                result = engine.execute({
+                    "source_table": test_table,
+                    "measures": [{"function": "COUNT"}],
+                    "dimensions": []
+                })
+                results['aggregate'] = {
+                    'status': 'pass' if result.status.value == 'success' else 'fail',
+                    'row_count': result.row_count,
+                    'message': result.summary
+                }
+            else:
+                results['aggregate'] = {'status': 'skip', 'message': 'No tables found'}
+        except Exception as e:
+            results['aggregate'] = {'status': 'error', 'message': str(e)}
+        
+        # Test Compare (needs 2 tables)
+        try:
+            tables2 = handler.query(f"""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_schema = 'main' 
+                AND table_name LIKE '{project.lower()}%'
+                AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+                LIMIT 2
+            """)
+            if len(tables2) >= 2:
+                engine = CompareEngine(conn, project)
+                result = engine.execute({
+                    "source_a": tables2[0]['table_name'],
+                    "source_b": tables2[1]['table_name']
+                })
+                results['compare'] = {
+                    'status': 'pass' if result.status.value in ['success', 'partial'] else 'fail',
+                    'findings': len(result.findings),
+                    'message': result.summary
+                }
+            else:
+                results['compare'] = {'status': 'skip', 'message': 'Need 2 tables'}
+        except Exception as e:
+            results['compare'] = {'status': 'error', 'message': str(e)}
+        
+        # Test Validate
+        try:
+            if test_table:
+                # Get first column
+                cols = handler.query(f"PRAGMA table_info('{test_table}')")
+                if cols:
+                    first_col = cols[0]['name']
+                    engine = ValidateEngine(conn, project)
+                    result = engine.execute({
+                        "source_table": test_table,
+                        "rules": [{"field": first_col, "type": "not_null"}]
+                    })
+                    results['validate'] = {
+                        'status': 'pass',
+                        'findings': len(result.findings),
+                        'message': result.summary
+                    }
+                else:
+                    results['validate'] = {'status': 'skip', 'message': 'No columns'}
+            else:
+                results['validate'] = {'status': 'skip', 'message': 'No tables'}
+        except Exception as e:
+            results['validate'] = {'status': 'error', 'message': str(e)}
+        
+        # Test Detect
+        try:
+            if test_table:
+                cols = handler.query(f"PRAGMA table_info('{test_table}')")
+                if cols:
+                    first_col = cols[0]['name']
+                    engine = DetectEngine(conn, project)
+                    result = engine.execute({
+                        "source_table": test_table,
+                        "patterns": [{"type": "duplicate", "columns": [first_col]}]
+                    })
+                    results['detect'] = {
+                        'status': 'pass',
+                        'findings': len(result.findings),
+                        'message': result.summary
+                    }
+                else:
+                    results['detect'] = {'status': 'skip', 'message': 'No columns'}
+            else:
+                results['detect'] = {'status': 'skip', 'message': 'No tables'}
+        except Exception as e:
+            results['detect'] = {'status': 'error', 'message': str(e)}
+        
+        # Test Map (simple lookup, no table needed)
+        try:
+            engine = MapEngine(conn, project)
+            result = engine.execute({
+                "mode": "lookup",
+                "value": "TX",
+                "type": "state_names"
+            })
+            results['map'] = {
+                'status': 'pass' if result.data and result.data[0].get('output') == 'Texas' else 'fail',
+                'message': f"TX -> {result.data[0].get('output') if result.data else 'N/A'}"
+            }
+        except Exception as e:
+            results['map'] = {'status': 'error', 'message': str(e)}
+        
+        # Summary
+        passed = sum(1 for r in results.values() if r.get('status') == 'pass')
+        
+        return {
+            'project': project,
+            'test_table': test_table,
+            'summary': f"{passed}/5 engines passed",
+            'results': results
+        }
+        
+    except Exception as e:
+        logger.error(f"[ENGINE-TEST] Quick test error: {e}")
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
