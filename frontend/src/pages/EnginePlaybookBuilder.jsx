@@ -689,6 +689,13 @@ export default function EnginePlaybookBuilder() {
                   )}
                 </div>
                 
+                {/* Export Controls */}
+                <ExportControls 
+                  results={runStatus.results} 
+                  projectId={projectId}
+                  playbookName={playbook.name}
+                />
+                
                 {runStatus.results.results?.map(result => {
                   const feature = playbook.features.find(f => f.instanceId === result.id);
                   const colors = ENGINE_COLORS[result.engine] || ENGINE_COLORS.aggregate;
@@ -1067,6 +1074,43 @@ export default function EnginePlaybookBuilder() {
           font-size: 11px;
         }
         
+        /* Export styles */
+        .epb-export {
+          margin: 12px 0;
+          padding: 12px;
+          background: var(--bg-primary);
+          border-radius: 6px;
+        }
+        
+        .epb-export-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        
+        .epb-export-select {
+          flex: 1;
+          padding: 6px 10px;
+          border: 1px solid var(--border-color);
+          border-radius: 4px;
+          font-size: 12px;
+          background: var(--bg-secondary);
+          color: var(--text-primary);
+        }
+        
+        .epb-export-select:disabled {
+          opacity: 0.5;
+        }
+        
+        .epb-export-error {
+          margin-top: 8px;
+          padding: 8px;
+          background: rgba(220, 38, 38, 0.1);
+          border-radius: 4px;
+          color: #dc2626;
+          font-size: 12px;
+        }
+        
         /* Modal styles */
         .epb-modal-overlay {
           position: fixed;
@@ -1140,6 +1184,127 @@ export default function EnginePlaybookBuilder() {
           font-family: monospace;
         }
       `}</style>
+    </div>
+  );
+}
+
+
+// =============================================================================
+// EXPORT CONTROLS
+// =============================================================================
+
+const EXPORT_TEMPLATES = [
+  { id: 'executive_summary', name: 'Executive Summary', formats: ['pdf', 'docx', 'html'] },
+  { id: 'findings_report', name: 'Detailed Findings Report', formats: ['docx', 'pdf', 'html'] },
+  { id: 'data_quality_scorecard', name: 'Data Quality Scorecard', formats: ['xlsx', 'pdf', 'csv'] },
+  { id: 'remediation_checklist', name: 'Remediation Checklist', formats: ['xlsx', 'docx', 'csv'] },
+  { id: 'raw_data', name: 'Raw Data Export', formats: ['json', 'csv', 'xlsx'] }
+];
+
+function ExportControls({ results, projectId, playbookName }) {
+  const [exporting, setExporting] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState('');
+  const [selectedFormat, setSelectedFormat] = useState('');
+  const [exportError, setExportError] = useState(null);
+  
+  const currentTemplate = EXPORT_TEMPLATES.find(t => t.id === selectedTemplate);
+  
+  const handleExport = async () => {
+    if (!selectedTemplate || !selectedFormat) return;
+    
+    setExporting(true);
+    setExportError(null);
+    
+    try {
+      const response = await fetch(`${API_BASE}/api/engines/${projectId}/export`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playbook_results: results,
+          template: selectedTemplate,
+          format: selectedFormat,
+          context: {
+            project_name: projectId,
+            playbook_name: playbookName
+          }
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (!data.success) {
+        setExportError(data.error || 'Export failed');
+        setExporting(false);
+        return;
+      }
+      
+      // Decode base64 and trigger download
+      const binaryString = atob(data.content_base64);
+      const bytes = new Uint8Array(binaryString.length);
+      for (let i = 0; i < binaryString.length; i++) {
+        bytes[i] = binaryString.charCodeAt(i);
+      }
+      
+      const blob = new Blob([bytes], { type: data.content_type });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      
+      setExporting(false);
+    } catch (err) {
+      setExportError(err.message);
+      setExporting(false);
+    }
+  };
+  
+  return (
+    <div className="epb-export">
+      <div className="epb-export-row">
+        <select 
+          value={selectedTemplate} 
+          onChange={(e) => { 
+            setSelectedTemplate(e.target.value); 
+            setSelectedFormat(''); 
+          }}
+          className="epb-export-select"
+        >
+          <option value="">Select export template...</option>
+          {EXPORT_TEMPLATES.map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        
+        <select 
+          value={selectedFormat} 
+          onChange={(e) => setSelectedFormat(e.target.value)}
+          disabled={!currentTemplate}
+          className="epb-export-select"
+        >
+          <option value="">Format...</option>
+          {currentTemplate?.formats.map(f => (
+            <option key={f} value={f}>{f.toUpperCase()}</option>
+          ))}
+        </select>
+        
+        <button 
+          onClick={handleExport}
+          disabled={!selectedTemplate || !selectedFormat || exporting}
+          className="btn btn-primary"
+          style={{ padding: '6px 12px' }}
+        >
+          {exporting ? <Loader2 size={14} className="epb-spin" /> : <Download size={14} />}
+          {exporting ? 'Exporting...' : 'Export'}
+        </button>
+      </div>
+      
+      {exportError && (
+        <div className="epb-export-error">{exportError}</div>
+      )}
     </div>
   );
 }
