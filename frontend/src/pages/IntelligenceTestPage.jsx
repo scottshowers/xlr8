@@ -9,11 +9,10 @@
  * 
  * Route: /admin/intelligence-test
  * Created: January 11, 2026
- * Updated: January 16, 2026 - Light theme UX
  */
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { 
   ArrowLeft, Play, RefreshCw, Search, CheckCircle, XCircle, 
@@ -22,6 +21,19 @@ import {
 } from 'lucide-react';
 
 const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
+
+// Color scheme matching your app
+const colors = {
+  background: '#0a0a0f',
+  cardBg: '#12121a',
+  border: '#1e1e2e',
+  text: '#e4e4e7',
+  textMuted: '#71717a',
+  primary: '#6366f1',
+  accent: '#22c55e',
+  warning: '#f59e0b',
+  danger: '#ef4444',
+};
 
 // Sample test questions
 const SAMPLE_QUESTIONS = [
@@ -34,7 +46,6 @@ const SAMPLE_QUESTIONS = [
 
 export default function IntelligenceTestPage() {
   const { activeProject } = useProject();
-  const navigate = useNavigate();
   const projectId = activeProject?.name || 'TEA1000';
   
   // State for each operation
@@ -44,6 +55,12 @@ export default function IntelligenceTestPage() {
   const [customQuery, setCustomQuery] = useState('');
   const [expandedResults, setExpandedResults] = useState({});
   const [copiedText, setCopiedText] = useState(null);
+  
+  // Engine test state
+  const [enginesStatus, setEnginesStatus] = useState({ loading: false, result: null, error: null });
+  const [selectedEngine, setSelectedEngine] = useState('aggregate');
+  const [engineConfig, setEngineConfig] = useState('');
+  const [engineTestResult, setEngineTestResult] = useState({ loading: false, result: null, error: null });
 
   // Helper to copy text
   const copyToClipboard = (text) => {
@@ -117,6 +134,80 @@ export default function IntelligenceTestPage() {
     }
   };
 
+  // Run quick engine tests
+  const runEnginesQuickTest = async () => {
+    setEnginesStatus({ loading: true, result: null, error: null });
+    try {
+      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/test-engines-quick`);
+      const data = await response.json();
+      setEnginesStatus({ loading: false, result: data, error: null });
+    } catch (err) {
+      setEnginesStatus({ loading: false, result: null, error: err.message });
+    }
+  };
+
+  // Test single engine with config
+  const runEngineTest = async () => {
+    setEngineTestResult({ loading: true, result: null, error: null });
+    try {
+      let config;
+      try {
+        config = JSON.parse(engineConfig);
+      } catch (e) {
+        setEngineTestResult({ loading: false, result: null, error: 'Invalid JSON config' });
+        return;
+      }
+      
+      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/test-engine`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ engine: selectedEngine, config })
+      });
+      const data = await response.json();
+      setEngineTestResult({ loading: false, result: data, error: null });
+    } catch (err) {
+      setEngineTestResult({ loading: false, result: null, error: err.message });
+    }
+  };
+
+  // Sample configs for each engine
+  const ENGINE_SAMPLE_CONFIGS = {
+    aggregate: {
+      source_table: "YOUR_TABLE_NAME",
+      measures: [{ function: "COUNT" }],
+      dimensions: ["stateprovince"]
+    },
+    compare: {
+      source_a: "TABLE_A",
+      source_b: "TABLE_B"
+    },
+    validate: {
+      source_table: "YOUR_TABLE_NAME",
+      rules: [
+        { field: "email", type: "format", pattern: "email" },
+        { field: "employeeid", type: "not_null" }
+      ]
+    },
+    detect: {
+      source_table: "YOUR_TABLE_NAME",
+      patterns: [
+        { type: "duplicate", columns: ["email"] },
+        { type: "duplicate", columns: ["employeeid"] }
+      ]
+    },
+    map: {
+      mode: "lookup",
+      value: "TX",
+      type: "state_names"
+    }
+  };
+
+  // Load sample config when engine changes
+  const handleEngineChange = (engine) => {
+    setSelectedEngine(engine);
+    setEngineConfig(JSON.stringify(ENGINE_SAMPLE_CONFIGS[engine], null, 2));
+  };
+
   // Toggle result expansion
   const toggleExpanded = (question) => {
     setExpandedResults(prev => ({ ...prev, [question]: !prev[question] }));
@@ -126,7 +217,7 @@ export default function IntelligenceTestPage() {
   const StatusBadge = ({ status }) => {
     if (status.loading) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#f59e0b' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.warning }}>
           <Loader2 size={14} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
           Running...
         </span>
@@ -134,112 +225,62 @@ export default function IntelligenceTestPage() {
     }
     if (status.error) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#ef4444' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.danger }}>
           <XCircle size={14} /> Error
         </span>
       );
     }
     if (status.result) {
       return (
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: '#10b981' }}>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: colors.accent }}>
           <CheckCircle size={14} /> Complete
         </span>
       );
     }
-    return <span style={{ color: 'var(--text-muted)' }}>Not run</span>;
+    return <span style={{ color: colors.textMuted }}>Not run</span>;
   };
 
   return (
-    <div>
-      {/* Back link */}
-      <button
-        onClick={() => navigate('/admin')}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 6,
-          color: 'var(--text-muted)',
-          background: 'none',
-          border: 'none',
-          fontSize: 13,
-          marginBottom: 16,
-          cursor: 'pointer',
-          padding: 0,
-        }}
-      >
-        <ArrowLeft size={16} />
-        Back to Platform Settings
-      </button>
-
+    <div style={{ minHeight: '100vh', background: colors.background, padding: '1.5rem', color: colors.text }}>
       {/* Header */}
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ 
-          margin: 0, 
-          fontSize: '20px', 
-          fontWeight: 600, 
-          color: 'var(--text-primary)', 
-          display: 'flex', 
-          alignItems: 'center', 
-          gap: '10px',
-          fontFamily: "'Sora', var(--font-body)"
-        }}>
-          <div style={{ 
-            width: '36px', 
-            height: '36px', 
-            borderRadius: '10px', 
-            backgroundColor: 'var(--grass-green)', 
-            display: 'flex', 
-            alignItems: 'center', 
-            justifyContent: 'center' 
-          }}>
-            <Brain size={20} color="#ffffff" />
-          </div>
+      <div style={{ marginBottom: '1.5rem' }}>
+        <Link to="/admin" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', color: colors.primary, textDecoration: 'none', marginBottom: '1rem' }}>
+          <ArrowLeft size={16} /> Back to Admin
+        </Link>
+        <h1 style={{ margin: 0, fontSize: '1.75rem', fontWeight: 600, display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <Brain size={28} color={colors.primary} />
           Intelligence Pipeline Test
         </h1>
-        <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-          Test MetadataReasoner and term resolution for project: <strong style={{ color: 'var(--grass-green)' }}>{projectId}</strong>
+        <p style={{ margin: '0.5rem 0 0', color: colors.textMuted }}>
+          Test MetadataReasoner and term resolution for project: <strong style={{ color: colors.primary }}>{projectId}</strong>
         </p>
       </div>
 
       {/* Warning if no project */}
       {!activeProject && (
         <div style={{ 
-          padding: '12px 16px', 
-          background: 'rgba(245, 158, 11, 0.1)', 
-          border: '1px solid rgba(245, 158, 11, 0.3)',
-          borderRadius: 'var(--radius-lg)', 
-          marginBottom: '20px',
+          padding: '1rem', 
+          background: `${colors.warning}15`, 
+          border: `1px solid ${colors.warning}40`,
+          borderRadius: 8, 
+          marginBottom: '1.5rem',
           display: 'flex',
           alignItems: 'center',
-          gap: '12px',
-          fontSize: 'var(--text-sm)'
+          gap: '0.75rem'
         }}>
-          <AlertTriangle size={20} color="#f59e0b" />
-          <span style={{ color: 'var(--text-secondary)' }}>
-            No project selected. Using default: <strong>TEA1000</strong>. Select a project from the flow bar for different data.
-          </span>
+          <AlertTriangle size={20} color={colors.warning} />
+          <span>No project selected. Using default: <strong>TEA1000</strong>. Select a project from Projects page for different data.</span>
         </div>
       )}
 
       {/* Step 1: Analyze */}
-      <div style={{ 
-        background: 'var(--bg-secondary)', 
-        border: '1px solid var(--border)', 
-        borderRadius: 'var(--radius-lg)', 
-        padding: '20px', 
-        marginBottom: '16px' 
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ 
-              width: 32, height: 32, borderRadius: '50%', 
-              background: 'var(--grass-green)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', 
-              fontWeight: 600, fontSize: '14px' 
-            }}>1</div>
+      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>1</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>Run Analyze</div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>Populates _intelligence_lookups, _table_classifications</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Run Analyze</div>
+              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Populates _intelligence_lookups, _table_classifications</div>
             </div>
           </div>
           <StatusBadge status={analyzeStatus} />
@@ -248,53 +289,42 @@ export default function IntelligenceTestPage() {
           onClick={runAnalyze}
           disabled={analyzeStatus.loading}
           style={{
-            padding: '10px 20px',
-            background: analyzeStatus.loading ? 'var(--border)' : 'var(--grass-green)',
+            padding: '0.6rem 1.25rem',
+            background: analyzeStatus.loading ? colors.border : colors.primary,
             color: '#fff',
             border: 'none',
-            borderRadius: 'var(--radius-md)',
+            borderRadius: 6,
             cursor: analyzeStatus.loading ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600
+            gap: '0.5rem',
+            fontSize: '0.9rem',
+            fontWeight: 500
           }}
         >
           {analyzeStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Database size={16} />}
           {analyzeStatus.loading ? 'Analyzing...' : 'Run Analyze'}
         </button>
         {analyzeStatus.error && (
-          <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', color: '#ef4444' }}>
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
             {analyzeStatus.error}
           </div>
         )}
         {analyzeStatus.result && (
-          <div style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', fontSize: '12px', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{JSON.stringify(analyzeStatus.result, null, 2)}</pre>
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: colors.background, borderRadius: 6, fontSize: '0.8rem', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(analyzeStatus.result, null, 2)}</pre>
           </div>
         )}
       </div>
 
       {/* Step 2: Recalc */}
-      <div style={{ 
-        background: 'var(--bg-secondary)', 
-        border: '1px solid var(--border)', 
-        borderRadius: 'var(--radius-lg)', 
-        padding: '20px', 
-        marginBottom: '16px' 
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ 
-              width: 32, height: 32, borderRadius: '50%', 
-              background: 'var(--grass-green)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', 
-              fontWeight: 600, fontSize: '14px' 
-            }}>2</div>
+      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>2</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>Run Recalc</div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>Builds _term_index, _entity_tables, join_priority</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Run Recalc</div>
+              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Builds _term_index, _entity_tables, join_priority</div>
             </div>
           </div>
           <StatusBadge status={recalcStatus} />
@@ -303,203 +333,436 @@ export default function IntelligenceTestPage() {
           onClick={runRecalc}
           disabled={recalcStatus.loading}
           style={{
-            padding: '10px 20px',
-            background: recalcStatus.loading ? 'var(--border)' : 'var(--grass-green)',
+            padding: '0.6rem 1.25rem',
+            background: recalcStatus.loading ? colors.border : colors.primary,
             color: '#fff',
             border: 'none',
-            borderRadius: 'var(--radius-md)',
+            borderRadius: 6,
             cursor: recalcStatus.loading ? 'not-allowed' : 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '8px',
-            fontSize: 'var(--text-sm)',
-            fontWeight: 600
+            gap: '0.5rem',
+            fontSize: '0.9rem',
+            fontWeight: 500
           }}
         >
           {recalcStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={16} />}
           {recalcStatus.loading ? 'Recalculating...' : 'Run Recalc'}
         </button>
         {recalcStatus.error && (
-          <div style={{ marginTop: '12px', padding: '12px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', color: '#ef4444' }}>
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
             {recalcStatus.error}
           </div>
         )}
         {recalcStatus.result && (
-          <div style={{ marginTop: '12px', padding: '12px', background: 'var(--bg-tertiary)', borderRadius: 'var(--radius-md)', fontSize: '12px', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', color: 'var(--text-secondary)' }}>{JSON.stringify(recalcStatus.result, null, 2)}</pre>
+          <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: colors.background, borderRadius: 6, fontSize: '0.8rem', fontFamily: 'monospace', maxHeight: 150, overflow: 'auto' }}>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{JSON.stringify(recalcStatus.result, null, 2)}</pre>
           </div>
         )}
       </div>
 
-      {/* Step 3: Query Tests */}
-      <div style={{ 
-        background: 'var(--bg-secondary)', 
-        border: '1px solid var(--border)', 
-        borderRadius: 'var(--radius-lg)', 
-        padding: '20px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-            <div style={{ 
-              width: 32, height: 32, borderRadius: '50%', 
-              background: 'var(--grass-green)', color: '#fff',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', 
-              fontWeight: 600, fontSize: '14px' 
-            }}>3</div>
+      {/* Step 3: Test 5 Engines */}
+      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem', marginBottom: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.75rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.accent, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600, color: '#000' }}>3</div>
             <div>
-              <div style={{ fontWeight: 600, fontSize: 'var(--text-base)', color: 'var(--text-primary)' }}>Test Queries</div>
-              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>Test term resolution and SQL assembly</div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Test 5 Engines</div>
+              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Aggregate, Compare, Validate, Detect, Map</div>
+            </div>
+          </div>
+          <StatusBadge status={enginesStatus} />
+        </div>
+        
+        {/* Quick Test Button */}
+        <button
+          onClick={runEnginesQuickTest}
+          disabled={enginesStatus.loading}
+          style={{
+            padding: '0.6rem 1.25rem',
+            background: enginesStatus.loading ? colors.border : colors.accent,
+            color: '#000',
+            border: 'none',
+            borderRadius: 6,
+            cursor: enginesStatus.loading ? 'not-allowed' : 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            fontSize: '0.9rem',
+            fontWeight: 600,
+            marginBottom: '1rem'
+          }}
+        >
+          {enginesStatus.loading ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Zap size={16} />}
+          {enginesStatus.loading ? 'Testing...' : 'Quick Test All Engines'}
+        </button>
+        
+        {/* Quick Test Results */}
+        {enginesStatus.result && (
+          <div style={{ marginBottom: '1rem' }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.5rem', color: colors.text }}>
+              {enginesStatus.result.summary}
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
+              {Object.entries(enginesStatus.result.results || {}).map(([engine, result]) => (
+                <div 
+                  key={engine}
+                  style={{
+                    padding: '0.5rem 0.75rem',
+                    borderRadius: 6,
+                    background: result.status === 'pass' ? `${colors.accent}20` : 
+                               result.status === 'error' ? `${colors.danger}20` : 
+                               `${colors.warning}20`,
+                    border: `1px solid ${result.status === 'pass' ? colors.accent : 
+                                        result.status === 'error' ? colors.danger : colors.warning}40`,
+                    fontSize: '0.8rem'
+                  }}
+                >
+                  <div style={{ fontWeight: 600, textTransform: 'uppercase', marginBottom: '0.25rem' }}>
+                    {result.status === 'pass' && <CheckCircle size={12} style={{ marginRight: 4, color: colors.accent }} />}
+                    {result.status === 'error' && <XCircle size={12} style={{ marginRight: 4, color: colors.danger }} />}
+                    {result.status === 'skip' && <AlertTriangle size={12} style={{ marginRight: 4, color: colors.warning }} />}
+                    {engine}
+                  </div>
+                  <div style={{ color: colors.textMuted, fontSize: '0.75rem' }}>{result.message}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        
+        {enginesStatus.error && (
+          <div style={{ marginBottom: '1rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
+            {enginesStatus.error}
+          </div>
+        )}
+        
+        {/* Individual Engine Test */}
+        <div style={{ borderTop: `1px solid ${colors.border}`, paddingTop: '1rem' }}>
+          <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: '0.75rem' }}>Test Individual Engine</div>
+          
+          {/* Engine Selector */}
+          <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.75rem', flexWrap: 'wrap' }}>
+            {['aggregate', 'compare', 'validate', 'detect', 'map'].map(eng => (
+              <button
+                key={eng}
+                onClick={() => handleEngineChange(eng)}
+                style={{
+                  padding: '0.4rem 0.75rem',
+                  background: selectedEngine === eng ? colors.primary : colors.border,
+                  color: selectedEngine === eng ? '#fff' : colors.textMuted,
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                  fontWeight: 500,
+                  textTransform: 'uppercase'
+                }}
+              >
+                {eng}
+              </button>
+            ))}
+          </div>
+          
+          {/* Config Editor */}
+          <div style={{ marginBottom: '0.75rem' }}>
+            <label style={{ fontSize: '0.75rem', color: colors.textMuted, display: 'block', marginBottom: '0.35rem' }}>
+              Config (JSON)
+            </label>
+            <textarea
+              value={engineConfig}
+              onChange={(e) => setEngineConfig(e.target.value)}
+              placeholder="Enter engine config as JSON..."
+              style={{
+                width: '100%',
+                minHeight: 120,
+                padding: '0.75rem',
+                background: colors.background,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                color: colors.text,
+                fontSize: '0.8rem',
+                fontFamily: 'monospace',
+                resize: 'vertical'
+              }}
+            />
+          </div>
+          
+          {/* Run Button */}
+          <button
+            onClick={runEngineTest}
+            disabled={engineTestResult.loading || !engineConfig}
+            style={{
+              padding: '0.5rem 1rem',
+              background: engineTestResult.loading ? colors.border : colors.primary,
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: engineTestResult.loading || !engineConfig ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              fontSize: '0.85rem',
+              fontWeight: 500
+            }}
+          >
+            {engineTestResult.loading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={14} />}
+            Run {selectedEngine.charAt(0).toUpperCase() + selectedEngine.slice(1)} Engine
+          </button>
+          
+          {/* Engine Test Result */}
+          {engineTestResult.error && (
+            <div style={{ marginTop: '0.75rem', padding: '0.75rem', background: `${colors.danger}15`, borderRadius: 6, fontSize: '0.85rem', color: colors.danger }}>
+              {engineTestResult.error}
+            </div>
+          )}
+          
+          {engineTestResult.result && (
+            <div style={{ marginTop: '0.75rem', background: colors.background, borderRadius: 6, overflow: 'hidden' }}>
+              {/* Status Header */}
+              <div style={{ 
+                padding: '0.75rem', 
+                borderBottom: `1px solid ${colors.border}`,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {engineTestResult.result.result?.status === 'success' ? (
+                    <CheckCircle size={16} color={colors.accent} />
+                  ) : (
+                    <AlertTriangle size={16} color={colors.warning} />
+                  )}
+                  <span style={{ fontWeight: 600 }}>
+                    {engineTestResult.result.result?.status?.toUpperCase()}
+                  </span>
+                </div>
+                <span style={{ fontSize: '0.8rem', color: colors.textMuted }}>
+                  {engineTestResult.result.result?.row_count} rows
+                </span>
+              </div>
+              
+              {/* Summary */}
+              {engineTestResult.result.result?.summary && (
+                <div style={{ padding: '0.5rem 0.75rem', borderBottom: `1px solid ${colors.border}`, fontSize: '0.85rem' }}>
+                  {engineTestResult.result.result.summary}
+                </div>
+              )}
+              
+              {/* SQL */}
+              {engineTestResult.result.result?.sql && (
+                <div style={{ padding: '0.75rem', borderBottom: `1px solid ${colors.border}` }}>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>SQL</div>
+                  <pre style={{ 
+                    margin: 0, 
+                    padding: '0.5rem', 
+                    background: '#1a1a2e', 
+                    borderRadius: 4, 
+                    fontSize: '0.75rem', 
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    maxHeight: 100
+                  }}>
+                    {engineTestResult.result.result.sql}
+                  </pre>
+                </div>
+              )}
+              
+              {/* Findings */}
+              {engineTestResult.result.result?.findings?.length > 0 && (
+                <div style={{ padding: '0.75rem', borderBottom: `1px solid ${colors.border}` }}>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
+                    FINDINGS ({engineTestResult.result.result.findings.length})
+                  </div>
+                  {engineTestResult.result.result.findings.map((f, i) => (
+                    <div key={i} style={{ 
+                      padding: '0.5rem', 
+                      background: f.severity === 'error' ? `${colors.danger}15` : `${colors.warning}15`,
+                      borderRadius: 4,
+                      marginBottom: '0.25rem',
+                      fontSize: '0.8rem'
+                    }}>
+                      <div style={{ fontWeight: 600 }}>{f.finding_type}</div>
+                      <div style={{ color: colors.textMuted }}>{f.message}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              
+              {/* Data Preview */}
+              {engineTestResult.result.result?.data?.length > 0 && (
+                <div style={{ padding: '0.75rem' }}>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
+                    DATA (first {Math.min(5, engineTestResult.result.result.data.length)} rows)
+                  </div>
+                  <pre style={{ 
+                    margin: 0, 
+                    padding: '0.5rem', 
+                    background: '#1a1a2e', 
+                    borderRadius: 4, 
+                    fontSize: '0.7rem', 
+                    overflow: 'auto',
+                    maxHeight: 150
+                  }}>
+                    {JSON.stringify(engineTestResult.result.result.data.slice(0, 5), null, 2)}
+                  </pre>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Step 4: Test Queries */}
+      <div style={{ background: colors.cardBg, border: `1px solid ${colors.border}`, borderRadius: 10, padding: '1.25rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+            <div style={{ width: 32, height: 32, borderRadius: '50%', background: colors.primary, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 600 }}>4</div>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: '1rem' }}>Test Query Resolution</div>
+              <div style={{ fontSize: '0.8rem', color: colors.textMuted }}>Test term_index + MetadataReasoner + SQLAssembler</div>
             </div>
           </div>
           <button
             onClick={runAllQueries}
             style={{
-              padding: '8px 16px',
-              background: 'var(--grass-green)',
-              color: '#fff',
+              padding: '0.5rem 1rem',
+              background: colors.accent,
+              color: '#000',
               border: 'none',
-              borderRadius: 'var(--radius-md)',
+              borderRadius: 6,
               cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              fontSize: 'var(--text-sm)',
+              gap: '0.5rem',
+              fontSize: '0.85rem',
               fontWeight: 600
             }}
           >
-            <Play size={14} />
-            Run All Tests
+            <Zap size={14} /> Run All Tests
           </button>
         </div>
 
-        {/* Custom Query Input */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-          <div style={{ position: 'relative', flex: 1 }}>
-            <Search size={16} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }} />
-            <input
-              type="text"
-              value={customQuery}
-              onChange={(e) => setCustomQuery(e.target.value)}
-              placeholder="Enter custom query..."
-              onKeyPress={(e) => e.key === 'Enter' && customQuery && testQuery(customQuery)}
-              style={{
-                width: '100%',
-                padding: '10px 12px 10px 36px',
-                background: 'var(--bg-primary)',
-                border: '1px solid var(--border)',
-                borderRadius: 'var(--radius-md)',
-                fontSize: 'var(--text-sm)',
-                color: 'var(--text-primary)',
-                outline: 'none'
-              }}
-            />
-          </div>
+        {/* Custom query input */}
+        <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+          <input
+            type="text"
+            value={customQuery}
+            onChange={(e) => setCustomQuery(e.target.value)}
+            placeholder="Enter custom query..."
+            style={{
+              flex: 1,
+              padding: '0.6rem 1rem',
+              background: colors.background,
+              border: `1px solid ${colors.border}`,
+              borderRadius: 6,
+              color: colors.text,
+              fontSize: '0.9rem'
+            }}
+            onKeyDown={(e) => e.key === 'Enter' && customQuery && testQuery(customQuery)}
+          />
           <button
             onClick={() => customQuery && testQuery(customQuery)}
             disabled={!customQuery}
             style={{
-              padding: '10px 20px',
-              background: customQuery ? 'var(--grass-green)' : 'var(--border)',
+              padding: '0.6rem 1rem',
+              background: customQuery ? colors.primary : colors.border,
               color: '#fff',
               border: 'none',
-              borderRadius: 'var(--radius-md)',
+              borderRadius: 6,
               cursor: customQuery ? 'pointer' : 'not-allowed',
               display: 'flex',
               alignItems: 'center',
-              gap: '6px',
-              fontSize: 'var(--text-sm)',
-              fontWeight: 600
+              gap: '0.5rem'
             }}
           >
-            <Zap size={14} />
-            Test
+            <Search size={16} /> Test
           </button>
         </div>
 
-        {/* Sample Queries */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        {/* Sample queries */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
           {SAMPLE_QUESTIONS.map((sample, idx) => {
             const status = queryResults[sample.query] || {};
+            const isExpanded = expandedResults[sample.query];
+            
             return (
-              <div key={idx} style={{ 
-                background: 'var(--bg-primary)', 
-                borderRadius: 'var(--radius-md)', 
-                overflow: 'hidden', 
-                border: '1px solid var(--border)' 
-              }}>
+              <div key={idx} style={{ background: colors.background, borderRadius: 8, overflow: 'hidden' }}>
+                {/* Query row */}
                 <div style={{ 
                   display: 'flex', 
                   alignItems: 'center', 
-                  gap: '12px', 
-                  padding: '12px 16px',
+                  gap: '0.75rem', 
+                  padding: '0.75rem 1rem',
                   cursor: status.result ? 'pointer' : 'default'
                 }}
                 onClick={() => status.result && toggleExpanded(sample.query)}
                 >
                   {status.result ? (
-                    expandedResults[sample.query] ? <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
+                    isExpanded ? <ChevronDown size={16} color={colors.textMuted} /> : <ChevronRight size={16} color={colors.textMuted} />
                   ) : (
                     <div style={{ width: 16 }} />
                   )}
                   <div style={{ flex: 1 }}>
-                    <code style={{ fontSize: 'var(--text-sm)', color: 'var(--grass-green)', fontFamily: 'monospace' }}>{sample.query}</code>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{sample.description}</div>
+                    <code style={{ fontSize: '0.85rem', color: colors.text }}>{sample.query}</code>
+                    <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>{sample.description}</div>
                   </div>
                   <StatusBadge status={status} />
-                  {!status.loading && !status.result && (
-                    <button
-                      onClick={(e) => { e.stopPropagation(); testQuery(sample.query); }}
-                      style={{
-                        padding: '6px 12px',
-                        background: 'var(--border)',
-                        border: 'none',
-                        borderRadius: 'var(--radius-sm)',
-                        cursor: 'pointer',
-                        fontSize: '12px',
-                        color: 'var(--text-secondary)',
-                        fontWeight: 500
-                      }}
-                    >
-                      Run
-                    </button>
-                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); testQuery(sample.query); }}
+                    disabled={status.loading}
+                    style={{
+                      padding: '0.4rem 0.75rem',
+                      background: status.loading ? colors.border : colors.primary,
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: status.loading ? 'not-allowed' : 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      fontSize: '0.8rem'
+                    }}
+                  >
+                    {status.loading ? <Loader2 size={12} style={{ animation: 'spin 1s linear infinite' }} /> : <Play size={12} />}
+                    Run
+                  </button>
                 </div>
 
-                {/* Expanded Results */}
-                {expandedResults[sample.query] && status.result && (
-                  <div style={{ padding: '0 16px 16px 44px', borderTop: '1px solid var(--border)', marginTop: '4px', paddingTop: '12px' }}>
-                    {/* Term Matches */}
+                {/* Expanded results */}
+                {isExpanded && status.result && (
+                  <div style={{ padding: '0 1rem 1rem 2.75rem' }}>
+                    {/* Term matches */}
                     {status.result.term_matches && (
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
                           TERM MATCHES ({status.result.term_matches.length})
                         </div>
                         {status.result.term_matches.map((match, i) => (
                           <div key={i} style={{ 
                             display: 'flex', 
                             alignItems: 'center', 
-                            gap: '8px', 
-                            padding: '6px 10px',
-                            background: 'var(--bg-tertiary)',
-                            borderRadius: 'var(--radius-sm)',
-                            marginBottom: '4px',
-                            fontSize: '13px'
+                            gap: '0.5rem', 
+                            padding: '0.35rem 0.5rem',
+                            background: colors.cardBg,
+                            borderRadius: 4,
+                            marginBottom: '0.25rem',
+                            fontSize: '0.8rem'
                           }}>
-                            <span style={{ color: '#10b981', fontWeight: 600 }}>{match.term}</span>
-                            <span style={{ color: 'var(--text-muted)' }}>→</span>
-                            <span style={{ color: '#f59e0b' }}>{match.table}</span>
-                            <span style={{ color: 'var(--text-muted)' }}>.</span>
-                            <span style={{ color: 'var(--grass-green)' }}>{match.column}</span>
-                            <span style={{ color: 'var(--text-muted)' }}>{match.operator}</span>
-                            <span style={{ color: 'var(--text-primary)' }}>'{match.match_value}'</span>
+                            <span style={{ color: colors.accent, fontWeight: 600 }}>{match.term}</span>
+                            <span style={{ color: colors.textMuted }}>→</span>
+                            <span style={{ color: colors.warning }}>{match.table}</span>
+                            <span style={{ color: colors.textMuted }}>.</span>
+                            <span style={{ color: colors.primary }}>{match.column}</span>
+                            <span style={{ color: colors.textMuted }}>{match.operator}</span>
+                            <span style={{ color: colors.text }}>'{match.match_value}'</span>
                             <span style={{ 
                               marginLeft: 'auto', 
-                              padding: '2px 8px', 
-                              background: match.source === 'reasoned' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                              color: match.source === 'reasoned' ? '#f59e0b' : '#10b981',
-                              borderRadius: 4,
-                              fontSize: '11px',
-                              fontWeight: 500
+                              padding: '1px 6px', 
+                              background: match.source === 'reasoned' ? `${colors.warning}20` : `${colors.accent}20`,
+                              color: match.source === 'reasoned' ? colors.warning : colors.accent,
+                              borderRadius: 3,
+                              fontSize: '0.7rem'
                             }}>
                               {match.source || 'term_index'}
                             </span>
@@ -510,39 +773,38 @@ export default function IntelligenceTestPage() {
 
                     {/* SQL */}
                     {status.result.assembly?.sql && (
-                      <div style={{ marginBottom: '12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
-                          <div style={{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase' }}>GENERATED SQL</div>
+                      <div style={{ marginBottom: '0.75rem' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+                          <div style={{ fontSize: '0.75rem', color: colors.textMuted, fontWeight: 600 }}>GENERATED SQL</div>
                           <button
                             onClick={() => copyToClipboard(status.result.assembly.sql)}
                             style={{
-                              padding: '4px 8px',
-                              background: 'var(--border)',
+                              padding: '2px 6px',
+                              background: colors.border,
                               border: 'none',
-                              borderRadius: 'var(--radius-sm)',
+                              borderRadius: 3,
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              fontSize: '11px',
-                              color: copiedText === status.result.assembly.sql ? '#10b981' : 'var(--text-muted)'
+                              gap: '0.25rem',
+                              fontSize: '0.7rem',
+                              color: copiedText === status.result.assembly.sql ? colors.accent : colors.textMuted
                             }}
                           >
-                            {copiedText === status.result.assembly.sql ? <Check size={12} /> : <Copy size={12} />}
+                            {copiedText === status.result.assembly.sql ? <Check size={10} /> : <Copy size={10} />}
                             {copiedText === status.result.assembly.sql ? 'Copied!' : 'Copy'}
                           </button>
                         </div>
                         <pre style={{ 
                           margin: 0, 
-                          padding: '12px', 
-                          background: 'var(--bg-tertiary)', 
-                          borderRadius: 'var(--radius-md)', 
-                          fontSize: '12px', 
+                          padding: '0.5rem', 
+                          background: '#1a1a2e', 
+                          borderRadius: 4, 
+                          fontSize: '0.75rem', 
                           overflow: 'auto',
                           whiteSpace: 'pre-wrap',
-                          color: 'var(--text-secondary)',
-                          fontFamily: 'monospace',
-                          border: '1px solid var(--border)'
+                          color: colors.text,
+                          fontFamily: 'monospace'
                         }}>
                           {status.result.assembly.sql}
                         </pre>
@@ -552,21 +814,20 @@ export default function IntelligenceTestPage() {
                     {/* Execution results */}
                     {status.result.execution && (
                       <div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>
+                        <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
                           EXECUTION ({status.result.execution.row_count} rows)
                         </div>
                         <pre style={{ 
                           margin: 0, 
-                          padding: '12px', 
-                          background: 'var(--bg-tertiary)', 
-                          borderRadius: 'var(--radius-md)', 
-                          fontSize: '11px', 
+                          padding: '0.5rem', 
+                          background: '#1a1a2e', 
+                          borderRadius: 4, 
+                          fontSize: '0.7rem', 
                           maxHeight: 150,
                           overflow: 'auto',
                           whiteSpace: 'pre-wrap',
-                          color: 'var(--text-secondary)',
-                          fontFamily: 'monospace',
-                          border: '1px solid var(--border)'
+                          color: colors.text,
+                          fontFamily: 'monospace'
                         }}>
                           {JSON.stringify(status.result.execution.sample_rows || status.result.execution, null, 2)}
                         </pre>
@@ -575,7 +836,7 @@ export default function IntelligenceTestPage() {
 
                     {/* Error */}
                     {status.result.error && (
-                      <div style={{ padding: '10px', background: 'rgba(239, 68, 68, 0.1)', borderRadius: 'var(--radius-md)', fontSize: 'var(--text-sm)', color: '#ef4444' }}>
+                      <div style={{ padding: '0.5rem', background: `${colors.danger}15`, borderRadius: 4, fontSize: '0.8rem', color: colors.danger }}>
                         {status.result.error}
                       </div>
                     )}
@@ -587,67 +848,61 @@ export default function IntelligenceTestPage() {
 
           {/* Show custom query results */}
           {customQuery && queryResults[customQuery] && (
-            <div style={{ 
-              background: 'var(--bg-primary)', 
-              borderRadius: 'var(--radius-md)', 
-              overflow: 'hidden', 
-              border: '2px solid var(--grass-green)' 
-            }}>
+            <div style={{ background: colors.background, borderRadius: 8, overflow: 'hidden', border: `1px solid ${colors.primary}` }}>
               <div style={{ 
                 display: 'flex', 
                 alignItems: 'center', 
-                gap: '12px', 
-                padding: '12px 16px',
+                gap: '0.75rem', 
+                padding: '0.75rem 1rem',
                 cursor: queryResults[customQuery].result ? 'pointer' : 'default'
               }}
               onClick={() => queryResults[customQuery].result && toggleExpanded(customQuery)}
               >
                 {queryResults[customQuery].result ? (
-                  expandedResults[customQuery] ? <ChevronDown size={16} style={{ color: 'var(--text-muted)' }} /> : <ChevronRight size={16} style={{ color: 'var(--text-muted)' }} />
+                  expandedResults[customQuery] ? <ChevronDown size={16} color={colors.textMuted} /> : <ChevronRight size={16} color={colors.textMuted} />
                 ) : (
                   <div style={{ width: 16 }} />
                 )}
                 <div style={{ flex: 1 }}>
-                  <code style={{ fontSize: 'var(--text-sm)', color: 'var(--grass-green)', fontFamily: 'monospace' }}>{customQuery}</code>
-                  <div style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Custom query</div>
+                  <code style={{ fontSize: '0.85rem', color: colors.primary }}>{customQuery}</code>
+                  <div style={{ fontSize: '0.75rem', color: colors.textMuted }}>Custom query</div>
                 </div>
                 <StatusBadge status={queryResults[customQuery]} />
               </div>
               
-              {/* Custom query expanded results */}
+              {/* Custom query expanded results - same structure as samples */}
               {expandedResults[customQuery] && queryResults[customQuery].result && (
-                <div style={{ padding: '0 16px 16px 44px', borderTop: '1px solid var(--border)', marginTop: '4px', paddingTop: '12px' }}>
+                <div style={{ padding: '0 1rem 1rem 2.75rem' }}>
                   {queryResults[customQuery].result.term_matches && (
-                    <div style={{ marginBottom: '12px' }}>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>
+                    <div style={{ marginBottom: '0.75rem' }}>
+                      <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>
                         TERM MATCHES ({queryResults[customQuery].result.term_matches.length})
                       </div>
                       {queryResults[customQuery].result.term_matches.map((match, i) => (
                         <div key={i} style={{ 
                           display: 'flex', 
                           alignItems: 'center', 
-                          gap: '8px', 
-                          padding: '6px 10px',
-                          background: 'var(--bg-tertiary)',
-                          borderRadius: 'var(--radius-sm)',
-                          marginBottom: '4px',
-                          fontSize: '13px'
+                          gap: '0.5rem', 
+                          padding: '0.35rem 0.5rem',
+                          background: colors.cardBg,
+                          borderRadius: 4,
+                          marginBottom: '0.25rem',
+                          fontSize: '0.8rem'
                         }}>
-                          <span style={{ color: '#10b981', fontWeight: 600 }}>{match.term}</span>
-                          <span style={{ color: 'var(--text-muted)' }}>→</span>
-                          <span style={{ color: '#f59e0b' }}>{match.table}</span>
-                          <span style={{ color: 'var(--text-muted)' }}>.</span>
-                          <span style={{ color: 'var(--grass-green)' }}>{match.column}</span>
-                          <span style={{ color: 'var(--text-muted)' }}>{match.operator}</span>
-                          <span style={{ color: 'var(--text-primary)' }}>'{match.match_value}'</span>
+                          <span style={{ color: colors.accent, fontWeight: 600 }}>{match.term}</span>
+                          <span style={{ color: colors.textMuted }}>→</span>
+                          <span style={{ color: colors.warning }}>{match.table}</span>
+                          <span style={{ color: colors.textMuted }}>.</span>
+                          <span style={{ color: colors.primary }}>{match.column}</span>
+                          <span style={{ color: colors.textMuted }}>{match.operator}</span>
+                          <span style={{ color: colors.text }}>'{match.match_value}'</span>
                           <span style={{ 
                             marginLeft: 'auto', 
-                            padding: '2px 8px', 
-                            background: match.source === 'reasoned' ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
-                            color: match.source === 'reasoned' ? '#f59e0b' : '#10b981',
-                            borderRadius: 4,
-                            fontSize: '11px',
-                            fontWeight: 500
+                            padding: '1px 6px', 
+                            background: match.source === 'reasoned' ? `${colors.warning}20` : `${colors.accent}20`,
+                            color: match.source === 'reasoned' ? colors.warning : colors.accent,
+                            borderRadius: 3,
+                            fontSize: '0.7rem'
                           }}>
                             {match.source || 'term_index'}
                           </span>
@@ -657,18 +912,17 @@ export default function IntelligenceTestPage() {
                   )}
                   {queryResults[customQuery].result.assembly?.sql && (
                     <div>
-                      <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginBottom: '6px', fontWeight: 600, textTransform: 'uppercase' }}>GENERATED SQL</div>
+                      <div style={{ fontSize: '0.75rem', color: colors.textMuted, marginBottom: '0.35rem', fontWeight: 600 }}>GENERATED SQL</div>
                       <pre style={{ 
                         margin: 0, 
-                        padding: '12px', 
-                        background: 'var(--bg-tertiary)', 
-                        borderRadius: 'var(--radius-md)', 
-                        fontSize: '12px', 
+                        padding: '0.5rem', 
+                        background: '#1a1a2e', 
+                        borderRadius: 4, 
+                        fontSize: '0.75rem', 
                         overflow: 'auto',
                         whiteSpace: 'pre-wrap',
-                        color: 'var(--text-secondary)',
-                        fontFamily: 'monospace',
-                        border: '1px solid var(--border)'
+                        color: colors.text,
+                        fontFamily: 'monospace'
                       }}>
                         {queryResults[customQuery].result.assembly.sql}
                       </pre>
