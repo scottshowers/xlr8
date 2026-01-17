@@ -10,7 +10,6 @@ Updated: December 17, 2025 - Replaced vacuum with register_extractor (local LLM 
 Updated: December 23, 2025 - Added smart_router (unified upload endpoint)
 Updated: December 23, 2025 - Added metrics_router (platform analytics)
 Updated: December 27, 2025 - Added classification_router (FIVE TRUTHS transparency layer)
-Updated: January 15, 2026 - Added remediation router (Phase 4A.6 & 4A.7 Playbook Wire-up + Progress)
 """
 
 from fastapi import FastAPI
@@ -129,14 +128,6 @@ except ImportError as e:
     BI_ROUTER_AVAILABLE = False
     logging.warning(f"BI router import failed: {e}")
 
-# Import engines_router (5 Universal Engines for Playbook Builder)
-try:
-    from backend.routers import engines_router
-    ENGINES_ROUTER_AVAILABLE = True
-except ImportError as e:
-    ENGINES_ROUTER_AVAILABLE = False
-    logging.warning(f"Engines router import failed: {e}")
-
 # Import cleanup router (data deletion endpoints)
 try:
     from backend.routers import cleanup
@@ -216,6 +207,22 @@ try:
 except ImportError as e:
     REFERENCE_AVAILABLE = False
     logging.warning(f"Reference router import failed: {e}")
+
+# Import engines router (5 Universal Engines - Phase 5 Playbook Builder)
+try:
+    from backend.routers import engines_router
+    ENGINES_ROUTER_AVAILABLE = True
+except ImportError as e:
+    ENGINES_ROUTER_AVAILABLE = False
+    logging.warning(f"Engines router import failed: {e}")
+
+# Import integrations router (API connections - UKG Pro, Workday, etc.)
+try:
+    from backend.routers import integrations_router
+    INTEGRATIONS_AVAILABLE = True
+except ImportError as e:
+    INTEGRATIONS_AVAILABLE = False
+    logging.warning(f"Integrations router import failed: {e}")
 
 try:
     from backend.routers import dashboard
@@ -448,13 +455,6 @@ if BI_ROUTER_AVAILABLE:
 else:
     logger.warning("BI router not available")
 
-# Register engines_router if available (5 Universal Engines)
-if ENGINES_ROUTER_AVAILABLE:
-    app.include_router(engines_router.router, prefix="/api/engines", tags=["engines"])
-    logger.info("Engines router registered at /api/engines")
-else:
-    logger.warning("Engines router not available")
-
 # Register health router if available (comprehensive system diagnostics)
 if HEALTH_AVAILABLE:
     app.include_router(health.router, prefix="/api", tags=["health"])
@@ -517,6 +517,20 @@ if REFERENCE_AVAILABLE:
 else:
     logger.warning("Reference Truth router not available")
 
+# Register engines router if available (5 Universal Engines)
+if ENGINES_ROUTER_AVAILABLE:
+    app.include_router(engines_router.router, prefix="/api/engines", tags=["engines"])
+    logger.info("Engines router registered at /api/engines")
+else:
+    logger.warning("Engines router not available")
+
+# Register integrations router if available (API connections)
+if INTEGRATIONS_AVAILABLE:
+    app.include_router(integrations_router.router, prefix="/api/integrations", tags=["integrations"])
+    logger.info("Integrations router registered at /api/integrations")
+else:
+    logger.warning("Integrations router not available")
+
 # Register dashboard router if available (real metrics, lineage, relationships)
 if DASHBOARD_AVAILABLE:
     app.include_router(dashboard.router, tags=["dashboard"])
@@ -526,16 +540,16 @@ else:
 
 # Register findings router (Phase 4A.4 - Findings Dashboard)
 try:
-    from backend.routers import findings
+    from routers import findings
     app.include_router(findings.router, prefix="/api/findings", tags=["findings"])
     logger.info("Findings router registered at /api/findings")
 except ImportError as e:
     logger.warning(f"Findings router import failed: {e}")
 
-# Register remediation router (Phase 4A.6 & 4A.7 - Playbook Wire-up + Progress Tracker)
+# Register remediation router (Phase 4A.6/4A.7 - Playbook Wire-up & Progress Tracker)
 try:
-    from backend.routers import remediation
-    app.include_router(remediation.router, prefix="/api", tags=["remediation"])
+    from routers import remediation
+    app.include_router(remediation.router, prefix="/api/remediation", tags=["remediation"])
     logger.info("Remediation router registered at /api/remediation")
 except ImportError as e:
     logger.warning(f"Remediation router import failed: {e}")
