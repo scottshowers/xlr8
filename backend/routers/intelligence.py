@@ -1608,3 +1608,116 @@ async def test_engines_quick(project: str):
             'error': str(e),
             'traceback': traceback.format_exc()
         }
+
+
+@router.get("/{project}/diagnose")
+async def diagnose_project(project: str):
+    """
+    Diagnostic endpoint to check project data availability.
+    Shows what the backend can find for a given project identifier.
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        conn = handler.conn
+        
+        diagnostics = {
+            'input_project': project,
+            'tables': {},
+            'classifications': {},
+            'term_index': {},
+            'column_profiles': {}
+        }
+        
+        # Check tables matching project prefix
+        tables = conn.execute("""
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_schema = 'main' 
+            AND (
+                table_name LIKE ? || '%' 
+                OR table_name LIKE ? || '%'
+            )
+            AND table_name NOT LIKE '\\_%' ESCAPE '\\'
+            ORDER BY table_name
+            LIMIT 20
+        """, [project.lower(), project.upper()]).fetchall()
+        
+        diagnostics['tables'] = {
+            'count': len(tables),
+            'names': [t[0] for t in tables],
+            'pattern_used': f"{project.lower()}% or {project.upper()}%"
+        }
+        
+        # Check _table_classifications
+        try:
+            classifications = conn.execute("""
+                SELECT project_name, COUNT(*) as cnt 
+                FROM _table_classifications 
+                WHERE project_name LIKE ? || '%' OR project_name LIKE ? || '%'
+                GROUP BY project_name
+            """, [project.lower(), project.upper()]).fetchall()
+            
+            diagnostics['classifications'] = {
+                'found': [{'project_name': c[0], 'count': c[1]} for c in classifications]
+            }
+            
+            # Also get distinct project_names to see what's there
+            all_projects = conn.execute("""
+                SELECT DISTINCT project_name FROM _table_classifications LIMIT 10
+            """).fetchall()
+            diagnostics['classifications']['all_project_names'] = [p[0] for p in all_projects]
+            
+        except Exception as e:
+            diagnostics['classifications'] = {'error': str(e)}
+        
+        # Check _term_index
+        try:
+            term_counts = conn.execute("""
+                SELECT project, COUNT(*) as cnt 
+                FROM _term_index 
+                WHERE project LIKE ? || '%' OR project LIKE ? || '%'
+                GROUP BY project
+            """, [project.lower(), project.upper()]).fetchall()
+            
+            diagnostics['term_index'] = {
+                'found': [{'project': t[0], 'count': t[1]} for t in term_counts]
+            }
+            
+            all_term_projects = conn.execute("""
+                SELECT DISTINCT project FROM _term_index LIMIT 10
+            """).fetchall()
+            diagnostics['term_index']['all_projects'] = [p[0] for p in all_term_projects]
+            
+        except Exception as e:
+            diagnostics['term_index'] = {'error': str(e)}
+        
+        # Check _column_profiles
+        try:
+            profile_counts = conn.execute("""
+                SELECT project, COUNT(*) as cnt 
+                FROM _column_profiles 
+                WHERE project LIKE ? || '%' OR project LIKE ? || '%'
+                GROUP BY project
+            """, [project.lower(), project.upper()]).fetchall()
+            
+            diagnostics['column_profiles'] = {
+                'found': [{'project': p[0], 'count': p[1]} for p in profile_counts]
+            }
+            
+            all_profile_projects = conn.execute("""
+                SELECT DISTINCT project FROM _column_profiles LIMIT 10
+            """).fetchall()
+            diagnostics['column_profiles']['all_projects'] = [p[0] for p in all_profile_projects]
+            
+        except Exception as e:
+            diagnostics['column_profiles'] = {'error': str(e)}
+        
+        return diagnostics
+        
+    except Exception as e:
+        import traceback
+        return {
+            'error': str(e),
+            'traceback': traceback.format_exc()
+        }
