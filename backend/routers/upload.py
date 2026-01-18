@@ -874,7 +874,8 @@ def process_file_background(
                     result = handler.store_csv(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
-                        uploaded_by=uploaded_by_email
+                        uploaded_by=uploaded_by_email,
+                        project_id=project_id
                     )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
@@ -882,7 +883,8 @@ def process_file_background(
                     result = handler.store_excel(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
-                        uploaded_by=uploaded_by_email
+                        uploaded_by=uploaded_by_email,
+                        project_id=project_id
                     )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
@@ -1351,7 +1353,7 @@ def process_file_background(
                                             temp_csv = f"/tmp/{job_id}_converted.csv"
                                             df.to_csv(temp_csv, index=False)
                                             
-                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv")
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", project_id=project_id)
                                             
                                             # Cleanup temp file
                                             try:
@@ -1470,7 +1472,7 @@ def process_file_background(
                                                 temp_csv = f"/tmp/{job_id}_docx_table.csv"
                                                 df.to_csv(temp_csv, index=False)
                                                 
-                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv")
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", project_id=project_id)
                                                 
                                                 try:
                                                     os.remove(temp_csv)
