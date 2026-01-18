@@ -53,14 +53,35 @@ class QueryService:
         self._cache: Dict[str, PlaybookDefinition] = {}
     
     def _get_connection(self):
-        """Get DuckDB connection."""
+        """Get DuckDB connection via structured_handler singleton."""
         if self._conn is not None:
             return self._conn
         
+        # Use structured_handler singleton - same pattern as execution_service and engines_router
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+            self._conn = handler.conn
+            logger.info("[QUERY] Got connection from structured_handler (utils)")
+            return self._conn
+        except ImportError:
+            pass
+        
+        try:
+            from backend.utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+            self._conn = handler.conn
+            logger.info("[QUERY] Got connection from structured_handler (backend.utils)")
+            return self._conn
+        except ImportError:
+            pass
+        
+        # Fallback: direct connection (should rarely be needed)
         try:
             import duckdb
             if os.path.exists(self.duckdb_path):
-                self._conn = duckdb.connect(self.duckdb_path, read_only=True)
+                self._conn = duckdb.connect(self.duckdb_path)
+                logger.warning("[QUERY] Using direct DuckDB connection (fallback)")
                 return self._conn
         except Exception as e:
             logger.error(f"[QUERY] Failed to connect to DuckDB: {e}")
