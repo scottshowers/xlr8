@@ -236,19 +236,24 @@ export default function PlaybookSelectPage() {
       const playbook = defRes.data.playbook;
       setDefinition(playbook);
 
-      // 3. Load resolutions for each step
+      // 3. Load resolutions for all steps in parallel (batched)
       const allResolutions = {};
-      for (const step of playbook.steps) {
+      const resolvePromises = playbook.steps.map(async (step) => {
         try {
           const resolveRes = await api.get(
-            `/playbooks/instance/${newInstanceId}/step/${step.id}/resolve`
+            `/playbooks/instance/${newInstanceId}/step/${encodeURIComponent(step.id)}/resolve`
           );
-          allResolutions[step.id] = resolveRes.data.resolutions || {};
+          return { stepId: step.id, resolutions: resolveRes.data.resolutions || {} };
         } catch (err) {
           console.warn(`Failed to get resolutions for step ${step.id}:`, err);
-          allResolutions[step.id] = {};
+          return { stepId: step.id, resolutions: {} };
         }
-      }
+      });
+      
+      const results = await Promise.all(resolvePromises);
+      results.forEach(({ stepId, resolutions: stepRes }) => {
+        allResolutions[stepId] = stepRes;
+      });
       setResolutions(allResolutions);
 
       // 4. Move to review phase
