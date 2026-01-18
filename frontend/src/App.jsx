@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 
 // Context Providers
 import { ProjectProvider } from './context/ProjectContext';
@@ -42,7 +42,9 @@ import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookSelectPage from './pages/PlaybookSelectPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import EnginePlaybookBuilder from './pages/EnginePlaybookBuilder';
+import PlaybookBuilderV2 from './pages/PlaybookBuilderV2';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
+import PlaybookViewer from './components/PlaybookViewer';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
 import ExportPage from './pages/ExportPage';
 import ProcessingPage from './pages/ProcessingPage';
@@ -80,6 +82,12 @@ const Page = ({ children }) => (
 const FlowPage = ({ children, step }) => (
   <MainLayout showFlowBar currentStep={step}>{children}</MainLayout>
 );
+
+// Wrapper for PlaybookViewer to extract URL params
+function PlaybookViewerWrapper() {
+  const { playbookId, projectId } = useParams();
+  return <PlaybookViewer playbookId={playbookId || 'year-end'} projectId={projectId} />;
+}
 
 function AppRoutes() {
   return (
@@ -189,6 +197,12 @@ function AppRoutes() {
         } />
         <Route path="/build-playbook" element={
           <ProtectedRoute><Page><PlaybookWireupPage /></Page></ProtectedRoute>
+        } />
+        <Route path="/playbook/:playbookId/:projectId" element={
+          <ProtectedRoute><Page><PlaybookViewerWrapper /></Page></ProtectedRoute>
+        } />
+        <Route path="/playbook/:playbookId" element={
+          <ProtectedRoute><Page><PlaybookViewerWrapper /></Page></ProtectedRoute>
         } />
         
         {/* Workspace (Chat) */}
