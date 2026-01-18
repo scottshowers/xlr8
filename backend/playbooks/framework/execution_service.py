@@ -698,27 +698,50 @@ class ExecutionService:
             return []
         
         try:
+            # Check if project_id column exists for newer schema
+            has_project_id = False
+            try:
+                cols = [row[1] for row in conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()]
+                has_project_id = 'project_id' in cols
+            except Exception:
+                pass
+            
+            # Build WHERE clause for project filtering
+            # Try project_id first (UUID), fall back to project name
+            project_filter_sql = ""
+            project_params = []
+            
+            if has_project_id and self.project:
+                # Try to match by project_id (UUID) OR project name (for backward compat)
+                project_filter_sql = "AND (project_id = ? OR LOWER(project) = LOWER(?))"
+                project_params = [self.project, self.project]
+            elif self.project:
+                project_filter_sql = "AND LOWER(project) = LOWER(?)"
+                project_params = [self.project]
+            
             # Build query with optional filter
             if filter_pattern:
-                results = conn.execute("""
+                results = conn.execute(f"""
                     SELECT table_name, file_name, row_count
                     FROM _schema_metadata 
                     WHERE is_current = TRUE
+                    {project_filter_sql}
                     AND (
                         LOWER(table_name) LIKE ? 
                         OR LOWER(file_name) LIKE ?
                     )
                     ORDER BY file_name
                     LIMIT 50
-                """, [f"%{filter_pattern.lower()}%", f"%{filter_pattern.lower()}%"]).fetchall()
+                """, project_params + [f"%{filter_pattern.lower()}%", f"%{filter_pattern.lower()}%"]).fetchall()
             else:
-                results = conn.execute("""
+                results = conn.execute(f"""
                     SELECT table_name, file_name, row_count
                     FROM _schema_metadata 
                     WHERE is_current = TRUE
+                    {project_filter_sql}
                     ORDER BY file_name
                     LIMIT 50
-                """).fetchall()
+                """, project_params).fetchall()
             
             tables = []
             for row in results:
@@ -728,6 +751,7 @@ class ExecutionService:
                     'row_count': row[2]
                 })
             
+            logger.info(f"[EXEC] Found {len(tables)} tables for project '{self.project}'")
             return tables
             
         except Exception as e:
