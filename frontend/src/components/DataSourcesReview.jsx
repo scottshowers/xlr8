@@ -522,13 +522,13 @@ export default function DataSourcesReview({
       alignItems: 'center',
       gap: '0.5rem',
       padding: '0.75rem 1.5rem',
-      background: hasUnresolved ? COLORS.textMuted : COLORS.primary,
+      background: COLORS.primary,
       color: COLORS.white,
       border: 'none',
       borderRadius: '8px',
       fontSize: '0.95rem',
       fontWeight: '600',
-      cursor: hasUnresolved ? 'not-allowed' : 'pointer',
+      cursor: 'pointer',
     },
     backBtn: {
       padding: '0.75rem 1.5rem',
@@ -596,7 +596,7 @@ export default function DataSourcesReview({
           {hasUnresolved ? (
             <>
               <AlertTriangle size={18} />
-              Some steps need data selection before proceeding
+              Some steps missing data - they'll be skipped
             </>
           ) : (
             <>
@@ -608,7 +608,6 @@ export default function DataSourcesReview({
         <button 
           style={styles.confirmBtn} 
           onClick={onConfirm}
-          disabled={hasUnresolved}
         >
           Continue to Steps
           <ArrowRight size={18} />
