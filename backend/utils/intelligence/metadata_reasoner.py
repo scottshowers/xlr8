@@ -70,9 +70,10 @@ class MetadataReasoner:
         #                         operator='ILIKE', match_value='%401%')]
     """
     
-    def __init__(self, conn: duckdb.DuckDBPyConnection, project: str):
+    def __init__(self, conn: duckdb.DuckDBPyConnection, project: str, project_id: str = None):
         self.conn = conn
         self.project = project.lower() if project else 'default'
+        self.project_id = project_id  # UUID for precise matching
         
         # Cache metadata on init (small, fast queries)
         self._domain_tables: Dict[str, List[str]] = {}
@@ -85,6 +86,26 @@ class MetadataReasoner:
     
     def _load_metadata(self):
         """Load and cache metadata for fast reasoning."""
+        
+        # Check if project_id column exists
+        has_project_id = False
+        try:
+            cols = [row[1] for row in self.conn.execute("PRAGMA table_info(_column_profiles)").fetchall()]
+            has_project_id = 'project_id' in cols
+        except Exception:
+            pass
+        
+        # Build project filter - prefer project_id (UUID) when available
+        if has_project_id and self.project_id:
+            project_filter = "project_id = ?"
+            project_param = self.project_id
+        elif has_project_id and self.project:
+            # Try to match by project_id OR project name
+            project_filter = "(project_id = ? OR LOWER(project) = LOWER(?))"
+            project_param = [self.project, self.project]
+        else:
+            project_filter = "LOWER(project) = ?"
+            project_param = self.project
         
         # 1. Load domain → tables mapping (case-insensitive project match)
         try:
@@ -105,15 +126,23 @@ class MetadataReasoner:
         except Exception as e:
             logger.warning(f"[REASONER] Could not load domain tables: {e}")
         
-        # 2. Load column classifications by name patterns (case-insensitive project match)
+        # 2. Load column classifications by name patterns
         try:
-            results = self.conn.execute("""
-                SELECT table_name, column_name, inferred_type
-                FROM _column_profiles
-                WHERE LOWER(project) = ?
-            """, [self.project]).fetchall()
+            # Use project_id when available
+            if isinstance(project_param, list):
+                results = self.conn.execute(f"""
+                    SELECT table_name, column_name, inferred_type
+                    FROM _column_profiles
+                    WHERE {project_filter}
+                """, project_param).fetchall()
+            else:
+                results = self.conn.execute(f"""
+                    SELECT table_name, column_name, inferred_type
+                    FROM _column_profiles
+                    WHERE {project_filter}
+                """, [project_param]).fetchall()
             
-            logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}'")
+            logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}' (project_id={self.project_id})")
             
             for table_name, column_name, inferred_type in results:
                 col_lower = column_name.lower()
