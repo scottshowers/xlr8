@@ -22,7 +22,7 @@ from datetime import datetime
 from .definitions import (
     PlaybookDefinition, PlaybookInstance, StepDefinition,
     StepProgress, Finding, StepStatus, FindingStatus, FindingSeverity,
-    EngineConfig
+    EngineConfig, TableResolution
 )
 from .progress_service import get_progress_service
 
@@ -294,25 +294,43 @@ class ExecutionService:
         config: Dict[str, Any], 
         step_progress: Optional[StepProgress]
     ) -> Dict[str, Any]:
-        """Resolve placeholders in engine config."""
+        """
+        Resolve placeholders in engine config using hybrid strategy:
+        1. Check step_progress.resolved_tables for manual overrides
+        2. Try term_index resolution
+        3. Fall back to matched_files
+        """
         resolved = {}
         
         for key, value in config.items():
             if isinstance(value, str) and value.startswith('{{') and value.endswith('}}'):
-                # Placeholder - try to resolve from matched files
-                placeholder = value[2:-2]
+                placeholder = value[2:-2]  # e.g., 'w_2_data'
+                resolved_table = None
                 
-                if step_progress and step_progress.matched_files:
-                    # Try to find a matching table
-                    for matched_file in step_progress.matched_files:
-                        # Convert filename to likely table name
-                        # This is simplified - real implementation needs table lookup
-                        resolved[key] = self._file_to_table(matched_file)
-                        break
-                    else:
-                        resolved[key] = value  # Keep placeholder if no match
-                else:
-                    resolved[key] = value
+                # Strategy 1: Check for manual override or cached resolution
+                if step_progress and placeholder in step_progress.resolved_tables:
+                    resolution = step_progress.resolved_tables[placeholder]
+                    if resolution.resolved_table:
+                        resolved_table = resolution.resolved_table
+                        logger.info(f"[EXEC] Placeholder '{placeholder}' resolved from cache/manual: {resolved_table}")
+                
+                # Strategy 2: Try term_index
+                if not resolved_table:
+                    resolved_table = self._resolve_via_term_index(placeholder)
+                    if resolved_table:
+                        logger.info(f"[EXEC] Placeholder '{placeholder}' resolved via term_index: {resolved_table}")
+                
+                # Strategy 3: Fall back to matched_files
+                if not resolved_table and step_progress and step_progress.matched_files:
+                    resolved_table = self._resolve_via_matched_files(placeholder, step_progress.matched_files)
+                    if resolved_table:
+                        logger.info(f"[EXEC] Placeholder '{placeholder}' resolved via matched_files: {resolved_table}")
+                
+                # Use resolved table or keep placeholder
+                resolved[key] = resolved_table if resolved_table else value
+                if not resolved_table:
+                    logger.warning(f"[EXEC] Could not resolve placeholder '{placeholder}'")
+                    
             elif isinstance(value, dict):
                 resolved[key] = self._resolve_config(value, step_progress)
             elif isinstance(value, list):
@@ -324,6 +342,79 @@ class ExecutionService:
                 resolved[key] = value
         
         return resolved
+    
+    def _resolve_via_term_index(self, placeholder: str) -> Optional[str]:
+        """Try to resolve a placeholder using term_index."""
+        conn = self._get_connection()
+        if not conn:
+            return None
+        
+        try:
+            # Import term_index
+            try:
+                from utils.intelligence.term_index import TermIndex
+            except ImportError:
+                from backend.utils.intelligence.term_index import TermIndex
+            
+            term_index = TermIndex(conn, self.project)
+            
+            # Convert placeholder to search terms (w_2_data → ['w-2', 'w2'])
+            search_terms = self._placeholder_to_terms(placeholder)
+            
+            matches = term_index.resolve_terms(search_terms)
+            if matches:
+                # Return the highest confidence match
+                best_match = max(matches, key=lambda m: m.confidence)
+                return best_match.table_name
+                
+        except Exception as e:
+            logger.warning(f"[EXEC] term_index resolution failed for '{placeholder}': {e}")
+        
+        return None
+    
+    def _resolve_via_matched_files(self, placeholder: str, matched_files: List[str]) -> Optional[str]:
+        """Try to resolve a placeholder using matched files."""
+        # Convert placeholder to likely filename patterns
+        patterns = self._placeholder_to_patterns(placeholder)
+        
+        for filename in matched_files:
+            filename_lower = filename.lower()
+            for pattern in patterns:
+                if pattern in filename_lower:
+                    # Found a matching file - convert to table name
+                    return self._file_to_table(filename)
+        
+        return None
+    
+    def _placeholder_to_terms(self, placeholder: str) -> List[str]:
+        """Convert a placeholder to search terms for term_index."""
+        # 'w_2_data' → ['w-2', 'w2', 'w 2']
+        # 'employee_data' → ['employee']
+        
+        # Remove common suffixes
+        base = placeholder.replace('_data', '').replace('_table', '').replace('_report', '')
+        
+        terms = []
+        
+        # Add with underscores converted to various formats
+        terms.append(base.replace('_', '-'))  # w_2 → w-2
+        terms.append(base.replace('_', ''))   # w_2 → w2
+        terms.append(base.replace('_', ' '))  # w_2 → w 2
+        terms.append(base)                     # w_2
+        
+        return terms
+    
+    def _placeholder_to_patterns(self, placeholder: str) -> List[str]:
+        """Convert a placeholder to filename search patterns."""
+        base = placeholder.replace('_data', '').replace('_table', '').replace('_report', '')
+        
+        patterns = []
+        patterns.append(base.replace('_', '-'))
+        patterns.append(base.replace('_', ''))
+        patterns.append(base.replace('_', ' '))
+        patterns.append(base)
+        
+        return patterns
     
     def _file_to_table(self, filename: str) -> str:
         """Convert a filename to a DuckDB table name."""
@@ -463,6 +554,213 @@ class ExecutionService:
             'total_findings': total_findings,
             'results': results
         }
+
+
+    # =========================================================================
+    # TABLE RESOLUTION
+    # =========================================================================
+    
+    def resolve_step_placeholders(
+        self,
+        step: StepDefinition,
+        step_progress: Optional[StepProgress]
+    ) -> Dict[str, TableResolution]:
+        """
+        Auto-resolve all placeholders in a step's analysis configs.
+        
+        Returns dict of placeholder → TableResolution for UI display.
+        Consultant can then override any of these.
+        """
+        resolutions = {}
+        
+        # Extract all placeholders from analysis configs
+        placeholders = self._extract_placeholders(step.analysis)
+        
+        for placeholder in placeholders:
+            # Skip if already manually set
+            if step_progress and placeholder in step_progress.resolved_tables:
+                existing = step_progress.resolved_tables[placeholder]
+                if existing.manually_set:
+                    resolutions[placeholder] = existing
+                    continue
+            
+            # Try hybrid resolution
+            resolution = self._auto_resolve_placeholder(placeholder, step_progress)
+            resolutions[placeholder] = resolution
+        
+        return resolutions
+    
+    def _extract_placeholders(self, configs: List[EngineConfig]) -> List[str]:
+        """Extract all placeholders from engine configs."""
+        placeholders = []
+        
+        def extract_from_dict(d: Dict):
+            for value in d.values():
+                if isinstance(value, str) and value.startswith('{{') and value.endswith('}}'):
+                    placeholder = value[2:-2]
+                    if placeholder not in placeholders:
+                        placeholders.append(placeholder)
+                elif isinstance(value, dict):
+                    extract_from_dict(value)
+                elif isinstance(value, list):
+                    for item in value:
+                        if isinstance(item, dict):
+                            extract_from_dict(item)
+        
+        for config in configs:
+            extract_from_dict(config.config)
+        
+        return placeholders
+    
+    def _auto_resolve_placeholder(
+        self, 
+        placeholder: str,
+        step_progress: Optional[StepProgress]
+    ) -> TableResolution:
+        """
+        Auto-resolve a single placeholder using hybrid strategy.
+        Returns TableResolution with alternatives for UI.
+        """
+        resolution = TableResolution(placeholder=placeholder)
+        alternatives = []
+        
+        # Strategy 1: term_index
+        term_table = self._resolve_via_term_index(placeholder)
+        if term_table:
+            resolution.resolved_table = term_table
+            resolution.resolution_method = 'term_index'
+            resolution.confidence = 0.8
+        
+        # Strategy 2: matched_files (use as alternative or primary)
+        if step_progress and step_progress.matched_files:
+            file_table = self._resolve_via_matched_files(placeholder, step_progress.matched_files)
+            if file_table:
+                if not resolution.resolved_table:
+                    resolution.resolved_table = file_table
+                    resolution.resolution_method = 'matched_files'
+                    resolution.confidence = 0.7
+                elif file_table != resolution.resolved_table:
+                    alternatives.append(file_table)
+        
+        # Get more alternatives from available tables
+        more_alternatives = self._find_alternative_tables(placeholder)
+        for alt in more_alternatives:
+            if alt not in alternatives and alt != resolution.resolved_table:
+                alternatives.append(alt)
+        
+        resolution.alternatives = alternatives[:5]  # Limit to 5
+        
+        return resolution
+    
+    def _find_alternative_tables(self, placeholder: str) -> List[str]:
+        """Find tables that might match a placeholder."""
+        conn = self._get_connection()
+        if not conn:
+            return []
+        
+        alternatives = []
+        patterns = self._placeholder_to_patterns(placeholder)
+        
+        try:
+            # Search _schema_metadata for matching tables
+            for pattern in patterns:
+                results = conn.execute("""
+                    SELECT DISTINCT table_name 
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND (
+                        LOWER(table_name) LIKE ? 
+                        OR LOWER(file_name) LIKE ?
+                    )
+                    LIMIT 5
+                """, [f"%{pattern}%", f"%{pattern}%"]).fetchall()
+                
+                for row in results:
+                    if row[0] not in alternatives:
+                        alternatives.append(row[0])
+                
+                if len(alternatives) >= 5:
+                    break
+                    
+        except Exception as e:
+            logger.warning(f"[EXEC] Failed to find alternative tables for '{placeholder}': {e}")
+        
+        return alternatives
+    
+    def get_available_tables(self, filter_pattern: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Get all available tables for manual selection dropdown.
+        
+        Returns list of {table_name, file_name, row_count, columns} dicts.
+        """
+        conn = self._get_connection()
+        if not conn:
+            return []
+        
+        try:
+            # Build query with optional filter
+            if filter_pattern:
+                results = conn.execute("""
+                    SELECT table_name, file_name, row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND (
+                        LOWER(table_name) LIKE ? 
+                        OR LOWER(file_name) LIKE ?
+                    )
+                    ORDER BY file_name
+                    LIMIT 50
+                """, [f"%{filter_pattern.lower()}%", f"%{filter_pattern.lower()}%"]).fetchall()
+            else:
+                results = conn.execute("""
+                    SELECT table_name, file_name, row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    ORDER BY file_name
+                    LIMIT 50
+                """).fetchall()
+            
+            tables = []
+            for row in results:
+                tables.append({
+                    'table_name': row[0],
+                    'file_name': row[1],
+                    'row_count': row[2]
+                })
+            
+            return tables
+            
+        except Exception as e:
+            logger.error(f"[EXEC] Failed to get available tables: {e}")
+            return []
+    
+    def set_table_resolution(
+        self,
+        instance_id: str,
+        step_id: str,
+        placeholder: str,
+        table_name: str
+    ) -> TableResolution:
+        """
+        Manually set/override a table resolution.
+        
+        This is called when the consultant picks a different table.
+        """
+        resolution = TableResolution(
+            placeholder=placeholder,
+            resolved_table=table_name,
+            resolution_method='manual',
+            confidence=1.0,
+            manually_set=True
+        )
+        
+        # Persist to progress_service
+        progress_service = get_progress_service()
+        progress_service.set_resolved_table(instance_id, step_id, placeholder, resolution)
+        
+        logger.info(f"[EXEC] Manual table resolution: {placeholder} → {table_name}")
+        
+        return resolution
 
 
 # =============================================================================

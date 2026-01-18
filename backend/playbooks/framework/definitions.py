@@ -137,6 +137,17 @@ class Finding:
 
 
 @dataclass
+class TableResolution:
+    """Resolution of a placeholder to an actual table."""
+    placeholder: str              # e.g., "w_2_data"
+    resolved_table: Optional[str] = None  # e.g., "TEA1000_w2_elections_v3"
+    resolution_method: Optional[str] = None  # 'term_index', 'matched_files', 'manual'
+    confidence: float = 0.0
+    alternatives: List[str] = field(default_factory=list)  # Other candidate tables
+    manually_set: bool = False    # Consultant override flag
+
+
+@dataclass
 class StepProgress:
     """Progress state for a single step."""
     step_id: str
@@ -145,6 +156,9 @@ class StepProgress:
     # Data matching
     matched_files: List[str] = field(default_factory=list)
     missing_data: List[str] = field(default_factory=list)
+    
+    # Table resolution (placeholder → actual table)
+    resolved_tables: Dict[str, TableResolution] = field(default_factory=dict)
     
     # Analysis results
     findings: List[Finding] = field(default_factory=list)

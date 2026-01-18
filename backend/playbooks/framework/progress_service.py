@@ -22,7 +22,7 @@ import json
 
 from .definitions import (
     PlaybookDefinition, PlaybookInstance, StepProgress, Finding,
-    StepStatus, FindingStatus, FindingSeverity,
+    StepStatus, FindingStatus, FindingSeverity, TableResolution,
     create_playbook_instance, create_step_progress
 )
 
@@ -197,6 +197,41 @@ class ProgressService:
             self._persist_instance(instance)
         
         return True
+    
+    def set_resolved_table(
+        self,
+        instance_id: str,
+        step_id: str,
+        placeholder: str,
+        resolution: TableResolution
+    ) -> bool:
+        """Set or update a table resolution for a step."""
+        instance = self.get_instance(instance_id)
+        if not instance or step_id not in instance.progress:
+            return False
+        
+        progress = instance.progress[step_id]
+        progress.resolved_tables[placeholder] = resolution
+        
+        instance.updated_at = datetime.now()
+        
+        if self.supabase:
+            self._persist_instance(instance)
+        
+        logger.info(f"[PROGRESS] Set resolution for step {step_id}: {placeholder} → {resolution.resolved_table}")
+        return True
+    
+    def get_step_resolutions(
+        self,
+        instance_id: str,
+        step_id: str
+    ) -> Dict[str, TableResolution]:
+        """Get all table resolutions for a step."""
+        instance = self.get_instance(instance_id)
+        if not instance or step_id not in instance.progress:
+            return {}
+        
+        return instance.progress[step_id].resolved_tables
     
     # =========================================================================
     # FINDINGS MANAGEMENT

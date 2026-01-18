@@ -62,6 +62,12 @@ class UpdateFindingRequest(BaseModel):
     note: Optional[str] = None
 
 
+class ResolveTableRequest(BaseModel):
+    """Request to manually resolve a placeholder to a table."""
+    placeholder: str
+    table_name: str
+
+
 # =============================================================================
 # HELPER FUNCTIONS
 # =============================================================================
@@ -495,6 +501,136 @@ async def update_finding(
         raise HTTPException(status_code=404, detail="Finding not found")
     
     return {'success': True}
+
+
+# =============================================================================
+# TABLE RESOLUTION
+# =============================================================================
+
+@router.get("/instance/{instance_id}/step/{step_id}/resolve")
+async def get_step_resolutions(instance_id: str, step_id: str):
+    """
+    Get table resolutions for a step.
+    
+    Returns current resolutions (manual or auto) plus alternatives.
+    Consultant uses this to see what tables will be used and can override.
+    """
+    fw = _get_framework()
+    if not fw:
+        raise HTTPException(status_code=500, detail="Framework not available")
+    
+    progress_service = fw['progress']()
+    query_service = fw['query']()
+    
+    # Get instance
+    instance = progress_service.get_instance(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    
+    # Get playbook definition
+    definition = query_service.load_playbook(instance.playbook_id)
+    if not definition:
+        raise HTTPException(status_code=404, detail="Playbook not found")
+    
+    # Find step
+    step = None
+    for s in definition.steps:
+        if s.id == step_id:
+            step = s
+            break
+    
+    if not step:
+        raise HTTPException(status_code=404, detail=f"Step '{step_id}' not found")
+    
+    step_progress = instance.progress.get(step_id)
+    
+    # Get execution service to do resolution
+    execution_service = fw['execution'](instance.project_id)
+    resolutions = execution_service.resolve_step_placeholders(step, step_progress)
+    
+    # Convert to dict for JSON
+    result = {}
+    for placeholder, resolution in resolutions.items():
+        result[placeholder] = {
+            'placeholder': resolution.placeholder,
+            'resolved_table': resolution.resolved_table,
+            'resolution_method': resolution.resolution_method,
+            'confidence': resolution.confidence,
+            'alternatives': resolution.alternatives,
+            'manually_set': resolution.manually_set
+        }
+    
+    return {
+        'success': True,
+        'step_id': step_id,
+        'resolutions': result,
+        'has_unresolved': any(r.resolved_table is None for r in resolutions.values())
+    }
+
+
+@router.post("/instance/{instance_id}/step/{step_id}/resolve")
+async def set_step_resolution(
+    instance_id: str,
+    step_id: str,
+    request: ResolveTableRequest
+):
+    """
+    Manually set/override a table resolution.
+    
+    Called when consultant picks a different table from the dropdown.
+    """
+    fw = _get_framework()
+    if not fw:
+        raise HTTPException(status_code=500, detail="Framework not available")
+    
+    progress_service = fw['progress']()
+    
+    # Verify instance exists
+    instance = progress_service.get_instance(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    
+    if step_id not in instance.progress:
+        raise HTTPException(status_code=404, detail=f"Step '{step_id}' not found")
+    
+    # Set the resolution via execution service
+    execution_service = fw['execution'](instance.project_id)
+    resolution = execution_service.set_table_resolution(
+        instance_id,
+        step_id,
+        request.placeholder,
+        request.table_name
+    )
+    
+    return {
+        'success': True,
+        'placeholder': resolution.placeholder,
+        'resolved_table': resolution.resolved_table,
+        'manually_set': resolution.manually_set
+    }
+
+
+@router.get("/tables/{project_id}")
+async def get_available_tables(project_id: str, filter: Optional[str] = None):
+    """
+    Get available tables for manual selection dropdown.
+    
+    Args:
+        project_id: Project context
+        filter: Optional search filter (matches table_name or file_name)
+    """
+    fw = _get_framework()
+    if not fw:
+        raise HTTPException(status_code=500, detail="Framework not available")
+    
+    execution_service = fw['execution'](project_id)
+    tables = execution_service.get_available_tables(filter)
+    
+    return {
+        'success': True,
+        'tables': tables,
+        'count': len(tables)
+    }
 
 
 # =============================================================================
