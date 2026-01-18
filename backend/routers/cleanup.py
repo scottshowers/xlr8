@@ -103,11 +103,18 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
     
     Note: PDF tables are now in _schema_metadata (via store_dataframe).
     The _pdf_tables table is deprecated and no longer used.
+    
+    The 'project' param can be either:
+    - Project code (e.g., "TEA1000")  
+    - Project UUID (e.g., "0a2a186d-daa2-4a33-891c-b508803fdd83")
+    We check both project and project_id columns for matches.
     """
     cleaned = {
         "_schema_metadata": 0, 
         "_column_mappings": 0,
         "_column_profiles": 0,
+        "_term_index": 0,
+        "_entity_tables": 0,
         "_intelligence_findings": 0,
         "_intelligence_tasks": 0,
         "_intelligence_lookups": 0,
@@ -115,6 +122,14 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
     }
     
     try:
+        # Check if project_id column exists (for hybrid matching)
+        has_project_id = False
+        try:
+            cols = [row[1] for row in conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()]
+            has_project_id = 'project_id' in cols
+        except Exception:
+            pass
+        
         # 1. Clean _schema_metadata (ALL file types: Excel, CSV, PDF)
         try:
             if table_name:
@@ -126,7 +141,11 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
                 cleaned["_schema_metadata"] = result.rowcount if hasattr(result, 'rowcount') else 1
                 logger.info(f"[CLEANUP] Deleted from _schema_metadata by file_name: {filename}")
             elif project:
-                result = conn.execute(f"DELETE FROM _schema_metadata WHERE project = ?", [project])
+                # Match by project CODE or project_id UUID
+                if has_project_id:
+                    result = conn.execute(f"DELETE FROM _schema_metadata WHERE LOWER(project) = LOWER(?) OR project_id = ?", [project, project])
+                else:
+                    result = conn.execute(f"DELETE FROM _schema_metadata WHERE LOWER(project) = LOWER(?)", [project])
                 cleaned["_schema_metadata"] = result.rowcount if hasattr(result, 'rowcount') else 1
                 logger.info(f"[CLEANUP] Deleted from _schema_metadata by project: {project}")
         except Exception as e:
@@ -141,17 +160,38 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
                 elif filename:
                     conn.execute(f"DELETE FROM {ctx_table} WHERE file_name = ?", [filename])
                 elif project:
-                    conn.execute(f"DELETE FROM {ctx_table} WHERE project = ?", [project])
+                    # Check if this table has project_id column
+                    ctx_has_project_id = False
+                    try:
+                        ctx_cols = [row[1] for row in conn.execute(f"PRAGMA table_info({ctx_table})").fetchall()]
+                        ctx_has_project_id = 'project_id' in ctx_cols
+                    except Exception:
+                        pass
+                    
+                    if ctx_has_project_id:
+                        conn.execute(f"DELETE FROM {ctx_table} WHERE LOWER(project) = LOWER(?) OR project_id = ?", [project, project])
+                    else:
+                        conn.execute(f"DELETE FROM {ctx_table} WHERE LOWER(project) = LOWER(?)", [project])
                 cleaned[ctx_table] = 1
                 logger.info(f"[CLEANUP] Cleaned {ctx_table}")
             except Exception as e:
                 logger.debug(f"[CLEANUP] {ctx_table} cleanup: {e}")
         
-        # 3. Clean intelligence tables
+        # 3. Clean term_index and entity_tables
+        for term_table in ['_term_index', '_entity_tables']:
+            try:
+                if project:
+                    conn.execute(f"DELETE FROM {term_table} WHERE LOWER(project) = LOWER(?)", [project])
+                    cleaned[term_table] = 1
+                    logger.info(f"[CLEANUP] Cleaned {term_table}")
+            except Exception as e:
+                logger.debug(f"[CLEANUP] {term_table} cleanup: {e}")
+        
+        # 4. Clean intelligence tables
         for intel_table in ['_intelligence_findings', '_intelligence_tasks', '_intelligence_lookups', '_intelligence_relationships']:
             try:
                 if project:
-                    conn.execute(f"DELETE FROM {intel_table} WHERE project_name = ?", [project])
+                    conn.execute(f"DELETE FROM {intel_table} WHERE LOWER(project_name) = LOWER(?)", [project])
                     cleaned[intel_table] = 1
                     logger.info(f"[CLEANUP] Cleaned {intel_table}")
             except Exception as e:
@@ -635,15 +675,43 @@ async def delete_all_project_data(project_id: str):
     collection = _get_chromadb()
     if collection:
         try:
-            # Get all docs and filter by project (ChromaDB where clause is finicky)
+            # Build list of project identifiers to match (code, UUID, name variations)
+            project_matches = {project_lower}
+            
+            # Try to look up project in Supabase to get all identifiers
+            supabase = _get_supabase()
+            if supabase:
+                try:
+                    # Try by ID (UUID)
+                    result = supabase.table("projects").select("id,code,name,customer").eq("id", project_id).execute()
+                    if result.data:
+                        proj = result.data[0]
+                        project_matches.add(proj.get('id', '').lower())
+                        project_matches.add(proj.get('code', '').lower())
+                        project_matches.add(proj.get('name', '').lower())
+                    else:
+                        # Try by code
+                        result = supabase.table("projects").select("id,code,name,customer").ilike("code", project_id).execute()
+                        if result.data:
+                            proj = result.data[0]
+                            project_matches.add(proj.get('id', '').lower())
+                            project_matches.add(proj.get('code', '').lower())
+                            project_matches.add(proj.get('name', '').lower())
+                except Exception as lookup_e:
+                    logger.debug(f"[CLEANUP] Project lookup: {lookup_e}")
+            
+            project_matches.discard('')  # Remove empty strings
+            logger.info(f"[CLEANUP] ChromaDB cleanup - matching identifiers: {project_matches}")
+            
+            # Get all docs and filter by any matching project identifier
             all_docs = collection.get(include=["metadatas"])
             ids_to_delete = []
             
             for i, metadata in enumerate(all_docs.get("metadatas", [])):
                 if not metadata:
                     continue
-                doc_project = metadata.get("project_id") or metadata.get("project") or ""
-                if doc_project.lower() == project_lower:
+                doc_project = (metadata.get("project_id") or metadata.get("project") or "").lower()
+                if doc_project in project_matches:
                     ids_to_delete.append(all_docs["ids"][i])
             
             if ids_to_delete:
@@ -663,12 +731,22 @@ async def delete_all_project_data(project_id: str):
         except Exception as e:
             logger.debug(f"[CLEANUP] Jobs cleanup: {e}")
         
-        # Document Registry - try both project_id (UUID) and project name match
+        # Document Registry - try multiple matching strategies
         try:
-            # First try by project code in filename prefix
-            result = supabase.table("document_registry").delete().ilike("filename", f"{project_id}%").execute()
-            deleted["registry"] = len(result.data) if result.data else 0
-            logger.info(f"[CLEANUP] Deleted {deleted['registry']} from document_registry")
+            # Strategy 1: Match by project_id column (UUID)
+            result1 = supabase.table("document_registry").delete().eq("project_id", project_id).execute()
+            count1 = len(result1.data) if result1.data else 0
+            
+            # Strategy 2: Match by project_name column (code like "TEA1000")
+            result2 = supabase.table("document_registry").delete().ilike("project_name", project_id).execute()
+            count2 = len(result2.data) if result2.data else 0
+            
+            # Strategy 3: Match by filename prefix (legacy)
+            result3 = supabase.table("document_registry").delete().ilike("filename", f"{project_id}%").execute()
+            count3 = len(result3.data) if result3.data else 0
+            
+            deleted["registry"] = count1 + count2 + count3
+            logger.info(f"[CLEANUP] Deleted {deleted['registry']} from document_registry (by_project_id={count1}, by_name={count2}, by_filename={count3})")
         except Exception as e:
             logger.debug(f"[CLEANUP] Registry cleanup: {e}")
         
