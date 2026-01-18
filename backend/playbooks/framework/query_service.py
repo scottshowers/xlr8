@@ -203,7 +203,16 @@ class QueryService:
             
             try:
                 # Try to find action_id and description columns
-                columns = [c.lower() for c in table_info.get('columns', [])]
+                # Columns may be strings or dicts with 'name' key
+                raw_columns = table_info.get('columns', [])
+                columns = []
+                for c in raw_columns:
+                    if isinstance(c, dict):
+                        columns.append(c.get('name', '').lower())
+                    elif isinstance(c, str):
+                        columns.append(c.lower())
+                    else:
+                        columns.append(str(c).lower())
                 
                 action_col = None
                 desc_col = None
