@@ -15,6 +15,7 @@
 import React, { useState, useEffect, useRef, useCallback, Component } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../services/api';
+import TableResolutionPanel from './TableResolutionPanel';
 import { 
   AlertTriangle, Lightbulb, Clock, RefreshCw, CheckCircle, XCircle, 
   Search, ClipboardList, Building, FileText, Upload, Folder, Calendar,
@@ -1535,7 +1536,7 @@ function TooltipDisplay({ tooltips, onEdit, onDelete, isAdmin }) {
 }
 
 // Action Card Component
-function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged, onUnacknowledge }) {
+function ActionCard({ action, stepNumber, progress, projectId, instanceId, onUpdate, tooltips, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged, onUnacknowledge }) {
   const [expanded, setExpanded] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [notes, setNotes] = useState(progress?.notes || '');
@@ -1941,6 +1942,16 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
             }
             return null;
           })()}
+
+          {/* Data Source Selection (Table Resolution) */}
+          {instanceId && (
+            <TableResolutionPanel
+              instanceId={instanceId}
+              stepId={action.action_id}
+              projectId={projectId}
+              onResolutionsChange={() => console.log('[RESOLUTION] Changed for', action.action_id)}
+            />
+          )}
 
           <div style={styles.section}>
             <div style={styles.buttonRow}>
@@ -2558,7 +2569,7 @@ function ActionCard({ action, stepNumber, progress, projectId, onUpdate, tooltip
 }
 
 // Step Accordion Component
-function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onUnacknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged }) {
+function StepAccordion({ step, progress, projectId, instanceId, onUpdate, tooltipsByAction, isAdmin, onAddTooltip, onEditTooltip, onDeleteTooltip, uploadedFiles, onAcknowledge, onUnacknowledge, onSuppress, onSuppressPattern, isIssueSuppressed, isIssueAcknowledged }) {
   const [expanded, setExpanded] = useState(false); // Default collapsed
   
   // Safety check
@@ -2659,6 +2670,7 @@ function StepAccordion({ step, progress, projectId, onUpdate, tooltipsByAction, 
                 stepNumber={step.step_number}
                 progress={progress[action.action_id] || {}}
                 projectId={projectId}
+                instanceId={instanceId}
                 onUpdate={onUpdate}
                 tooltips={tooltipsByAction[action.action_id] || []}
                 isAdmin={isAdmin}
@@ -2704,6 +2716,9 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
   // SUPPRESSIONS: State for acknowledged/suppressed findings
   const [suppressions, setSuppressions] = useState([]);
   
+  // FRAMEWORK: Instance ID for new playbook framework (table resolution)
+  const [frameworkInstanceId, setFrameworkInstanceId] = useState(null);
+  
   // ENTITY CONFIGURATION: State for FEIN selection
   const [showEntityConfig, setShowEntityConfig] = useState(false);
   const [entityConfig, setEntityConfig] = useState(null);
@@ -2728,8 +2743,24 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
       loadTooltips();
       loadSuppressions();
       checkEntityConfig();
+      loadFrameworkInstance();
     }
   }, [project]);
+  
+  // Load framework instance for table resolution
+  const loadFrameworkInstance = async () => {
+    try {
+      const res = await api.post(`/playbooks/year-end/instance/${project.id}`, {
+        create_if_missing: true
+      });
+      if (res.data?.instance_id) {
+        setFrameworkInstanceId(res.data.instance_id);
+        console.log('[FRAMEWORK] Instance loaded:', res.data.instance_id);
+      }
+    } catch (err) {
+      console.warn('[FRAMEWORK] Instance load failed (non-blocking):', err);
+    }
+  };
   
   // Check/load entity configuration
   const checkEntityConfig = async () => {
@@ -3673,6 +3704,7 @@ export default function YearEndPlaybook({ project, projectName, customerName, on
             step={step}
             progress={progress}
             projectId={project.id}
+            instanceId={frameworkInstanceId}
             onUpdate={handleUpdate}
             tooltipsByAction={tooltipsByAction}
             isAdmin={isAdmin}
