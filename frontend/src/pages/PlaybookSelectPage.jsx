@@ -1,18 +1,45 @@
 /**
- * PlaybookSelectPage.jsx - Step 3: Select Playbooks
+ * PlaybookSelectPage.jsx - Step 3: Select Playbooks + Data Source Review
  * 
- * Select which analysis playbooks to run against uploaded data.
- * Uses design system classes - NO emojis.
+ * Two-phase flow:
+ * 1. Select which playbook to run
+ * 2. Review/confirm data source mappings (via DataSourcesReview)
  * 
- * Phase 4A UX Overhaul - January 16, 2026
+ * After confirmation, navigates to Step 4 (Processing) with instance_id.
+ * 
+ * Updated: January 18, 2026 - Integrated with Playbook Framework
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { BookOpen, Check, ChevronRight, Calendar, Shield, Search, RefreshCw, Zap, ClipboardList } from 'lucide-react';
+import { 
+  BookOpen, Check, ChevronRight, ChevronLeft, Calendar, Shield, 
+  Search, RefreshCw, Zap, ClipboardList, Database, Loader2,
+  AlertTriangle, ArrowRight
+} from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
+import DataSourcesReview from '../components/DataSourcesReview';
+import api from '../services/api';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+// =============================================================================
+// CONSTANTS
+// =============================================================================
+
+const COLORS = {
+  primary: '#83b16d',
+  primaryLight: 'rgba(131, 177, 109, 0.1)',
+  text: '#1a2332',
+  textMuted: '#64748b',
+  border: '#e2e8f0',
+  bg: '#f8fafc',
+  white: '#ffffff',
+  green: '#059669',
+  greenBg: '#d1fae5',
+  yellow: '#d97706',
+  yellowBg: '#fef3c7',
+  red: '#dc2626',
+  redBg: '#fee2e2',
+};
 
 const CATEGORY_ICONS = {
   'year-end': Calendar,
@@ -21,146 +48,506 @@ const CATEGORY_ICONS = {
   'migration': RefreshCw,
   'optimization': Zap,
   'audit': ClipboardList,
+  'vendor': BookOpen,
   'default': BookOpen,
 };
 
-const MOCK_PLAYBOOKS = [
-  { id: 'year-end-readiness', name: 'Year-End Readiness', description: 'W-2 validation, tax compliance, payroll reconciliation', category: 'year-end', action_count: 24, recommended: true },
-  { id: 'data-quality', name: 'Data Quality Assessment', description: 'Missing fields, duplicates, data inconsistencies', category: 'data-quality', action_count: 18, recommended: true },
-  { id: 'migration-validation', name: 'Migration Validation', description: 'Pre/post migration data integrity checks', category: 'migration', action_count: 32 },
-  { id: 'compliance-audit', name: 'Compliance Audit', description: 'Regulatory requirements and best practices', category: 'compliance', action_count: 15 },
-  { id: 'benefits-review', name: 'Benefits Configuration Review', description: 'Benefit plans, eligibility, deduction mappings', category: 'audit', action_count: 20 },
+// Fallback playbooks if API not available
+const FALLBACK_PLAYBOOKS = [
+  { 
+    id: 'year-end', 
+    name: 'Year-End Checklist', 
+    description: 'W-2 validation, tax compliance, payroll reconciliation', 
+    category: 'year-end', 
+    type: 'vendor',
+    available: true
+  },
 ];
 
-const PlaybookSelectPage = () => {
+// =============================================================================
+// PHASES
+// =============================================================================
+
+const PHASES = {
+  SELECT: 'select',
+  REVIEW: 'review',
+};
+
+// =============================================================================
+// PLAYBOOK CARD COMPONENT
+// =============================================================================
+
+function PlaybookCard({ playbook, isSelected, onSelect }) {
+  const Icon = CATEGORY_ICONS[playbook.category] || CATEGORY_ICONS[playbook.type] || CATEGORY_ICONS.default;
+  
+  const styles = {
+    card: {
+      background: isSelected ? COLORS.primaryLight : COLORS.white,
+      border: `2px solid ${isSelected ? COLORS.primary : COLORS.border}`,
+      borderRadius: '12px',
+      padding: '1.25rem',
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      position: 'relative',
+    },
+    header: {
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      marginBottom: '0.75rem',
+    },
+    iconWrap: {
+      width: '40px',
+      height: '40px',
+      borderRadius: '10px',
+      background: isSelected ? COLORS.primary : COLORS.bg,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: isSelected ? COLORS.white : COLORS.primary,
+    },
+    checkWrap: {
+      width: '24px',
+      height: '24px',
+      borderRadius: '50%',
+      background: isSelected ? COLORS.primary : COLORS.border,
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: COLORS.white,
+    },
+    name: {
+      fontSize: '1.1rem',
+      fontWeight: '600',
+      color: COLORS.text,
+      marginBottom: '0.5rem',
+    },
+    desc: {
+      fontSize: '0.9rem',
+      color: COLORS.textMuted,
+      lineHeight: 1.5,
+    },
+  };
+
+  return (
+    <div style={styles.card} onClick={() => onSelect(playbook)}>
+      <div style={styles.header}>
+        <div style={styles.iconWrap}>
+          <Icon size={20} />
+        </div>
+        <div style={styles.checkWrap}>
+          {isSelected && <Check size={14} />}
+        </div>
+      </div>
+      <h4 style={styles.name}>{playbook.name}</h4>
+      <p style={styles.desc}>{playbook.description || 'Analysis playbook'}</p>
+    </div>
+  );
+}
+
+// =============================================================================
+// MAIN COMPONENT
+// =============================================================================
+
+export default function PlaybookSelectPage() {
   const navigate = useNavigate();
   const { activeProject } = useProject();
   
+  // Phase state
+  const [phase, setPhase] = useState(PHASES.SELECT);
+  
+  // Selection phase state
   const [playbooks, setPlaybooks] = useState([]);
-  const [selectedIds, setSelectedIds] = useState(new Set());
-  const [loading, setLoading] = useState(true);
-  const [starting, setStarting] = useState(false);
+  const [selectedPlaybook, setSelectedPlaybook] = useState(null);
+  const [loadingPlaybooks, setLoadingPlaybooks] = useState(true);
+  
+  // Review phase state
+  const [instanceId, setInstanceId] = useState(null);
+  const [definition, setDefinition] = useState(null);
+  const [resolutions, setResolutions] = useState({});
+  const [loadingInstance, setLoadingInstance] = useState(false);
+  
+  // General state
   const [error, setError] = useState(null);
 
+  // =========================================================================
+  // LOAD PLAYBOOKS
+  // =========================================================================
+  
   useEffect(() => {
     fetchPlaybooks();
   }, []);
 
   const fetchPlaybooks = async () => {
+    setLoadingPlaybooks(true);
+    setError(null);
+    
     try {
-      const res = await fetch(`${API_BASE}/api/playbooks/templates`);
-      if (res.ok) {
-        const data = await res.json();
-        setPlaybooks(data.templates || data.playbooks || data || []);
+      // Try the framework endpoint first
+      const res = await api.get('/playbooks/list');
+      if (res.data?.playbooks && res.data.playbooks.length > 0) {
+        setPlaybooks(res.data.playbooks);
       } else {
-        setPlaybooks(MOCK_PLAYBOOKS);
+        // Fall back to templates endpoint
+        const templatesRes = await api.get('/playbooks/templates');
+        if (templatesRes.data?.templates) {
+          setPlaybooks(templatesRes.data.templates);
+        } else {
+          setPlaybooks(FALLBACK_PLAYBOOKS);
+        }
       }
-    } catch {
-      setPlaybooks(MOCK_PLAYBOOKS);
+    } catch (err) {
+      console.warn('Failed to load playbooks, using fallback:', err);
+      setPlaybooks(FALLBACK_PLAYBOOKS);
     } finally {
-      setLoading(false);
+      setLoadingPlaybooks(false);
     }
   };
 
-  const toggleSelection = (id) => {
-    setSelectedIds(prev => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
+  // =========================================================================
+  // HANDLE PLAYBOOK SELECTION -> MOVE TO REVIEW
+  // =========================================================================
+  
+  const handleSelectPlaybook = (playbook) => {
+    setSelectedPlaybook(playbook);
   };
 
-  const selectRecommended = () => setSelectedIds(new Set(playbooks.filter(p => p.recommended).map(p => p.id)));
-  const selectAll = () => setSelectedIds(new Set(playbooks.map(p => p.id)));
-  const clearAll = () => setSelectedIds(new Set());
-
-  const startAnalysis = async () => {
-    if (selectedIds.size === 0) {
-      setError('Please select at least one playbook');
+  const handleContinueToReview = async () => {
+    if (!selectedPlaybook || !activeProject?.id) {
+      setError('Please select a playbook');
       return;
     }
-    setStarting(true);
+
+    setLoadingInstance(true);
+    setError(null);
+
     try {
-      await fetch(`${API_BASE}/api/analysis/start`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ project_id: activeProject?.id, playbook_ids: Array.from(selectedIds) }),
-      });
-    } catch {}
-    navigate('/processing');
+      // 1. Create/get instance
+      const instanceRes = await api.post(
+        `/playbooks/${selectedPlaybook.id}/instance/${activeProject.id}`,
+        { create_if_missing: true }
+      );
+      
+      const newInstanceId = instanceRes.data.instance_id;
+      setInstanceId(newInstanceId);
+
+      // 2. Load playbook definition
+      const defRes = await api.get(`/playbooks/${selectedPlaybook.id}/definition`);
+      const playbook = defRes.data.playbook;
+      setDefinition(playbook);
+
+      // 3. Load resolutions for each step
+      const allResolutions = {};
+      for (const step of playbook.steps) {
+        try {
+          const resolveRes = await api.get(
+            `/playbooks/instance/${newInstanceId}/step/${step.id}/resolve`
+          );
+          allResolutions[step.id] = resolveRes.data.resolutions || {};
+        } catch (err) {
+          console.warn(`Failed to get resolutions for step ${step.id}:`, err);
+          allResolutions[step.id] = {};
+        }
+      }
+      setResolutions(allResolutions);
+
+      // 4. Move to review phase
+      setPhase(PHASES.REVIEW);
+
+    } catch (err) {
+      console.error('Failed to initialize playbook:', err);
+      setError(err.response?.data?.detail || 'Failed to initialize playbook');
+    } finally {
+      setLoadingInstance(false);
+    }
   };
 
-  const totalActions = playbooks.filter(p => selectedIds.has(p.id)).reduce((sum, p) => sum + (p.action_count || 0), 0);
+  // =========================================================================
+  // HANDLE RESOLUTION CHANGES
+  // =========================================================================
+  
+  const handleResolutionChange = useCallback((stepId, newStepResolutions) => {
+    setResolutions(prev => ({
+      ...prev,
+      [stepId]: newStepResolutions
+    }));
+  }, []);
 
-  if (loading) {
-    return <div className="page-loading"><p>Loading playbooks...</p></div>;
+  // =========================================================================
+  // CHECK IF ALL RESOLVED
+  // =========================================================================
+  
+  const hasUnresolved = useCallback(() => {
+    if (!definition?.steps) return false;
+    
+    for (const step of definition.steps) {
+      const stepRes = resolutions[step.id] || {};
+      for (const placeholder of Object.keys(stepRes)) {
+        const res = stepRes[placeholder];
+        if (!res?.resolved_table) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }, [definition, resolutions]);
+
+  // =========================================================================
+  // HANDLE CONFIRM -> NAVIGATE TO PROCESSING
+  // =========================================================================
+  
+  const handleConfirm = () => {
+    if (!instanceId) {
+      setError('No instance created');
+      return;
+    }
+    
+    // Navigate to Step 4 with instance_id
+    navigate(`/processing/${instanceId}`);
+  };
+
+  // =========================================================================
+  // HANDLE BACK
+  // =========================================================================
+  
+  const handleBack = () => {
+    if (phase === PHASES.REVIEW) {
+      setPhase(PHASES.SELECT);
+      setInstanceId(null);
+      setDefinition(null);
+      setResolutions({});
+    } else {
+      navigate('/data');
+    }
+  };
+
+  // =========================================================================
+  // STYLES
+  // =========================================================================
+  
+  const styles = {
+    container: {
+      maxWidth: '1000px',
+      margin: '0 auto',
+      padding: '1.5rem',
+    },
+    header: {
+      marginBottom: '2rem',
+    },
+    title: {
+      fontSize: '1.75rem',
+      fontWeight: '600',
+      color: COLORS.text,
+      marginBottom: '0.5rem',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.75rem',
+    },
+    subtitle: {
+      fontSize: '1rem',
+      color: COLORS.textMuted,
+    },
+    grid: {
+      display: 'grid',
+      gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+      gap: '1rem',
+      marginBottom: '2rem',
+    },
+    footer: {
+      display: 'flex',
+      justifyContent: 'space-between',
+      alignItems: 'center',
+      padding: '1rem 0',
+      borderTop: `1px solid ${COLORS.border}`,
+    },
+    btn: {
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+      padding: '0.75rem 1.5rem',
+      borderRadius: '8px',
+      fontSize: '1rem',
+      fontWeight: '600',
+      cursor: 'pointer',
+      border: 'none',
+      transition: 'all 0.2s ease',
+    },
+    btnPrimary: {
+      background: COLORS.primary,
+      color: COLORS.white,
+    },
+    btnSecondary: {
+      background: 'transparent',
+      color: COLORS.textMuted,
+      border: `1px solid ${COLORS.border}`,
+    },
+    btnDisabled: {
+      opacity: 0.5,
+      cursor: 'not-allowed',
+    },
+    error: {
+      padding: '1rem',
+      background: COLORS.redBg,
+      color: COLORS.red,
+      borderRadius: '8px',
+      marginBottom: '1rem',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '0.5rem',
+    },
+    loading: {
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      padding: '4rem 2rem',
+      color: COLORS.textMuted,
+      gap: '1rem',
+    },
+    selectedInfo: {
+      padding: '0.75rem 1rem',
+      background: COLORS.primaryLight,
+      borderRadius: '8px',
+      color: COLORS.text,
+      fontWeight: '500',
+    },
+  };
+
+  // =========================================================================
+  // RENDER: LOADING STATE
+  // =========================================================================
+  
+  if (loadingPlaybooks) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loading}>
+          <Loader2 size={32} className="animate-spin" style={{ animation: 'spin 1s linear infinite' }} />
+          <span>Loading playbooks...</span>
+        </div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
   }
 
-  return (
-    <div className="playbook-page">
-      <div className="page-header">
-        <h1 className="page-title">Select Playbooks</h1>
-        <p className="page-subtitle">Choose which analysis to run{activeProject ? ` for ${activeProject.customer || activeProject.name}` : ''}</p>
-      </div>
-
-      {/* Controls */}
-      <div className="card mb-4">
-        <div className="card-body flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <span style={{ fontWeight: 'var(--weight-semibold)' }}>{selectedIds.size} of {playbooks.length} selected</span>
-            {selectedIds.size > 0 && <span className="text-muted">({totalActions} actions)</span>}
+  // =========================================================================
+  // RENDER: REVIEW PHASE (DataSourcesReview)
+  // =========================================================================
+  
+  if (phase === PHASES.REVIEW) {
+    if (loadingInstance) {
+      return (
+        <div style={styles.container}>
+          <div style={styles.loading}>
+            <Loader2 size={32} style={{ animation: 'spin 1s linear infinite' }} />
+            <span>Initializing playbook and resolving data sources...</span>
           </div>
-          <div className="flex gap-2">
-            <button className="btn btn-secondary btn-sm" onClick={selectRecommended}>Recommended</button>
-            <button className="btn btn-secondary btn-sm" onClick={selectAll}>Select All</button>
-            {selectedIds.size > 0 && <button className="btn btn-secondary btn-sm" onClick={clearAll}>Clear</button>}
-          </div>
+          <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
         </div>
-      </div>
+      );
+    }
 
-      {/* Playbook Grid */}
-      <div className="playbook-grid">
-        {playbooks.map(playbook => {
-          const isSelected = selectedIds.has(playbook.id);
-          const Icon = CATEGORY_ICONS[playbook.category] || CATEGORY_ICONS.default;
-          return (
-            <div
-              key={playbook.id}
-              className={`playbook-card ${isSelected ? 'playbook-card--selected' : ''}`}
-              onClick={() => toggleSelection(playbook.id)}
-            >
-              <div className="playbook-card__header">
-                <div className="playbook-card__icon">
-                  <Icon size={20} />
-                </div>
-                <div className="playbook-card__check">
-                  {isSelected && <Check size={16} />}
-                </div>
-              </div>
-              <h4 className="playbook-card__name">{playbook.name}</h4>
-              <p className="playbook-card__desc">{playbook.description}</p>
-              <div className="playbook-card__meta">
-                <span>{playbook.action_count} actions</span>
-                {playbook.recommended && <span className="badge badge--success">Recommended</span>}
-              </div>
-            </div>
-          );
-        })}
+    return (
+      <div style={styles.container}>
+        {error && (
+          <div style={styles.error}>
+            <AlertTriangle size={18} />
+            {error}
+          </div>
+        )}
+        
+        <DataSourcesReview
+          instanceId={instanceId}
+          definition={definition}
+          projectId={activeProject?.id}
+          resolutions={resolutions}
+          hasUnresolved={hasUnresolved()}
+          onResolutionChange={handleResolutionChange}
+          onConfirm={handleConfirm}
+          onBack={handleBack}
+        />
+      </div>
+    );
+  }
+
+  // =========================================================================
+  // RENDER: SELECT PHASE
+  // =========================================================================
+  
+  return (
+    <div style={styles.container}>
+      {/* Header */}
+      <div style={styles.header}>
+        <h1 style={styles.title}>
+          <ClipboardList size={28} />
+          Select Playbook
+        </h1>
+        <p style={styles.subtitle}>
+          Choose which analysis to run{activeProject ? ` for ${activeProject.customer || activeProject.name}` : ''}
+        </p>
       </div>
 
       {/* Error */}
-      {error && <div className="alert alert--error mt-4">{error}</div>}
+      {error && (
+        <div style={styles.error}>
+          <AlertTriangle size={18} />
+          {error}
+        </div>
+      )}
 
-      {/* Actions */}
-      <div className="flex gap-4 mt-6">
-        <button className="btn btn-primary btn-lg" onClick={startAnalysis} disabled={selectedIds.size === 0 || starting}>
-          {starting ? 'Starting...' : 'Run Analysis'}
-          <ChevronRight size={18} />
-        </button>
-        <button className="btn btn-secondary" onClick={() => navigate('/upload')}>Back to Upload</button>
+      {/* Playbook Grid */}
+      <div style={styles.grid}>
+        {playbooks.map(playbook => (
+          <PlaybookCard
+            key={playbook.id}
+            playbook={playbook}
+            isSelected={selectedPlaybook?.id === playbook.id}
+            onSelect={handleSelectPlaybook}
+          />
+        ))}
       </div>
+
+      {/* Footer */}
+      <div style={styles.footer}>
+        <button
+          style={{ ...styles.btn, ...styles.btnSecondary }}
+          onClick={() => navigate('/data')}
+        >
+          <ChevronLeft size={18} />
+          Back to Data
+        </button>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {selectedPlaybook && (
+            <span style={styles.selectedInfo}>
+              Selected: {selectedPlaybook.name}
+            </span>
+          )}
+          
+          <button
+            style={{
+              ...styles.btn,
+              ...styles.btnPrimary,
+              ...((!selectedPlaybook || loadingInstance) ? styles.btnDisabled : {})
+            }}
+            onClick={handleContinueToReview}
+            disabled={!selectedPlaybook || loadingInstance}
+          >
+            {loadingInstance ? (
+              <>
+                <Loader2 size={18} style={{ animation: 'spin 1s linear infinite' }} />
+                Loading...
+              </>
+            ) : (
+              <>
+                Configure Data Sources
+                <ArrowRight size={18} />
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
-};
-
-export default PlaybookSelectPage;
+}
