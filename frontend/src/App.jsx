@@ -42,7 +42,6 @@ import PlaybooksPage from './pages/PlaybooksPage';
 import PlaybookSelectPage from './pages/PlaybookSelectPage';
 import PlaybookBuilderPage from './pages/PlaybookBuilderPage';
 import EnginePlaybookBuilder from './pages/EnginePlaybookBuilder';
-import PlaybookBuilderV2 from './pages/PlaybookBuilderV2';
 import PlaybookWireupPage from './pages/PlaybookWireupPage';
 import PlaybookViewer from './components/PlaybookViewer';
 import ProgressTrackerPage from './pages/ProgressTrackerPage';
@@ -203,6 +202,10 @@ function AppRoutes() {
         } />
         <Route path="/playbook/:playbookId" element={
           <ProtectedRoute><Page><PlaybookViewerWrapper /></Page></ProtectedRoute>
+        } />
+        {/* TEST ROUTE - no auth, no wrapper */}
+        <Route path="/playbook-test/:playbookId/:projectId" element={
+          <PlaybookViewerWrapper />
         } />
         
         {/* Workspace (Chat) */}
