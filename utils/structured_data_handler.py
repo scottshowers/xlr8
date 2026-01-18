@@ -464,6 +464,7 @@ class StructuredDataHandler:
                 CREATE TABLE IF NOT EXISTS _schema_metadata (
                     id INTEGER PRIMARY KEY,
                     project VARCHAR NOT NULL,
+                    project_id VARCHAR,
                     file_name VARCHAR NOT NULL,
                     sheet_name VARCHAR NOT NULL,
                     table_name VARCHAR NOT NULL,
@@ -482,6 +483,15 @@ class StructuredDataHandler:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # MIGRATION: Add project_id column if it doesn't exist
+            try:
+                cols = [row[1] for row in self.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()]
+                if 'project_id' not in cols:
+                    self.conn.execute("ALTER TABLE _schema_metadata ADD COLUMN project_id VARCHAR")
+                    logger.info("[MIGRATION] Added project_id column to _schema_metadata")
+            except Exception as mig_e:
+                logger.debug(f"[MIGRATION] project_id migration: {mig_e}")
             
             # Load version tracking
             self.conn.execute("""
@@ -571,6 +581,7 @@ class StructuredDataHandler:
                 CREATE TABLE IF NOT EXISTS _column_profiles (
                     id INTEGER,
                     project VARCHAR NOT NULL,
+                    project_id VARCHAR,
                     table_name VARCHAR NOT NULL,
                     column_name VARCHAR NOT NULL,
                     
@@ -627,6 +638,10 @@ class StructuredDataHandler:
                 if 'filter_priority' not in col_names:
                     logger.warning("[MIGRATION] Adding filter_priority column to _column_profiles")
                     self.conn.execute("ALTER TABLE _column_profiles ADD COLUMN filter_priority INTEGER DEFAULT 0")
+                
+                if 'project_id' not in col_names:
+                    logger.warning("[MIGRATION] Adding project_id column to _column_profiles")
+                    self.conn.execute("ALTER TABLE _column_profiles ADD COLUMN project_id VARCHAR")
                 
                 self.conn.commit()
             except Exception as mig_e:
@@ -1089,7 +1104,8 @@ class StructuredDataHandler:
         encrypt_pii: bool,
         all_encrypted_cols: list,
         results: dict,
-        uploaded_by: str = None
+        uploaded_by: str = None,
+        project_id: str = None
     ) -> bool:
         """
         Store a single dataframe as a DuckDB table.
@@ -1159,10 +1175,11 @@ class StructuredDataHandler:
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, project_id, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
                 project,
+                project_id,
                 file_name,
                 sheet_name,
                 table_name,
@@ -3952,7 +3969,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         encrypt_pii: bool = False,  # Disabled - security at perimeter (Railway, API auth, HTTPS)
         keep_previous_version: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
-        uploaded_by: str = None
+        uploaded_by: str = None,
+        project_id: str = None
     ) -> Dict[str, Any]:
         """
         Store Excel file in DuckDB with encryption and versioning.
@@ -4135,7 +4153,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                                     sub_df, project, file_name, 
                                     f"{sheet_name} - {sub_table_name}",
                                     version, encrypt_pii, all_encrypted_cols, results,
-                                    uploaded_by=uploaded_by
+                                    uploaded_by=uploaded_by,
+                                    project_id=project_id
                                 )
                             elapsed = (datetime.now() - sheet_start_time).total_seconds()
                             logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(horizontal_tables)} horizontal tables ({elapsed:.1f}s)")
@@ -4149,7 +4168,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                                     sub_df, project, file_name,
                                     f"{sheet_name} - {sub_table_name}",
                                     version, encrypt_pii, all_encrypted_cols, results,
-                                    uploaded_by=uploaded_by
+                                    uploaded_by=uploaded_by,
+                                    project_id=project_id
                                 )
                             elapsed = (datetime.now() - sheet_start_time).total_seconds()
                             logger.warning(f"[STORE_EXCEL] Sheet '{sheet_name}' -> {len(vertical_tables)} vertical tables ({elapsed:.1f}s)")
@@ -4161,7 +4181,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                     self._store_single_table(
                         df, project, file_name, sheet_name,
                         version, encrypt_pii, all_encrypted_cols, results,
-                        uploaded_by=uploaded_by
+                        uploaded_by=uploaded_by,
+                        project_id=project_id
                     )
                     
                     elapsed = (datetime.now() - sheet_start_time).total_seconds()
@@ -4383,7 +4404,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         project: str,
         file_name: str,
         progress_callback: Optional[Callable[[int, str], None]] = None,
-        uploaded_by: str = None
+        uploaded_by: str = None,
+        project_id: str = None
     ) -> Dict[str, Any]:
         """
         Store CSV file in DuckDB.
@@ -4464,10 +4486,10 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             
             self.safe_execute("""
                 INSERT INTO _schema_metadata 
-                (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, is_current)
-                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                (id, project, project_id, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, truth_type, uploaded_by, is_current)
+                VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
             """, [
-                project, file_name, 'data', table_name, display_name,
+                project, project_id, file_name, 'data', table_name, display_name,
                 entity_meta.get('entity_type'), entity_meta.get('category'),
                 json.dumps(columns_info), len(df.columns), len(df), json.dumps(likely_keys),
                 None,  # truth_type - set by smart_router if provided
@@ -4516,7 +4538,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         file_name: str,
         sheet_name: str = 'data',
         source_type: str = 'pdf',
-        uploaded_by: str = None
+        uploaded_by: str = None,
+        project_id: str = None
     ) -> Dict[str, Any]:
         """
         Store a DataFrame in DuckDB with proper metadata.
@@ -4627,10 +4650,11 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             with self._db_lock:
                 self.conn.execute("""
                     INSERT INTO _schema_metadata 
-                    (id, project, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
-                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
+                    (id, project, project_id, file_name, sheet_name, table_name, display_name, entity_type, category, columns, column_count, row_count, likely_keys, encrypted_columns, truth_type, uploaded_by, version, is_current)
+                    VALUES (nextval('schema_metadata_seq'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, TRUE)
                 """, [
                     project,
+                    project_id,
                     file_name,
                     sheet_name,
                     table_name,
@@ -4732,7 +4756,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         self, 
         project: str, 
         table_name: str,
-        progress_callback: Optional[Callable[[int, str], None]] = None
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+        project_id: str = None
     ) -> Dict[str, Any]:
         """
         v5.0 OPTIMIZED: Profile columns using SQL aggregates instead of loading DataFrame.
@@ -4785,7 +4810,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                 for col_idx, col in enumerate(columns):
                     try:
                         profile = self._profile_column_sql(
-                            table_name, col, project, row_count, use_sampling
+                            table_name, col, project, row_count, use_sampling,
+                            project_id=project_id
                         )
                         
                         # Store in database
@@ -4836,7 +4862,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         col: str, 
         project: str,
         total_rows: int,
-        use_sampling: bool = False
+        use_sampling: bool = False,
+        project_id: str = None
     ) -> Dict[str, Any]:
         """
         Profile a single column using SQL aggregates.
@@ -4848,6 +4875,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         """
         profile = {
             'project': project,
+            'project_id': project_id,
             'table_name': table_name,
             'column_name': col,
             'original_dtype': 'VARCHAR',
@@ -5437,7 +5465,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                 # Insert new profile
                 self.conn.execute("""
                     INSERT INTO _column_profiles (
-                        id, project, table_name, column_name,
+                        id, project, project_id, table_name, column_name,
                         inferred_type, original_dtype,
                         total_count, null_count, distinct_count,
                         min_value, max_value, mean_value,
@@ -5445,10 +5473,11 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                         min_date, max_date,
                         sample_values, is_likely_key, is_categorical,
                         filter_category, filter_priority
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, [
                     hash(f"{profile['project']}_{profile['table_name']}_{profile['column_name']}") % 2147483647,
                     profile['project'],
+                    profile.get('project_id'),
                     profile['table_name'],
                     profile['column_name'],
                     profile.get('inferred_type'),
