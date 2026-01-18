@@ -11,7 +11,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate } from 'react-router-dom';
-import YearEndPlaybook from '../components/YearEndPlaybook';
+import PlaybookRunner from '../components/PlaybookRunner';
 import { LoadingSpinner, ErrorState, EmptyState, PageHeader, Card, Tooltip } from '../components/ui';
 import api from '../services/api';
 import { getCustomerColorPalette } from '../utils/customerColors';
@@ -927,18 +927,17 @@ export default function PlaybooksPage() {
     );
   }
 
-  // Active playbook runner
+  // Active playbook runner - now uses universal PlaybookRunner for all playbooks
   if (activePlaybook) {
-    if (activePlaybook.id === 'year-end-checklist') {
-      return (
-        <YearEndPlaybook 
-          project={activeProject}
-          projectName={projectName}
-          customerName={customerName}
-          onClose={() => setActivePlaybook(null)}
-        />
-      );
-    }
+    return (
+      <PlaybookRunner 
+        playbook={activePlaybook}
+        project={activeProject}
+        projectName={projectName}
+        customerName={customerName}
+        onClose={() => setActivePlaybook(null)}
+      />
+    );
   }
 
   const assignedPlaybookIds = activeProject?.playbooks || [];
