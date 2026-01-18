@@ -24,6 +24,13 @@ from .definitions import (
     PlaybookDefinition, PlaybookType, StepDefinition, EngineConfig
 )
 
+# Import analysis inference for automatic engine config generation
+try:
+    from .analysis_inference import infer_analysis_configs, extract_keywords
+    INFERENCE_AVAILABLE = True
+except ImportError:
+    INFERENCE_AVAILABLE = False
+
 logger = logging.getLogger(__name__)
 
 # DuckDB path
@@ -103,6 +110,28 @@ class QueryService:
         for step in steps:
             if step.id in step_docs:
                 step.required_data = step_docs[step.id]
+        
+        # Infer analysis configs for each step using term_index
+        if INFERENCE_AVAILABLE:
+            logger.info(f"[QUERY] Inferring analysis configs for {len(steps)} steps...")
+            for step in steps:
+                try:
+                    keywords = extract_keywords(step.description or '')
+                    configs = infer_analysis_configs(
+                        step_id=step.id,
+                        description=step.description or '',
+                        keywords=keywords,
+                        conn=conn,
+                        project='global'  # Year-end uses global/reference data
+                    )
+                    step.analysis = configs
+                    if configs:
+                        logger.debug(f"[QUERY] Step {step.id}: {len(configs)} analysis configs")
+                except Exception as e:
+                    logger.warning(f"[QUERY] Analysis inference failed for step {step.id}: {e}")
+                    step.analysis = []
+        else:
+            logger.warning("[QUERY] Analysis inference not available - steps will have no analysis configs")
         
         # Create definition
         definition = PlaybookDefinition(

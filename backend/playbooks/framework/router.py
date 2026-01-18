@@ -158,7 +158,15 @@ async def get_playbook_definition(playbook_id: str):
                     'sequence': step.sequence,
                     'expert_path_skip': step.expert_path_skip,
                     'guidance': step.guidance,
-                    'analysis_count': len(step.analysis)
+                    'analysis_count': len(step.analysis),
+                    'analysis': [
+                        {
+                            'engine': cfg.engine,
+                            'config': cfg.config,
+                            'description': cfg.description
+                        }
+                        for cfg in step.analysis
+                    ]
                 }
                 for step in definition.steps
             ],
