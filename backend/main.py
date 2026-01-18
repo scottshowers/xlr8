@@ -224,6 +224,14 @@ except ImportError as e:
     INTEGRATIONS_AVAILABLE = False
     logging.warning(f"Integrations router import failed: {e}")
 
+# Import playbook framework router (unified playbook system - January 2026)
+try:
+    from backend.routers import playbook_framework_router
+    PLAYBOOK_FRAMEWORK_AVAILABLE = True
+except ImportError as e:
+    PLAYBOOK_FRAMEWORK_AVAILABLE = False
+    logging.warning(f"Playbook framework router import failed: {e}")
+
 try:
     from backend.routers import dashboard
     DASHBOARD_AVAILABLE = True
@@ -530,6 +538,13 @@ if INTEGRATIONS_AVAILABLE:
     logger.info("Integrations router registered at /api/integrations")
 else:
     logger.warning("Integrations router not available")
+
+# Register playbook framework router if available (unified playbook system)
+if PLAYBOOK_FRAMEWORK_AVAILABLE:
+    app.include_router(playbook_framework_router.router, tags=["playbook-framework"])
+    logger.info("Playbook framework router registered at /api/playbooks")
+else:
+    logger.warning("Playbook framework router not available")
 
 # Register dashboard router if available (real metrics, lineage, relationships)
 if DASHBOARD_AVAILABLE:
