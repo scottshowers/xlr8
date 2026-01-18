@@ -47,6 +47,26 @@ class ExecutionService:
         if self._conn:
             return self._conn
         
+        # Use the structured_handler singleton - this is the pattern used everywhere else
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+            self._conn = handler.conn
+            logger.info(f"[EXEC] Got connection from structured_handler (utils)")
+            return self._conn
+        except ImportError:
+            pass
+        
+        try:
+            from backend.utils.structured_data_handler import get_structured_handler
+            handler = get_structured_handler()
+            self._conn = handler.conn
+            logger.info(f"[EXEC] Got connection from structured_handler (backend.utils)")
+            return self._conn
+        except ImportError:
+            pass
+        
+        # Fallback: direct connection
         try:
             import duckdb
             import os
@@ -54,9 +74,19 @@ class ExecutionService:
             duckdb_path = "/data/structured_data.duckdb"
             if os.path.exists(duckdb_path):
                 self._conn = duckdb.connect(duckdb_path)
+                logger.info(f"[EXEC] Direct connection to DuckDB at {duckdb_path}")
                 return self._conn
+            else:
+                logger.error(f"[EXEC] DuckDB file not found at {duckdb_path}")
+                if os.path.exists("/data"):
+                    files = os.listdir("/data")
+                    logger.error(f"[EXEC] /data contains: {files[:10]}")
+                else:
+                    logger.error("[EXEC] /data directory does not exist")
         except Exception as e:
             logger.error(f"[EXEC] Failed to connect to DuckDB: {e}")
+            import traceback
+            logger.error(f"[EXEC] Traceback: {traceback.format_exc()}")
         
         return None
     
@@ -77,7 +107,9 @@ class ExecutionService:
                 'detect': DetectEngine,
                 'map': MapEngine
             }
-        except ImportError:
+            logger.info(f"[EXEC] Loaded engines from backend.engines: {list(self._engines.keys())}")
+        except ImportError as e1:
+            logger.warning(f"[EXEC] Failed to import from backend.engines: {e1}")
             try:
                 from engines import (
                     AggregateEngine, CompareEngine, ValidateEngine,
@@ -90,8 +122,12 @@ class ExecutionService:
                     'detect': DetectEngine,
                     'map': MapEngine
                 }
-            except ImportError:
-                logger.error("[EXEC] Engines module not available")
+                logger.info(f"[EXEC] Loaded engines from engines: {list(self._engines.keys())}")
+            except ImportError as e2:
+                logger.error(f"[EXEC] Failed to import from engines: {e2}")
+                logger.error("[EXEC] Engines module not available from either path")
+                import traceback
+                logger.error(f"[EXEC] Traceback: {traceback.format_exc()}")
                 return None
         
         return self._engines
@@ -192,11 +228,27 @@ class ExecutionService:
         engines = self._get_engines()
         conn = self._get_connection()
         
-        if not engines or not conn:
+        # Detailed error reporting
+        if not engines and not conn:
+            logger.error("[EXEC] Both engines and connection unavailable")
             return {
                 'success': False,
                 'engine': config.engine,
-                'error': 'Engines or connection not available'
+                'error': 'Both engines module and DuckDB connection unavailable'
+            }
+        elif not engines:
+            logger.error("[EXEC] Engines module not available")
+            return {
+                'success': False,
+                'engine': config.engine,
+                'error': 'Engines module import failed - check backend.engines path'
+            }
+        elif not conn:
+            logger.error("[EXEC] DuckDB connection not available")
+            return {
+                'success': False,
+                'engine': config.engine,
+                'error': 'DuckDB connection failed - /data/structured_data.duckdb not found or not accessible'
             }
         
         engine_class = engines.get(config.engine)
