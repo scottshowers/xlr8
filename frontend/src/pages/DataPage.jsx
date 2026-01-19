@@ -488,7 +488,8 @@ function UploadPanel({ c, project, targetScope }) {
   }, [targetScope]);
 
   const handleFiles = (files) => {
-    const projectId = targetScope === 'project' ? project?.id : 'Global/Universal';
+    // Pass the full project object so addUpload can access project.code
+    const projectObj = targetScope === 'project' ? project : null;
     const projectName = targetScope === 'project' ? project?.name : 'Reference Library';
     
     if (targetScope === 'project' && !project?.id) {
@@ -501,7 +502,7 @@ function UploadPanel({ c, project, targetScope }) {
       const isRuleSource = truthType === 'regulatory';
       const isVendorDocs = truthType === 'reference';
       
-      addUpload(file, projectId, projectName, { 
+      addUpload(file, projectObj, projectName, { 
         truth_type: truthType,
         standards_mode: isRuleSource,
         domain: selectedDomain !== 'auto' ? selectedDomain : (isRuleSource ? 'regulatory' : undefined),
@@ -905,14 +906,12 @@ function FilesPanel({ c, project, targetScope }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Use fast /files endpoint instead of slow /platform
-      // When in global scope (Reference Library), don't filter by project
-      // Use project CODE for DuckDB queries, not display name
-      const projectCode = project?.code || project?.name || project?.id || '';
-      const shouldFilterByProject = targetScope !== 'global' && projectCode;
+      // Use project UUID for querying - data is stored with project_id (UUID)
+      const projectId = project?.id || '';
+      const shouldFilterByProject = targetScope !== 'global' && projectId;
       
       const [filesRes, refRes] = await Promise.all([
-        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectCode)}` : ''}`).catch(() => ({ data: {} })),
+        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectId)}` : ''}`).catch(() => ({ data: {} })),
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
@@ -946,21 +945,22 @@ function FilesPanel({ c, project, targetScope }) {
   // Filter based on scope
   const isGlobalScope = targetScope === 'global';
   
-  // Use project code for matching (files are stored with code in DuckDB)
-  const projectCode = project?.code || project?.name;
-  
+  // Don't filter client-side - the API already filtered by project
+  // Just separate global vs project files
   const structuredFiles = (structuredData?.files || []).filter(f => {
     if (isGlobalScope) {
       return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library' || f.project === '__STANDARDS__';
     }
-    return !project || f.project?.toLowerCase() === projectCode?.toLowerCase();
+    // API already filtered by project_id, trust the results
+    return true;
   });
   
   const docs = (documents?.documents || []).filter(d => {
     if (isGlobalScope) {
       return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library' || d.project === '__STANDARDS__';
     }
-    return !project || d.project?.toLowerCase() === projectCode?.toLowerCase();
+    // API already filtered by project_id, trust the results
+    return true;
   });
   
   // Reference library files (always global)
