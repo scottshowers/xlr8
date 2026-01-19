@@ -232,6 +232,14 @@ except ImportError as e:
     INTEGRATIONS_AVAILABLE = False
     logging.warning(f"Integrations router import failed: {e}")
 
+# Import UKG connector router (direct UKG Pro API access)
+try:
+    from backend.routers import ukg_connector
+    UKG_CONNECTOR_AVAILABLE = True
+except ImportError as e:
+    UKG_CONNECTOR_AVAILABLE = False
+    logging.warning(f"UKG connector router import failed: {e}")
+
 # Import playbook framework router (unified playbook system - January 2026)
 try:
     from backend.routers import playbook_framework_router
@@ -553,6 +561,13 @@ if INTEGRATIONS_AVAILABLE:
     logger.info("Integrations router registered at /api/integrations")
 else:
     logger.warning("Integrations router not available")
+
+# Register UKG connector router if available (direct UKG Pro API access)
+if UKG_CONNECTOR_AVAILABLE:
+    app.include_router(ukg_connector.router, prefix="/api", tags=["ukg-connector"])
+    logger.info("UKG connector router registered at /api/ukg")
+else:
+    logger.warning("UKG connector router not available")
 
 # Register playbook framework router if available (unified playbook system)
 if PLAYBOOK_FRAMEWORK_AVAILABLE:
