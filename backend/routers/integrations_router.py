@@ -41,7 +41,7 @@ router = APIRouter()
 
 class ConnectionCredentials(BaseModel):
     """Credentials for a system connection."""
-    customer_id: str
+    project_name: str
     system_id: str
     credentials: Dict[str, str]  # Encrypted in production
 
@@ -212,7 +212,7 @@ async def save_connection(request: ConnectionCredentials):
         # Check for existing connection
         existing = supabase.table('api_connections') \
             .select('id') \
-            .eq('customer_id', request.customer_id) \
+            .eq('project_name', request.project_name) \
             .eq('provider', request.system_id) \
             .execute()
         
@@ -230,7 +230,7 @@ async def save_connection(request: ConnectionCredentials):
         else:
             # Create new
             result = supabase.table('api_connections').insert({
-                'customer_id': request.customer_id,
+                'project_name': request.project_name,
                 'provider': request.system_id,
                 'connection_name': system.name,
                 'hostname': request.credentials.get('hostname', ''),
@@ -242,7 +242,7 @@ async def save_connection(request: ConnectionCredentials):
             }).execute()
             connection_id = result.data[0]['id'] if result.data else None
         
-        logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.customer_id}")
+        logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.project_name}")
         
         return {
             "success": True,
@@ -255,8 +255,8 @@ async def save_connection(request: ConnectionCredentials):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/connections/{customer_id}")
-async def get_project_connections(customer_id: str):
+@router.get("/connections/{project_name}")
+async def get_project_connections(project_name: str):
     """
     Get all connections for a project.
     """
@@ -269,8 +269,8 @@ async def get_project_connections(customer_id: str):
         supabase = get_supabase()
         
         result = supabase.table('api_connections') \
-            .select('id, customer_id, provider, connection_name, hostname, username, status, created_at, last_connected_at') \
-            .eq('customer_id', customer_id) \
+            .select('id, project_name, provider, connection_name, hostname, username, status, created_at, last_connected_at') \
+            .eq('project_name', project_name) \
             .execute()
         
         connections = []
@@ -289,7 +289,7 @@ async def get_project_connections(customer_id: str):
             })
         
         return {
-            "customer_id": customer_id,
+            "project_name": project_name,
             "connections": connections,
             "count": len(connections)
         }
@@ -298,14 +298,14 @@ async def get_project_connections(customer_id: str):
         logger.error(f"[INTEGRATIONS] Get connections failed: {e}")
         # Return empty on error
         return {
-            "customer_id": customer_id,
+            "project_name": project_name,
             "connections": [],
             "count": 0
         }
 
 
-@router.post("/connections/{customer_id}/test")
-async def test_connection(customer_id: str, request: ConnectionTestRequest):
+@router.post("/connections/{project_name}/test")
+async def test_connection(project_name: str, request: ConnectionTestRequest):
     """
     Test a connection by making a simple API call.
     """
@@ -339,7 +339,7 @@ async def test_connection(customer_id: str, request: ConnectionTestRequest):
                         'last_connected_at': datetime.now().isoformat() if result['success'] else None,
                         'last_error': result.get('error') if not result['success'] else None,
                     }) \
-                    .eq('customer_id', customer_id) \
+                    .eq('project_name', project_name) \
                     .eq('provider', request.system_id) \
                     .execute()
             except Exception as e:
@@ -455,8 +455,8 @@ async def _test_ukg_pro_connection(credentials: Dict[str, str]) -> Dict:
 # DATA PULL
 # =============================================================================
 
-@router.post("/connections/{customer_id}/pull")
-async def pull_data(customer_id: str, request: DataPullRequest):
+@router.post("/connections/{project_name}/pull")
+async def pull_data(project_name: str, request: DataPullRequest):
     """
     Pull data from connected system into XLR8.
     
@@ -479,7 +479,7 @@ async def pull_data(customer_id: str, request: DataPullRequest):
         )
     
     # Get connection credentials
-    key = f"{customer_id}:{request.system_id}"
+    key = f"{project_name}:{request.system_id}"
     connection = _connections.get(key)
     if not connection:
         raise HTTPException(
@@ -504,7 +504,7 @@ async def pull_data(customer_id: str, request: DataPullRequest):
         try:
             if request.system_id == "ukg_pro":
                 result = await _pull_ukg_pro_endpoint(
-                    customer_id=customer_id,
+                    project_name=project_name,
                     endpoint=endpoint,
                     credentials=connection["credentials"]
                 )
@@ -531,7 +531,7 @@ async def pull_data(customer_id: str, request: DataPullRequest):
     successful = sum(1 for r in results if r.get("success"))
     
     return {
-        "customer_id": customer_id,
+        "project_name": project_name,
         "system_id": request.system_id,
         "endpoints_requested": len(request.endpoints),
         "endpoints_successful": successful,
@@ -539,7 +539,7 @@ async def pull_data(customer_id: str, request: DataPullRequest):
     }
 
 
-async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[str, str]) -> Dict:
+async def _pull_ukg_pro_endpoint(project_name: str, endpoint, credentials: Dict[str, str]) -> Dict:
     """
     Pull data from a UKG Pro endpoint and store in DuckDB.
     """
@@ -582,7 +582,7 @@ async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[s
             
             # Store in DuckDB
             row_count = await _store_in_duckdb(
-                customer_id=customer_id,
+                project_name=project_name,
                 endpoint_id=endpoint.id,
                 truth_bucket=endpoint.truth_bucket.value,
                 data=data
@@ -593,7 +593,7 @@ async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[s
                 "success": True,
                 "rows_imported": row_count,
                 "truth_bucket": endpoint.truth_bucket.value,
-                "table_name": f"{customer_id}_api_{endpoint.id}"
+                "table_name": f"{project_name}_api_{endpoint.id}"
             }
             
         except Exception as e:
@@ -604,7 +604,7 @@ async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[s
             }
 
 
-async def _store_in_duckdb(customer_id: str, endpoint_id: str, truth_bucket: str, data: Any) -> int:
+async def _store_in_duckdb(project_name: str, endpoint_id: str, truth_bucket: str, data: Any) -> int:
     """
     Store API response data in DuckDB.
     """
@@ -632,10 +632,10 @@ async def _store_in_duckdb(customer_id: str, endpoint_id: str, truth_bucket: str
     df = pd.DataFrame(records)
     
     # Build table name
-    table_name = f"{customer_id}_api_{endpoint_id}"
+    table_name = f"{project_name}_api_{endpoint_id}"
     
     # Connect to project database
-    db_path = f"/app/data/duckdb/{customer_id}.duckdb"
+    db_path = f"/app/data/duckdb/{project_name}.duckdb"
     
     try:
         conn = duckdb.connect(db_path)
