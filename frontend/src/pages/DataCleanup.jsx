@@ -407,6 +407,237 @@ export default function DataCleanup() {
           )}
         </div>
       </div>
+
+      {/* Nuclear Delete All Section */}
+      <NuclearCleanup onComplete={refreshProjects} />
     </div>
   );
 }
+
+/**
+ * Nuclear Cleanup Component
+ * Deletes ALL orphaned data regardless of naming convention
+ */
+function NuclearCleanup({ onComplete }) {
+  const [confirmText, setConfirmText] = useState('');
+  const [deleting, setDeleting] = useState(false);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState(null);
+  const [expanded, setExpanded] = useState(false);
+
+  const handleNuclearDelete = async () => {
+    if (confirmText !== 'DELETE ALL') {
+      setError('Type "DELETE ALL" to confirm');
+      return;
+    }
+
+    setDeleting(true);
+    setError(null);
+    setResult(null);
+
+    try {
+      const res = await api.delete('/status/nuclear/all');
+      setResult(res.data);
+      setConfirmText('');
+      if (onComplete) onComplete();
+    } catch (err) {
+      console.error('Nuclear delete error:', err);
+      setError(err.response?.data?.detail || err.message || 'Delete failed');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div style={{
+      background: 'var(--bg-secondary)',
+      borderRadius: 'var(--radius-lg)',
+      padding: 'var(--space-6)',
+      marginTop: 'var(--space-6)',
+      border: '1px solid var(--border)'
+    }}>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 'var(--space-3)',
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          width: '100%',
+          textAlign: 'left',
+          padding: 0
+        }}
+      >
+        <AlertTriangle size={24} color="#ef4444" />
+        <div>
+          <h2 style={{ 
+            fontSize: 'var(--text-lg)', 
+            fontWeight: 600, 
+            color: 'var(--text-primary)',
+            margin: 0
+          }}>
+            Nuclear Cleanup
+          </h2>
+          <p style={{ 
+            fontSize: 'var(--text-sm)', 
+            color: 'var(--text-muted)',
+            margin: 0
+          }}>
+            Delete ALL orphaned data (use when normal cleanup fails)
+          </p>
+        </div>
+        <ChevronDown 
+          size={20} 
+          style={{ 
+            marginLeft: 'auto',
+            transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+            transition: 'transform 0.2s',
+            color: 'var(--text-muted)'
+          }} 
+        />
+      </button>
+
+      {expanded && (
+        <div style={{ marginTop: 'var(--space-4)' }}>
+          {/* Warning */}
+          <div style={{
+            padding: 'var(--space-4)',
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: 'var(--radius-md)',
+            marginBottom: 'var(--space-4)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 'var(--space-3)' }}>
+              <AlertTriangle size={20} color="#ef4444" style={{ flexShrink: 0, marginTop: 2 }} />
+              <div>
+                <div style={{ fontWeight: 600, color: '#ef4444', marginBottom: 'var(--space-2)' }}>
+                  This will permanently delete:
+                </div>
+                <ul style={{ 
+                  margin: 0, 
+                  paddingLeft: 'var(--space-4)', 
+                  color: 'var(--text-secondary)',
+                  fontSize: 'var(--text-sm)'
+                }}>
+                  <li>ALL DuckDB tables (except system tables)</li>
+                  <li>ALL column profiles and metadata</li>
+                  <li>ALL document chunks from ChromaDB</li>
+                  <li>ALL processing jobs and history</li>
+                </ul>
+                <div style={{ 
+                  marginTop: 'var(--space-2)', 
+                  fontSize: 'var(--text-sm)',
+                  color: 'var(--text-muted)'
+                }}>
+                  Reference library data will be preserved.
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Confirm Input */}
+          <div style={{ marginBottom: 'var(--space-4)' }}>
+            <label style={{ 
+              display: 'block', 
+              fontSize: 'var(--text-sm)', 
+              fontWeight: 500,
+              color: 'var(--text-secondary)',
+              marginBottom: 'var(--space-2)'
+            }}>
+              Type <strong style={{ color: '#ef4444' }}>DELETE ALL</strong> to confirm
+            </label>
+            <input
+              type="text"
+              value={confirmText}
+              onChange={(e) => { setConfirmText(e.target.value); setError(null); }}
+              placeholder="Type DELETE ALL to confirm"
+              style={{
+                width: '100%',
+                padding: 'var(--space-3)',
+                border: '1px solid var(--border)',
+                borderRadius: 'var(--radius-md)',
+                fontSize: 'var(--text-sm)',
+                fontFamily: 'var(--font-body)',
+                background: 'var(--bg-tertiary)',
+                color: 'var(--text-primary)'
+              }}
+            />
+          </div>
+
+          {/* Error */}
+          {error && (
+            <div style={{
+              padding: 'var(--space-3)',
+              background: 'rgba(239, 68, 68, 0.1)',
+              border: '1px solid rgba(239, 68, 68, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: 'var(--space-4)',
+              fontSize: 'var(--text-sm)',
+              color: '#ef4444'
+            }}>
+              {error}
+            </div>
+          )}
+
+          {/* Result */}
+          {result && (
+            <div style={{
+              padding: 'var(--space-4)',
+              background: 'rgba(34, 197, 94, 0.1)',
+              border: '1px solid rgba(34, 197, 94, 0.3)',
+              borderRadius: 'var(--radius-md)',
+              marginBottom: 'var(--space-4)'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginBottom: 'var(--space-2)' }}>
+                <Check size={18} color="#22c55e" />
+                <span style={{ fontWeight: 600, color: '#22c55e' }}>Cleanup Complete</span>
+              </div>
+              <div style={{ fontSize: 'var(--text-sm)', color: 'var(--text-secondary)' }}>
+                {result.message || `Deleted ${result.details?.tables_dropped?.length || 0} tables, ${result.details?.chromadb_cleared || 0} document chunks`}
+              </div>
+            </div>
+          )}
+
+          {/* Delete Button */}
+          <button
+            onClick={handleNuclearDelete}
+            disabled={deleting || confirmText !== 'DELETE ALL'}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 'var(--space-2)',
+              width: '100%',
+              padding: 'var(--space-3)',
+              background: (deleting || confirmText !== 'DELETE ALL') 
+                ? 'var(--text-muted)' 
+                : '#dc2626',
+              color: '#ffffff',
+              border: 'none',
+              borderRadius: 'var(--radius-md)',
+              fontSize: 'var(--text-sm)',
+              fontWeight: 600,
+              cursor: (deleting || confirmText !== 'DELETE ALL') 
+                ? 'not-allowed' 
+                : 'pointer',
+              fontFamily: 'var(--font-body)'
+            }}
+          >
+            {deleting ? (
+              <>
+                <Loader2 size={16} className="spin" />
+                Deleting Everything...
+              </>
+            ) : (
+              <>
+                <AlertTriangle size={16} />
+                Nuclear Delete All Data
+              </>
+            )}
+          </button>
+        </div>
+      )}
+    </div>
+  );
