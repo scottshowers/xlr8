@@ -570,7 +570,7 @@ else:
 
 # Register findings router (Phase 4A.4 - Findings Dashboard)
 try:
-    from routers import findings
+    from backend.routers import findings
     app.include_router(findings.router, prefix="/api/findings", tags=["findings"])
     logger.info("Findings router registered at /api/findings")
 except ImportError as e:
@@ -578,7 +578,7 @@ except ImportError as e:
 
 # Register remediation router (Phase 4A.6/4A.7 - Playbook Wire-up & Progress Tracker)
 try:
-    from routers import remediation
+    from backend.routers import remediation
     app.include_router(remediation.router, prefix="/api/remediation", tags=["remediation"])
     logger.info("Remediation router registered at /api/remediation")
 except ImportError as e:
