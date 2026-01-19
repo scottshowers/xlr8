@@ -29,7 +29,7 @@ export default function Status() {
         params: selectedProject !== 'all' ? { project: selectedProject } : {} 
       }).catch(() => ({ data: { documents: [] } }))
       const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }))
-      const projectsRes = await api.get('/projects/list').catch(() => ({ data: [] }))
+      const projectsRes = await api.get('/customers/list').catch(() => ({ data: [] }))
       
       setChromaStats(chromaRes.data)
       setDocuments(docsRes.data.documents || [])

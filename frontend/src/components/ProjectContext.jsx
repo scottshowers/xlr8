@@ -232,7 +232,7 @@ export default function ProjectContext({ projectId, projectName, compact = false
     setError(null);
     
     try {
-      const res = await api.get(`/reference/projects/${encodeURIComponent(project)}/context`);
+      const res = await api.get(`/reference/customers/${encodeURIComponent(project)}/context`);
       setContext(res.data);
       
       // Initialize edit state
@@ -284,7 +284,7 @@ export default function ProjectContext({ projectId, projectName, compact = false
     
     setLoading(true);
     try {
-      await api.post(`/reference/projects/${encodeURIComponent(project)}/detect`);
+      await api.post(`/reference/customers/${encodeURIComponent(project)}/detect`);
       await loadContext();
     } catch (err) {
       setError(err.message || 'Detection failed');
@@ -299,7 +299,7 @@ export default function ProjectContext({ projectId, projectName, compact = false
     
     setSaving(true);
     try {
-      await api.post(`/reference/projects/${encodeURIComponent(project)}/context/confirm`, {
+      await api.post(`/reference/customers/${encodeURIComponent(project)}/context/confirm`, {
         system_codes: editSystems,
         domain_codes: editDomains,
         functional_areas: editFunctionalAreas,
@@ -748,7 +748,7 @@ export function ProjectContextBadge({ projectId, projectName }) {
   useEffect(() => {
     if (!project) return;
     
-    api.get(`/reference/projects/${encodeURIComponent(project)}/context`)
+    api.get(`/reference/customers/${encodeURIComponent(project)}/context`)
       .then(res => setContext(res.data))
       .catch(() => {});
   }, [project]);
