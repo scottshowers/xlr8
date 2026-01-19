@@ -977,7 +977,7 @@ async def get_suggestions(customer_id: str):
         # 3. Try to get intelligence findings as suggestions
         try:
             if INTELLIGENCE_AVAILABLE:
-                engine = IntelligenceEngine(project)
+                engine = IntelligenceEngine(customer_id)
                 rag = RAGHandler() if RAG_AVAILABLE else None
                 engine.load_context(structured_handler=handler, schema=schema, rag_handler=rag)
                 
@@ -1070,10 +1070,10 @@ async def get_bi_schema(customer_id: str):
                 'domain': t.get('domain', '')
             })
         
-        logger.info(f"[BI] Schema for {project}: {len(tables)} unique tables")
+        logger.info(f"[BI] Schema for {customer_id}: {len(tables)} unique tables")
         
         return {
-            "project": project,
+            "project": customer_id,
             "tables": tables,
             "filter_candidates": schema.get('filter_candidates', {}),
             "relationships": schema.get('relationships', [])
