@@ -116,6 +116,44 @@ class ProjectModel:
             return None
     
     @staticmethod
+    def get_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
+        """
+        Get project by any identifier (id, code, or name).
+        
+        Tries in order:
+        1. By ID (UUID)
+        2. By code (e.g., TEA1000)
+        3. By name (e.g., TEAM US)
+        
+        This handles the project_id mismatch issue where different parts
+        of the system use different identifiers.
+        """
+        supabase = get_supabase()
+        if not supabase:
+            return None
+        
+        try:
+            # Try by ID first (UUID format)
+            response = supabase.table('projects').select('*').eq('id', identifier).execute()
+            if response.data:
+                return response.data[0]
+            
+            # Try by code (case-insensitive)
+            response = supabase.table('projects').select('*').ilike('code', identifier).execute()
+            if response.data:
+                return response.data[0]
+            
+            # Try by name (case-insensitive)
+            response = supabase.table('projects').select('*').ilike('name', identifier).execute()
+            if response.data:
+                return response.data[0]
+            
+            return None
+        except Exception as e:
+            logger.error(f"getting project by identifier '{identifier}': {e}")
+            return None
+    
+    @staticmethod
     def update(project_id: str, **kwargs) -> Optional[Dict[str, Any]]:
         """Update project"""
         supabase = get_supabase()
