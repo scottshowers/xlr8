@@ -121,22 +121,28 @@ class ProjectModel:
         Get project by any identifier (id, code, or name).
         
         Tries in order:
-        1. By ID (UUID)
+        1. By ID (UUID) - only if identifier looks like a UUID
         2. By code (e.g., TEA1000)
         3. By name (e.g., TEAM US)
         
         This handles the project_id mismatch issue where different parts
         of the system use different identifiers.
         """
+        import re
+        
         supabase = get_supabase()
         if not supabase:
             return None
         
+        # UUID pattern check - only try UUID query if it looks like one
+        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
+        
         try:
-            # Try by ID first (UUID format)
-            response = supabase.table('projects').select('*').eq('id', identifier).execute()
-            if response.data:
-                return response.data[0]
+            # Try by ID first (only if it looks like a UUID)
+            if uuid_pattern.match(identifier):
+                response = supabase.table('projects').select('*').eq('id', identifier).execute()
+                if response.data:
+                    return response.data[0]
             
             # Try by code (case-insensitive)
             response = supabase.table('projects').select('*').ilike('code', identifier).execute()
