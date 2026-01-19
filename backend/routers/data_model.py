@@ -64,8 +64,8 @@ class RelationshipCreate(BaseModel):
     relationship_type: str = "key"  # key, semantic, manual
 
 
-@router.post("/data-model/analyze/{project_name}")
-async def analyze_data_model(project_name: str):
+@router.post("/data-model/analyze/{customer_id}")
+async def analyze_data_model(customer_id: str):
     """
     Auto-detect relationships between tables in a project.
     
@@ -77,11 +77,11 @@ async def analyze_data_model(project_name: str):
     """
     try:
         # Get tables from DuckDB via structured data handler
-        tables = await get_project_tables(project_name)
+        tables = await get_project_tables(customer_id)
         
         if not tables:
             return {
-                "project": project_name,
+                "project": customer_id,
                 "relationships": [],
                 "semantic_types": [],
                 "unmatched_columns": [],
@@ -116,7 +116,7 @@ async def analyze_data_model(project_name: str):
                 logger.info(f"Loaded {len(global_result.data)} global mappings")
             
             # Get project-specific confirmed relationships
-            project_result = supabase.table('project_relationships').select('*').eq('project_name', project_name).execute()
+            project_result = supabase.table('project_relationships').select('*').eq('customer_id', customer_id).execute()
             if project_result.data:
                 project_confirmed = project_result.data
                 logger.info(f"Loaded {len(project_confirmed)} project-specific relationships")
@@ -133,7 +133,7 @@ async def analyze_data_model(project_name: str):
         except ImportError:
             from backend.utils.relationship_detector import analyze_project_relationships
         
-        result = await analyze_project_relationships(project_name, tables, llm_client)
+        result = await analyze_project_relationships(customer_id, tables, llm_client)
         
         # Apply global mappings - auto-confirm known relationships
         if global_mappings:
@@ -211,7 +211,7 @@ async def analyze_data_model(project_name: str):
                 
                 # Upsert to avoid duplicates
                 supabase.table('project_relationships').upsert({
-                    'project_name': project_name,
+                    'customer_id': customer_id,
                     'source_table': source_table,
                     'source_column': source_column,
                     'target_table': target_table,
@@ -220,17 +220,17 @@ async def analyze_data_model(project_name: str):
                     'method': rel.get('method', 'auto'),
                     'semantic_type': rel.get('semantic_type'),
                     'status': status
-                }, on_conflict='project_name,source_table,source_column,target_table,target_column').execute()
+                }, on_conflict='customer_id,source_table,source_column,target_table,target_column').execute()
                 saved_count += 1
             
-            logger.info(f"Auto-saved {saved_count} relationships to database for {project_name}")
+            logger.info(f"Auto-saved {saved_count} relationships to database for {customer_id}")
             result['stats']['saved_to_db'] = saved_count
             
         except Exception as save_e:
             logger.warning(f"Could not auto-save relationships: {save_e}")
             result['stats']['saved_to_db'] = 0
         
-        logger.info(f"Analyzed {result['stats']['tables_analyzed']} tables for {project_name}, "
+        logger.info(f"Analyzed {result['stats']['tables_analyzed']} tables for {customer_id}, "
                    f"found {result['stats']['relationships_found']} relationships "
                    f"({result['stats']['needs_review']} need review)")
         
@@ -243,8 +243,8 @@ async def analyze_data_model(project_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/data-model/relationships/{project_name}")
-async def get_relationships(project_name: str):
+@router.get("/data-model/relationships/{customer_id}")
+async def get_relationships(customer_id: str):
     """
     Get stored relationships for a project.
     
@@ -266,7 +266,7 @@ async def get_relationships(project_name: str):
             # Get all relationships for this project
             result = supabase.table('project_relationships') \
                 .select('*') \
-                .eq('project_name', project_name) \
+                .eq('customer_id', customer_id) \
                 .execute()
             
             if result.data:
@@ -295,7 +295,7 @@ async def get_relationships(project_name: str):
                         'id': row.get('id'),
                     })
                 
-                logger.info(f"Loaded {len(relationships)} relationships for {project_name}")
+                logger.info(f"Loaded {len(relationships)} relationships for {customer_id}")
             
         except Exception as db_e:
             logger.warning(f"Could not load relationships from database: {db_e}")
@@ -308,15 +308,15 @@ async def get_relationships(project_name: str):
         tables_count = 0
         columns_count = 0
         try:
-            tables = await get_project_tables(project_name)
+            tables = await get_project_tables(customer_id)
             tables_count = len(tables)
             columns_count = sum(len(t.get('columns', [])) for t in tables)
-            logger.info(f"Stats for {project_name}: {tables_count} tables, {columns_count} columns")
+            logger.info(f"Stats for {customer_id}: {tables_count} tables, {columns_count} columns")
         except Exception as stats_e:
             logger.warning(f"Could not get table stats: {stats_e}")
         
         return {
-            "project": project_name,
+            "project": customer_id,
             "relationships": relationships,
             "semantic_types": semantic_types,
             "stats": {
@@ -333,8 +333,8 @@ async def get_relationships(project_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/data-model/context-graph/{project_name}")
-async def get_context_graph(project_name: str):
+@router.get("/data-model/context-graph/{customer_id}")
+async def get_context_graph(customer_id: str):
     """
     Get the context graph showing hub/spoke relationships.
     
@@ -356,7 +356,7 @@ async def get_context_graph(project_name: str):
         handler = get_structured_handler()
         
         # Get the context graph
-        graph = handler.get_context_graph(project_name)
+        graph = handler.get_context_graph(customer_id)
         
         # Also get summary stats
         hubs = graph.get('hubs', [])
@@ -372,7 +372,7 @@ async def get_context_graph(project_name: str):
             }
         
         return {
-            "project": project_name,
+            "project": customer_id,
             "summary": {
                 "hub_count": len(hubs),
                 "spoke_count": len(relationships),
@@ -390,8 +390,8 @@ async def get_context_graph(project_name: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/data-model/context-graph/{project_name}/compute")
-async def compute_context_graph(project_name: str):
+@router.post("/data-model/context-graph/{customer_id}/compute")
+async def compute_context_graph(customer_id: str):
     """
     Force recomputation of the context graph for a project.
     
@@ -409,11 +409,11 @@ async def compute_context_graph(project_name: str):
         handler = get_structured_handler()
         
         # Run context graph computation
-        result = handler.compute_context_graph(project_name)
+        result = handler.compute_context_graph(customer_id)
         
         return {
             "success": True,
-            "project": project_name,
+            "project": customer_id,
             "result": result
         }
         
@@ -422,7 +422,7 @@ async def compute_context_graph(project_name: str):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
-async def confirm_relationship(project_name: str, confirmation: RelationshipConfirmation):
+async def confirm_relationship(customer_id: str, confirmation: RelationshipConfirmation):
     """
     Confirm or reject a suggested relationship.
     
@@ -449,7 +449,7 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
             if confirmation.confirmed:
                 # Save to project_relationships
                 supabase.table('project_relationships').upsert({
-                    'project_name': project_name,
+                    'customer_id': customer_id,
                     'source_table': confirmation.source_table,
                     'source_column': confirmation.source_column,
                     'target_table': confirmation.target_table,
@@ -470,7 +470,7 @@ async def confirm_relationship(project_name: str, confirmation: RelationshipConf
             else:
                 # Save rejection to avoid re-suggesting
                 supabase.table('project_relationships').upsert({
-                    'project_name': project_name,
+                    'customer_id': customer_id,
                     'source_table': confirmation.source_table,
                     'source_column': confirmation.source_column,
                     'target_table': confirmation.target_table,
@@ -541,8 +541,8 @@ async def update_relationship(rel_id: int, updates: dict):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/data-model/relationships/{project_name}/create")
-async def create_relationship(project_name: str, relationship: RelationshipCreate):
+@router.post("/data-model/relationships/{customer_id}/create")
+async def create_relationship(customer_id: str, relationship: RelationshipCreate):
     """
     Manually create a relationship between columns.
     """
@@ -569,9 +569,9 @@ async def create_relationship(project_name: str, relationship: RelationshipCreat
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/data-model/relationships/{project_name}")
+@router.delete("/data-model/relationships/{customer_id}")
 async def delete_relationship(
-    project_name: str,
+    customer_id: str,
     source_table: str,
     source_column: str,
     target_table: str,
@@ -588,7 +588,7 @@ async def delete_relationship(
             # Delete from Supabase
             result = supabase.table('project_relationships') \
                 .delete() \
-                .eq('project_name', project_name) \
+                .eq('customer_id', customer_id) \
                 .eq('source_table', source_table) \
                 .eq('source_column', source_column) \
                 .eq('target_table', target_table) \
@@ -605,8 +605,8 @@ async def delete_relationship(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.delete("/data-model/relationships/{project_name}/all")
-async def delete_all_relationships(project_name: str, confirm: bool = False):
+@router.delete("/data-model/relationships/{customer_id}/all")
+async def delete_all_relationships(customer_id: str, confirm: bool = False):
     """
     Delete ALL relationships for a project.
     Requires confirm=true.
@@ -622,12 +622,12 @@ async def delete_all_relationships(project_name: str, confirm: bool = False):
         if supabase:
             result = supabase.table('project_relationships') \
                 .delete() \
-                .eq('project_name', project_name) \
+                .eq('customer_id', customer_id) \
                 .execute()
             deleted_count = len(result.data or [])
-            logger.warning(f"⚠️ Deleted ALL {deleted_count} relationships for project {project_name}")
+            logger.warning(f"⚠️ Deleted ALL {deleted_count} relationships for project {customer_id}")
         
-        return {"status": "deleted", "count": deleted_count, "project": project_name}
+        return {"status": "deleted", "count": deleted_count, "project": customer_id}
     except Exception as e:
         logger.error(f"Failed to delete all relationships: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -635,7 +635,7 @@ async def delete_all_relationships(project_name: str, confirm: bool = False):
 
 # Helper functions
 
-async def get_project_tables(project_name: str) -> List[Dict]:
+async def get_project_tables(customer_id: str) -> List[Dict]:
     """
     Get table schemas for a project - tries metadata first, falls back to direct DuckDB query.
     """
@@ -665,7 +665,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
             for row in metadata_result:
                 table_name, proj, filename, sheet, columns_json, row_count = row
                 
-                if proj.lower() != project_name.lower():
+                if proj.lower() != customer_id.lower():
                     continue
                 
                 try:
@@ -682,7 +682,7 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                     'filename': filename
                 })
             
-            logger.info(f"Found {len(tables)} tables for {project_name}")
+            logger.info(f"Found {len(tables)} tables for {customer_id}")
             
         except Exception as e:
             logger.warning(f"Metadata query failed: {e}")
@@ -692,13 +692,13 @@ async def get_project_tables(project_name: str) -> List[Dict]:
         
         # FALLBACK: If metadata returned nothing, query DuckDB directly
         if not tables:
-            logger.warning(f"No tables from metadata - querying DuckDB directly for {project_name}")
+            logger.warning(f"No tables from metadata - querying DuckDB directly for {customer_id}")
             try:
                 all_tables = handler.conn.execute("SHOW TABLES").fetchall()
                 
                 # Build project prefixes for matching
                 # Tables use first 8 chars of UUID (no hyphens) as prefix
-                project_clean = project_name.strip()
+                project_clean = customer_id.strip()
                 project_prefixes = [
                     project_clean.lower(),
                     project_clean.lower().replace(' ', '_'),
@@ -745,12 +745,12 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                         'filename': 'DuckDB'
                     })
                 
-                logger.info(f"Direct query found {len(tables)} tables for {project_name}")
+                logger.info(f"Direct query found {len(tables)} tables for {customer_id}")
                 
             except Exception as direct_e:
                 logger.error(f"Direct table query failed: {direct_e}")
         
-        logger.info(f"Total {len(tables)} tables for project {project_name}")
+        logger.info(f"Total {len(tables)} tables for project {customer_id}")
         return tables
         
     except Exception as e:
@@ -997,7 +997,7 @@ async def get_all_relationships_summary():
         by_semantic_type = {}
         
         for row in result.data:
-            proj = row.get('project_name', 'unknown')
+            proj = row.get('customer_id', 'unknown')
             if proj not in by_project:
                 by_project[proj] = {
                     'project': proj,
@@ -1107,7 +1107,7 @@ async def test_relationship(request: TestRelationshipRequest):
             # Check both directions (A→B and B→A)
             rel_result = supabase.table('project_relationships') \
                 .select('*') \
-                .eq('project_name', project) \
+                .eq('customer_id', project) \
                 .or_(
                     f"and(source_table.ilike.%{table_a}%,target_table.ilike.%{table_b}%),"
                     f"and(source_table.ilike.%{table_b}%,target_table.ilike.%{table_a}%)"
