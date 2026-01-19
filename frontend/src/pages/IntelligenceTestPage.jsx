@@ -80,7 +80,7 @@ export default function IntelligenceTestPage() {
   const runRecalc = async () => {
     setRecalcStatus({ loading: true, result: null, error: null });
     try {
-      const response = await fetch(`${API_BASE}/api/projects/${projectId}/recalc`, {
+      const response = await fetch(`${API_BASE}/api/customers/${projectId}/recalc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ what: ['terms', 'entities', 'joins'] })
@@ -186,7 +186,7 @@ export default function IntelligenceTestPage() {
     }));
     try {
       const response = await fetch(
-        `${API_BASE}/api/projects/${projectId}/resolve-terms?question=${encodeURIComponent(question)}`,
+        `${API_BASE}/api/customers/${projectId}/resolve-terms?question=${encodeURIComponent(question)}`,
         { method: 'POST' }
       );
       const data = await response.json();

@@ -1,7 +1,7 @@
 /**
  * ProjectsPage.jsx - Projects List
  * 
- * WIRED TO REAL API - Fetches projects from /api/projects/list
+ * WIRED TO REAL API - Fetches projects from /api/customers/list
  * Shows Start Date and Projected End as separate columns.
  * 
  * Phase 4A UX Overhaul - January 16, 2026
@@ -50,7 +50,7 @@ const ProjectsPage = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects/list`);
+      const res = await fetch(`${API_BASE}/api/customers/list`);
       if (!res.ok) throw new Error('Failed to fetch projects');
       const data = await res.json();
       
@@ -94,7 +94,7 @@ const ProjectsPage = () => {
           <h1 className="page-title">Customers</h1>
           <p className="page-subtitle">{projects.length} total customers</p>
         </div>
-        <button className="btn btn-primary btn-lg" onClick={() => navigate('/projects/new')}>
+        <button className="btn btn-primary btn-lg" onClick={() => navigate('/customers/new')}>
           <Plus size={18} />
           New Customer
         </button>
@@ -134,7 +134,7 @@ const ProjectsPage = () => {
           </thead>
           <tbody>
             {filteredProjects.map(project => (
-              <tr key={project.id} onClick={() => navigate(`/projects/${project.id}/hub`)} style={{ cursor: 'pointer' }}>
+              <tr key={project.id} onClick={() => navigate(`/customers/${project.id}/hub`)} style={{ cursor: 'pointer' }}>
                 <td>
                   <div className="flex items-center">
                     <div className="project-card__avatar" style={{ width: '32px', height: '32px', fontSize: 'var(--text-sm)', background: getCustomerColor(project.customer || project.name), flexShrink: 0 }}>

@@ -57,7 +57,7 @@ export default function ProjectHub() {
 
   const fetchProject = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects/list`);
+      const res = await fetch(`${API_BASE}/api/customers/list`);
       if (!res.ok) throw new Error('Failed to fetch projects');
       const projects = await res.json();
       
@@ -102,7 +102,7 @@ export default function ProjectHub() {
         <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
           <h2>Project Not Found</h2>
           <p className="text-muted mt-2">{error}</p>
-          <button className="btn btn-primary mt-4" onClick={() => navigate('/projects')}>Back to Customers</button>
+          <button className="btn btn-primary mt-4" onClick={() => navigate('/customers')}>Back to Customers</button>
         </div>
       </div>
     );
@@ -127,7 +127,7 @@ export default function ProjectHub() {
           </div>
         </div>
         <div className="hub-actions">
-          <button className="btn btn-secondary" onClick={() => navigate(`/projects/${id}/edit`)}><Settings size={16} />Edit</button>
+          <button className="btn btn-secondary" onClick={() => navigate(`/customers/${id}/edit`)}><Settings size={16} />Edit</button>
           <button className="btn btn-secondary" onClick={() => navigate('/workspace')}><MessageSquare size={16} />Ask AI</button>
           <button className="btn btn-primary" onClick={() => navigate('/findings')}>Continue to Findings</button>
         </div>

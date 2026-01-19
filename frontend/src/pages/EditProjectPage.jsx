@@ -1,7 +1,7 @@
 /**
  * EditProjectPage.jsx - Edit Project
  * 
- * WIRED TO REAL API - Fetches project, allows updates via PATCH /api/projects/{id}
+ * WIRED TO REAL API - Fetches project, allows updates via PATCH /api/customers/{id}
  * 
  * Phase 4A UX Overhaul - January 16, 2026
  */
@@ -83,7 +83,7 @@ const EditProjectPage = () => {
 
   const fetchProject = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects/list`);
+      const res = await fetch(`${API_BASE}/api/customers/list`);
       if (!res.ok) throw new Error('Failed to fetch projects');
       const projects = await res.json();
       
@@ -163,7 +163,7 @@ const EditProjectPage = () => {
     try {
       const engagementLabel = ENGAGEMENT_TYPES.find(t => t.value === formData.engagement_type)?.label || formData.engagement_type;
       
-      const res = await fetch(`${API_BASE}/api/projects/${id}`, {
+      const res = await fetch(`${API_BASE}/api/customers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -184,7 +184,7 @@ const EditProjectPage = () => {
       if (!res.ok) throw new Error('Failed to update project');
       
       setSuccess(true);
-      setTimeout(() => navigate(`/projects/${id}/hub`), 1500);
+      setTimeout(() => navigate(`/customers/${id}/hub`), 1500);
     } catch (err) {
       setError(err.message || 'Failed to update project');
     } finally {
@@ -197,9 +197,9 @@ const EditProjectPage = () => {
     
     setDeleting(true);
     try {
-      const res = await fetch(`${API_BASE}/api/projects/${id}`, { method: 'DELETE' });
+      const res = await fetch(`${API_BASE}/api/customers/${id}`, { method: 'DELETE' });
       if (!res.ok) throw new Error('Failed to delete project');
-      navigate('/projects');
+      navigate('/customers');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -218,7 +218,7 @@ const EditProjectPage = () => {
 
   return (
     <div className="edit-project-page">
-      <button className="btn btn-secondary mb-4" onClick={() => navigate(`/projects/${id}/hub`)}>
+      <button className="btn btn-secondary mb-4" onClick={() => navigate(`/customers/${id}/hub`)}>
         <ArrowLeft size={16} />
         Back to Project
       </button>
@@ -429,7 +429,7 @@ const EditProjectPage = () => {
               </>
             )}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate(`/projects/${id}/hub`)}>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate(`/customers/${id}/hub`)}>
             Cancel
           </button>
         </div>

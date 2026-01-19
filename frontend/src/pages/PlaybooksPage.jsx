@@ -964,7 +964,7 @@ export default function PlaybooksPage() {
               ? "This project doesn't have any playbooks assigned yet. Go to Projects to assign playbooks."
               : "No playbooks have been assigned to this project. Contact your administrator to enable playbooks."
           }
-          action={isAdmin ? { label: 'Manage Projects', to: '/projects' } : null}
+          action={isAdmin ? { label: 'Manage Projects', to: '/customers' } : null}
         />
       </>
     );

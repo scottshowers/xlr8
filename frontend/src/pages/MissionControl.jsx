@@ -40,7 +40,7 @@ const MissionControl = () => {
 
   const fetchProjects = async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/projects/list`);
+      const res = await fetch(`${API_BASE}/api/customers/list`);
       if (!res.ok) throw new Error('Failed to fetch');
       const data = await res.json();
       
@@ -125,7 +125,7 @@ const MissionControl = () => {
           <h1 className="page-title">Mission Control</h1>
           <p className="page-subtitle">Overview of your active projects</p>
         </div>
-        <button className="btn btn-primary btn-lg" onClick={() => navigate('/projects/new')}>
+        <button className="btn btn-primary btn-lg" onClick={() => navigate('/customers/new')}>
           <Plus size={18} />New Project
         </button>
       </div>
@@ -160,7 +160,7 @@ const MissionControl = () => {
           <div className="section-header"><h2 className="section-title">Needs Attention</h2></div>
           <div className="attention-list">
             {attentionItems.map(item => (
-              <div key={item.id} className="attention-item" onClick={() => navigate(`/projects/${item.projectId}/hub`)}>
+              <div key={item.id} className="attention-item" onClick={() => navigate(`/customers/${item.projectId}/hub`)}>
                 <div className={`attention-indicator attention-indicator--${item.type}`} />
                 <div className="attention-content">
                   <div className="attention-title">{item.title}</div>
@@ -176,20 +176,20 @@ const MissionControl = () => {
       {/* Recent Projects */}
       <div className="section-header">
         <h2 className="section-title">Recent Projects</h2>
-        <button className="btn btn-secondary" onClick={() => navigate('/projects')}>View All Customers</button>
+        <button className="btn btn-secondary" onClick={() => navigate('/customers')}>View All Customers</button>
       </div>
 
       {recentProjects.length === 0 ? (
         <div className="card">
           <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
             <p className="text-muted">No customers yet.</p>
-            <button className="btn btn-primary mt-4" onClick={() => navigate('/projects/new')}>Create Your First Project</button>
+            <button className="btn btn-primary mt-4" onClick={() => navigate('/customers/new')}>Create Your First Project</button>
           </div>
         </div>
       ) : (
         <div className="projects-grid">
           {recentProjects.map(project => (
-            <div key={project.id} className="project-card" onClick={() => navigate(`/projects/${project.id}/hub`)}>
+            <div key={project.id} className="project-card" onClick={() => navigate(`/customers/${project.id}/hub`)}>
               <div className="project-card__header">
                 <div className="project-card__avatar" style={{ background: getCustomerColor(project.name) }}>{project.initials}</div>
                 <div>
