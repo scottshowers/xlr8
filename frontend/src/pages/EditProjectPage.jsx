@@ -11,6 +11,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { ChevronRight, AlertCircle, Check, Loader2, ArrowLeft, Trash2 } from 'lucide-react';
 import { useProject } from '../context/ProjectContext';
 import { useAuth } from '../context/AuthContext';
+import ConnectionSetup from '../components/ConnectionSetup';
 
 const API_BASE = import.meta.env.VITE_API_URL || '';
 
@@ -396,6 +397,16 @@ const EditProjectPage = () => {
               onChange={(e) => handleChange('notes', e.target.value)}
               style={{ resize: 'vertical' }}
             />
+          </div>
+        </div>
+
+        {/* API Connections */}
+        <div className="card mb-6">
+          <div className="card-header">
+            <h3 className="card-title">API Connections</h3>
+          </div>
+          <div className="card-body">
+            <ConnectionSetup projectId={id} />
           </div>
         </div>
 
