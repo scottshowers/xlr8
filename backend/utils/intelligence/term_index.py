@@ -1722,7 +1722,7 @@ class VendorSchemaLoader:
         
         # Map vendor names to file names
         file_map = {
-            'ukg_pro': 'ukg_schema_reference.json',
+            'ukg_pro': 'ukg_pro_schema.json',
             'ukg_wfm': 'ukg_wfm_dimensions_schema_v1.json',
             'ukg_wfm_dimensions': 'ukg_wfm_dimensions_schema_v1.json',
             'ukg_ready': 'ukg_ready_schema_v1.json',
