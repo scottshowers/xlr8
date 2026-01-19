@@ -574,7 +574,7 @@ class DetectionService:
                 'functional_areas': func_areas
             }
             
-            supabase.table('projects').update(update_data).eq('name', project_id).execute()
+            supabase.table('customers').update(update_data).eq('name', project_id).execute()
             
             # Update junction tables
             self._update_junction_tables(project_id, detection, supabase)
@@ -590,7 +590,7 @@ class DetectionService:
         """Update junction tables for relational queries."""
         try:
             # Get project UUID
-            project_result = supabase.table('projects').select('id').eq('name', project_id).execute()
+            project_result = supabase.table('customers').select('id').eq('name', project_id).execute()
             if not project_result.data:
                 return
             
@@ -636,7 +636,7 @@ class DetectionService:
             return None
         
         try:
-            result = supabase.table('projects').select(
+            result = supabase.table('customers').select(
                 'id, name, systems, domains, functional_areas, '
                 'detected_context, context_confirmed, engagement_type'
             ).eq('name', project_id).execute()
@@ -673,7 +673,7 @@ class DetectionService:
             self._load_reference_data()
             
             # Get current context
-            current = supabase.table('projects').select('detected_context').eq('name', project_id).execute()
+            current = supabase.table('customers').select('detected_context').eq('name', project_id).execute()
             detected_context = current.data[0].get('detected_context', {}) if current.data else {}
             
             update_data = {'context_confirmed': True}
@@ -720,7 +720,7 @@ class DetectionService:
             detected_context['confirmed_at'] = datetime.now().isoformat()
             update_data['detected_context'] = detected_context
             
-            supabase.table('projects').update(update_data).eq('name', project_id).execute()
+            supabase.table('customers').update(update_data).eq('name', project_id).execute()
             
             logger.info(f"[DETECTION] Confirmed context for {project_id}")
             return True
