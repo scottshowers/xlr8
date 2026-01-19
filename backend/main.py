@@ -234,7 +234,7 @@ except ImportError as e:
 
 # Import UKG connector router (direct UKG Pro API access)
 try:
-    from backend.routers import ukg_connector
+    from backend.routers.ukg_connector import router as ukg_connector_router
     UKG_CONNECTOR_AVAILABLE = True
 except ImportError as e:
     UKG_CONNECTOR_AVAILABLE = False
@@ -564,7 +564,7 @@ else:
 
 # Register UKG connector router if available (direct UKG Pro API access)
 if UKG_CONNECTOR_AVAILABLE:
-    app.include_router(ukg_connector.router, prefix="/api", tags=["ukg-connector"])
+    app.include_router(ukg_connector_router, prefix="/api", tags=["ukg-connector"])
     logger.info("UKG connector router registered at /api/ukg")
 else:
     logger.warning("UKG connector router not available")
