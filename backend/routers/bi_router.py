@@ -500,12 +500,17 @@ def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
         all_tables = handler.conn.execute("SHOW TABLES").fetchall()
         
         # Build project prefix for filtering
+        # Tables use first 8 chars of UUID (no hyphens) as prefix
         project_clean = (project or '').strip()
         project_prefixes = [
             project_clean.lower(),
             project_clean.lower().replace(' ', '_'),
             project_clean.lower().replace('-', '_'),
+            # Handle UUID-based customer IDs: extract first 8 chars without hyphens
+            project_clean.replace('-', '')[:8].lower() if '-' in project_clean else None,
         ]
+        # Remove None values
+        project_prefixes = [p for p in project_prefixes if p]
         
         # Track seen tables to prevent duplicates
         seen_table_names = set()

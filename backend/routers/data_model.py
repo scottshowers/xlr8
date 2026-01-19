@@ -697,12 +697,16 @@ async def get_project_tables(project_name: str) -> List[Dict]:
                 all_tables = handler.conn.execute("SHOW TABLES").fetchall()
                 
                 # Build project prefixes for matching
+                # Tables use first 8 chars of UUID (no hyphens) as prefix
                 project_clean = project_name.strip()
                 project_prefixes = [
                     project_clean.lower(),
                     project_clean.lower().replace(' ', '_'),
                     project_clean.lower().replace(' ', '_').replace('-', '_'),
+                    # Handle UUID-based customer IDs: extract first 8 chars without hyphens
+                    project_clean.replace('-', '')[:8].lower() if '-' in project_clean else None,
                 ]
+                project_prefixes = [p for p in project_prefixes if p]
                 
                 for (table_name,) in all_tables:
                     # Skip system tables
