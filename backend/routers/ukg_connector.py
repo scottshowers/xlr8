@@ -11,6 +11,7 @@ Endpoints:
 """
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from typing import Optional, Dict, Any, List
 import httpx
@@ -52,6 +53,99 @@ def build_auth_headers(creds: UKGCredentials) -> Dict[str, str]:
         "Content-Type": "application/json",
         "Accept": "application/json"
     }
+
+
+@router.get("/browse", response_class=HTMLResponse)
+async def browse_ukg_data(
+    username: str,
+    password: str,
+    user_api_key: str,
+    hostname: str = "service5.ultipro.com",
+    customer_api_key: str = "OTA4F"
+):
+    """
+    Nice HTML view of all available code tables.
+    /api/ukg/browse?username=XXX&password=XXX&user_api_key=XXX
+    """
+    from fastapi.responses import HTMLResponse
+    
+    creds = UKGCredentials(
+        hostname=hostname,
+        customer_api_key=customer_api_key,
+        username=username,
+        password=password,
+        user_api_key=user_api_key
+    )
+    
+    url = f"https://{creds.hostname}/configuration/v1/code-tables"
+    headers = build_auth_headers(creds)
+    
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(url, headers=headers)
+            
+            if response.status_code == 200:
+                tables = response.json()
+                
+                # Build nice HTML
+                rows = ""
+                for i, table in enumerate(tables, 1):
+                    name = table.get('name', table) if isinstance(table, dict) else table
+                    rows += f"<tr><td>{i}</td><td>{name}</td></tr>"
+                
+                html = f"""
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>UKG Pro Code Tables</title>
+                    <style>
+                        body {{ font-family: -apple-system, sans-serif; max-width: 900px; margin: 40px auto; padding: 20px; }}
+                        h1 {{ color: #28a745; }}
+                        .count {{ background: #d4edda; padding: 10px 20px; border-radius: 8px; display: inline-block; margin-bottom: 20px; }}
+                        table {{ width: 100%; border-collapse: collapse; }}
+                        th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+                        th {{ background: #f8f9fa; }}
+                        tr:hover {{ background: #f5f5f5; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>✅ UKG Pro Code Tables</h1>
+                    <div class="count">Found <strong>{len(tables)}</strong> code tables available</div>
+                    <table>
+                        <tr><th>#</th><th>Table Name</th></tr>
+                        {rows}
+                    </table>
+                </body>
+                </html>
+                """
+                return HTMLResponse(content=html)
+            else:
+                return HTMLResponse(content=f"<h1>Error {response.status_code}</h1><pre>{response.text}</pre>")
+                
+    except Exception as e:
+        return HTMLResponse(content=f"<h1>Error</h1><pre>{str(e)}</pre>")
+
+
+@router.get("/quick-test")
+async def quick_test_ukg_connection(
+    username: str,
+    password: str,
+    user_api_key: str,
+    hostname: str = "service5.ultipro.com",
+    customer_api_key: str = "OTA4F"
+):
+    """
+    Quick test - just hit this URL with query params:
+    /api/ukg/quick-test?username=XXX&password=XXX&user_api_key=XXX
+    """
+    creds = UKGCredentials(
+        hostname=hostname,
+        customer_api_key=customer_api_key,
+        username=username,
+        password=password,
+        user_api_key=user_api_key
+    )
+    return await test_ukg_connection(creds)
 
 
 @router.post("/test-connection", response_model=UKGTestResult)
