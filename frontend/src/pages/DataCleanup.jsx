@@ -330,13 +330,13 @@ export default function DataCleanup() {
                 color: 'var(--text-secondary)',
                 marginBottom: 'var(--space-2)'
               }}>
-                Type <strong style={{ color: '#ef4444' }}>{selectedProject.code || selectedProject.name}</strong> to confirm
+                Type <strong style={{ color: '#ef4444' }}>{selectedProject.name}</strong> to confirm
               </label>
               <input
                 type="text"
                 value={confirmText}
                 onChange={(e) => { setConfirmText(e.target.value); setError(null); }}
-                placeholder="Type project code to confirm"
+                placeholder="Type customer name to confirm"
                 style={{
                   width: '100%',
                   padding: 'var(--space-3)',
@@ -370,7 +370,7 @@ export default function DataCleanup() {
           {selectedProject && (
             <button
               onClick={handleDelete}
-              disabled={deleting || confirmText !== (selectedProject.code || selectedProject.name)}
+              disabled={deleting || confirmText !== selectedProject.name}
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -378,7 +378,7 @@ export default function DataCleanup() {
                 gap: 'var(--space-2)',
                 width: '100%',
                 padding: 'var(--space-3)',
-                background: (deleting || confirmText !== (selectedProject.code || selectedProject.name)) 
+                background: (deleting || confirmText !== selectedProject.name) 
                   ? 'var(--text-muted)' 
                   : '#ef4444',
                 color: '#ffffff',
@@ -386,7 +386,7 @@ export default function DataCleanup() {
                 borderRadius: 'var(--radius-md)',
                 fontSize: 'var(--text-sm)',
                 fontWeight: 600,
-                cursor: (deleting || confirmText !== (selectedProject.code || selectedProject.name)) 
+                cursor: (deleting || confirmText !== selectedProject.name) 
                   ? 'not-allowed' 
                   : 'pointer',
                 fontFamily: 'var(--font-body)'
