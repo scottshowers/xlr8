@@ -1643,7 +1643,6 @@ def process_extraction_job(
                 cost_usd=result['cost_usd'],
                 processing_time_ms=result['processing_time_ms'],
                 extraction_method=result.get('llm_used', 'unknown'),
-                customer_id=customer_id,
                 duckdb_table=result.get('duckdb_table')
             )
             result['extract_id'] = saved.get('id') if saved else None
