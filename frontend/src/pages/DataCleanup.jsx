@@ -436,7 +436,7 @@ function NuclearCleanup({ onComplete }) {
     setResult(null);
 
     try {
-      const res = await api.delete('/status/nuclear/all');
+      const res = await api.delete('/status/nuclear/all?force=true');
       setResult(res.data);
       setConfirmText('');
       if (onComplete) onComplete();
