@@ -120,7 +120,7 @@ export default function ConnectionSetup({ projectId, onConnectionsChange }) {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            project_id: projectId,
+            project_name: projectId,
             system_id: systemId,
             credentials: credentials[systemId] || {}
           })
