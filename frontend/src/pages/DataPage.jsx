@@ -77,6 +77,194 @@ const getFileTypeInfo = (filename) => {
   return FILE_TYPE_CONFIG[ext] || { bg: '#64748b', label: ext?.toUpperCase() || 'FILE', icon: FileText };
 };
 
+// ============================================================================
+// SYNC FROM UKG BUTTON
+// ============================================================================
+const API_BASE = import.meta.env.VITE_API_URL || 'https://hcmpact-xlr8-production.up.railway.app';
+
+function SyncFromUKGButton({ c, projectId }) {
+  const [syncing, setSyncing] = useState(false);
+  const [hasConnection, setHasConnection] = useState(false);
+  const [jobId, setJobId] = useState(null);
+  const [status, setStatus] = useState(null);
+  const [showStatus, setShowStatus] = useState(false);
+  
+  // Check if project has UKG connection
+  useEffect(() => {
+    if (!projectId) return;
+    
+    fetch(`${API_BASE}/api/integrations/connections/${projectId}`)
+      .then(res => res.json())
+      .then(data => {
+        const ukgConn = (data.connections || []).find(c => c.system_id === 'ukg_pro' && c.status === 'connected');
+        setHasConnection(!!ukgConn);
+      })
+      .catch(() => setHasConnection(false));
+  }, [projectId]);
+  
+  // Poll for job status
+  useEffect(() => {
+    if (!jobId) return;
+    
+    const pollInterval = setInterval(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/ukg/sync-status/${jobId}`);
+        const data = await res.json();
+        setStatus(data);
+        
+        // Stop polling when complete or failed
+        if (data.status === 'completed' || data.status === 'failed') {
+          clearInterval(pollInterval);
+          setSyncing(false);
+          
+          // Auto-hide after 10 seconds on success
+          if (data.status === 'completed' && data.success) {
+            setTimeout(() => setShowStatus(false), 10000);
+          }
+        }
+      } catch (err) {
+        console.error('Poll failed:', err);
+      }
+    }, 2000); // Poll every 2 seconds
+    
+    return () => clearInterval(pollInterval);
+  }, [jobId]);
+  
+  const handleSync = async () => {
+    setSyncing(true);
+    setStatus(null);
+    setShowStatus(true);
+    
+    try {
+      const res = await fetch(`${API_BASE}/api/ukg/sync-config/${projectId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      
+      const data = await res.json();
+      
+      if (data.status === 'already_running') {
+        setJobId(data.job_id);
+        setStatus({ status: 'running', current_step: 'Resuming existing sync...' });
+      } else if (data.job_id) {
+        setJobId(data.job_id);
+        setStatus({ status: 'queued', current_step: 'Starting...' });
+      } else {
+        setSyncing(false);
+        setStatus({ status: 'failed', errors: ['Failed to start sync job'] });
+      }
+    } catch (err) {
+      setSyncing(false);
+      setStatus({ status: 'failed', errors: [err.message] });
+    }
+  };
+  
+  if (!hasConnection) return null;
+  
+  const isComplete = status?.status === 'completed';
+  const isFailed = status?.status === 'failed';
+  const progress = status?.total_tables > 0 
+    ? Math.round((status.tables_processed / status.total_tables) * 100) 
+    : 0;
+  
+  return (
+    <>
+      <Tooltip title="Sync from UKG Pro" detail="Pull all configuration and employee data directly from UKG Pro API." action="Sync now to get latest data">
+        <button
+          onClick={handleSync}
+          disabled={syncing}
+          style={{
+            display: 'flex', alignItems: 'center', gap: '0.5rem',
+            padding: '0.5rem 1rem', 
+            background: syncing ? '#f0f0f0' : '#dcfce7',
+            border: '1px solid #16a34a',
+            borderRadius: 8, 
+            color: '#166534',
+            fontSize: 'var(--text-sm)', 
+            cursor: syncing ? 'wait' : 'pointer',
+            transition: 'all 0.2s', 
+            fontWeight: 500, 
+            whiteSpace: 'nowrap',
+            fontFamily: 'var(--font-body)'
+          }}
+        >
+          {syncing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+          {syncing ? 'Syncing...' : 'Sync from UKG'}
+        </button>
+      </Tooltip>
+      
+      {/* Status popup */}
+      {showStatus && status && (
+        <div style={{
+          position: 'fixed',
+          top: '80px',
+          right: '20px',
+          padding: '16px 20px',
+          borderRadius: '8px',
+          background: isFailed ? '#fee2e2' : isComplete ? '#dcfce7' : '#f0f9ff',
+          border: `1px solid ${isFailed ? '#dc2626' : isComplete ? '#16a34a' : '#3b82f6'}`,
+          boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+          zIndex: 1000,
+          minWidth: '320px',
+          maxWidth: '400px'
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
+            {isComplete ? <CheckCircle size={18} color="#16a34a" /> : 
+             isFailed ? <XCircle size={18} color="#dc2626" /> :
+             <Loader2 size={18} color="#3b82f6" className="spin" />}
+            <strong style={{ color: isFailed ? '#991b1b' : isComplete ? '#166534' : '#1e40af' }}>
+              {isComplete ? 'Sync Complete!' : isFailed ? 'Sync Failed' : 'Syncing from UKG Pro...'}
+            </strong>
+            <button 
+              onClick={() => { setShowStatus(false); if (!syncing) setJobId(null); }}
+              style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', padding: '4px' }}
+            >
+              ✕
+            </button>
+          </div>
+          
+          {/* Progress bar */}
+          {!isComplete && !isFailed && (
+            <div style={{ marginBottom: '12px' }}>
+              <div style={{ 
+                height: '6px', 
+                background: '#e5e7eb', 
+                borderRadius: '3px',
+                overflow: 'hidden'
+              }}>
+                <div style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  background: '#3b82f6',
+                  transition: 'width 0.3s ease'
+                }} />
+              </div>
+            </div>
+          )}
+          
+          {/* Status details */}
+          <div style={{ fontSize: '13px', color: isFailed ? '#991b1b' : isComplete ? '#166534' : '#1e40af' }}>
+            {status.current_step && <div style={{ marginBottom: '4px' }}>{status.current_step}</div>}
+            {status.tables_synced !== undefined && (
+              <div>
+                {status.tables_synced} tables synced
+                {status.total_rows ? `, ${status.total_rows.toLocaleString()} rows` : ''}
+                {status.tables_failed > 0 && ` (${status.tables_failed} failed)`}
+              </div>
+            )}
+            {isFailed && status.errors?.length > 0 && (
+              <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                {status.errors.slice(0, 3).join(', ')}
+                {status.errors.length > 3 && `... and ${status.errors.length - 3} more`}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 
 // ============================================================================
 // MAIN PAGE
@@ -287,6 +475,8 @@ export default function DataPage() {
         </div>
         
         <div style={{ display: 'flex', gap: '0.75rem' }}>
+          {/* Sync from UKG button - only show if project has UKG connection */}
+          <SyncFromUKGButton c={c} projectId={activeProject?.id} />
           <Tooltip title="Data Explorer" detail="Explore tables, columns, relationships, and data health across your project." action="View classifications and run compliance checks">
             <Link 
               to="/data/explorer" 
