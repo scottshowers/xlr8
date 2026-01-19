@@ -2247,7 +2247,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         v4.0 CHANGE: Use BRIT/schema reference FIRST, inference SECOND.
         
         Algorithm:
-        1. Load known FK patterns from ukg_schema_reference.json
+        1. Load known FK patterns from ukg_pro_schema.json
         2. Identify hub candidates from DATA PATTERNS
         3. Find spokes by SCHEMA MATCHING (known FKs) - 100% confidence
         4. Find additional spokes by VALUE MATCHING (inference) - lower confidence
@@ -2277,9 +2277,9 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             known_hubs = {}  # hub_type -> {key_column, semantic_type, ...}
             
             schema_paths = [
-                '/app/config/ukg_schema_reference.json',
-                'config/ukg_schema_reference.json',
-                os.path.join(os.path.dirname(__file__), '..', 'config', 'ukg_schema_reference.json'),
+                '/app/config/ukg_pro_schema.json',
+                'config/ukg_pro_schema.json',
+                os.path.join(os.path.dirname(__file__), '..', 'config', 'ukg_pro_schema.json'),
             ]
             
             for schema_path in schema_paths:
@@ -3213,7 +3213,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             ]
             
             for base_path in base_paths:
-                schema_path = os.path.join(base_path, 'ukg_schema_reference.json')
+                schema_path = os.path.join(base_path, 'ukg_pro_schema.json')
                 if os.path.exists(schema_path):
                     with open(schema_path, 'r') as f:
                         schema = json.load(f)
