@@ -5,17 +5,17 @@ Intelligence Router - API Endpoints for Universal Analysis Engine
 Exposes the ProjectIntelligenceService via REST API.
 
 ENDPOINTS:
-- GET  /intelligence/{project}/summary      - Get analysis summary
-- GET  /intelligence/{project}/findings     - Get findings with filters
-- GET  /intelligence/{project}/tasks        - Get tasks with filters
-- GET  /intelligence/{project}/evidence/{id} - Get evidence package for finding
-- POST /intelligence/{project}/analyze      - Trigger analysis (usually auto on upload)
-- GET  /intelligence/{project}/lookups      - Get detected lookup tables
-- GET  /intelligence/{project}/relationships - Get detected relationships
-- POST /intelligence/{project}/stuck        - "I'm stuck" helper
-- GET  /intelligence/{project}/work-trail   - Get work trail
-- POST /intelligence/{project}/task/{id}/complete - Mark task complete
-- POST /intelligence/{project}/collision-check - Check collision before action
+- GET  /intelligence/{customer_id}/summary      - Get analysis summary
+- GET  /intelligence/{customer_id}/findings     - Get findings with filters
+- GET  /intelligence/{customer_id}/tasks        - Get tasks with filters
+- GET  /intelligence/{customer_id}/evidence/{id} - Get evidence package for finding
+- POST /intelligence/{customer_id}/analyze      - Trigger analysis (usually auto on upload)
+- GET  /intelligence/{customer_id}/lookups      - Get detected lookup tables
+- GET  /intelligence/{customer_id}/relationships - Get detected relationships
+- POST /intelligence/{customer_id}/stuck        - "I'm stuck" helper
+- GET  /intelligence/{customer_id}/work-trail   - Get work trail
+- POST /intelligence/{customer_id}/task/{id}/complete - Mark task complete
+- POST /intelligence/{customer_id}/collision-check - Check collision before action
 
 Author: XLR8 Team
 """
@@ -65,14 +65,14 @@ class TaskCompleteRequest(BaseModel):
 # HELPER - Get Intelligence Service
 # =============================================================================
 
-def _get_intelligence_service(project: str):
+def _get_intelligence_service(customer_id: str):
     """Get or create intelligence service for a project."""
     try:
         from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
         from utils.structured_data_handler import get_structured_handler
         
         handler = get_structured_handler()
-        service = get_project_intelligence(project, handler)
+        service = get_project_intelligence(customer_id, handler)
         return service
         
     except ImportError as e:
@@ -87,26 +87,26 @@ def _get_intelligence_service(project: str):
 # ENDPOINTS
 # =============================================================================
 
-@router.get("/{project}/summary")
-async def get_summary(project: str):
+@router.get("/{customer_id}/summary")
+async def get_summary(customer_id: str):
     """
     Get intelligence summary for a project.
     
     Returns high-level stats: tables, rows, findings, tasks, scores.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         
         # If not analyzed yet, return empty summary
         if not service.analyzed_at:
             return {
-                'project': project,
+                'customer_id': customer_id,
                 'analyzed': False,
                 'message': 'Project not yet analyzed. Upload data or call /analyze.'
             }
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'analyzed': True,
             'analyzed_at': service.analyzed_at.isoformat() if service.analyzed_at else None,
             'structure': {
@@ -141,9 +141,9 @@ async def get_summary(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/findings")
+@router.get("/{customer_id}/findings")
 async def get_findings(
-    project: str,
+    customer_id: str,
     severity: Optional[str] = Query(None, description="Filter by severity: critical, warning, info"),
     category: Optional[str] = Query(None, description="Filter by category: STRUCTURE, QUALITY, RELATIONSHIP, PATTERN"),
     table: Optional[str] = Query(None, description="Filter by table name (partial match)")
@@ -152,11 +152,11 @@ async def get_findings(
     Get findings for a project with optional filters.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         findings = service.get_findings(severity=severity, category=category, table=table)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(findings),
             'filters': {
                 'severity': severity,
@@ -173,9 +173,9 @@ async def get_findings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/tasks")
+@router.get("/{customer_id}/tasks")
 async def get_tasks(
-    project: str,
+    customer_id: str,
     status: Optional[str] = Query(None, description="Filter by status: pending, in_progress, complete, skipped"),
     severity: Optional[str] = Query(None, description="Filter by severity: critical, warning, info")
 ):
@@ -186,11 +186,11 @@ async def get_tasks(
     Each task has a shortcut - the fastest way to resolve it.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         tasks = service.get_tasks(status=status, severity=severity)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(tasks),
             'filters': {
                 'status': status,
@@ -206,8 +206,8 @@ async def get_tasks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/evidence/{finding_id}")
-async def get_evidence(project: str, finding_id: str):
+@router.get("/{customer_id}/evidence/{finding_id}")
+async def get_evidence(customer_id: str, finding_id: str):
     """
     Get full evidence package for a finding.
     
@@ -218,14 +218,14 @@ async def get_evidence(project: str, finding_id: str):
     - Timestamp and data hash for proof
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         evidence = service.get_evidence(finding_id)
         
         if not evidence:
             raise HTTPException(status_code=404, detail=f"Finding '{finding_id}' not found")
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'finding_id': finding_id,
             'evidence': evidence.to_dict()
         }
@@ -237,8 +237,8 @@ async def get_evidence(project: str, finding_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/analyze")
-async def analyze_project(project: str, request: AnalyzeRequest = None):
+@router.post("/{customer_id}/analyze")
+async def analyze_project(customer_id: str, request: AnalyzeRequest = None):
     """
     Trigger analysis for a project.
     
@@ -254,7 +254,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
         from utils.structured_data_handler import get_structured_handler
         
         handler = get_structured_handler()
-        service = ProjectIntelligenceService(project, handler)
+        service = ProjectIntelligenceService(customer_id, handler)
         
         # Map tier names to enum
         tier_map = {
@@ -306,7 +306,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
                     target_id=f"analysis_{analysis_id}",
                     relationship=LineageModel.REL_ANALYZED,
                     project_id=project_id,
-                    metadata={'tiers': [t.value for t in tiers], 'project': project}
+                    metadata={'tiers': [t.value for t in tiers], 'customer_id': customer_id}
                 )
             
             # Track analysis → findings edges
@@ -334,7 +334,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
             logger.warning(f"[INTELLIGENCE_API] Lineage tracking failed (non-fatal): {lineage_error}")
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'success': 'error' not in result,
             'analysis': result
         }
@@ -348,9 +348,9 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/lookups")
+@router.get("/{customer_id}/lookups")
 async def get_lookups(
-    project: str,
+    customer_id: str,
     lookup_type: Optional[str] = Query(None, description="Filter by type: location, department, status, etc.")
 ):
     """
@@ -359,14 +359,14 @@ async def get_lookups(
     These are auto-decoded: "LOC001" → "Houston, TX (LOC001)"
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         lookups = service.lookups
         
         if lookup_type:
             lookups = [l for l in lookups if l.lookup_type == lookup_type]
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(lookups),
             'lookups': [l.to_dict() for l in lookups]
         }
@@ -378,9 +378,9 @@ async def get_lookups(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/metrics")
+@router.get("/{customer_id}/metrics")
 async def get_organizational_metrics(
-    project: str,
+    customer_id: str,
     category: Optional[str] = Query(None, description="Filter by category: workforce, compensation, benefits, demographics, configuration, dimensional")
 ):
     """
@@ -395,7 +395,7 @@ async def get_organizational_metrics(
     All computed dynamically from Context Graph and Lookups.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         metrics = service.get_organizational_metrics(category)
         
         # Group by category for easier consumption
@@ -407,7 +407,7 @@ async def get_organizational_metrics(
             by_category[cat].append(m.to_dict())
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(metrics),
             'by_category': by_category,
             'metrics': [m.to_dict() for m in metrics]
@@ -420,18 +420,18 @@ async def get_organizational_metrics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/relationships")
-async def get_relationships(project: str):
+@router.get("/{customer_id}/relationships")
+async def get_relationships(customer_id: str):
     """
     Get detected table relationships.
     
     Shows how tables connect (foreign keys, join paths).
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(service.relationships),
             'relationships': [r.to_dict() for r in service.relationships]
         }
@@ -443,8 +443,8 @@ async def get_relationships(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/debug-columns")
-async def debug_columns(project: str, table: str = None):
+@router.get("/{customer_id}/debug-columns")
+async def debug_columns(customer_id: str, table: str = None):
     """
     Debug endpoint: Show column names from profile.
     
@@ -464,7 +464,7 @@ async def debug_columns(project: str, table: str = None):
                 WHERE LOWER(project) = LOWER(?)
                 AND LOWER(table_name) LIKE LOWER(?)
                 ORDER BY table_name, column_name
-            """, [project, f"%{table}%"]).fetchall()
+            """, [customer_id, f"%{table}%"]).fetchall()
         else:
             # Get all columns with 'name' or 'supervisor' in them
             rows = conn.execute("""
@@ -473,10 +473,10 @@ async def debug_columns(project: str, table: str = None):
                 WHERE LOWER(project) = LOWER(?)
                 AND (LOWER(column_name) LIKE '%name%' OR LOWER(column_name) LIKE '%super%' OR LOWER(column_name) LIKE '%manager%')
                 ORDER BY table_name, column_name
-            """, [project]).fetchall()
+            """, [customer_id]).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'filter': table or 'name/supervisor/manager columns',
             'count': len(rows),
             'columns': [
@@ -495,8 +495,8 @@ async def debug_columns(project: str, table: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/detect-relationships")
-async def run_relationship_detection(project: str):
+@router.get("/{customer_id}/detect-relationships")
+async def run_relationship_detection(customer_id: str):
     """
     Debug endpoint: Force run relationship detection.
     
@@ -510,7 +510,7 @@ async def run_relationship_detection(project: str):
         conn = handler.conn
         
         # Run detection
-        stats = _detect_relationships(conn, project)
+        stats = _detect_relationships(conn, customer_id)
         
         # Get what was detected
         rows = conn.execute("""
@@ -518,10 +518,10 @@ async def run_relationship_detection(project: str):
                    relationship_type, semantic_meaning, confidence
             FROM _column_relationships
             WHERE LOWER(project) = LOWER(?)
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'stats': stats,
             'relationships': [
                 {
@@ -542,8 +542,8 @@ async def run_relationship_detection(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/test-multi-hop")
-async def test_multi_hop_detection(project: str, query: str = "manager's department"):
+@router.get("/{customer_id}/test-multi-hop")
+async def test_multi_hop_detection(customer_id: str, query: str = "manager's department"):
     """
     Debug endpoint: Test multi-hop detection.
     
@@ -585,8 +585,8 @@ async def test_multi_hop_detection(project: str, query: str = "manager's departm
     return result
 
 
-@router.get("/{project}/run-multi-hop")
-async def run_multi_hop_query(project: str, query: str = "manager's department"):
+@router.get("/{customer_id}/run-multi-hop")
+async def run_multi_hop_query(customer_id: str, query: str = "manager's department"):
     """
     Debug endpoint: Actually run a multi-hop query and see what happens.
     
@@ -594,7 +594,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
     """
     result = {
         'query': query,
-        'project': project,
+        'customer_id': customer_id,
         'steps': [],
         'sql': None,
         'error': None
@@ -621,7 +621,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
             SELECT DISTINCT table_name FROM _column_profiles 
             WHERE LOWER(project) = LOWER(?) 
             AND (LOWER(table_name) LIKE '%employee%' OR LOWER(table_name) LIKE '%company%')
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         result['steps'].append({'step': 'find_tables', 'result': [t[0] for t in tables]})
         
         # Step 3: Check for relationship
@@ -630,7 +630,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
             FROM _column_relationships
             WHERE LOWER(project) = LOWER(?)
             AND semantic_meaning = 'supervisor'
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         result['steps'].append({'step': 'find_relationships', 'result': [
             {'table': r[0], 'source': r[1], 'target': r[2], 'semantic': r[3]} for r in relationships
         ]})
@@ -659,7 +659,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
                 WHERE LOWER(project) = LOWER(?)
                 AND table_name = ?
                 AND LOWER(column_name) = LOWER(?)
-            """, [project, primary_table, candidate]).fetchall()
+            """, [customer_id, primary_table, candidate]).fetchall()
             
             if target_columns:
                 target_attr_col = target_columns[0][0]
@@ -673,7 +673,7 @@ async def run_multi_hop_query(project: str, query: str = "manager's department")
                 WHERE LOWER(project) = LOWER(?)
                 AND table_name = ?
                 AND LOWER(column_name) LIKE ?
-            """, [project, primary_table, f'%{target_attr}%']).fetchall()
+            """, [customer_id, primary_table, f'%{target_attr}%']).fetchall()
             
             if target_columns:
                 target_attr_col = target_columns[0][0]
@@ -708,19 +708,19 @@ LIMIT 100'''
     return result
 
 
-@router.post("/{project}/stuck")
-async def help_stuck(project: str, request: StuckRequest):
+@router.post("/{customer_id}/stuck")
+async def help_stuck(customer_id: str, request: StuckRequest):
     """
     The "I'M STUCK" button.
     
     Describe what you're trying to do, get guided help.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         result = service.help_stuck(request.description)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'query': request.description,
             'help': result
         }
@@ -732,20 +732,20 @@ async def help_stuck(project: str, request: StuckRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/work-trail")
+@router.get("/{customer_id}/work-trail")
 async def get_work_trail(
-    project: str,
+    customer_id: str,
     limit: int = Query(50, description="Number of entries to return")
 ):
     """
     Get work trail - auto-documentation of what was done.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         entries = service.get_work_trail(limit=limit)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'total': len(entries),
             'entries': [e.to_dict() for e in entries]
         }
@@ -757,13 +757,13 @@ async def get_work_trail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/task/{task_id}/complete")
-async def complete_task(project: str, task_id: str, request: TaskCompleteRequest = None):
+@router.post("/{customer_id}/task/{task_id}/complete")
+async def complete_task(customer_id: str, task_id: str, request: TaskCompleteRequest = None):
     """
     Mark a task as complete.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         
         # Find the task
         task = next((t for t in service.tasks if t.id == task_id), None)
@@ -791,7 +791,7 @@ async def complete_task(project: str, task_id: str, request: TaskCompleteRequest
         )
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'task_id': task_id,
             'status': 'complete',
             'message': f"Task '{task.title}' marked as complete"
@@ -804,8 +804,8 @@ async def complete_task(project: str, task_id: str, request: TaskCompleteRequest
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/collision-check")
-async def check_collision(project: str, request: CollisionCheckRequest):
+@router.post("/{customer_id}/collision-check")
+async def check_collision(customer_id: str, request: CollisionCheckRequest):
     """
     Check what will break if an action is taken.
     
@@ -813,7 +813,7 @@ async def check_collision(project: str, request: CollisionCheckRequest):
     Before making changes, see the downstream impact.
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         warning = service.check_collision(
             action=request.action,
             table=request.table,
@@ -823,13 +823,13 @@ async def check_collision(project: str, request: CollisionCheckRequest):
         
         if not warning:
             return {
-                'project': project,
+                'customer_id': customer_id,
                 'collision_detected': False,
                 'message': 'No downstream impacts detected. Safe to proceed.'
             }
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'collision_detected': True,
             'warning': warning.to_dict()
         }
@@ -841,19 +841,19 @@ async def check_collision(project: str, request: CollisionCheckRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/decode/{column}/{value}")
-async def decode_value(project: str, column: str, value: str):
+@router.get("/{customer_id}/decode/{column}/{value}")
+async def decode_value(customer_id: str, column: str, value: str):
     """
     Decode a coded value using detected lookups.
     
     Example: /decode/location_code/LOC001 → "Houston, TX (LOC001)"
     """
     try:
-        service = _get_intelligence_service(project)
+        service = _get_intelligence_service(customer_id)
         decoded = service.decode_value(column, value)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'column': column,
             'original': value,
             'decoded': decoded,
@@ -871,8 +871,8 @@ async def decode_value(project: str, column: str, value: str):
 # DIAGNOSTIC ENDPOINTS
 # =============================================================================
 
-@router.get("/{project}/diag/numeric-columns")
-async def diag_numeric_columns(project: str):
+@router.get("/{customer_id}/diag/numeric-columns")
+async def diag_numeric_columns(customer_id: str):
     """
     Diagnostic: Show all numeric columns found for a project.
     
@@ -887,7 +887,7 @@ async def diag_numeric_columns(project: str):
         conn = handler.conn
         
         # Get numeric columns via TermIndex
-        term_index = TermIndex(conn, project)
+        term_index = TermIndex(conn, customer_id)
         numeric_cols = []
         debug_info = {}
         try:
@@ -905,7 +905,7 @@ async def diag_numeric_columns(project: str):
                 WHERE project = ?
                   AND (LOWER(column_name) LIKE '%salary%' OR LOWER(column_name) LIKE '%amount%')
                 LIMIT 10
-            """, [project]).fetchall()
+            """, [customer_id]).fetchall()
             debug_info['raw_query_results'] = len(raw_test)
             debug_info['raw_sample'] = [{'t': r[0], 'c': r[1]} for r in raw_test[:3]]
         except Exception as e:
@@ -917,14 +917,14 @@ async def diag_numeric_columns(project: str):
             FROM _column_profiles
             WHERE project = ? AND LOWER(column_name) LIKE '%salary%'
             ORDER BY table_name
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         annual_cols = conn.execute("""
             SELECT table_name, column_name, inferred_type, distinct_count
             FROM _column_profiles
             WHERE project = ? AND LOWER(column_name) LIKE '%annual%'
             ORDER BY table_name
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         # Get all columns with numeric type
         numeric_type_cols = conn.execute("""
@@ -933,10 +933,10 @@ async def diag_numeric_columns(project: str):
             WHERE project = ? AND inferred_type = 'numeric'
             ORDER BY table_name
             LIMIT 50
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'debug': debug_info,
             'numeric_by_pattern': [{'table': r[0], 'column': r[1]} for r in numeric_cols],
             'numeric_by_pattern_count': len(numeric_cols),
@@ -950,8 +950,8 @@ async def diag_numeric_columns(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-numeric")
-async def diag_test_numeric(project: str, q: str = "salary above 75000"):
+@router.get("/{customer_id}/diag/test-numeric")
+async def diag_test_numeric(customer_id: str, q: str = "salary above 75000"):
     """
     Diagnostic: Test numeric expression resolution directly.
     
@@ -963,13 +963,13 @@ async def diag_test_numeric(project: str, q: str = "salary above 75000"):
         
         handler = get_structured_handler()
         conn = handler.conn
-        term_index = TermIndex(conn, project)
+        term_index = TermIndex(conn, customer_id)
         
         # Call resolve_numeric_expression directly
         matches = term_index.resolve_numeric_expression(q, full_question=q)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'query': q,
             'matches': [
                 {
@@ -989,8 +989,8 @@ async def diag_test_numeric(project: str, q: str = "salary above 75000"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/date-columns")
-async def diag_date_columns(project: str):
+@router.get("/{customer_id}/diag/date-columns")
+async def diag_date_columns(customer_id: str):
     """
     Diagnostic: Show all date columns for Evolution 4.
     """
@@ -1006,7 +1006,7 @@ async def diag_date_columns(project: str):
             FROM _column_profiles
             WHERE project = ? AND inferred_type = 'date'
             ORDER BY table_name, column_name
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         # Get columns with date-like names
         date_name_cols = conn.execute("""
@@ -1022,10 +1022,10 @@ async def diag_date_columns(project: str):
                    OR LOWER(column_name) LIKE '%end%')
             ORDER BY table_name, column_name
             LIMIT 50
-        """, [project]).fetchall()
+        """, [customer_id]).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'date_type_columns': [
                 {'table': r[0], 'column': r[1], 'type': r[2], 'distinct': r[3]} 
                 for r in date_type_cols
@@ -1043,8 +1043,8 @@ async def diag_date_columns(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-date")
-async def diag_test_date(project: str, q: str = "last year"):
+@router.get("/{customer_id}/diag/test-date")
+async def diag_test_date(customer_id: str, q: str = "last year"):
     """
     Diagnostic: Test date expression resolution directly.
     
@@ -1057,13 +1057,13 @@ async def diag_test_date(project: str, q: str = "last year"):
         
         handler = get_structured_handler()
         conn = handler.conn
-        term_index = TermIndex(conn, project)
+        term_index = TermIndex(conn, customer_id)
         
         # Call resolve_date_expression directly
         matches = term_index.resolve_date_expression(q, full_question=q)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'query': q,
             'matches': [
                 {
@@ -1084,8 +1084,8 @@ async def diag_test_date(project: str, q: str = "last year"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-deterministic")
-async def diag_test_deterministic(project: str, q: str = "employees hired last year"):
+@router.get("/{customer_id}/diag/test-deterministic")
+async def diag_test_deterministic(customer_id: str, q: str = "employees hired last year"):
     """
     Diagnostic: Test full deterministic path for a question.
     
@@ -1098,7 +1098,7 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         
         handler = get_structured_handler()
         conn = handler.conn
-        term_index = TermIndex(conn, project)
+        term_index = TermIndex(conn, customer_id)
         
         question = q.lower()
         
@@ -1179,7 +1179,7 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
             or_term_matches = term_index.resolve_terms(or_terms)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'question': q,
             'words_original': words,
             'numeric_phrases': numeric_phrases,
@@ -1225,8 +1225,8 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         }
 
 
-@router.get("/{project}/diag/test-aggregation")
-async def diag_test_aggregation(project: str, q: str = "average salary"):
+@router.get("/{customer_id}/diag/test-aggregation")
+async def diag_test_aggregation(customer_id: str, q: str = "average salary"):
     """
     Diagnostic: Test aggregation intent detection.
     
@@ -1265,7 +1265,7 @@ async def diag_test_aggregation(project: str, q: str = "average salary"):
         numeric_cols = conn.execute(numeric_query).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'question': q,
             'detected_intent': detected_intent,
             'agg_keywords_found': {
@@ -1294,8 +1294,8 @@ async def diag_test_aggregation(project: str, q: str = "average salary"):
         }
 
 
-@router.get("/{project}/diag/test-agg-target")
-async def diag_test_agg_target(project: str, term: str = "salary", domain: str = None):
+@router.get("/{customer_id}/diag/test-agg-target")
+async def diag_test_agg_target(customer_id: str, term: str = "salary", domain: str = None):
     """
     Diagnostic: Test aggregation target resolution.
     
@@ -1307,13 +1307,13 @@ async def diag_test_agg_target(project: str, term: str = "salary", domain: str =
         
         handler = get_structured_handler()
         conn = handler.conn
-        term_index = TermIndex(conn, project)
+        term_index = TermIndex(conn, customer_id)
         
         # Call resolve_aggregation_target
         matches = term_index.resolve_aggregation_target(term, domain=domain)
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'term': term,
             'domain': domain,
             'matches': [
@@ -1361,8 +1361,8 @@ class EngineTestRequest(BaseModel):
     config: dict
 
 
-@router.post("/{project}/test-engine")
-async def test_engine(project: str, request: EngineTestRequest):
+@router.post("/{customer_id}/test-engine")
+async def test_engine(customer_id: str, request: EngineTestRequest):
     """
     Test any of the 5 engines with a config.
     
@@ -1418,13 +1418,13 @@ async def test_engine(project: str, request: EngineTestRequest):
             }
         
         # Create and execute
-        engine = engine_class(conn, project)
+        engine = engine_class(conn, customer_id)
         result = engine.execute(request.config)
         
         # Convert to dict for JSON response
         return {
             'engine': request.engine,
-            'project': project,
+            'customer_id': customer_id,
             'config': request.config,
             'result': {
                 'status': result.status.value,
@@ -1448,8 +1448,8 @@ async def test_engine(project: str, request: EngineTestRequest):
         }
 
 
-@router.get("/{project}/test-engines-quick")
-async def test_engines_quick(project: str):
+@router.get("/{customer_id}/test-engines-quick")
+async def test_engines_quick(customer_id: str):
     """
     Quick test of all 5 engines with default configs.
     Returns pass/fail for each engine.
@@ -1476,7 +1476,7 @@ async def test_engines_quick(project: str):
         tables = handler.query(f"""
             SELECT table_name FROM information_schema.tables 
             WHERE table_schema = 'main' 
-            AND table_name LIKE '{project.lower()}%'
+            AND table_name LIKE '{customer_id.lower()}%'
             AND table_name NOT LIKE '\\_%' ESCAPE '\\'
             LIMIT 1
         """)
@@ -1488,7 +1488,7 @@ async def test_engines_quick(project: str):
         # Test Aggregate
         try:
             if test_table:
-                engine = AggregateEngine(conn, project)
+                engine = AggregateEngine(conn, customer_id)
                 result = engine.execute({
                     "source_table": test_table,
                     "measures": [{"function": "COUNT"}],
@@ -1509,12 +1509,12 @@ async def test_engines_quick(project: str):
             tables2 = handler.query(f"""
                 SELECT table_name FROM information_schema.tables 
                 WHERE table_schema = 'main' 
-                AND table_name LIKE '{project.lower()}%'
+                AND table_name LIKE '{customer_id.lower()}%'
                 AND table_name NOT LIKE '\\_%' ESCAPE '\\'
                 LIMIT 2
             """)
             if len(tables2) >= 2:
-                engine = CompareEngine(conn, project)
+                engine = CompareEngine(conn, customer_id)
                 result = engine.execute({
                     "source_a": tables2[0]['table_name'],
                     "source_b": tables2[1]['table_name']
@@ -1536,7 +1536,7 @@ async def test_engines_quick(project: str):
                 cols = handler.query(f"PRAGMA table_info('{test_table}')")
                 if cols:
                     first_col = cols[0]['name']
-                    engine = ValidateEngine(conn, project)
+                    engine = ValidateEngine(conn, customer_id)
                     result = engine.execute({
                         "source_table": test_table,
                         "rules": [{"field": first_col, "type": "not_null"}]
@@ -1559,7 +1559,7 @@ async def test_engines_quick(project: str):
                 cols = handler.query(f"PRAGMA table_info('{test_table}')")
                 if cols:
                     first_col = cols[0]['name']
-                    engine = DetectEngine(conn, project)
+                    engine = DetectEngine(conn, customer_id)
                     result = engine.execute({
                         "source_table": test_table,
                         "patterns": [{"type": "duplicate", "columns": [first_col]}]
@@ -1578,7 +1578,7 @@ async def test_engines_quick(project: str):
         
         # Test Map (simple lookup, no table needed)
         try:
-            engine = MapEngine(conn, project)
+            engine = MapEngine(conn, customer_id)
             result = engine.execute({
                 "mode": "lookup",
                 "value": "TX",
@@ -1595,7 +1595,7 @@ async def test_engines_quick(project: str):
         passed = sum(1 for r in results.values() if r.get('status') == 'pass')
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'test_table': test_table,
             'summary': f"{passed}/5 engines passed",
             'results': results
@@ -1610,8 +1610,8 @@ async def test_engines_quick(project: str):
         }
 
 
-@router.get("/{project}/diagnose")
-async def diagnose_project(project: str):
+@router.get("/{customer_id}/diagnose")
+async def diagnose_project(customer_id: str):
     """
     Diagnostic endpoint to check project data availability.
     Shows what the backend can find for a given project identifier.
@@ -1625,7 +1625,7 @@ async def diagnose_project(project: str):
         conn = handler.conn
         
         diagnostics = {
-            'input_project': project,
+            'input_customer_id': customer_id,
             'schema_metadata': {},
             'tables': {},
             'classifications': {},
@@ -1671,7 +1671,7 @@ async def diagnose_project(project: str):
                     )
                     ORDER BY file_name
                     LIMIT 20
-                """, [project, project, project]).fetchall()
+                """, [customer_id, project, customer_id]).fetchall()
             else:
                 all_projects = conn.execute("""
                     SELECT DISTINCT project, COUNT(*) as file_count
@@ -1692,7 +1692,7 @@ async def diagnose_project(project: str):
                     AND LOWER(project) LIKE LOWER(?) || '%'
                     ORDER BY file_name
                     LIMIT 20
-                """, [project]).fetchall()
+                """, [customer_id]).fetchall()
             
             diagnostics['schema_metadata']['matching_files'] = [
                 {'file_name': m[0], 'project': m[1], 'project_id': m[2], 'table_name': m[3], 'row_count': m[4]}
@@ -1719,7 +1719,7 @@ async def diagnose_project(project: str):
         diagnostics['tables'] = {
             'count': len(tables),
             'names': [t[0] for t in tables],
-            'pattern_used': f"{project.lower()}% or {project.upper()}%"
+            'pattern_used': f"{customer_id.lower()}% or {project.upper()}%"
         }
         
         # Check _table_classifications

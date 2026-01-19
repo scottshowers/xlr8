@@ -81,7 +81,7 @@ class FindingsResponse(BaseModel):
 # FINDING GENERATORS
 # =============================================================================
 
-def generate_data_quality_findings(project_name: str) -> List[Finding]:
+def generate_data_quality_findings(customer_id: str) -> List[Finding]:
     """
     Generate findings from data quality analysis.
     Looks at column profiles for nulls, duplicates, outliers.
@@ -89,7 +89,7 @@ def generate_data_quality_findings(project_name: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(project_name)
+        handler = duckdb_manager.get_handler(customer_id)
         if not handler:
             return findings
         
@@ -98,7 +98,7 @@ def generate_data_quality_findings(project_name: str) -> List[Finding]:
             profiles = handler.conn.execute("""
                 SELECT * FROM _column_profiles 
                 WHERE project = ?
-            """, [project_name]).fetchall()
+            """, [customer_id]).fetchall()
             
             columns = handler.conn.execute(
                 "DESCRIBE _column_profiles"
@@ -174,7 +174,7 @@ def generate_data_quality_findings(project_name: str) -> List[Finding]:
     return findings
 
 
-def generate_coverage_findings(project_name: str) -> List[Finding]:
+def generate_coverage_findings(customer_id: str) -> List[Finding]:
     """
     Generate findings from truth coverage analysis.
     Identifies missing documentation for key topics.
@@ -182,7 +182,7 @@ def generate_coverage_findings(project_name: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(project_name)
+        handler = duckdb_manager.get_handler(customer_id)
         if not handler:
             return findings
         
@@ -192,7 +192,7 @@ def generate_coverage_findings(project_name: str) -> List[Finding]:
                 SELECT DISTINCT domain, hub_table 
                 FROM _table_classifications 
                 WHERE project = ?
-            """, [project_name]).fetchall()
+            """, [customer_id]).fetchall()
         except Exception:
             return findings
         
@@ -205,7 +205,7 @@ def generate_coverage_findings(project_name: str) -> List[Finding]:
         for domain in domains_found:
             # Check reference collection for this domain
             try:
-                collection = chroma_manager.get_collection(project_name, 'reference')
+                collection = chroma_manager.get_collection(customer_id, 'reference')
                 if collection:
                     results = collection.query(
                         query_texts=[domain],
@@ -238,7 +238,7 @@ def generate_coverage_findings(project_name: str) -> List[Finding]:
     return findings
 
 
-def generate_pattern_findings(project_name: str) -> List[Finding]:
+def generate_pattern_findings(customer_id: str) -> List[Finding]:
     """
     Generate findings from pattern analysis.
     Looks for anomalies, distributions, and business rule violations.
@@ -246,7 +246,7 @@ def generate_pattern_findings(project_name: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(project_name)
+        handler = duckdb_manager.get_handler(customer_id)
         if not handler:
             return findings
         
@@ -333,9 +333,9 @@ def generate_pattern_findings(project_name: str) -> List[Finding]:
 # ENDPOINTS
 # =============================================================================
 
-@router.get("/{project_name}/findings", response_model=FindingsResponse)
+@router.get("/{customer_id}/findings", response_model=FindingsResponse)
 async def get_project_findings(
-    project_name: str,
+    customer_id: str,
     severity: Optional[str] = Query(None, description="Filter by severity"),
     category: Optional[str] = Query(None, description="Filter by category"),
     status: Optional[str] = Query(None, description="Filter by status")
@@ -351,9 +351,9 @@ async def get_project_findings(
     try:
         # Generate all findings
         all_findings = []
-        all_findings.extend(generate_data_quality_findings(project_name))
-        all_findings.extend(generate_coverage_findings(project_name))
-        all_findings.extend(generate_pattern_findings(project_name))
+        all_findings.extend(generate_data_quality_findings(customer_id))
+        all_findings.extend(generate_coverage_findings(customer_id))
+        all_findings.extend(generate_pattern_findings(customer_id))
         
         # Apply filters
         filtered = all_findings
@@ -381,10 +381,10 @@ async def get_project_findings(
         )
         
         # Get cost equivalent
-        cost_equiv = get_project_cost_equivalent(project_name)
+        cost_equiv = get_project_cost_equivalent(customer_id)
         
         return FindingsResponse(
-            project=project_name,
+            project=customer_id,
             findings=filtered,
             summary=summary,
             cost_equivalent=cost_equiv,
@@ -392,13 +392,13 @@ async def get_project_findings(
         )
         
     except Exception as e:
-        logger.error(f"Error getting findings for {project_name}: {e}")
+        logger.error(f"Error getting findings for {customer_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project_name}/cost-equivalent")
+@router.get("/{customer_id}/cost-equivalent")
 async def get_cost_equivalent(
-    project_name: str,
+    customer_id: str,
     hourly_rate: float = Query(250.0, description="Consultant hourly rate")
 ):
     """
@@ -407,22 +407,22 @@ async def get_cost_equivalent(
     Shows what the equivalent manual analysis would cost.
     """
     try:
-        result = get_project_cost_equivalent(project_name, hourly_rate)
+        result = get_project_cost_equivalent(customer_id, hourly_rate)
         return result
     except Exception as e:
         logger.error(f"Error calculating cost equivalent: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project_name}/findings/{finding_id}/acknowledge")
-async def acknowledge_finding(project_name: str, finding_id: str):
+@router.post("/{customer_id}/findings/{finding_id}/acknowledge")
+async def acknowledge_finding(customer_id: str, finding_id: str):
     """Mark a finding as acknowledged."""
     # For now, findings are generated on-the-fly
     # In future, store acknowledgments in database
     return {"success": True, "finding_id": finding_id, "status": "acknowledged"}
 
 
-@router.post("/{project_name}/findings/{finding_id}/resolve")
-async def resolve_finding(project_name: str, finding_id: str):
+@router.post("/{customer_id}/findings/{finding_id}/resolve")
+async def resolve_finding(customer_id: str, finding_id: str):
     """Mark a finding as resolved."""
     return {"success": True, "finding_id": finding_id, "status": "resolved"}

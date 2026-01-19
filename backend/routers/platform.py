@@ -353,7 +353,7 @@ async def get_platform_status(
             
             def get_rels_count():
                 if project:
-                    return supabase.table("project_relationships").select("id", count="exact").eq("project_name", project).execute()
+                    return supabase.table("project_relationships").select("id", count="exact").eq("customer_id", project).execute()
                 return supabase.table("project_relationships").select("id", count="exact").execute()
             
             def get_active_jobs():
@@ -515,9 +515,9 @@ async def get_platform_status(
                 if project_filter:
                     from utils.database.models import ProjectModel
                     proj_record = ProjectModel.get_by_identifier(project_filter)
-                    project_id = proj_record.get('id') if proj_record else None
-                    if project_id:
-                        result = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
+                    customer_id = proj_record.get('id') if proj_record else None
+                    if customer_id:
+                        result = supabase.table("document_registry").select("*").eq("customer_id", customer_id).execute()
                     else:
                         result = supabase.table("document_registry").select("*").execute()
                 else:
@@ -532,7 +532,7 @@ async def get_platform_status(
                     return []
                 # Fetch all relationships - no limit, same as data_model.py
                 if project_filter:
-                    result = supabase.table("project_relationships").select("*").eq("project_name", project_filter).execute()
+                    result = supabase.table("project_relationships").select("*").eq("customer_id", project_filter).execute()
                 else:
                     result = supabase.table("project_relationships").select("*").execute()
                 return result.data or []
@@ -568,7 +568,7 @@ async def get_platform_status(
                     registry_chunks[fn_lower] = {
                         'chunk_count': entry.get('chunk_count', 0),
                         'storage_type': entry.get('storage_type', 'chromadb'),
-                        'project_name': entry.get('project_name', '')
+                        'customer_id': entry.get('customer_id', '')
                     }
             
             # Build files dict from schema metadata
@@ -633,7 +633,7 @@ async def get_platform_status(
                     chunk_count = entry.get('chunk_count', 0)
                     files_dict[fname] = {
                         "filename": fname,
-                        "project": entry.get('project_name', ''),
+                        "project": entry.get('customer_id', ''),
                         "tables": 0,
                         "rows": 0,
                         "chunks": chunk_count,
@@ -798,7 +798,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
         # =================================================================
         # CRITICAL: Look up project to get UUID for querying
         # The filter might be "TEA1000" (code) but data is stored with
-        # project_id (UUID). We need to resolve the identifier first.
+        # customer_id (UUID). We need to resolve the identifier first.
         # =================================================================
         resolved_project_id = None
         resolved_project_name = None
@@ -816,11 +816,11 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
         # Query DuckDB for schema metadata (fast, local)
         try:
             if project_filter and files_handler:
-                # Check if project_id column exists
+                # Check if customer_id column exists
                 has_project_id = False
                 try:
                     cols = [row[1] for row in files_handler.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()]
-                    has_project_id = 'project_id' in cols
+                    has_project_id = 'customer_id' in cols
                 except Exception:
                     pass
                 
@@ -830,10 +830,10 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                     schema_results = files_handler.conn.execute("""
                         SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
                         FROM _schema_metadata 
-                        WHERE is_current = TRUE AND project_id = ?
+                        WHERE is_current = TRUE AND customer_id = ?
                         ORDER BY file_name, table_name
                     """, [resolved_project_id]).fetchall()
-                    logger.info(f"[FILES] Queried by project_id={resolved_project_id}, found {len(schema_results)} rows")
+                    logger.info(f"[FILES] Queried by customer_id={resolved_project_id}, found {len(schema_results)} rows")
                 elif resolved_project_name:
                     # Fall back: query by resolved project name
                     schema_results = files_handler.conn.execute("""
@@ -849,7 +849,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                         schema_results = files_handler.conn.execute("""
                             SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
                             FROM _schema_metadata 
-                            WHERE is_current = TRUE AND (LOWER(project) = LOWER(?) OR project_id = ?)
+                            WHERE is_current = TRUE AND (LOWER(project) = LOWER(?) OR customer_id = ?)
                             ORDER BY file_name, table_name
                         """, [project_filter, project_filter]).fetchall()
                     else:
@@ -889,13 +889,13 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                 if project_filter:
                     from utils.database.models import ProjectModel
                     proj_record = ProjectModel.get_by_identifier(project_filter)
-                    project_id = proj_record.get('id') if proj_record else None
-                    if project_id:
-                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").eq("project_id", project_id).execute()
+                    customer_id = proj_record.get('id') if proj_record else None
+                    if customer_id:
+                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, customer_id").eq("customer_id", customer_id).execute()
                     else:
-                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").execute()
+                        result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, customer_id").execute()
                 else:
-                    result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").execute()
+                    result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, customer_id").execute()
                 
                 registry_entries = result.data or []
                 for entry in registry_entries:
@@ -908,7 +908,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                             'truth_type': entry.get('truth_type', ''),
                             'domain': entry.get('domain', []),
                             'chunk_count': entry.get('chunk_count', 0),
-                            'project_name': entry.get('project_name', '')
+                            'customer_id': entry.get('customer_id', '')
                         }
         except Exception as e:
             logger.debug(f"[FILES] Registry query: {e}")
@@ -972,7 +972,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             if original_fname not in files_dict and provenance.get('chunk_count', 0) > 0:
                 files_dict[original_fname] = {
                     "filename": original_fname,
-                    "project": provenance.get('project_name', ''),
+                    "project": provenance.get('customer_id', ''),
                     "tables": 0,
                     "rows": 0,
                     "row_count": 0,
@@ -994,7 +994,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             coll = rag.client.get_collection(name="documents")
             results = coll.get(include=["metadatas"])
             
-            # Get project_id for comparison if we have a project_filter
+            # Get customer_id for comparison if we have a project_filter
             filter_project_id = None
             if project_filter:
                 try:
@@ -1010,7 +1010,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
                 if not meta:
                     continue
                 source = meta.get('source') or meta.get('filename')
-                proj_id = meta.get('project_id') or ''
+                proj_id = meta.get('customer_id') or ''
                 proj_name = meta.get('project') or ''
                 
                 # Include reference library docs OR docs matching current project filter
@@ -1142,7 +1142,7 @@ async def list_references():
             if not meta:
                 continue
             source = meta.get('source') or meta.get('filename')
-            project = meta.get('project_id') or meta.get('project')
+            project = meta.get('customer_id') or meta.get('project')
             
             # Only include reference library docs (global/universal/standards)
             if project not in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
@@ -1318,7 +1318,7 @@ async def delete_all_references(
         for i, meta in enumerate(results.get('metadatas', [])):
             if not meta:
                 continue
-            project = meta.get('project_id') or meta.get('project')
+            project = meta.get('customer_id') or meta.get('project')
             if project in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
                 ids_to_delete.append(results['ids'][i])
         

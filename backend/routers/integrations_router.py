@@ -41,7 +41,7 @@ router = APIRouter()
 
 class ConnectionCredentials(BaseModel):
     """Credentials for a system connection."""
-    project_id: str
+    customer_id: str
     system_id: str
     credentials: Dict[str, str]  # Encrypted in production
 
@@ -201,9 +201,9 @@ async def save_connection(request: ConnectionCredentials):
         )
     
     # Store connection (in-memory for now)
-    key = f"{request.project_id}:{request.system_id}"
+    key = f"{request.customer_id}:{request.system_id}"
     _connections[key] = {
-        "project_id": request.project_id,
+        "customer_id": request.customer_id,
         "system_id": request.system_id,
         "credentials": request.credentials,  # Would encrypt in production
         "status": "saved",
@@ -212,7 +212,7 @@ async def save_connection(request: ConnectionCredentials):
         "last_pull": None,
     }
     
-    logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.project_id}")
+    logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.customer_id}")
     
     return {
         "success": True,
@@ -221,8 +221,8 @@ async def save_connection(request: ConnectionCredentials):
     }
 
 
-@router.get("/connections/{project_id}")
-async def get_project_connections(project_id: str):
+@router.get("/connections/{customer_id}")
+async def get_project_connections(customer_id: str):
     """
     Get all connections for a project.
     """
@@ -233,7 +233,7 @@ async def get_project_connections(project_id: str):
     
     connections = []
     for key, conn in _connections.items():
-        if conn["project_id"] == project_id:
+        if conn["customer_id"] == customer_id:
             system = get_system(conn["system_id"])
             connections.append({
                 "system_id": conn["system_id"],
@@ -245,14 +245,14 @@ async def get_project_connections(project_id: str):
             })
     
     return {
-        "project_id": project_id,
+        "customer_id": customer_id,
         "connections": connections,
         "count": len(connections)
     }
 
 
-@router.post("/connections/{project_id}/test")
-async def test_connection(project_id: str, request: ConnectionTestRequest):
+@router.post("/connections/{customer_id}/test")
+async def test_connection(customer_id: str, request: ConnectionTestRequest):
     """
     Test a connection by making a simple API call.
     """
@@ -278,7 +278,7 @@ async def test_connection(project_id: str, request: ConnectionTestRequest):
             result = await _test_ukg_pro_connection(request.credentials)
             
             # Update connection status
-            key = f"{project_id}:{request.system_id}"
+            key = f"{customer_id}:{request.system_id}"
             if key in _connections:
                 _connections[key]["status"] = "connected" if result["success"] else "failed"
                 _connections[key]["last_tested"] = datetime.now().isoformat()
@@ -377,8 +377,8 @@ async def _test_ukg_pro_connection(credentials: Dict[str, str]) -> Dict:
 # DATA PULL
 # =============================================================================
 
-@router.post("/connections/{project_id}/pull")
-async def pull_data(project_id: str, request: DataPullRequest):
+@router.post("/connections/{customer_id}/pull")
+async def pull_data(customer_id: str, request: DataPullRequest):
     """
     Pull data from connected system into XLR8.
     
@@ -401,7 +401,7 @@ async def pull_data(project_id: str, request: DataPullRequest):
         )
     
     # Get connection credentials
-    key = f"{project_id}:{request.system_id}"
+    key = f"{customer_id}:{request.system_id}"
     connection = _connections.get(key)
     if not connection:
         raise HTTPException(
@@ -426,7 +426,7 @@ async def pull_data(project_id: str, request: DataPullRequest):
         try:
             if request.system_id == "ukg_pro":
                 result = await _pull_ukg_pro_endpoint(
-                    project_id=project_id,
+                    customer_id=customer_id,
                     endpoint=endpoint,
                     credentials=connection["credentials"]
                 )
@@ -453,7 +453,7 @@ async def pull_data(project_id: str, request: DataPullRequest):
     successful = sum(1 for r in results if r.get("success"))
     
     return {
-        "project_id": project_id,
+        "customer_id": customer_id,
         "system_id": request.system_id,
         "endpoints_requested": len(request.endpoints),
         "endpoints_successful": successful,
@@ -461,7 +461,7 @@ async def pull_data(project_id: str, request: DataPullRequest):
     }
 
 
-async def _pull_ukg_pro_endpoint(project_id: str, endpoint, credentials: Dict[str, str]) -> Dict:
+async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[str, str]) -> Dict:
     """
     Pull data from a UKG Pro endpoint and store in DuckDB.
     """
@@ -503,7 +503,7 @@ async def _pull_ukg_pro_endpoint(project_id: str, endpoint, credentials: Dict[st
             
             # Store in DuckDB
             row_count = await _store_in_duckdb(
-                project_id=project_id,
+                customer_id=customer_id,
                 endpoint_id=endpoint.id,
                 truth_bucket=endpoint.truth_bucket.value,
                 data=data
@@ -514,7 +514,7 @@ async def _pull_ukg_pro_endpoint(project_id: str, endpoint, credentials: Dict[st
                 "success": True,
                 "rows_imported": row_count,
                 "truth_bucket": endpoint.truth_bucket.value,
-                "table_name": f"{project_id}_api_{endpoint.id}"
+                "table_name": f"{customer_id}_api_{endpoint.id}"
             }
             
         except Exception as e:
@@ -525,7 +525,7 @@ async def _pull_ukg_pro_endpoint(project_id: str, endpoint, credentials: Dict[st
             }
 
 
-async def _store_in_duckdb(project_id: str, endpoint_id: str, truth_bucket: str, data: Any) -> int:
+async def _store_in_duckdb(customer_id: str, endpoint_id: str, truth_bucket: str, data: Any) -> int:
     """
     Store API response data in DuckDB.
     """
@@ -553,10 +553,10 @@ async def _store_in_duckdb(project_id: str, endpoint_id: str, truth_bucket: str,
     df = pd.DataFrame(records)
     
     # Build table name
-    table_name = f"{project_id}_api_{endpoint_id}"
+    table_name = f"{customer_id}_api_{endpoint_id}"
     
     # Connect to project database
-    db_path = f"/app/data/duckdb/{project_id}.duckdb"
+    db_path = f"/app/data/duckdb/{customer_id}.duckdb"
     
     try:
         conn = duckdb.connect(db_path)

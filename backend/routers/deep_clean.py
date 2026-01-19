@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _get_registry_files(project_id: Optional[str] = None) -> Set[str]:
+def _get_registry_files(customer_id: Optional[str] = None) -> Set[str]:
     """
     Get all valid filenames from DocumentRegistry (the source of truth).
     Returns lowercase filenames for case-insensitive matching.
@@ -31,14 +31,14 @@ def _get_registry_files(project_id: Optional[str] = None) -> Set[str]:
     try:
         from utils.database.models import DocumentRegistryModel, ProjectModel
         
-        if project_id:
+        if customer_id:
             # Try to get project UUID from name if needed
-            if len(project_id) < 32:  # Likely a name, not UUID
-                proj = ProjectModel.get_by_name(project_id)
+            if len(customer_id) < 32:  # Likely a name, not UUID
+                proj = ProjectModel.get_by_name(customer_id)
                 if proj:
-                    project_id = proj.get('id')
+                    customer_id = proj.get('id')
             
-            entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+            entries = DocumentRegistryModel.get_by_project(customer_id, include_global=True)
         else:
             entries = DocumentRegistryModel.get_all()
         
@@ -56,7 +56,7 @@ def _get_registry_files(project_id: Optional[str] = None) -> Set[str]:
 
 
 @router.post("/deep-clean")
-async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, force: bool = False):
+async def deep_clean(customer_id: Optional[str] = None, confirm: bool = False, force: bool = False):
     """
     Deep clean all orphaned data across all storage systems.
     
@@ -72,7 +72,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
     - Playbook progress cache for deleted files
     
     Args:
-        project_id: Optional - clean only this project. If None, cleans everything.
+        customer_id: Optional - clean only this project. If None, cleans everything.
         confirm: Must be True to actually delete (safety check)
         force: If True, proceed even if Registry is empty (for intentional full wipe)
     
@@ -83,7 +83,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
     if not confirm:
         return {
             "warning": "This will delete orphaned data. Pass confirm=true to proceed.",
-            "preview": await _preview_orphans(project_id)
+            "preview": await _preview_orphans(customer_id)
         }
     
     results = {
@@ -104,7 +104,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
         wipe_all = True
     else:
         # NORMAL MODE: Only clean orphans (files not in registry)
-        valid_files = _get_registry_files(project_id)
+        valid_files = _get_registry_files(customer_id)
         wipe_all = False
         
         if not valid_files:
@@ -163,11 +163,11 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
             # NORMAL: Only clean orphans based on registry
             orphan_tables = []
             try:
-                if project_id:
+                if customer_id:
                     meta_result = conn.execute("""
                         SELECT table_name, file_name FROM _schema_metadata 
                         WHERE LOWER(project) LIKE ?
-                    """, [f"%{project_id.lower()}%"]).fetchall()
+                    """, [f"%{customer_id.lower()}%"]).fetchall()
                 else:
                     meta_result = conn.execute(
                         "SELECT table_name, file_name FROM _schema_metadata"
@@ -188,11 +188,11 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 """).fetchone()
                 
                 if table_check[0] > 0:
-                    if project_id:
+                    if customer_id:
                         pdf_result = conn.execute("""
                             SELECT table_name, source_file FROM _pdf_tables 
-                            WHERE LOWER(project) LIKE ? OR LOWER(project_id) LIKE ?
-                        """, [f"%{project_id.lower()}%", f"%{project_id.lower()}%"]).fetchall()
+                            WHERE LOWER(project) LIKE ? OR LOWER(customer_id) LIKE ?
+                        """, [f"%{customer_id.lower()}%", f"%{customer_id.lower()}%"]).fetchall()
                     else:
                         pdf_result = conn.execute(
                             "SELECT table_name, source_file FROM _pdf_tables"
@@ -240,10 +240,10 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
             """).fetchone()
             
             if table_check[0] > 0:
-                if project_id:
+                if customer_id:
                     fm_result = conn.execute(
                         "SELECT filename FROM file_metadata WHERE LOWER(project) LIKE ?",
-                        [f"%{project_id.lower()}%"]
+                        [f"%{customer_id.lower()}%"]
                     ).fetchall()
                 else:
                     fm_result = conn.execute("SELECT filename FROM file_metadata").fetchall()
@@ -311,13 +311,13 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
             # NORMAL: Only delete orphans (chunks for files not in registry)
             for i, metadata in enumerate(all_chroma.get("metadatas", [])):
                 filename = metadata.get("source", metadata.get("filename", ""))
-                doc_project = metadata.get("project_id", metadata.get("project", ""))
+                doc_project = metadata.get("customer_id", metadata.get("project", ""))
                 
                 # Filter by project if specified
-                if project_id:
-                    if not (doc_project == project_id or 
-                            str(doc_project).lower().startswith(project_id[:8].lower()) or
-                            project_id.lower() in str(doc_project).lower()):
+                if customer_id:
+                    if not (doc_project == customer_id or 
+                            str(doc_project).lower().startswith(customer_id[:8].lower()) or
+                            customer_id.lower() in str(doc_project).lower()):
                         continue
                 
                 # Check if file is orphaned (not in registry)
@@ -372,8 +372,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 
                 for table in tables_to_wipe:
                     try:
-                        if project_id:
-                            result = supabase.table(table).delete().eq("project_id", project_id).execute()
+                        if customer_id:
+                            result = supabase.table(table).delete().eq("customer_id", customer_id).execute()
                         else:
                             # Delete all - need a condition that matches everything
                             result = supabase.table(table).delete().neq("id", "00000000-0000-0000-0000-000000000000").execute()
@@ -389,8 +389,8 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 
                 # Handle playbook_runs separately (uses bigint id, not UUID)
                 try:
-                    if project_id:
-                        result = supabase.table("playbook_runs").delete().eq("project_id", project_id).execute()
+                    if customer_id:
+                        result = supabase.table("playbook_runs").delete().eq("customer_id", customer_id).execute()
                     else:
                         result = supabase.table("playbook_runs").delete().gt("id", 0).execute()
                     count = len(result.data) if result.data else 0
@@ -403,7 +403,7 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
                 
                 # Handle tables with non-standard keys
                 special_tables = [
-                    ("project_relationships", "project_name"),  # Uses project_name not project_id
+                    ("project_relationships", "customer_id"),  # Uses customer_id not customer_id
                     ("standards_rules", "rule_id"),             # Uses rule_id
                     ("standards_documents", "id"),              # Standard id
                     ("lineage_edges", "source_type"),           # Composite key, no id column
@@ -458,9 +458,9 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
     try:
         from routers.playbooks import PLAYBOOK_PROGRESS, PLAYBOOK_CACHE
         
-        if project_id:
-            if project_id in PLAYBOOK_PROGRESS:
-                del PLAYBOOK_PROGRESS[project_id]
+        if customer_id:
+            if customer_id in PLAYBOOK_PROGRESS:
+                del PLAYBOOK_PROGRESS[customer_id]
                 results["playbook_cache"]["cleaned"] += 1
         else:
             count = len(PLAYBOOK_PROGRESS)
@@ -487,11 +487,11 @@ async def deep_clean(project_id: Optional[str] = None, confirm: bool = False, fo
         "total_errors": total_errors,
         "registry_file_count": len(valid_files),
         "details": results,
-        "project_filter": project_id
+        "project_filter": customer_id
     }
 
 
-async def _preview_orphans(project_id: Optional[str] = None) -> dict:
+async def _preview_orphans(customer_id: Optional[str] = None) -> dict:
     """Preview what would be cleaned without actually deleting."""
     
     preview = {
@@ -503,7 +503,7 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
     }
     
     # Get valid files from registry
-    valid_files = _get_registry_files(project_id)
+    valid_files = _get_registry_files(customer_id)
     preview["registry_file_count"] = len(valid_files)
     
     if not valid_files:
@@ -562,6 +562,6 @@ async def _preview_orphans(project_id: Optional[str] = None) -> dict:
 
 
 @router.get("/deep-clean/preview")
-async def preview_deep_clean(project_id: Optional[str] = None):
+async def preview_deep_clean(customer_id: Optional[str] = None):
     """Preview what would be cleaned without deleting anything."""
-    return await _preview_orphans(project_id)
+    return await _preview_orphans(customer_id)

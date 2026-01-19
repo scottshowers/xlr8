@@ -156,7 +156,7 @@ def _get_engine_module():
             return None
 
 
-def _get_connection(project: str):
+def _get_connection(customer_id: str):
     """Get DuckDB connection for project."""
     try:
         from utils.structured_data_handler import get_structured_handler
@@ -189,8 +189,8 @@ def _result_to_response(engine_name: str, result) -> Dict:
 # AGGREGATE ENGINE
 # =============================================================================
 
-@router.post("/{project}/aggregate")
-async def run_aggregate(project: str, request: AggregateRequest):
+@router.post("/{customer_id}/aggregate")
+async def run_aggregate(customer_id: str, request: AggregateRequest):
     """
     Run aggregate query (COUNT, SUM, AVG with GROUP BY).
     
@@ -215,8 +215,8 @@ async def run_aggregate(project: str, request: AggregateRequest):
         if not engines:
             raise HTTPException(status_code=500, detail="Engines module not available")
         
-        conn = _get_connection(project)
-        engine = engines['AggregateEngine'](conn, project)
+        conn = _get_connection(customer_id)
+        engine = engines['AggregateEngine'](conn, customer_id)
         
         # Build config from request
         config = {}
@@ -253,8 +253,8 @@ async def run_aggregate(project: str, request: AggregateRequest):
 # COMPARE ENGINE
 # =============================================================================
 
-@router.post("/{project}/compare")
-async def run_compare(project: str, request: CompareRequest):
+@router.post("/{customer_id}/compare")
+async def run_compare(customer_id: str, request: CompareRequest):
     """
     Compare two tables/datasets.
     
@@ -272,8 +272,8 @@ async def run_compare(project: str, request: CompareRequest):
         if not engines:
             raise HTTPException(status_code=500, detail="Engines module not available")
         
-        conn = _get_connection(project)
-        engine = engines['CompareEngine'](conn, project)
+        conn = _get_connection(customer_id)
+        engine = engines['CompareEngine'](conn, customer_id)
         
         config = {
             'source_a': request.source_a,
@@ -306,8 +306,8 @@ async def run_compare(project: str, request: CompareRequest):
 # VALIDATE ENGINE
 # =============================================================================
 
-@router.post("/{project}/validate")
-async def run_validate(project: str, request: ValidateRequest):
+@router.post("/{customer_id}/validate")
+async def run_validate(customer_id: str, request: ValidateRequest):
     """
     Validate data quality against rules.
     
@@ -330,8 +330,8 @@ async def run_validate(project: str, request: ValidateRequest):
         if not engines:
             raise HTTPException(status_code=500, detail="Engines module not available")
         
-        conn = _get_connection(project)
-        engine = engines['ValidateEngine'](conn, project)
+        conn = _get_connection(customer_id)
+        engine = engines['ValidateEngine'](conn, customer_id)
         
         config = {
             'source_table': request.source_table,
@@ -357,8 +357,8 @@ async def run_validate(project: str, request: ValidateRequest):
 # DETECT ENGINE
 # =============================================================================
 
-@router.post("/{project}/detect")
-async def run_detect(project: str, request: DetectRequest):
+@router.post("/{customer_id}/detect")
+async def run_detect(customer_id: str, request: DetectRequest):
     """
     Detect patterns in data.
     
@@ -381,8 +381,8 @@ async def run_detect(project: str, request: DetectRequest):
         if not engines:
             raise HTTPException(status_code=500, detail="Engines module not available")
         
-        conn = _get_connection(project)
-        engine = engines['DetectEngine'](conn, project)
+        conn = _get_connection(customer_id)
+        engine = engines['DetectEngine'](conn, customer_id)
         
         config = {
             'source_table': request.source_table,
@@ -408,8 +408,8 @@ async def run_detect(project: str, request: DetectRequest):
 # MAP ENGINE
 # =============================================================================
 
-@router.post("/{project}/map")
-async def run_map(project: str, request: MapRequest):
+@router.post("/{customer_id}/map")
+async def run_map(customer_id: str, request: MapRequest):
     """
     Map/transform values.
     
@@ -450,8 +450,8 @@ async def run_map(project: str, request: MapRequest):
         if not engines:
             raise HTTPException(status_code=500, detail="Engines module not available")
         
-        conn = _get_connection(project)
-        engine = engines['MapEngine'](conn, project)
+        conn = _get_connection(customer_id)
+        engine = engines['MapEngine'](conn, customer_id)
         
         config = {'mode': request.mode}
         
@@ -488,8 +488,8 @@ async def run_map(project: str, request: MapRequest):
 # GENERIC EXECUTION
 # =============================================================================
 
-@router.post("/{project}/execute")
-async def execute_engine(project: str, engine: str, request: EngineRequest):
+@router.post("/{customer_id}/execute")
+async def execute_engine(customer_id: str, engine: str, request: EngineRequest):
     """
     Execute any engine with a config dict.
     
@@ -527,8 +527,8 @@ async def execute_engine(project: str, engine: str, request: EngineRequest):
                 detail=f"Unknown engine: {engine}. Available: {list(engine_map.keys())}"
             )
         
-        conn = _get_connection(project)
-        engine_instance = engine_class(conn, project)
+        conn = _get_connection(customer_id)
+        engine_instance = engine_class(conn, customer_id)
         result = engine_instance.execute(request.config)
         
         return _result_to_response(engine, result)
@@ -550,8 +550,8 @@ async def execute_engine(project: str, engine: str, request: EngineRequest):
 # BATCH EXECUTION
 # =============================================================================
 
-@router.post("/{project}/batch")
-async def execute_batch(project: str, request: BatchRequest):
+@router.post("/{customer_id}/batch")
+async def execute_batch(customer_id: str, request: BatchRequest):
     """
     Execute multiple engines in sequence.
     
@@ -593,7 +593,7 @@ async def execute_batch(project: str, request: BatchRequest):
             'map': engines_module['MapEngine']
         }
         
-        conn = _get_connection(project)
+        conn = _get_connection(customer_id)
         results = []
         total_findings = 0
         
@@ -613,7 +613,7 @@ async def execute_batch(project: str, request: BatchRequest):
                 continue
             
             try:
-                engine_instance = engine_class(conn, project)
+                engine_instance = engine_class(conn, customer_id)
                 result = engine_instance.execute(config)
                 
                 response = _result_to_response(engine_name, result)
@@ -636,7 +636,7 @@ async def execute_batch(project: str, request: BatchRequest):
         
         return {
             'success': passed == len(request.operations),
-            'project': project,
+            'customer_id': customer_id,
             'summary': f"{passed}/{len(request.operations)} operations succeeded",
             'total_findings': total_findings,
             'results': results
@@ -656,26 +656,26 @@ async def execute_batch(project: str, request: BatchRequest):
 # SCHEMA/METADATA
 # =============================================================================
 
-@router.get("/{project}/tables")
-async def get_available_tables(project: str):
+@router.get("/{customer_id}/tables")
+async def get_available_tables(customer_id: str):
     """Get list of tables available for engine operations."""
     try:
-        conn = _get_connection(project)
+        conn = _get_connection(customer_id)
         
         tables = conn.execute(f"""
             SELECT table_name 
             FROM information_schema.tables 
             WHERE table_schema = 'main' 
             AND (
-                table_name LIKE '{project.lower()}%' 
-                OR table_name LIKE '{project.upper()}%'
+                table_name LIKE '{customer_id.lower()}%' 
+                OR table_name LIKE '{customer_id.upper()}%'
             )
             AND table_name NOT LIKE '\\_%' ESCAPE '\\'
             ORDER BY table_name
         """).fetchall()
         
         return {
-            'project': project,
+            'customer_id': customer_id,
             'tables': [t[0] for t in tables],
             'count': len(tables)
         }
@@ -687,11 +687,11 @@ async def get_available_tables(project: str):
         }
 
 
-@router.get("/{project}/table/{table_name}/columns")
-async def get_table_columns(project: str, table_name: str):
+@router.get("/{customer_id}/table/{table_name}/columns")
+async def get_table_columns(customer_id: str, table_name: str):
     """Get columns for a specific table."""
     try:
-        conn = _get_connection(project)
+        conn = _get_connection(customer_id)
         
         columns = conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
         
@@ -752,8 +752,8 @@ async def get_export_templates():
             }
 
 
-@router.post("/{project}/export")
-async def export_results(project: str, request: ExportRequest):
+@router.post("/{customer_id}/export")
+async def export_results(customer_id: str, request: ExportRequest):
     """
     Export playbook results using a template.
     
@@ -780,7 +780,7 @@ async def export_results(project: str, request: ExportRequest):
         
         # Add project to context
         context = request.context or {}
-        context['project_name'] = context.get('project_name', project)
+        context['project_name'] = context.get('customer_id', customer_id)
         
         result = export_playbook_results(
             playbook_results=request.playbook_results,
@@ -817,8 +817,8 @@ async def export_results(project: str, request: ExportRequest):
         }
 
 
-@router.post("/{project}/export/download")
-async def export_download(project: str, request: ExportRequest):
+@router.post("/{customer_id}/export/download")
+async def export_download(customer_id: str, request: ExportRequest):
     """
     Export and return as downloadable file (streaming response).
     """
@@ -831,7 +831,7 @@ async def export_download(project: str, request: ExportRequest):
             from engines.export import export_playbook_results
         
         context = request.context or {}
-        context['project_name'] = context.get('project_name', project)
+        context['project_name'] = context.get('customer_id', customer_id)
         
         result = export_playbook_results(
             playbook_results=request.playbook_results,
