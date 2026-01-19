@@ -35,7 +35,7 @@ router = APIRouter(tags=["connections"])
 
 class ConnectionCreate(BaseModel):
     """Create a new API connection."""
-    project_name: str
+    customer_id: str
     provider: str  # ukg_pro, ukg_wfm, ukg_ready
     connection_name: str = "Default"
     base_url: str
@@ -58,7 +58,7 @@ class ConnectionUpdate(BaseModel):
 class ConnectionResponse(BaseModel):
     """Connection info (without sensitive data)."""
     id: str
-    project_name: str
+    customer_id: str
     provider: str
     connection_name: str
     base_url: str
@@ -115,7 +115,7 @@ async def create_connection(conn: ConnectionCreate):
     
     Saves credentials securely and tests the connection.
     """
-    logger.info(f"[CONNECTIONS] Creating {conn.provider} connection for {conn.project_name}")
+    logger.info(f"[CONNECTIONS] Creating {conn.provider} connection for {conn.customer_id}")
     
     try:
         supabase = get_supabase()
@@ -123,7 +123,7 @@ async def create_connection(conn: ConnectionCreate):
         # Check for existing connection
         existing = supabase.table('api_connections') \
             .select('id') \
-            .eq('project_name', conn.project_name) \
+            .eq('customer_id', conn.customer_id) \
             .eq('provider', conn.provider) \
             .eq('connection_name', conn.connection_name) \
             .execute()
@@ -133,7 +133,7 @@ async def create_connection(conn: ConnectionCreate):
         
         # Save connection
         result = supabase.table('api_connections').insert({
-            'project_name': conn.project_name,
+            'customer_id': conn.customer_id,
             'provider': conn.provider,
             'connection_name': conn.connection_name,
             'base_url': conn.base_url,
@@ -165,19 +165,19 @@ async def create_connection(conn: ConnectionCreate):
         raise HTTPException(500, str(e))
 
 
-@router.get("/connections/{project_name}")
-async def list_connections(project_name: str):
+@router.get("/connections/{customer_id}")
+async def list_connections(customer_id: str):
     """List all API connections for a project."""
     try:
         supabase = get_supabase()
         
         result = supabase.table('api_connections') \
-            .select('id, project_name, provider, connection_name, base_url, status, last_connected_at, last_error') \
-            .eq('project_name', project_name) \
+            .select('id, customer_id, provider, connection_name, base_url, status, last_connected_at, last_error') \
+            .eq('customer_id', customer_id) \
             .execute()
         
         return {
-            "project": project_name,
+            "project": customer_id,
             "connections": result.data or []
         }
         
@@ -193,7 +193,7 @@ async def get_connection(connection_id: str):
         supabase = get_supabase()
         
         result = supabase.table('api_connections') \
-            .select('id, project_name, provider, connection_name, base_url, username, status, last_connected_at, last_error, created_at') \
+            .select('id, customer_id, provider, connection_name, base_url, username, status, last_connected_at, last_error, created_at') \
             .eq('id', connection_id) \
             .single() \
             .execute()
@@ -476,7 +476,7 @@ async def execute_report(connection_id: str, request: ReportExecuteRequest):
         table_name = None
         if request.target_table and result.data:
             table_name = await save_to_duckdb(
-                conn_data['project_name'],
+                conn_data['customer_id'],
                 request.target_table,
                 result.columns,
                 result.data
@@ -502,7 +502,7 @@ async def execute_report(connection_id: str, request: ReportExecuteRequest):
         raise HTTPException(500, str(e))
 
 
-async def save_to_duckdb(project_name: str, table_name: str, columns: List[str], data: List[Dict]) -> str:
+async def save_to_duckdb(customer_id: str, table_name: str, columns: List[str], data: List[Dict]) -> str:
     """
     Save report data to DuckDB.
     
@@ -517,7 +517,7 @@ async def save_to_duckdb(project_name: str, table_name: str, columns: List[str],
         table_name = f"pro_{table_name}"
     
     table_name = table_name.lower().replace(' ', '_').replace('-', '_')
-    full_table_name = f"{project_name}_{table_name}"
+    full_table_name = f"{customer_id}_{table_name}"
     
     # Build CREATE TABLE statement
     col_defs = []
