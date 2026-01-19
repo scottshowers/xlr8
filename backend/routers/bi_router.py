@@ -446,12 +446,12 @@ def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
     
     try:
         # Get customer name for display
-        customer_name = project  # Default to project name
+        customer_name = customer_id  # Default to customer_id
         try:
             from utils.database.models import ProjectModel
-            proj_record = ProjectModel.get_by_name(project) if project else None
+            proj_record = ProjectModel.get_by_name(customer_id) if customer_id else None
             if proj_record:
-                customer_name = proj_record.get('customer') or project
+                customer_name = proj_record.get('customer') or customer_id
         except Exception as e:
             logger.debug(f"[BI] Could not look up customer name: {e}")
         
@@ -501,7 +501,7 @@ def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
         
         # Build project prefix for filtering
         # Tables use first 8 chars of UUID (no hyphens) as prefix
-        project_clean = (project or '').strip()
+        project_clean = (customer_id or '').strip()
         project_prefixes = [
             project_clean.lower(),
             project_clean.lower().replace(' ', '_'),
@@ -530,7 +530,7 @@ def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
                 for prefix in project_prefixes if prefix
             )
             
-            if not matches_project and project:
+            if not matches_project and customer_id:
                 continue
             
             try:
@@ -571,7 +571,7 @@ def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
                 tables.append({
                     'table_name': table_name,
                     'display_name': display_name,
-                    'project': project,
+                    'project': customer_id,
                     'customer': customer_name,
                     'columns': columns,
                     'row_count': row_count,
@@ -587,7 +587,7 @@ def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
         
         # Get filter candidates
         try:
-            filter_candidates = handler.get_filter_candidates(project)
+            filter_candidates = handler.get_filter_candidates(customer_id)
         except Exception:
             pass
         
