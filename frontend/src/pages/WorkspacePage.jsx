@@ -63,7 +63,7 @@ export default function WorkspacePage() {
             <p>Choose a project from Projects to start chatting with AI Assist.</p>
             <button 
               className="chat-page__empty-btn"
-              onClick={() => navigate('/projects')}
+              onClick={() => navigate('/customers')}
             >
               Go to Projects
               <ArrowRight size={16} />
