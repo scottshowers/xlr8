@@ -25,6 +25,14 @@ sys.path.insert(0, '/data')
 
 from backend.routers import upload, projects, jobs
 
+# Import customers router (replaces projects - customers is the primary, projects is backward compat)
+try:
+    from backend.routers import customers
+    CUSTOMERS_AVAILABLE = True
+except ImportError as e:
+    CUSTOMERS_AVAILABLE = False
+    logging.warning(f"Customers router import failed: {e}")
+
 # Import playbooks router
 try:
     from backend.routers import playbooks
@@ -301,7 +309,15 @@ async def startup_event():
 
 # Register core routers
 app.include_router(upload.router, prefix="/api")
+
+# Customers router - PRIMARY (replaces projects)
+if CUSTOMERS_AVAILABLE:
+    app.include_router(customers.router, prefix="/api/customers")
+    logger.info("Customers router registered at /api/customers")
+
+# Projects router - BACKWARD COMPATIBILITY (maps to customers)
 app.include_router(projects.router, prefix="/api/projects")
+
 app.include_router(jobs.router, prefix="/api")
 
 # Register cleanup router if available (data deletion endpoints)
