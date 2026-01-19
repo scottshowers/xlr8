@@ -27,7 +27,7 @@ import ContextGraph from '../components/ContextGraph';
 // TABLES & FIELDS TAB
 // =============================================================================
 
-function TablesFieldsTab({ tables, loading, projectCode, onRefresh }) {
+function TablesFieldsTab({ tables, loading, customerId, onRefresh }) {
   const [expandedTables, setExpandedTables] = useState({});
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedTable, setSelectedTable] = useState(null);
@@ -326,11 +326,11 @@ function TablesFieldsTab({ tables, loading, projectCode, onRefresh }) {
 // CONTEXT GRAPH TAB
 // =============================================================================
 
-function ContextGraphTab({ projectCode, projectName }) {
+function ContextGraphTab({ customerId, customerName }) {
   // ContextGraph component handles its own data loading
   return (
     <div style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border)', borderRadius: 'var(--radius-lg)', padding: 'var(--space-4)', minHeight: '500px' }}>
-      <ContextGraph project={projectCode || projectName} />
+      <ContextGraph project={customerId || customerName} />
     </div>
   );
 }
@@ -346,22 +346,22 @@ export default function DataExplorer() {
   const [loading, setLoading] = useState(true);
   const [showProjectDropdown, setShowProjectDropdown] = useState(false);
 
-  // Use project code for API calls
-  const projectCode = activeProject?.code || activeProject?.name || activeProject?.id;
-  const projectName = activeProject?.name;
+  // Use customer ID (UUID) for all API operations
+  const customerId = activeProject?.id;
+  const customerName = activeProject?.name;
 
   // Load tables
   useEffect(() => {
-    if (projectCode) {
+    if (customerId) {
       loadTables();
     }
-  }, [projectCode]);
+  }, [customerId]);
 
   const loadTables = async () => {
-    if (!projectCode) return;
+    if (!customerId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/files?project=${encodeURIComponent(projectCode)}`);
+      const res = await api.get(`/files?project=${encodeURIComponent(customerId)}`);
       const files = res.data?.files || [];
       
       // Build tables from files
@@ -507,15 +507,15 @@ export default function DataExplorer() {
         <TablesFieldsTab 
           tables={tables} 
           loading={loading} 
-          projectCode={projectCode}
+          customerId={customerId}
           onRefresh={loadTables}
         />
       )}
       
       {activeTab === 'context-graph' && (
         <ContextGraphTab 
-          projectCode={projectCode}
-          projectName={projectName}
+          customerId={customerId}
+          customerName={customerName}
         />
       )}
     </div>

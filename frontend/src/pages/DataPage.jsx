@@ -237,8 +237,7 @@ export default function DataPage() {
                       color: c.textMuted,
                       marginTop: '2px'
                     }}>
-                      {project.customer || 'No customer'}
-                      {project.code && <span style={{ marginLeft: '0.5rem', opacity: 0.7 }}>({project.code})</span>}
+                      {project.customer || project.name}
                     </div>
                   </div>
                   <ChevronRight size={18} color={c.textMuted} />
@@ -488,7 +487,7 @@ function UploadPanel({ c, project, targetScope }) {
   }, [targetScope]);
 
   const handleFiles = (files) => {
-    // Pass the full project object so addUpload can access project.code
+    // Pass the full project object so addUpload can access project.id
     const projectObj = targetScope === 'project' ? project : null;
     const projectName = targetScope === 'project' ? project?.name : 'Reference Library';
     

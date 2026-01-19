@@ -147,19 +147,20 @@ const CreateProjectPage = () => {
       const engagementLabel = ENGAGEMENT_TYPES.find(t => t.value === formData.engagement_type)?.label || formData.engagement_type;
       const selectedSystemsData = systems.filter(s => formData.selectedSystems.includes(s.code));
       
+      // Create customer with the new schema
+      // name = customer name (not combined with engagement type)
+      // engagement_types = list of engagement types
       await createProject({
-        name: `${formData.customer} - ${engagementLabel}`,
-        customer: formData.customer,
+        name: formData.customer,  // Just the customer name
+        engagement_types: [engagementLabel],  // List of engagement types
         systems: formData.selectedSystems,
         domains: formData.selectedDomains,
-        engagement_type: formData.engagement_type,
-        type: engagementLabel,
         product: selectedSystemsData[0]?.name || '',
         start_date: formData.engagement_start || null,
         target_go_live: formData.projected_end || null,
         lead_name: users.find(u => u.id === formData.pm_id)?.full_name || null,
         notes: formData.notes || null,
-        // New fields for team
+        // Team fields
         pm_id: formData.pm_id || null,
         consultant_ids: formData.consultant_ids,
       });

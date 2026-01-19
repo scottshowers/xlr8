@@ -29,17 +29,17 @@ export default function DataCleanup() {
   // Load stats when project selected
   useEffect(() => {
     if (selectedProject) {
-      loadProjectStats(selectedProject.code || selectedProject.name);
+      loadProjectStats(selectedProject.id);  // Use customer ID for API
     } else {
       setProjectStats(null);
     }
   }, [selectedProject]);
 
-  const loadProjectStats = async (projectCode) => {
+  const loadProjectStats = async (customerId) => {
     setLoadingStats(true);
     try {
       // Get table count
-      const filesRes = await api.get(`/files?project=${encodeURIComponent(projectCode)}`);
+      const filesRes = await api.get(`/files?project=${encodeURIComponent(customerId)}`);
       const files = filesRes.data?.files || [];
       
       let tableCount = 0;
@@ -54,7 +54,7 @@ export default function DataCleanup() {
       // Try to get document count
       let docCount = 0;
       try {
-        const docsRes = await api.get(`/platform?include=documents&project=${encodeURIComponent(projectCode)}`);
+        const docsRes = await api.get(`/platform?include=documents&project=${encodeURIComponent(customerId)}`);
         docCount = docsRes.data?.documents?.length || 0;
       } catch (e) {
         // Documents endpoint may not exist
@@ -77,9 +77,10 @@ export default function DataCleanup() {
   const handleDelete = async () => {
     if (!selectedProject) return;
     
-    const projectCode = selectedProject.code || selectedProject.name;
-    if (confirmText !== projectCode) {
-      setError(`Type "${projectCode}" to confirm deletion`);
+    // Use name for user confirmation (human-readable)
+    const customerName = selectedProject.name;
+    if (confirmText !== customerName) {
+      setError(`Type "${customerName}" to confirm deletion`);
       return;
     }
 
@@ -88,7 +89,8 @@ export default function DataCleanup() {
     setResult(null);
 
     try {
-      const res = await api.delete(`/status/project/${encodeURIComponent(projectCode)}/all`);
+      // Use ID for API call
+      const res = await api.delete(`/status/project/${encodeURIComponent(selectedProject.id)}/all`);
       setResult(res.data);
       setConfirmText('');
       setSelectedProject(null);

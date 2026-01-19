@@ -120,7 +120,7 @@ export default function DataHealthPage({ embedded = false }) {
     if (!activeProject?.name) return;
     setRelLoading(true);
     try {
-      const res = await api.get(`/data-model/relationships/${encodeURIComponent(activeProject.name)}`, {
+      const res = await api.get(`/data-model/relationships/${encodeURIComponent(activeProject.id)}`, {
         timeout: 15000
       });
       if (res.data?.relationships?.length > 0) {
@@ -144,7 +144,7 @@ export default function DataHealthPage({ embedded = false }) {
     if (!activeProject?.name) return;
     setRelLoading(true);
     try {
-      const res = await api.post(`/data-model/analyze/${encodeURIComponent(activeProject.name)}`, null, {
+      const res = await api.post(`/data-model/analyze/${encodeURIComponent(activeProject.id)}`, null, {
         timeout: 60000 // Analysis can take a while
       });
       setRelationships(res.data?.relationships || []);
@@ -160,7 +160,7 @@ export default function DataHealthPage({ embedded = false }) {
   const confirmRelationship = async (rel, confirmed) => {
     try {
       await api.post(
-        `/data-model/relationships/${encodeURIComponent(activeProject.name)}/confirm`,
+        `/data-model/relationships/${encodeURIComponent(activeProject.id)}/confirm`,
         {
           source_table: rel.source_table,
           source_column: rel.source_column,

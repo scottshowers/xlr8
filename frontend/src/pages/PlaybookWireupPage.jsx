@@ -307,7 +307,7 @@ export default function PlaybookWireupPage() {
     setError(null);
     
     try {
-      const response = await api.get(`/findings/${activeProject.name}/findings`);
+      const response = await api.get(`/findings/${activeProject.id}/findings`);
       setFindings(response.data.findings || []);
       
       // Pre-select if passed from FindingsDashboard

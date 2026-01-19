@@ -1167,7 +1167,8 @@ function ResultsPanel({ results, error, executionTime }) {
 // =============================================================================
 export default function AnalyticsPage() {
   const { activeProject } = useProject();
-  const projectCode = activeProject?.code || activeProject?.name;
+  // Use customer ID (UUID) as the identifier for all operations
+  const customerId = activeProject?.id;
 
   // State
   const [tables, setTables] = useState([]);
@@ -1185,7 +1186,7 @@ export default function AnalyticsPage() {
 
   // Load schema
   useEffect(() => {
-    if (!projectCode) {
+    if (!customerId) {
       setTables([]);
       setLoading(false);
       return;
@@ -1194,7 +1195,7 @@ export default function AnalyticsPage() {
     const loadSchema = async () => {
       setLoading(true);
       try {
-        const res = await api.get(`/bi/schema/${encodeURIComponent(projectCode)}`);
+        const res = await api.get(`/bi/schema/${encodeURIComponent(customerId)}`);
         setTables(res.data?.tables || []);
       } catch (err) {
         console.error('Failed to load schema:', err);
@@ -1205,7 +1206,7 @@ export default function AnalyticsPage() {
     };
 
     loadSchema();
-  }, [projectCode]);
+  }, [customerId]);
 
   // Handlers
   const handleSelectTable = (table) => {
@@ -1235,7 +1236,7 @@ export default function AnalyticsPage() {
   };
 
   const handleRun = async () => {
-    if (!sql || !projectCode) return;
+    if (!sql || !customerId) return;
     
     setRunning(true);
     setError(null);
@@ -1246,7 +1247,7 @@ export default function AnalyticsPage() {
     try {
       const res = await api.post('/bi/execute', {
         sql: sql,
-        project: projectCode,
+        project: customerId,
       });
       
       setExecutionTime((Date.now() - startTime) / 1000);
@@ -1268,7 +1269,7 @@ export default function AnalyticsPage() {
   };
 
   // No project selected
-  if (!projectCode) {
+  if (!customerId) {
     return (
       <div>
         <div style={{ marginBottom: '24px' }}>
@@ -1345,7 +1346,7 @@ export default function AnalyticsPage() {
           Analytics
         </h1>
         <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: 'var(--text-muted)' }}>
-          Query and visualize data for <strong>{projectCode}</strong>
+          Query and visualize data for <strong>{customerId}</strong>
         </p>
       </div>
 
