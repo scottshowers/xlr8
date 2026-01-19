@@ -1,11 +1,16 @@
 """
 Database Models for XLR8
-CRUD operations for projects, documents, chat history, suppressions, and entity config
+CRUD operations for customers, documents, chat history, suppressions, and entity config
 
 Uses Supabase for persistent storage.
 
-Version: 2.0 - Universal Classification Architecture
-Updated: December 2024
+IMPORTANT: Customer.id (UUID) is the ONLY identifier used throughout the system.
+- DuckDB tables: {customer_id}_{filename}_{sheet}
+- API calls: /customers/{customer_id}/...
+- All references: customer.id, never customer.name or a code
+
+Version: 3.0 - Customer-centric Architecture
+Updated: January 2026
 """
 
 from typing import List, Dict, Any, Optional, Tuple
@@ -21,43 +26,38 @@ logger = logging.getLogger(__name__)
 
 
 class ProjectModel:
-    """Project database operations"""
+    """Project/Customer database operations.
+    
+    Projects represent customer engagements. The project.id (UUID) is the ONLY 
+    identifier used throughout the system for DuckDB tables, API calls, etc.
+    
+    IMPORTANT: Always use project.id, never project.name or project.code
+    
+    Table: 'projects' in Supabase
+    """
     
     @staticmethod
-    def generate_project_code(customer: str) -> str:
-        """Generate a unique project code from customer name.
+    def create(name: str, engagement_types: List[str] = None,
+              notes: str = None, product: str = None) -> Optional[Dict[str, Any]]:
+        """Create a new project/customer.
         
-        Format: First 3 letters of customer (uppercase) + 4 random digits
-        Example: "Team Inc" -> "TEA1234"
+        Args:
+            name: Customer name (e.g., "TEAM Inc")
+            engagement_types: List of engagement types (e.g., ["Implementation", "Optimization"])
+            notes: Optional notes
+            product: Primary product (e.g., "UKG Pro")
         """
-        import random
-        prefix = ''.join(c for c in customer.upper() if c.isalpha())[:3]
-        if len(prefix) < 3:
-            prefix = prefix.ljust(3, 'X')
-        suffix = str(random.randint(1000, 9999))
-        return f"{prefix}{suffix}"
-    
-    @staticmethod
-    def create(name: str, client_name: str = None, project_type: str = 'Implementation', 
-              notes: str = None, product: str = None, code: str = None) -> Optional[Dict[str, Any]]:
-        """Create a new project"""
         supabase = get_supabase()
         if not supabase:
             return None
         
         try:
-            # Generate code if not provided
-            project_code = code
-            if not project_code and client_name:
-                project_code = ProjectModel.generate_project_code(client_name)
-            
             data = {
                 'name': name,
-                'code': project_code,
-                'customer': client_name or '',
+                'customer': name,  # Keep for backward compat
                 'status': 'active',
                 'metadata': {
-                    'type': project_type,
+                    'engagement_types': engagement_types or ['Implementation'],
                     'notes': notes,
                     'product': product
                 }
@@ -89,7 +89,7 @@ class ProjectModel:
     
     @staticmethod
     def get_by_id(project_id: str) -> Optional[Dict[str, Any]]:
-        """Get project by ID"""
+        """Get project by ID (UUID) - the primary lookup method"""
         supabase = get_supabase()
         if not supabase:
             return None
@@ -103,60 +103,16 @@ class ProjectModel:
     
     @staticmethod
     def get_by_name(name: str) -> Optional[Dict[str, Any]]:
-        """Get project by name"""
+        """Get project by name (fallback lookup)"""
         supabase = get_supabase()
         if not supabase:
             return None
         
         try:
-            response = supabase.table('projects').select('*').eq('name', name).execute()
+            response = supabase.table('projects').select('*').ilike('name', name).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"getting project by name: {e}")
-            return None
-    
-    @staticmethod
-    def get_by_identifier(identifier: str) -> Optional[Dict[str, Any]]:
-        """
-        Get project by any identifier (id, code, or name).
-        
-        Tries in order:
-        1. By ID (UUID) - only if identifier looks like a UUID
-        2. By code (e.g., TEA1000)
-        3. By name (e.g., TEAM US)
-        
-        This handles the project_id mismatch issue where different parts
-        of the system use different identifiers.
-        """
-        import re
-        
-        supabase = get_supabase()
-        if not supabase:
-            return None
-        
-        # UUID pattern check - only try UUID query if it looks like one
-        uuid_pattern = re.compile(r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$', re.I)
-        
-        try:
-            # Try by ID first (only if it looks like a UUID)
-            if uuid_pattern.match(identifier):
-                response = supabase.table('projects').select('*').eq('id', identifier).execute()
-                if response.data:
-                    return response.data[0]
-            
-            # Try by code (case-insensitive)
-            response = supabase.table('projects').select('*').ilike('code', identifier).execute()
-            if response.data:
-                return response.data[0]
-            
-            # Try by name (case-insensitive)
-            response = supabase.table('projects').select('*').ilike('name', identifier).execute()
-            if response.data:
-                return response.data[0]
-            
-            return None
-        except Exception as e:
-            logger.error(f"getting project by identifier '{identifier}': {e}")
             return None
     
     @staticmethod
@@ -176,17 +132,21 @@ class ProjectModel:
     
     @staticmethod
     def delete(project_id: str) -> bool:
-        """Delete project"""
+        """Delete project (soft delete by setting status)"""
         supabase = get_supabase()
         if not supabase:
             return False
         
         try:
-            supabase.table('projects').delete().eq('id', project_id).execute()
+            supabase.table('projects').update({'status': 'deleted'}).eq('id', project_id).execute()
             return True
         except Exception as e:
             logger.error(f"deleting project: {e}")
             return False
+
+
+# Alias for code that uses CustomerModel
+CustomerModel = ProjectModel
 
 
 class DocumentModel:
