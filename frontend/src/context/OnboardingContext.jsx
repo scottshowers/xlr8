@@ -137,7 +137,7 @@ export const systemMonitorTour = [
 // Tour Registry
 const tourRegistry = {
   '/dashboard': { id: 'dashboard', steps: dashboardTour },
-  '/projects': { id: 'projects', steps: projectsTour },
+  '/customers': { id: 'projects', steps: projectsTour },
   '/data': { id: 'data', steps: dataTour },
   '/vacuum': { id: 'vacuum', steps: vacuumTour },
   '/playbooks': { id: 'playbooks', steps: playbooksTour },
