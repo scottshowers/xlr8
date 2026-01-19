@@ -875,7 +875,7 @@ def process_file_background(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
                         uploaded_by=uploaded_by_email,
-                        customer_id=customer_id
+                        project_id=customer_id
                     )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
@@ -884,7 +884,7 @@ def process_file_background(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
                         uploaded_by=uploaded_by_email,
-                        customer_id=customer_id
+                        project_id=customer_id
                     )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
@@ -1042,7 +1042,7 @@ def process_file_background(
                         reg_result = RegistrationService.register_structured(
                             filename=filename,
                             project=project,
-                            customer_id=customer_id if not is_global else None,
+                            project_id=customer_id if not is_global else None,
                             tables_created=result.get('tables_created', []),
                             row_count=total_rows,
                             sheet_count=tables_created,
@@ -1353,7 +1353,7 @@ def process_file_background(
                                             temp_csv = f"/tmp/{job_id}_converted.csv"
                                             df.to_csv(temp_csv, index=False)
                                             
-                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", customer_id=customer_id)
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", project_id=customer_id)
                                             
                                             # Cleanup temp file
                                             try:
@@ -1472,7 +1472,7 @@ def process_file_background(
                                                 temp_csv = f"/tmp/{job_id}_docx_table.csv"
                                                 df.to_csv(temp_csv, index=False)
                                                 
-                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", customer_id=customer_id)
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", project_id=customer_id)
                                                 
                                                 try:
                                                     os.remove(temp_csv)
@@ -1663,7 +1663,7 @@ def process_file_background(
                     reg_result = RegistrationService.register_hybrid(
                         filename=filename,
                         project=project,
-                        customer_id=customer_id if not is_global else None,
+                        project_id=customer_id if not is_global else None,
                         tables_created=pdf_result.get('duckdb_result', {}).get('tables_created', []) if 'pdf_result' in dir() else [],
                         row_count=pdf_result.get('duckdb_result', {}).get('total_rows', 0) if 'pdf_result' in dir() else 0,
                         chunk_count=chunks_added,
@@ -1687,7 +1687,7 @@ def process_file_background(
                     reg_result = RegistrationService.register_embedded(
                         filename=filename,
                         project=project,
-                        customer_id=customer_id if not is_global else None,
+                        project_id=customer_id if not is_global else None,
                         chunk_count=chunks_added,
                         truth_type=truth_type,
                         file_size=file_size,
