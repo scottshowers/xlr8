@@ -1615,6 +1615,8 @@ async def diagnose_project(project: str):
     """
     Diagnostic endpoint to check project data availability.
     Shows what the backend can find for a given project identifier.
+    
+    CRITICAL: Shows _schema_metadata which is where uploaded files live.
     """
     try:
         from utils.structured_data_handler import get_structured_handler
@@ -1624,11 +1626,82 @@ async def diagnose_project(project: str):
         
         diagnostics = {
             'input_project': project,
+            'schema_metadata': {},
             'tables': {},
             'classifications': {},
             'term_index': {},
             'column_profiles': {}
         }
+        
+        # =================================================================
+        # CRITICAL: Check _schema_metadata (this is where uploaded files go)
+        # =================================================================
+        try:
+            # Check if project_id column exists
+            cols = conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()
+            col_names = [c[1] for c in cols]
+            has_project_id = 'project_id' in col_names
+            
+            diagnostics['schema_metadata']['has_project_id_column'] = has_project_id
+            diagnostics['schema_metadata']['columns'] = col_names
+            
+            # Get ALL unique project/project_id combinations
+            if has_project_id:
+                all_projects = conn.execute("""
+                    SELECT DISTINCT project, project_id, COUNT(*) as file_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    GROUP BY project, project_id
+                    ORDER BY file_count DESC
+                """).fetchall()
+                diagnostics['schema_metadata']['all_stored_projects'] = [
+                    {'project': p[0], 'project_id': p[1], 'file_count': p[2]} 
+                    for p in all_projects
+                ]
+                
+                # Now find matches for the input project
+                matches = conn.execute("""
+                    SELECT file_name, project, project_id, table_name, row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND (
+                        LOWER(project) = LOWER(?)
+                        OR project_id = ?
+                        OR LOWER(project) LIKE LOWER(?) || '%'
+                    )
+                    ORDER BY file_name
+                    LIMIT 20
+                """, [project, project, project]).fetchall()
+            else:
+                all_projects = conn.execute("""
+                    SELECT DISTINCT project, COUNT(*) as file_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    GROUP BY project
+                    ORDER BY file_count DESC
+                """).fetchall()
+                diagnostics['schema_metadata']['all_stored_projects'] = [
+                    {'project': p[0], 'file_count': p[1]} 
+                    for p in all_projects
+                ]
+                
+                matches = conn.execute("""
+                    SELECT file_name, project, NULL as project_id, table_name, row_count
+                    FROM _schema_metadata 
+                    WHERE is_current = TRUE
+                    AND LOWER(project) LIKE LOWER(?) || '%'
+                    ORDER BY file_name
+                    LIMIT 20
+                """, [project]).fetchall()
+            
+            diagnostics['schema_metadata']['matching_files'] = [
+                {'file_name': m[0], 'project': m[1], 'project_id': m[2], 'table_name': m[3], 'row_count': m[4]}
+                for m in matches
+            ]
+            diagnostics['schema_metadata']['match_count'] = len(matches)
+            
+        except Exception as e:
+            diagnostics['schema_metadata'] = {'error': str(e)}
         
         # Check tables matching project prefix
         tables = conn.execute("""
