@@ -15,8 +15,8 @@ from enum import Enum
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
-from utils.cost_equivalent import get_project_cost_equivalent, calculate_cost_equivalent
-from utils.duckdb_manager import duckdb_manager
+from backend.utils.cost_equivalent import get_project_cost_equivalent, calculate_cost_equivalent
+from utils.structured_data_handler import get_structured_handler
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -89,7 +89,7 @@ def generate_data_quality_findings(customer_id: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(customer_id)
+        handler = get_structured_handler()
         if not handler:
             return findings
         
@@ -182,7 +182,7 @@ def generate_coverage_findings(customer_id: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(customer_id)
+        handler = get_structured_handler()
         if not handler:
             return findings
         
@@ -246,7 +246,7 @@ def generate_pattern_findings(customer_id: str) -> List[Finding]:
     findings = []
     
     try:
-        handler = duckdb_manager.get_handler(customer_id)
+        handler = get_structured_handler()
         if not handler:
             return findings
         
