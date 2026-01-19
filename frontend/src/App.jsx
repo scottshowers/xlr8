@@ -115,7 +115,7 @@ function AppRoutes() {
         {/* ====== 8-STEP WORKFLOW (with flow bar) ====== */}
         
         {/* Step 1: Create Project */}
-        <Route path="/projects/new" element={
+        <Route path="/customers/new" element={
           <ProtectedRoute><FlowPage step={1}><CreateProjectPage /></FlowPage></ProtectedRoute>
         } />
         
@@ -158,13 +158,13 @@ function AppRoutes() {
         {/* ====== OTHER PAGES (no flow bar) ====== */}
         
         {/* Projects - specific routes first */}
-        <Route path="/projects/:id/hub" element={
+        <Route path="/customers/:id/hub" element={
           <ProtectedRoute><FlowPage step={1}><ProjectHub /></FlowPage></ProtectedRoute>
         } />
-        <Route path="/projects/:id/edit" element={
+        <Route path="/customers/:id/edit" element={
           <ProtectedRoute><FlowPage step={1}><EditProjectPage /></FlowPage></ProtectedRoute>
         } />
-        <Route path="/projects" element={
+        <Route path="/customers" element={
           <ProtectedRoute><Page><ProjectsPage /></Page></ProtectedRoute>
         } />
         
@@ -197,14 +197,14 @@ function AppRoutes() {
         <Route path="/build-playbook" element={
           <ProtectedRoute><Page><PlaybookWireupPage /></Page></ProtectedRoute>
         } />
-        <Route path="/playbook/:playbookId/:projectId" element={
+        <Route path="/playbook/:playbookId/:customerId" element={
           <ProtectedRoute><Page><PlaybookViewerWrapper /></Page></ProtectedRoute>
         } />
         <Route path="/playbook/:playbookId" element={
           <ProtectedRoute><Page><PlaybookViewerWrapper /></Page></ProtectedRoute>
         } />
         {/* TEST ROUTE - no auth, no wrapper */}
-        <Route path="/playbook-test/:playbookId/:projectId" element={
+        <Route path="/playbook-test/:playbookId/:customerId" element={
           <PlaybookViewerWrapper />
         } />
         
