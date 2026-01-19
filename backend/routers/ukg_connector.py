@@ -8,6 +8,7 @@ Endpoints:
 - POST /api/ukg/test-connection - Test API credentials
 - GET /api/ukg/code-tables - Get list of all code tables
 - GET /api/ukg/code-tables/{table_name} - Get specific code table data
+- POST /api/ukg/sync-config/{project_id} - Sync all config tables to DuckDB
 """
 
 from fastapi import APIRouter, HTTPException
@@ -17,6 +18,7 @@ from typing import Optional, Dict, Any, List
 import httpx
 import base64
 import logging
+import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +41,16 @@ class UKGTestResult(BaseModel):
     status_code: Optional[int] = None
     data: Optional[Any] = None
     error: Optional[str] = None
+
+
+class SyncResult(BaseModel):
+    """Result of a sync operation"""
+    success: bool
+    tables_synced: int
+    tables_failed: int
+    total_rows: int
+    details: List[Dict[str, Any]]
+    errors: List[str]
 
 
 def build_auth_headers(creds: UKGCredentials) -> Dict[str, str]:
@@ -302,3 +314,429 @@ async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 10
                 )
     except httpx.RequestError as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# SYNC ALL CONFIG TABLES - BACKGROUND JOB
+# =============================================================================
+
+import uuid
+from datetime import datetime
+
+# In-memory job tracking (would use Redis in production)
+_sync_jobs: Dict[str, Dict] = {}
+
+
+def get_supabase():
+    """Get Supabase client."""
+    try:
+        from utils.database.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
+    except ImportError:
+        from backend.utils.database.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
+
+
+async def get_connection_creds(project_id: str) -> Optional[Dict]:
+    """Get saved UKG Pro credentials for a project."""
+    try:
+        supabase = get_supabase()
+        result = supabase.table('api_connections') \
+            .select('*') \
+            .eq('project_name', project_id) \
+            .eq('provider', 'ukg_pro') \
+            .single() \
+            .execute()
+        return result.data
+    except Exception as e:
+        logger.error(f"Failed to get connection: {e}")
+        return None
+
+
+async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, job_id: str = None) -> List[Dict]:
+    """Fetch all pages from a paginated endpoint."""
+    all_data = []
+    page = 1
+    per_page = 100
+    
+    while True:
+        try:
+            params = {"page": page, "per_page": per_page}
+            response = await client.get(url, headers=headers, params=params, timeout=30.0)
+            
+            if response.status_code != 200:
+                logger.warning(f"[UKG-SYNC] {url} returned {response.status_code}")
+                break
+            
+            data = response.json()
+            
+            if not data:
+                break
+                
+            if isinstance(data, list):
+                all_data.extend(data)
+                if len(data) < per_page:
+                    break
+                page += 1
+            else:
+                # Single object response
+                all_data = [data] if data else []
+                break
+                
+            # Safety limit
+            if page > 100:
+                break
+                
+            # Polite delay - don't hammer UKG
+            await asyncio.sleep(0.5)
+            
+        except Exception as e:
+            logger.error(f"[UKG-SYNC] Error fetching {url}: {e}")
+            break
+    
+    return all_data
+
+
+async def save_to_duckdb(project_id: str, table_name: str, data: List[Dict]) -> int:
+    """Save data to DuckDB."""
+    if not data:
+        return 0
+        
+    try:
+        import duckdb
+        import pandas as pd
+        
+        # Flatten nested objects if needed
+        flat_data = []
+        for row in data:
+            flat_row = {}
+            for k, v in row.items():
+                if isinstance(v, dict):
+                    for k2, v2 in v.items():
+                        flat_row[f"{k}_{k2}"] = str(v2) if v2 is not None else None
+                elif isinstance(v, list):
+                    flat_row[k] = str(v)
+                else:
+                    flat_row[k] = v
+            flat_data.append(flat_row)
+        
+        df = pd.DataFrame(flat_data)
+        
+        # Sanitize table name
+        safe_table = table_name.replace('-', '_').replace(' ', '_').lower()
+        full_table_name = f"{project_id}_api_{safe_table}"
+        
+        # Connect to project database
+        db_path = f"/data/duckdb/{project_id}.duckdb"
+        
+        conn = duckdb.connect(db_path)
+        conn.execute(f'DROP TABLE IF EXISTS "{full_table_name}"')
+        conn.register("temp_df", df)
+        conn.execute(f'CREATE TABLE "{full_table_name}" AS SELECT * FROM temp_df')
+        conn.close()
+        
+        logger.info(f"[UKG-SYNC] Saved {len(df)} rows to {full_table_name}")
+        return len(df)
+        
+    except Exception as e:
+        logger.error(f"[UKG-SYNC] DuckDB save failed for {table_name}: {e}")
+        raise
+
+
+async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
+    """Background task to run the actual sync."""
+    global _sync_jobs
+    
+    job = _sync_jobs[job_id]
+    job['status'] = 'running'
+    job['started_at'] = datetime.now().isoformat()
+    
+    hostname = conn_data.get('hostname', '')
+    creds = UKGCredentials(
+        hostname=hostname,
+        customer_api_key=conn_data.get('customer_api_key', ''),
+        username=conn_data.get('username', ''),
+        password=conn_data.get('password', ''),
+        user_api_key=conn_data.get('user_api_key', '')
+    )
+    headers = build_auth_headers(creds)
+    
+    results = []
+    errors = []
+    total_rows = 0
+    tables_synced = 0
+    tables_failed = 0
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            # =====================================================
+            # STEP 1: Discover all available code tables
+            # =====================================================
+            job['current_step'] = 'Discovering code tables...'
+            logger.info(f"[UKG-SYNC] [{job_id}] Discovering available code tables...")
+            
+            code_tables_url = f"https://{hostname}/configuration/v1/code-tables"
+            try:
+                response = await client.get(code_tables_url, headers=headers, timeout=30.0)
+                if response.status_code == 200:
+                    available_tables = response.json()
+                    logger.info(f"[UKG-SYNC] [{job_id}] Found {len(available_tables)} code tables")
+                    job['total_tables'] = len(available_tables) + 7  # +7 for reality endpoints
+                else:
+                    available_tables = []
+                    errors.append(f"Could not fetch code tables list: HTTP {response.status_code}")
+            except Exception as e:
+                available_tables = []
+                errors.append(f"Could not fetch code tables list: {str(e)}")
+            
+            # =====================================================
+            # STEP 2: Pull each code table
+            # =====================================================
+            table_index = 0
+            for table_info in available_tables:
+                if isinstance(table_info, dict):
+                    table_name = table_info.get('name') or table_info.get('tableName') or str(table_info)
+                else:
+                    table_name = str(table_info)
+                
+                if not table_name or table_name == 'None':
+                    continue
+                
+                table_index += 1
+                job['current_step'] = f'Pulling {table_name}...'
+                job['tables_processed'] = table_index
+                logger.info(f"[UKG-SYNC] [{job_id}] [{table_index}/{len(available_tables)}] Pulling {table_name}...")
+                
+                url = f"https://{hostname}/configuration/v1/{table_name}"
+                
+                try:
+                    data = await fetch_all_pages(client, url, headers, job_id)
+                    
+                    if data:
+                        rows = await save_to_duckdb(project_id, table_name, data)
+                        total_rows += rows
+                        tables_synced += 1
+                        results.append({
+                            "table": table_name,
+                            "rows": rows,
+                            "success": True,
+                            "type": "configuration"
+                        })
+                    else:
+                        results.append({
+                            "table": table_name,
+                            "rows": 0,
+                            "success": True,
+                            "type": "configuration",
+                            "note": "empty"
+                        })
+                        
+                except Exception as e:
+                    tables_failed += 1
+                    error_msg = str(e)
+                    errors.append(f"{table_name}: {error_msg}")
+                    results.append({
+                        "table": table_name,
+                        "rows": 0,
+                        "success": False,
+                        "error": error_msg
+                    })
+                
+                # Update job progress
+                job['tables_synced'] = tables_synced
+                job['total_rows'] = total_rows
+                
+                # Polite delay between tables
+                await asyncio.sleep(1.0)
+            
+            # =====================================================
+            # STEP 3: Pull employee/personnel data (REALITY)
+            # =====================================================
+            reality_endpoints = [
+                {"name": "person_details", "path": "/personnel/v1/person-details"},
+                {"name": "employment_details", "path": "/personnel/v1/employment-details"},
+                {"name": "compensation_details", "path": "/personnel/v1/compensation-details"},
+                {"name": "employee_deductions", "path": "/personnel/v1/emp-deductions"},
+                {"name": "pto_plans", "path": "/personnel/v1/pto-plans"},
+                {"name": "contacts", "path": "/personnel/v1/contacts"},
+                {"name": "direct_deposit", "path": "/payroll/v1/direct-deposit"},
+            ]
+            
+            for endpoint in reality_endpoints:
+                table_index += 1
+                job['current_step'] = f'Pulling {endpoint["name"]}...'
+                job['tables_processed'] = table_index
+                logger.info(f"[UKG-SYNC] [{job_id}] Pulling {endpoint['name']}...")
+                
+                url = f"https://{hostname}{endpoint['path']}"
+                
+                try:
+                    data = await fetch_all_pages(client, url, headers, job_id)
+                    
+                    if data:
+                        rows = await save_to_duckdb(project_id, endpoint['name'], data)
+                        total_rows += rows
+                        tables_synced += 1
+                        results.append({
+                            "table": endpoint['name'],
+                            "rows": rows,
+                            "success": True,
+                            "type": "reality"
+                        })
+                    else:
+                        results.append({
+                            "table": endpoint['name'],
+                            "rows": 0,
+                            "success": True,
+                            "type": "reality",
+                            "note": "empty or no permission"
+                        })
+                        
+                except Exception as e:
+                    tables_failed += 1
+                    error_msg = str(e)
+                    errors.append(f"{endpoint['name']}: {error_msg}")
+                    results.append({
+                        "table": endpoint['name'],
+                        "rows": 0,
+                        "success": False,
+                        "error": error_msg
+                    })
+                
+                job['tables_synced'] = tables_synced
+                job['total_rows'] = total_rows
+                
+                # Polite delay
+                await asyncio.sleep(1.0)
+        
+        # Update last sync time in Supabase
+        try:
+            supabase = get_supabase()
+            supabase.table('api_connections') \
+                .update({'last_pull_at': datetime.now().isoformat()}) \
+                .eq('project_name', project_id) \
+                .eq('provider', 'ukg_pro') \
+                .execute()
+        except Exception as e:
+            logger.warning(f"[UKG-SYNC] Could not update last_pull_at: {e}")
+        
+        # Mark job complete
+        job['status'] = 'completed'
+        job['completed_at'] = datetime.now().isoformat()
+        job['success'] = tables_failed < tables_synced
+        job['tables_synced'] = tables_synced
+        job['tables_failed'] = tables_failed
+        job['total_rows'] = total_rows
+        job['results'] = results
+        job['errors'] = errors
+        job['current_step'] = 'Complete!'
+        
+        logger.info(f"[UKG-SYNC] [{job_id}] COMPLETE: {tables_synced} tables, {total_rows} rows, {tables_failed} failures")
+        
+    except Exception as e:
+        logger.error(f"[UKG-SYNC] [{job_id}] Job failed: {e}")
+        job['status'] = 'failed'
+        job['error'] = str(e)
+        job['completed_at'] = datetime.now().isoformat()
+
+
+class SyncJobResponse(BaseModel):
+    """Response when starting a sync job"""
+    job_id: str
+    status: str
+    message: str
+
+
+class SyncStatusResponse(BaseModel):
+    """Response for sync job status"""
+    job_id: str
+    status: str
+    current_step: Optional[str] = None
+    tables_processed: Optional[int] = None
+    total_tables: Optional[int] = None
+    tables_synced: Optional[int] = None
+    tables_failed: Optional[int] = None
+    total_rows: Optional[int] = None
+    started_at: Optional[str] = None
+    completed_at: Optional[str] = None
+    success: Optional[bool] = None
+    errors: Optional[List[str]] = None
+
+
+@router.post("/sync-config/{project_id}", response_model=SyncJobResponse)
+async def start_sync(project_id: str):
+    """
+    Start a background sync job to pull ALL UKG Pro data.
+    
+    Returns a job_id that can be polled for status.
+    """
+    global _sync_jobs
+    
+    logger.info(f"[UKG-SYNC] Starting sync job for project {project_id}")
+    
+    # Get saved credentials
+    conn_data = await get_connection_creds(project_id)
+    if not conn_data:
+        raise HTTPException(404, "No UKG Pro connection found for this project. Set up connection first.")
+    
+    hostname = conn_data.get('hostname', '')
+    if not hostname:
+        raise HTTPException(400, "Connection missing hostname")
+    
+    # Check if there's already a running job for this project
+    for jid, job in _sync_jobs.items():
+        if job.get('project_id') == project_id and job.get('status') == 'running':
+            return SyncJobResponse(
+                job_id=jid,
+                status='already_running',
+                message='A sync is already in progress for this project'
+            )
+    
+    # Create job
+    job_id = str(uuid.uuid4())[:8]
+    _sync_jobs[job_id] = {
+        'project_id': project_id,
+        'status': 'queued',
+        'created_at': datetime.now().isoformat(),
+        'current_step': 'Starting...',
+        'tables_processed': 0,
+        'total_tables': 0,
+        'tables_synced': 0,
+        'total_rows': 0,
+    }
+    
+    # Start background task
+    asyncio.create_task(run_sync_job(job_id, project_id, conn_data))
+    
+    return SyncJobResponse(
+        job_id=job_id,
+        status='started',
+        message='Sync job started. Poll /api/ukg/sync-status/{job_id} for progress.'
+    )
+
+
+@router.get("/sync-status/{job_id}", response_model=SyncStatusResponse)
+async def get_sync_status(job_id: str):
+    """
+    Get the status of a sync job.
+    """
+    global _sync_jobs
+    
+    job = _sync_jobs.get(job_id)
+    if not job:
+        raise HTTPException(404, f"Job {job_id} not found")
+    
+    return SyncStatusResponse(
+        job_id=job_id,
+        status=job.get('status', 'unknown'),
+        current_step=job.get('current_step'),
+        tables_processed=job.get('tables_processed'),
+        total_tables=job.get('total_tables'),
+        tables_synced=job.get('tables_synced'),
+        tables_failed=job.get('tables_failed'),
+        total_rows=job.get('total_rows'),
+        started_at=job.get('started_at'),
+        completed_at=job.get('completed_at'),
+        success=job.get('success'),
+        errors=job.get('errors'),
+    )
