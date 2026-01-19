@@ -289,6 +289,35 @@ export default function IntelligenceTestPage() {
         {diagnoseStatus.result && (
           <div className="itp-result" style={{ marginTop: 12 }}>
             <div className="itp-result-item"><strong>Input project:</strong> <code>{diagnoseStatus.result.input_project}</code></div>
+            
+            {/* CRITICAL: Schema Metadata - This is where uploaded files live */}
+            <div className="itp-result-item" style={{ background: '#f0f9ff', padding: 12, borderRadius: 8, marginTop: 8 }}>
+              <strong style={{ color: '#0369a1' }}>📁 _schema_metadata (Uploaded Files):</strong>
+              <div style={{ marginTop: 8 }}>
+                <div><strong>Has project_id column:</strong> {diagnoseStatus.result.schema_metadata?.has_project_id_column ? '✅ Yes' : '❌ No'}</div>
+                <div><strong>Files matching "{diagnoseStatus.result.input_project}":</strong> {diagnoseStatus.result.schema_metadata?.match_count || 0}</div>
+                {diagnoseStatus.result.schema_metadata?.matching_files?.length > 0 && (
+                  <div className="itp-result-detail" style={{ marginTop: 4 }}>
+                    {diagnoseStatus.result.schema_metadata.matching_files.slice(0, 5).map((f, i) => (
+                      <div key={i}>• {f.file_name} (project={f.project}, project_id={f.project_id || 'null'}, rows={f.row_count})</div>
+                    ))}
+                  </div>
+                )}
+                <div style={{ marginTop: 8, borderTop: '1px solid #e0e0e0', paddingTop: 8 }}>
+                  <strong>ALL projects in DuckDB:</strong>
+                  {diagnoseStatus.result.schema_metadata?.all_stored_projects?.length > 0 ? (
+                    <div className="itp-result-detail">
+                      {diagnoseStatus.result.schema_metadata.all_stored_projects.map((p, i) => (
+                        <div key={i}>• project="{p.project}", project_id="{p.project_id || 'null'}" ({p.file_count} files)</div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="itp-result-detail">No files in _schema_metadata</div>
+                  )}
+                </div>
+              </div>
+            </div>
+            
             <div className="itp-result-item">
               <strong>Tables found:</strong> {diagnoseStatus.result.tables?.count || 0}
               {diagnoseStatus.result.tables?.names?.length > 0 && (
