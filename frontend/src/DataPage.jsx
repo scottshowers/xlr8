@@ -237,8 +237,7 @@ export default function DataPage() {
                       color: c.textMuted,
                       marginTop: '2px'
                     }}>
-                      {project.customer || 'No customer'}
-                      {project.code && <span style={{ marginLeft: '0.5rem', opacity: 0.7 }}>({project.code})</span>}
+                      {project.customer || project.name}
                     </div>
                   </div>
                   <ChevronRight size={18} color={c.textMuted} />
@@ -962,14 +961,16 @@ function FilesPanel({ c, project, targetScope }) {
     if (isGlobalScope) {
       return f.is_global || f.project === 'Global/Universal' || f.project === 'Reference Library' || f.project === '__STANDARDS__';
     }
-    return !project || f.project === project.id || f.project === project.name;
+    // Use customer ID only - all data should be stored with ID
+    return !project || f.project === project.id;
   });
   
   const docs = (documents?.documents || []).filter(d => {
     if (isGlobalScope) {
       return d.is_global || d.project === 'Global/Universal' || d.project === 'Reference Library' || d.project === '__STANDARDS__';
     }
-    return !project || d.project === project.id || d.project === project.name;
+    // Use customer ID only - all data should be stored with ID
+    return !project || d.project === project.id;
   });
   
   // Reference library files (always global)
