@@ -3952,7 +3952,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             for (table_name,) in tables:
                 archived_name = f"{table_name}_v{version}"
                 try:
-                    self.conn.execute(f"ALTER TABLE {table_name} RENAME TO {archived_name}")
+                    self.conn.execute(f'ALTER TABLE "{table_name}" RENAME TO "{archived_name}"')
                     logger.info(f"Archived {table_name} -> {archived_name}")
                 except Exception as e:
                     logger.warning(f"Could not archive {table_name}: {e}")
@@ -4801,14 +4801,14 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             # Use context manager for thread-safe DuckDB access
             with self._db_lock:
                 # Get row count first
-                row_count = self.conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+                row_count = self.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
                 
                 if row_count == 0:
                     logger.warning(f"[PROFILING-FAST] Table {table_name} is empty")
                     return result
                 
                 # Get column names
-                columns_result = self.conn.execute(f"DESCRIBE {table_name}").fetchall()
+                columns_result = self.conn.execute(f'DESCRIBE "{table_name}"').fetchall()
                 columns = [col[0] for col in columns_result]
                 
                 logger.info(f"[PROFILING-FAST] Table {table_name}: {row_count:,} rows, {len(columns)} columns")
@@ -4930,7 +4930,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                         COUNT(*) as total,
                         SUM(CASE WHEN "{col}" IS NULL THEN 1 ELSE 0 END) as null_count,
                         COUNT(DISTINCT "{col}") as distinct_count
-                    FROM {table_name}
+                    FROM "{table_name}"
                 """).fetchone()
             else:
                 # String columns - check NULL, empty, and 'nan'
@@ -4939,7 +4939,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                         COUNT(*) as total,
                         SUM(CASE WHEN "{col}" IS NULL OR TRIM(CAST("{col}" AS VARCHAR)) = '' OR CAST("{col}" AS VARCHAR) = 'nan' THEN 1 ELSE 0 END) as null_count,
                         COUNT(DISTINCT "{col}") as distinct_count
-                    FROM {table_name}
+                    FROM "{table_name}"
                 """).fetchone()
             
             # Guard against None result
@@ -4961,14 +4961,14 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
             if is_numeric:
                 samples = self.conn.execute(f"""
                     SELECT DISTINCT "{col}" 
-                    FROM {table_name} 
+                    FROM "{table_name}" 
                     WHERE "{col}" IS NOT NULL
                     LIMIT 5
                 """).fetchall()
             else:
                 samples = self.conn.execute(f"""
                     SELECT DISTINCT "{col}" 
-                    FROM {table_name} 
+                    FROM "{table_name}" 
                     WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != '' AND CAST("{col}" AS VARCHAR) != 'nan'
                     LIMIT 5
                 """).fetchall()
@@ -4983,7 +4983,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                             MIN("{col}") as min_val,
                             MAX("{col}") as max_val,
                             AVG("{col}") as mean_val
-                        FROM {table_name}
+                        FROM "{table_name}"
                         WHERE "{col}" IS NOT NULL
                     """).fetchone()
                     profile['min_value'] = float(numeric_stats[0]) if numeric_stats[0] is not None else None
@@ -5000,7 +5000,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                 # Get all distinct values
                 distinct_result = self.conn.execute(f"""
                     SELECT DISTINCT "{col}"
-                    FROM {table_name}
+                    FROM "{table_name}"
                     WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != '' AND CAST("{col}" AS VARCHAR) != 'nan'
                     ORDER BY "{col}"
                 """).fetchall()
@@ -5009,7 +5009,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                 # Get value distribution
                 dist_result = self.conn.execute(f"""
                     SELECT "{col}", COUNT(*) as cnt
-                    FROM {table_name}
+                    FROM "{table_name}"
                     WHERE "{col}" IS NOT NULL
                     GROUP BY "{col}"
                     ORDER BY cnt DESC
@@ -5039,7 +5039,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                             MAX(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as max_val,
                             AVG(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as mean_val,
                             COUNT(TRY_CAST(REPLACE(REPLACE(CAST("{col}" AS VARCHAR), ',', ''), '$', '') AS DOUBLE)) as numeric_count
-                        FROM {table_name}
+                        FROM "{table_name}"
                         WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != ''
                     """).fetchone()
                     
@@ -5059,7 +5059,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                             MIN(TRY_CAST("{col}" AS DATE)) as min_date,
                             MAX(TRY_CAST("{col}" AS DATE)) as max_date,
                             COUNT(TRY_CAST("{col}" AS DATE)) as date_count
-                        FROM {table_name}
+                        FROM "{table_name}"
                         WHERE "{col}" IS NOT NULL AND TRIM(CAST("{col}" AS VARCHAR)) != ''
                     """).fetchone()
                     
@@ -5924,7 +5924,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
                         decrypt: bool = True) -> List[Dict]:
         """Get sample data from a table"""
         try:
-            df = self.query_to_dataframe(f"SELECT * FROM {table_name} LIMIT {limit}")
+            df = self.query_to_dataframe(f'SELECT * FROM "{table_name}" LIMIT {limit}')
             
             if decrypt:
                 df = self.encryptor.decrypt_dataframe(df)
@@ -6059,8 +6059,8 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         
         try:
             # Get data from both versions
-            df1 = self.query_to_dataframe(f"SELECT * FROM {table1}")
-            df2 = self.query_to_dataframe(f"SELECT * FROM {table2}")
+            df1 = self.query_to_dataframe(f'SELECT * FROM "{table1}"')
+            df2 = self.query_to_dataframe(f'SELECT * FROM "{table2}"')
             
             # Decrypt for comparison
             df1 = self.encryptor.decrypt_dataframe(df1)
