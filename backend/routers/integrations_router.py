@@ -171,8 +171,14 @@ async def get_system_endpoints(system_id: str, truth_bucket: Optional[str] = Non
 # CONNECTION MANAGEMENT
 # =============================================================================
 
-# In-memory storage for demo (would be Supabase in production)
-_connections: Dict[str, Dict[str, Any]] = {}
+def get_supabase():
+    """Get Supabase client."""
+    try:
+        from utils.database.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
+    except ImportError:
+        from backend.utils.database.supabase_client import get_supabase as _get_supabase
+        return _get_supabase()
 
 
 @router.post("/connections")
@@ -180,7 +186,7 @@ async def save_connection(request: ConnectionCredentials):
     """
     Save connection credentials for a project.
     
-    In production, credentials would be encrypted before storage.
+    Stores in Supabase api_connections table.
     """
     try:
         from backend.integrations.system_library import get_system
@@ -200,25 +206,53 @@ async def save_connection(request: ConnectionCredentials):
             detail=f"Missing required credentials: {missing}"
         )
     
-    # Store connection (in-memory for now)
-    key = f"{request.customer_id}:{request.system_id}"
-    _connections[key] = {
-        "customer_id": request.customer_id,
-        "system_id": request.system_id,
-        "credentials": request.credentials,  # Would encrypt in production
-        "status": "saved",
-        "created_at": datetime.now().isoformat(),
-        "last_tested": None,
-        "last_pull": None,
-    }
-    
-    logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.customer_id}")
-    
-    return {
-        "success": True,
-        "message": f"Connection saved for {system.name}",
-        "connection_id": key
-    }
+    try:
+        supabase = get_supabase()
+        
+        # Check for existing connection
+        existing = supabase.table('api_connections') \
+            .select('id') \
+            .eq('customer_id', request.customer_id) \
+            .eq('provider', request.system_id) \
+            .execute()
+        
+        if existing.data:
+            # Update existing
+            result = supabase.table('api_connections').update({
+                'hostname': request.credentials.get('hostname', ''),
+                'customer_api_key': request.credentials.get('customer_api_key', ''),
+                'username': request.credentials.get('username', ''),
+                'password': request.credentials.get('password', ''),
+                'user_api_key': request.credentials.get('user_api_key', ''),
+                'status': 'saved',
+            }).eq('id', existing.data[0]['id']).execute()
+            connection_id = existing.data[0]['id']
+        else:
+            # Create new
+            result = supabase.table('api_connections').insert({
+                'customer_id': request.customer_id,
+                'provider': request.system_id,
+                'connection_name': system.name,
+                'hostname': request.credentials.get('hostname', ''),
+                'customer_api_key': request.credentials.get('customer_api_key', ''),
+                'username': request.credentials.get('username', ''),
+                'password': request.credentials.get('password', ''),
+                'user_api_key': request.credentials.get('user_api_key', ''),
+                'status': 'saved',
+            }).execute()
+            connection_id = result.data[0]['id'] if result.data else None
+        
+        logger.info(f"[INTEGRATIONS] Saved connection for {request.system_id} in project {request.customer_id}")
+        
+        return {
+            "success": True,
+            "message": f"Connection saved for {system.name}",
+            "connection_id": connection_id
+        }
+        
+    except Exception as e:
+        logger.error(f"[INTEGRATIONS] Save connection failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/connections/{customer_id}")
@@ -231,24 +265,43 @@ async def get_project_connections(customer_id: str):
     except ImportError:
         from integrations.system_library import get_system
     
-    connections = []
-    for key, conn in _connections.items():
-        if conn["customer_id"] == customer_id:
-            system = get_system(conn["system_id"])
+    try:
+        supabase = get_supabase()
+        
+        result = supabase.table('api_connections') \
+            .select('id, customer_id, provider, connection_name, hostname, username, status, created_at, last_connected_at') \
+            .eq('customer_id', customer_id) \
+            .execute()
+        
+        connections = []
+        for conn in (result.data or []):
+            system = get_system(conn.get('provider', ''))
             connections.append({
-                "system_id": conn["system_id"],
-                "system_name": system.name if system else conn["system_id"],
-                "status": conn["status"],
-                "created_at": conn["created_at"],
-                "last_tested": conn["last_tested"],
-                "last_pull": conn["last_pull"],
+                "id": conn['id'],
+                "system_id": conn['provider'],
+                "system_name": system.name if system else conn.get('connection_name', conn['provider']),
+                "hostname": conn.get('hostname', ''),
+                "username": conn.get('username', ''),
+                "status": conn.get('status', 'unknown'),
+                "created_at": conn.get('created_at'),
+                "last_tested": conn.get('last_connected_at'),
+                "domain": system.domain if system else "HCM",
             })
-    
-    return {
-        "customer_id": customer_id,
-        "connections": connections,
-        "count": len(connections)
-    }
+        
+        return {
+            "customer_id": customer_id,
+            "connections": connections,
+            "count": len(connections)
+        }
+        
+    except Exception as e:
+        logger.error(f"[INTEGRATIONS] Get connections failed: {e}")
+        # Return empty on error
+        return {
+            "customer_id": customer_id,
+            "connections": [],
+            "count": 0
+        }
 
 
 @router.post("/connections/{customer_id}/test")
@@ -277,11 +330,20 @@ async def test_connection(customer_id: str, request: ConnectionTestRequest):
         try:
             result = await _test_ukg_pro_connection(request.credentials)
             
-            # Update connection status
-            key = f"{customer_id}:{request.system_id}"
-            if key in _connections:
-                _connections[key]["status"] = "connected" if result["success"] else "failed"
-                _connections[key]["last_tested"] = datetime.now().isoformat()
+            # Update connection status in Supabase
+            try:
+                supabase = get_supabase()
+                supabase.table('api_connections') \
+                    .update({
+                        'status': 'connected' if result['success'] else 'failed',
+                        'last_connected_at': datetime.now().isoformat() if result['success'] else None,
+                        'last_error': result.get('error') if not result['success'] else None,
+                    }) \
+                    .eq('customer_id', customer_id) \
+                    .eq('provider', request.system_id) \
+                    .execute()
+            except Exception as e:
+                logger.warning(f"[INTEGRATIONS] Could not update connection status: {e}")
             
             return result
         except Exception as e:
@@ -308,6 +370,7 @@ async def _test_ukg_pro_connection(credentials: Dict[str, str]) -> Dict:
     import base64
     
     # Build auth header
+    hostname = credentials.get("hostname", "service5.ultipro.com")
     username = credentials.get("username", "")
     password = credentials.get("password", "")
     user_api_key = credentials.get("user_api_key", "")
@@ -322,32 +385,41 @@ async def _test_ukg_pro_connection(credentials: Dict[str, str]) -> Dict:
         "US-Customer-Api-Key": customer_api_key,
         "Api-Key": user_api_key,
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
     
-    # Test endpoint - company details is usually accessible
-    base_url = "https://service4.ultipro.com"
-    test_url = f"{base_url}/configuration/v1/company-details"
+    # Test endpoint - code-tables is usually accessible
+    test_url = f"https://{hostname}/configuration/v1/code-tables"
     
     async with httpx.AsyncClient() as client:
         try:
             response = await client.get(test_url, headers=headers, timeout=30.0)
             
             if response.status_code == 200:
+                data = response.json()
+                table_count = len(data) if isinstance(data, list) else "unknown"
                 return {
                     "success": True,
                     "system_id": "ukg_pro",
-                    "message": "Successfully connected to UKG Pro",
+                    "message": f"Successfully connected to UKG Pro. Found {table_count} code tables.",
                     "details": {
                         "status_code": response.status_code,
-                        "response_preview": str(response.text[:200]) if response.text else None
+                        "table_count": table_count
                     }
                 }
             elif response.status_code == 401:
                 return {
                     "success": False,
                     "system_id": "ukg_pro",
-                    "error": "Authentication failed - check credentials",
+                    "error": "Authentication failed - check username/password/API keys",
                     "details": {"status_code": 401}
+                }
+            elif response.status_code == 403:
+                return {
+                    "success": False,
+                    "system_id": "ukg_pro",
+                    "error": "Forbidden - service account may need 'Company Configuration Integration' permission",
+                    "details": {"status_code": 403}
                 }
             else:
                 return {
@@ -363,7 +435,13 @@ async def _test_ukg_pro_connection(credentials: Dict[str, str]) -> Dict:
             return {
                 "success": False,
                 "system_id": "ukg_pro",
-                "error": "Connection timed out"
+                "error": "Connection timed out - check hostname"
+            }
+        except httpx.ConnectError as e:
+            return {
+                "success": False,
+                "system_id": "ukg_pro",
+                "error": f"Could not connect - check hostname: {str(e)}"
             }
         except Exception as e:
             return {
@@ -469,6 +547,7 @@ async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[s
     import base64
     
     # Build auth header
+    hostname = credentials.get("hostname", "service5.ultipro.com")
     username = credentials.get("username", "")
     password = credentials.get("password", "")
     user_api_key = credentials.get("user_api_key", "")
@@ -482,10 +561,10 @@ async def _pull_ukg_pro_endpoint(customer_id: str, endpoint, credentials: Dict[s
         "US-Customer-Api-Key": customer_api_key,
         "Api-Key": user_api_key,
         "Content-Type": "application/json",
+        "Accept": "application/json",
     }
     
-    base_url = "https://service4.ultipro.com"
-    url = f"{base_url}{endpoint.path}"
+    url = f"https://{hostname}{endpoint.path}"
     
     async with httpx.AsyncClient() as client:
         try:
