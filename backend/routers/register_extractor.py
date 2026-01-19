@@ -188,7 +188,6 @@ def save_extraction_job(
     cost_usd: float,
     processing_time_ms: int, 
     extraction_method: str = "local_llm",
-    customer_id: Optional[str] = None,
     duckdb_table: Optional[str] = None
 ) -> Optional[Dict]:
     """
@@ -207,7 +206,6 @@ def save_extraction_job(
     
     try:
         job_data = {
-            'customer_id': customer_id,
             'customer_id': customer_id,
             'source_file': source_file,
             'employee_count': employee_count,
