@@ -165,7 +165,7 @@ export default function DataPage() {
             <div style={{ textAlign: 'center', padding: '1rem' }}>
               <p style={{ color: c.textMuted, marginBottom: '1rem' }}>No customers yet</p>
               <a 
-                href="/projects/new"
+                href="/customers/new"
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',

@@ -414,7 +414,7 @@ const CreateProjectPage = () => {
               </>
             )}
           </button>
-          <button type="button" className="btn btn-secondary" onClick={() => navigate('/projects')}>
+          <button type="button" className="btn btn-secondary" onClick={() => navigate('/customers')}>
             Cancel
           </button>
         </div>

@@ -81,7 +81,7 @@ export default function DashboardPage() {
       {/* Quick Actions */}
       <div style={{ marginBottom: 32 }}>
         <button
-          onClick={() => navigate('/projects/new')}
+          onClick={() => navigate('/customers/new')}
           className="xlr8-btn xlr8-btn-primary"
           style={{
             display: 'inline-flex',
@@ -144,7 +144,7 @@ export default function DashboardPage() {
             <FileText size={48} style={{ marginBottom: 16, opacity: 0.3 }} />
             <p style={{ margin: 0, marginBottom: 16 }}>No customers yet</p>
             <button
-              onClick={() => navigate('/projects/new')}
+              onClick={() => navigate('/customers/new')}
               className="xlr8-btn xlr8-btn-secondary"
             >
               Create Your First Project

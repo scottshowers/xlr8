@@ -139,11 +139,11 @@ const ENDPOINT_CATEGORIES = [
 
     description: 'Project management (5 endpoints)',
     endpoints: [
-      { method: 'GET', path: '/api/projects/list', description: 'List all projects', priority: 'high' },
-      { method: 'GET', path: '/api/projects/{project_id}', description: 'Get project details', priority: 'medium', param: 'project_id' },
-      { method: 'POST', path: '/api/projects/create', description: 'Create new project', priority: 'medium' },
-      { method: 'PUT', path: '/api/projects/{project_id}', description: 'Update project', priority: 'low', param: 'project_id' },
-      { method: 'DELETE', path: '/api/projects/{project_id}', description: 'Delete project', priority: 'low', param: 'project_id', dangerous: true },
+      { method: 'GET', path: '/api/customers/list', description: 'List all projects', priority: 'high' },
+      { method: 'GET', path: '/api/customers/{project_id}', description: 'Get project details', priority: 'medium', param: 'project_id' },
+      { method: 'POST', path: '/api/customers/create', description: 'Create new project', priority: 'medium' },
+      { method: 'PUT', path: '/api/customers/{project_id}', description: 'Update project', priority: 'low', param: 'project_id' },
+      { method: 'DELETE', path: '/api/customers/{project_id}', description: 'Delete project', priority: 'low', param: 'project_id', dangerous: true },
     ]
   },
   {
@@ -342,9 +342,9 @@ const ENDPOINT_CATEGORIES = [
       { method: 'GET', path: '/api/reference/engagement-types', description: 'Engagement types', priority: 'low' },
       { method: 'GET', path: '/api/reference/stats', description: 'Reference stats', priority: 'low' },
       { method: 'POST', path: '/api/reference/detect', description: 'Detect context', priority: 'medium' },
-      { method: 'GET', path: '/api/reference/projects/{project_id}/context', description: 'Project context', priority: 'medium', param: 'project_id' },
-      { method: 'POST', path: '/api/reference/projects/{project_id}/detect', description: 'Run detection', priority: 'medium', param: 'project_id' },
-      { method: 'POST', path: '/api/reference/projects/{project_id}/context/confirm', description: 'Confirm context', priority: 'low', param: 'project_id' },
+      { method: 'GET', path: '/api/reference/customers/{project_id}/context', description: 'Project context', priority: 'medium', param: 'project_id' },
+      { method: 'POST', path: '/api/reference/customers/{project_id}/detect', description: 'Run detection', priority: 'medium', param: 'project_id' },
+      { method: 'POST', path: '/api/reference/customers/{project_id}/context/confirm', description: 'Confirm context', priority: 'low', param: 'project_id' },
       { method: 'GET', path: '/api/reference/admin/signatures', description: 'Detection signatures', priority: 'low' },
       { method: 'POST', path: '/api/reference/admin/signatures', description: 'Create signature', priority: 'low' },
       { method: 'DELETE', path: '/api/reference/admin/signatures/{signature_id}', description: 'Delete signature', priority: 'low', param: 'signature_id', dangerous: true },
