@@ -874,7 +874,7 @@ def _get_available_transforms(columns: List[str], data: List[Dict], schema: Dict
 # SUGGESTIONS ENDPOINT
 # =============================================================================
 
-@router.get("/bi/suggestions/{project}")
+@router.get("/bi/suggestions/{customer_id}")
 async def get_suggestions(customer_id: str):
     """
     Get smart query suggestions for a project.
@@ -890,7 +890,7 @@ async def get_suggestions(customer_id: str):
     
     try:
         handler = get_structured_handler()
-        schema = _build_bi_schema(handler, project)
+        schema = _build_bi_schema(handler, customer_id)
         
         if not schema or not schema.get('tables'):
             return {"suggestions": [], "categories": []}
@@ -1039,7 +1039,7 @@ async def get_suggestions(customer_id: str):
 # SCHEMA ENDPOINT
 # =============================================================================
 
-@router.get("/bi/schema/{project}")
+@router.get("/bi/schema/{customer_id}")
 async def get_bi_schema(customer_id: str):
     """Get schema info for BI builder."""
     if not STRUCTURED_AVAILABLE:
@@ -1047,7 +1047,7 @@ async def get_bi_schema(customer_id: str):
     
     try:
         handler = get_structured_handler()
-        schema = _build_bi_schema(handler, project)
+        schema = _build_bi_schema(handler, customer_id)
         
         # Simplify for frontend - deduplicate by table_name
         seen_tables = set()
@@ -1311,7 +1311,7 @@ async def export_bi_data(request: BIExportRequest):
 # SAVED QUERIES ENDPOINTS
 # =============================================================================
 
-@router.get("/bi/saved/{project}")
+@router.get("/bi/saved/{customer_id}")
 async def get_saved_queries(customer_id: str):
     """Get saved queries for a project."""
     if not SUPABASE_AVAILABLE:
@@ -1320,7 +1320,7 @@ async def get_saved_queries(customer_id: str):
     try:
         supabase = get_supabase()
         result = supabase.table('bi_saved_queries').select('*').eq(
-            'project', project
+            'project', customer_id
         ).order('created_at', desc=True).execute()
         
         return {"queries": result.data or []}
