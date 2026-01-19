@@ -169,7 +169,7 @@ export default function ContextBar() {
             )}
 
             <div style={{ maxHeight: 300, overflowY: 'auto' }}>
-              {/* All Projects option */}
+              {/* All Customers option */}
               {!searchTerm && (
                 <div
                   onClick={() => handleSelectProject(null)}
@@ -187,7 +187,7 @@ export default function ContextBar() {
                 >
                   <FolderOpen size={16} color="#5f6c7b" />
                   <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 600, fontSize: 13, color: '#2a3441' }}>All Projects</div>
+                    <div style={{ fontWeight: 600, fontSize: 13, color: '#2a3441' }}>All Customers</div>
                     <div style={{ fontSize: 11, color: '#5f6c7b' }}>Global view</div>
                   </div>
                   {!activeProject && <span style={{ color: '#83b16d', fontWeight: 600 }}>✓</span>}
@@ -200,7 +200,7 @@ export default function ContextBar() {
                 </div>
               ) : filteredProjects.length === 0 ? (
                 <div style={{ padding: 20, textAlign: 'center', color: '#5f6c7b', fontSize: 13 }}>
-                  {searchTerm ? 'No matching projects' : 'No projects yet'}
+                  {searchTerm ? 'No matching customers' : 'No customers yet'}
                 </div>
               ) : (
                 filteredProjects.map((project) => {

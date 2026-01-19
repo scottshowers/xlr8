@@ -157,8 +157,8 @@ const Sidebar = () => {
       section: 'Main',
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-        { icon: FolderKanban, label: 'Projects', path: '/projects' },
-        { icon: HardDrive, label: 'Project Data', path: '/data' },
+        { icon: FolderKanban, label: 'Customers', path: '/projects' },
+        { icon: HardDrive, label: 'Customer Data', path: '/data' },
         { icon: MessageSquare, label: 'AI Assist', path: '/workspace' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' }
       ]
@@ -266,7 +266,7 @@ const FlowBar = ({ currentStep = 1, completedSteps = [], hasActiveProject = fals
           }}
         >
           <FolderKanban size={14} />
-          <span>{activeProject?.customer || activeProject?.name || 'Select Project'}</span>
+          <span>{activeProject?.customer || activeProject?.name || 'Select Customer'}</span>
           <ChevronDown size={12} />
         </button>
         

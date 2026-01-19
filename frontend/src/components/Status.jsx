@@ -246,7 +246,7 @@ export default function Status() {
             onChange={(e) => setSelectedProject(e.target.value)}
             className="border rounded px-3 py-2 text-sm"
           >
-            <option value="all">All Projects</option>
+            <option value="all">All Customers</option>
             <option value="__GLOBAL__">Global</option>
             {projects.map(p => (
               <option key={p.id} value={p.name}>{p.name}</option>
