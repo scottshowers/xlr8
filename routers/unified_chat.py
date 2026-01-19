@@ -393,6 +393,8 @@ async def get_project_schema(project: str, scope: str, handler) -> Dict:
                 project_clean.lower(),
                 project_clean.lower().replace(' ', '_'),
                 project_clean.lower().replace(' ', '_').replace('-', '_'),
+                # Handle UUID-based customer IDs: extract first 8 chars without hyphens
+                project_clean.replace('-', '')[:8].lower() if '-' in project_clean else None,
             ]
             project_prefixes = list(dict.fromkeys([p for p in project_prefixes if p]))
             
@@ -626,7 +628,7 @@ def _get_project_domains(project: str, handler=None) -> Tuple[Optional[str], Lis
         if SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id, metadata').eq('name', project).execute()
+                result = supabase.table('customers').select('id, metadata').eq('name', project).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
                     # Check if domains already computed
@@ -794,7 +796,7 @@ async def unified_chat(request: UnifiedChatRequest):
         if project and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id, metadata').eq('name', project).limit(1).execute()
+                result = supabase.table('customers').select('id, metadata').eq('name', project).limit(1).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
                     # Phase 5F: Extract product from metadata

@@ -591,8 +591,9 @@ async def delete_all_project_data(project_id: str):
             project_lower = project_id.lower()
             project_prefixes = [
                 project_lower + '__',
+                project_lower + '_',
                 project_lower.replace('-', '') + '__',
-                project_lower.replace('_', '') + '__',
+                project_lower.replace('-', '')[:8] + '_',  # UUID first 8 chars
             ]
             
             for (table_name,) in tables:
