@@ -638,26 +638,44 @@ async def delete_all_project_data(project_id: str):
         project_lower + '__',
         project_lower + '_',
         project_lower.replace('-', '') + '__',
-        project_lower.replace('_', '') + '__',
+        project_lower.replace('-', '')[:8] + '_',  # UUID first 8 chars
     ]
     
     # 1. DuckDB tables
     conn = _get_duckdb(project_id)
     if conn:
         try:
+            # FIRST: Find tables registered in _schema_metadata for this project
+            # This catches tables regardless of naming convention
+            tables_from_metadata = set()
+            try:
+                meta_results = conn.execute("""
+                    SELECT DISTINCT table_name FROM _schema_metadata 
+                    WHERE LOWER(project) = LOWER(?) 
+                       OR project_id = ?
+                       OR LOWER(project) LIKE LOWER(?)
+                """, [project_id, project_id, f"%{project_id}%"]).fetchall()
+                tables_from_metadata = {r[0] for r in meta_results}
+                logger.info(f"[CLEANUP] Found {len(tables_from_metadata)} tables in metadata for {project_id}")
+            except Exception as meta_e:
+                logger.debug(f"[CLEANUP] Metadata lookup: {meta_e}")
+            
             tables = conn.execute("SHOW TABLES").fetchall()
             system_tables = {'_schema_metadata', '_pdf_tables', 'file_metadata', '_column_profiles', 
                            '_column_mappings', '_table_classifications', '_term_index', 
-                           '_column_relationships', 'schema_info'}
+                           '_column_relationships', 'schema_info', '_join_priorities'}
             
             for (table_name,) in tables:
                 # Skip system/metadata tables
                 if table_name in system_tables or table_name.startswith('_'):
                     continue
                 
-                # Check if table belongs to this project
+                # Check if table belongs to this project (by prefix OR by metadata registration)
                 table_lower = table_name.lower()
-                if any(table_lower.startswith(prefix) for prefix in project_prefixes):
+                matches_prefix = any(table_lower.startswith(prefix) for prefix in project_prefixes)
+                in_metadata = table_name in tables_from_metadata
+                
+                if matches_prefix or in_metadata:
                     try:
                         conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
                         deleted["tables"] += 1
@@ -1187,3 +1205,133 @@ async def delete_all_semantic_data():
     
     logger.warning(f"[CLEANUP] NUCLEAR SEMANTIC complete: {result}")
     return result
+
+
+@router.delete("/status/nuclear/all")
+async def nuclear_delete_all_data():
+    """
+    NUCLEAR OPTION: Delete ALL user data from DuckDB and ChromaDB.
+    
+    Use this when:
+    - Orphaned data exists from old naming conventions
+    - Normal cleanup can't find data due to identifier mismatches
+    - You want a completely fresh start
+    
+    This preserves:
+    - System tables (_schema_metadata structure, etc.)
+    - Supabase project/customer records
+    - Reference library data (if marked as global)
+    """
+    logger.warning("[CLEANUP] ⚠️ NUCLEAR DELETE ALL - Starting complete data wipe")
+    
+    result = {
+        "tables_dropped": [],
+        "metadata_cleared": {},
+        "chromadb_cleared": 0,
+        "supabase_cleared": {},
+        "errors": []
+    }
+    
+    # 1. DuckDB - Drop ALL non-system tables
+    conn = _get_duckdb()
+    if conn:
+        try:
+            tables = conn.execute("SHOW TABLES").fetchall()
+            system_tables = {'_schema_metadata', '_pdf_tables', 'file_metadata', '_column_profiles', 
+                           '_column_mappings', '_table_classifications', '_term_index', 
+                           '_column_relationships', 'schema_info', '_join_priorities',
+                           '_entity_config', '_suppression_rules'}
+            
+            for (table_name,) in tables:
+                # Skip system/metadata tables
+                if table_name in system_tables or table_name.startswith('__'):
+                    continue
+                
+                # Skip reference/global tables
+                if 'reference' in table_name.lower() or 'standards' in table_name.lower():
+                    continue
+                    
+                try:
+                    conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+                    result["tables_dropped"].append(table_name)
+                    logger.info(f"[CLEANUP] Dropped table: {table_name}")
+                except Exception as drop_e:
+                    result["errors"].append(f"Drop {table_name}: {drop_e}")
+            
+            # Clear ALL rows from metadata tables (but keep table structure)
+            metadata_tables = ['_column_profiles', '_column_mappings', '_schema_metadata', 
+                             '_table_classifications', '_term_index', '_column_relationships',
+                             '_join_priorities']
+            
+            for meta_table in metadata_tables:
+                try:
+                    # Check if table exists
+                    exists = conn.execute(f"SELECT COUNT(*) FROM information_schema.tables WHERE table_name = '{meta_table}'").fetchone()
+                    if exists and exists[0] > 0:
+                        count_before = conn.execute(f"SELECT COUNT(*) FROM {meta_table}").fetchone()[0]
+                        conn.execute(f"DELETE FROM {meta_table}")
+                        result["metadata_cleared"][meta_table] = count_before
+                except Exception as e:
+                    logger.debug(f"[CLEANUP] Metadata table {meta_table}: {e}")
+                    
+        except Exception as e:
+            result["errors"].append(f"DuckDB: {e}")
+            logger.error(f"[CLEANUP] DuckDB error: {e}")
+    
+    # 2. ChromaDB - Clear ALL chunks
+    collection = _get_chromadb()
+    if collection:
+        try:
+            all_docs = collection.get()
+            if all_docs and all_docs.get('ids'):
+                # Filter out reference library if desired
+                ids_to_delete = []
+                for i, doc_id in enumerate(all_docs['ids']):
+                    metadata = all_docs.get('metadatas', [{}])[i] or {}
+                    project = metadata.get('project', '')
+                    # Skip reference library
+                    if project in ('Reference Library', '__STANDARDS__', 'Global/Universal'):
+                        continue
+                    ids_to_delete.append(doc_id)
+                
+                if ids_to_delete:
+                    batch_size = 1000
+                    for i in range(0, len(ids_to_delete), batch_size):
+                        batch = ids_to_delete[i:i+batch_size]
+                        collection.delete(ids=batch)
+                    result["chromadb_cleared"] = len(ids_to_delete)
+        except Exception as e:
+            result["errors"].append(f"ChromaDB: {e}")
+            logger.error(f"[CLEANUP] ChromaDB error: {e}")
+    
+    # 3. Supabase - Clear jobs and document registry (but NOT projects)
+    supabase = _get_supabase()
+    if supabase:
+        # Clear jobs
+        try:
+            jobs = supabase.table('jobs').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            result["supabase_cleared"]["jobs"] = len(jobs.data) if jobs.data else 0
+        except Exception as e:
+            logger.debug(f"[CLEANUP] Jobs: {e}")
+        
+        # Clear document_registry
+        try:
+            docs = supabase.table('document_registry').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            result["supabase_cleared"]["document_registry"] = len(docs.data) if docs.data else 0
+        except Exception as e:
+            logger.debug(f"[CLEANUP] document_registry: {e}")
+        
+        # Clear documents (but not reference library)
+        try:
+            docs = supabase.table('documents').delete().neq('project_id', '__STANDARDS__').execute()
+            result["supabase_cleared"]["documents"] = len(docs.data) if docs.data else 0
+        except Exception as e:
+            logger.debug(f"[CLEANUP] documents: {e}")
+    
+    logger.warning(f"[CLEANUP] ⚠️ NUCLEAR DELETE ALL complete: {len(result['tables_dropped'])} tables, {result['chromadb_cleared']} chunks")
+    
+    return {
+        "success": True,
+        "message": f"Deleted {len(result['tables_dropped'])} tables, {result['chromadb_cleared']} document chunks",
+        "details": result
+    }
