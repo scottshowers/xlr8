@@ -829,7 +829,7 @@ class DocumentScanner:
             from backend.utils.supabase_client import get_supabase_client
             supabase = get_supabase_client()
             if supabase:
-                result = supabase.table('projects').select('name').eq('id', project_id).execute()
+                result = supabase.table('customers').select('name').eq('id', project_id).execute()
                 if result.data:
                     project_name = result.data[0].get('name')
                     logger.debug(f"[SCAN] Resolved project: {project_id[:8]} -> {project_name}")
