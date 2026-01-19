@@ -514,7 +514,7 @@ async def get_platform_status(
                     return []
                 if project_filter:
                     from utils.database.models import ProjectModel
-                    proj_record = ProjectModel.get_by_name(project_filter)
+                    proj_record = ProjectModel.get_by_identifier(project_filter)
                     project_id = proj_record.get('id') if proj_record else None
                     if project_id:
                         result = supabase.table("document_registry").select("*").eq("project_id", project_id).execute()
@@ -794,15 +794,71 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
         files_dict = {}
         
         files_handler = _get_read_handler()
+        
+        # =================================================================
+        # CRITICAL: Look up project to get UUID for querying
+        # The filter might be "TEA1000" (code) but data is stored with
+        # project_id (UUID). We need to resolve the identifier first.
+        # =================================================================
+        resolved_project_id = None
+        resolved_project_name = None
+        if project_filter:
+            try:
+                from utils.database.models import ProjectModel
+                proj_record = ProjectModel.get_by_identifier(project_filter)
+                if proj_record:
+                    resolved_project_id = proj_record.get('id')
+                    resolved_project_name = proj_record.get('name')
+                    logger.info(f"[FILES] Resolved '{project_filter}' → UUID={resolved_project_id}, name={resolved_project_name}")
+            except Exception as lookup_e:
+                logger.debug(f"[FILES] Project lookup: {lookup_e}")
+        
         # Query DuckDB for schema metadata (fast, local)
         try:
             if project_filter and files_handler:
-                schema_results = files_handler.conn.execute("""
-                    SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
-                    FROM _schema_metadata 
-                    WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
-                    ORDER BY file_name, table_name
-                """, [project_filter]).fetchall()
+                # Check if project_id column exists
+                has_project_id = False
+                try:
+                    cols = [row[1] for row in files_handler.conn.execute("PRAGMA table_info(_schema_metadata)").fetchall()]
+                    has_project_id = 'project_id' in cols
+                except Exception:
+                    pass
+                
+                # Query by resolved UUID (most reliable) or fall back to name matching
+                if has_project_id and resolved_project_id:
+                    # Best case: query by exact UUID
+                    schema_results = files_handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE AND project_id = ?
+                        ORDER BY file_name, table_name
+                    """, [resolved_project_id]).fetchall()
+                    logger.info(f"[FILES] Queried by project_id={resolved_project_id}, found {len(schema_results)} rows")
+                elif resolved_project_name:
+                    # Fall back: query by resolved project name
+                    schema_results = files_handler.conn.execute("""
+                        SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
+                        FROM _schema_metadata 
+                        WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
+                        ORDER BY file_name, table_name
+                    """, [resolved_project_name]).fetchall()
+                    logger.info(f"[FILES] Queried by project name='{resolved_project_name}', found {len(schema_results)} rows")
+                else:
+                    # Last resort: try the raw filter against both columns
+                    if has_project_id:
+                        schema_results = files_handler.conn.execute("""
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
+                            FROM _schema_metadata 
+                            WHERE is_current = TRUE AND (LOWER(project) = LOWER(?) OR project_id = ?)
+                            ORDER BY file_name, table_name
+                        """, [project_filter, project_filter]).fetchall()
+                    else:
+                        schema_results = files_handler.conn.execute("""
+                            SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
+                            FROM _schema_metadata 
+                            WHERE is_current = TRUE AND LOWER(project) = LOWER(?)
+                            ORDER BY file_name, table_name
+                        """, [project_filter]).fetchall()
             elif files_handler:
                 schema_results = files_handler.conn.execute("""
                     SELECT file_name, project, table_name, display_name, row_count, column_count, created_at, columns, entity_type, category
@@ -832,7 +888,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             if supabase:
                 if project_filter:
                     from utils.database.models import ProjectModel
-                    proj_record = ProjectModel.get_by_name(project_filter)
+                    proj_record = ProjectModel.get_by_identifier(project_filter)
                     project_id = proj_record.get('id') if proj_record else None
                     if project_id:
                         result = supabase.table("document_registry").select("filename, uploaded_by, created_at, truth_type, domain, chunk_count, project_name").eq("project_id", project_id).execute()
@@ -943,7 +999,7 @@ async def get_files_fast(project: Optional[str] = None) -> Dict[str, Any]:
             if project_filter:
                 try:
                     from utils.database.models import ProjectModel
-                    proj_record = ProjectModel.get_by_name(project_filter)
+                    proj_record = ProjectModel.get_by_identifier(project_filter)
                     filter_project_id = proj_record.get('id') if proj_record else None
                 except Exception:
                     pass
