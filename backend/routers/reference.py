@@ -450,22 +450,22 @@ async def detect_context(request: DetectionRequest):
 # PROJECT CONTEXT ENDPOINTS
 # =============================================================================
 
-@router.get("/projects/{project_id}/context", response_model=ProjectContextResponse)
-async def get_project_context(project_id: str):
+@router.get("/customers/{customer_id}/context", response_model=ProjectContextResponse)
+async def get_project_context(customer_id: str):
     """Get the detected/confirmed context for a project."""
     service = get_detection_service()
     if not service:
         raise HTTPException(status_code=500, detail="Detection service unavailable")
     
     try:
-        context = service.get_project_context(project_id)
+        context = service.get_project_context(customer_id)
         
         if not context:
-            raise HTTPException(status_code=404, detail=f"Project '{project_id}' not found")
+            raise HTTPException(status_code=404, detail=f"Project '{customer_id}' not found")
         
         return ProjectContextResponse(
             id=context.get('id'),
-            name=context.get('name', project_id),
+            name=context.get('name', customer_id),
             systems=context.get('systems') or [],
             domains=context.get('domains') or [],
             functional_areas=context.get('functional_areas') or [],
@@ -481,8 +481,8 @@ async def get_project_context(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/projects/{project_id}/context/confirm")
-async def confirm_project_context(project_id: str, request: ConfirmContextRequest):
+@router.post("/customers/{customer_id}/context/confirm")
+async def confirm_project_context(customer_id: str, request: ConfirmContextRequest):
     """
     Confirm or override the detected project context.
     
@@ -495,7 +495,7 @@ async def confirm_project_context(project_id: str, request: ConfirmContextReques
     
     try:
         success = service.confirm_project_context(
-            project_id=project_id,
+            customer_id=customer_id,
             system_codes=request.system_codes,
             domain_codes=request.domain_codes,
             functional_areas=request.functional_areas,
@@ -514,8 +514,8 @@ async def confirm_project_context(project_id: str, request: ConfirmContextReques
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/projects/{project_id}/detect")
-async def run_project_detection(project_id: str):
+@router.post("/customers/{customer_id}/detect")
+async def run_project_detection(customer_id: str):
     """
     Run detection for a project based on its existing uploaded files.
     
@@ -539,11 +539,11 @@ async def run_project_detection(project_id: str):
         tables_result = handler.conn.execute(f"""
             SELECT table_name, display_name, file_name
             FROM _schema_metadata
-            WHERE project = '{project_id}'
+            WHERE project = '{customer_id}'
         """).fetchall()
         
         if not tables_result:
-            raise HTTPException(status_code=404, detail=f"No tables found for project '{project_id}'")
+            raise HTTPException(status_code=404, detail=f"No tables found for project '{customer_id}'")
         
         # Collect all columns and file names
         all_columns = []
@@ -567,7 +567,7 @@ async def run_project_detection(project_id: str):
         )
         
         # Update project context
-        service.update_project_context(project_id, result)
+        service.update_project_context(customer_id, result)
         
         return {
             "status": "success",

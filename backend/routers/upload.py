@@ -12,7 +12,7 @@ v23 CHANGES (December 2025 - GET HEALTHY Week 2):
   - /standards/health
   - /standards/rules
   - /standards/documents
-  - /standards/compliance/check/{project_id}
+  - /standards/compliance/check/{customer_id}
 - process_file_background() still exported for smart_router to use
 
 v22 CHANGES:
@@ -111,7 +111,7 @@ router = APIRouter()
 # IDEMPOTENT UPLOAD HELPER - Clean existing data before re-upload
 # =============================================================================
 
-def _cleanup_existing_file(filename: str, project: str = None, project_id: str = None):
+def _cleanup_existing_file(filename: str, project: str = None, customer_id: str = None):
     """
     Remove any existing data for this filename before re-uploading.
     This makes uploads idempotent - same file uploaded twice = replacement, not duplication.
@@ -228,7 +228,7 @@ def _cleanup_existing_file(filename: str, project: str = None, project_id: str =
     # STEP 3: Unregister from Registry
     # =========================================================================
     try:
-        result['registry_deleted'] = DocumentRegistryModel.unregister(filename, project_id)
+        result['registry_deleted'] = DocumentRegistryModel.unregister(filename, customer_id)
         if result['registry_deleted']:
             logger.info(f"[CLEANUP] Unregistered {filename} from registry")
     except Exception as reg_e:
@@ -737,7 +737,7 @@ def process_file_background(
     file_path: str, 
     filename: str, 
     project: str,
-    project_id: Optional[str],
+    customer_id: Optional[str],
     functional_area: Optional[str],
     file_size: int,
     truth_type: Optional[str] = None,
@@ -769,7 +769,7 @@ def process_file_background(
     """
     try:
         logger.warning(f"[BACKGROUND] === STARTING JOB {job_id} ===")
-        logger.warning(f"[BACKGROUND] filename={filename}, project={project}, project_id={project_id}")
+        logger.warning(f"[BACKGROUND] filename={filename}, project={project}, customer_id={customer_id}")
         
         file_ext = filename.split('.')[-1].lower()
         logger.warning(f"[BACKGROUND] Detected file extension: '{file_ext}'")
@@ -809,7 +809,7 @@ def process_file_background(
             truth_type, classification_method, classification_confidence = auto_classify_file(
                 filename=filename,
                 file_extension=file_ext,
-                project_name=project
+                customer_id=project
             )
             logger.info(f"[BACKGROUND] Auto-classified: {truth_type} (method={classification_method}, confidence={classification_confidence})")
         
@@ -848,7 +848,7 @@ def process_file_background(
                 # IDEMPOTENT: Clean existing data for this filename first
                 # This prevents duplicate tables if same file uploaded twice
                 # ===========================================================
-                cleanup_result = _cleanup_existing_file(filename, project, project_id)
+                cleanup_result = _cleanup_existing_file(filename, project, customer_id)
                 if cleanup_result['duckdb_tables_deleted'] > 0:
                     logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['duckdb_tables_deleted']} tables")
                 
@@ -875,7 +875,7 @@ def process_file_background(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
                         uploaded_by=uploaded_by_email,
-                        project_id=project_id
+                        customer_id=customer_id
                     )
                     tables_created = 1
                     total_rows = result.get('row_count', 0)
@@ -884,7 +884,7 @@ def process_file_background(
                         file_path, project, filename,
                         progress_callback=structured_progress_callback,
                         uploaded_by=uploaded_by_email,
-                        project_id=project_id
+                        customer_id=customer_id
                     )
                     tables_created = len(result.get('tables_created', []))
                     total_rows = result.get('total_rows', 0)
@@ -980,7 +980,7 @@ def process_file_background(
                     
                     enrichment = enrich_structured_upload(
                         project=project,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         filename=filename,
                         handler=handler,
                         tables_created=result.get('tables_created', []),
@@ -1011,11 +1011,11 @@ def process_file_background(
                     logger.warning(f"[BACKGROUND] Enrichment failed: {enrich_e}")
                 
                 # Store schema summary in documents table for reference
-                if project_id:
+                if customer_id:
                     try:
                         schema_summary = json.dumps(result, indent=2)
                         DocumentModel.create(
-                            project_id=project_id,
+                            customer_id=customer_id,
                             name=filename,
                             category=functional_area or 'Structured Data',
                             file_type=file_ext,
@@ -1042,7 +1042,7 @@ def process_file_background(
                         reg_result = RegistrationService.register_structured(
                             filename=filename,
                             project=project,
-                            project_id=project_id if not is_global else None,
+                            customer_id=customer_id if not is_global else None,
                             tables_created=result.get('tables_created', []),
                             row_count=total_rows,
                             sheet_count=tables_created,
@@ -1059,7 +1059,7 @@ def process_file_background(
                             parse_time_ms=times['parse_time_ms'],
                             storage_time_ms=times['storage_time_ms'],
                             metadata={
-                                'project_name': project,
+                                'customer_id': project,
                                 'functional_area': functional_area,
                                 'file_size': file_size,
                                 'intelligence': intelligence_summary,
@@ -1120,7 +1120,7 @@ def process_file_background(
                         filename=filename,
                         duration_ms=times['processing_time_ms'],
                         success=True,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         file_size_bytes=file_size,
                         rows_processed=total_rows
                     )
@@ -1141,7 +1141,7 @@ def process_file_background(
                         filename=filename,
                         duration_ms=times['processing_time_ms'],
                         success=False,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         file_size_bytes=file_size,
                         error_message=str(e)[:500]
                     )
@@ -1180,7 +1180,7 @@ def process_file_background(
                     file_path=file_path,
                     project=project,
                     filename=filename,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     truth_type=truth_type,  # Pass truth_type to skip table extraction for reference docs
                     status_callback=status_callback
                 )
@@ -1353,7 +1353,7 @@ def process_file_background(
                                             temp_csv = f"/tmp/{job_id}_converted.csv"
                                             df.to_csv(temp_csv, index=False)
                                             
-                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", project_id=project_id)
+                                            result = handler.store_csv(temp_csv, project, f"{filename}_extracted.csv", customer_id=customer_id)
                                             
                                             # Cleanup temp file
                                             try:
@@ -1377,7 +1377,7 @@ def process_file_background(
                                                     reg_result = RegistrationService.register_structured(
                                                         filename=filename,
                                                         project=project,
-                                                        project_id=project_id,
+                                                        customer_id=customer_id,
                                                         tables_created=result.get('tables_created', []),
                                                         row_count=result.get('row_count', 0),
                                                         file_size=file_size,
@@ -1392,7 +1392,7 @@ def process_file_background(
                                                         parse_time_ms=times['parse_time_ms'],
                                                         storage_time_ms=times['storage_time_ms'],
                                                         metadata={
-                                                            'project_name': project,
+                                                            'customer_id': project,
                                                             'functional_area': functional_area,
                                                             'original_type': file_ext,
                                                             'detected_structure': 'tabular',
@@ -1419,7 +1419,7 @@ def process_file_background(
                                                 from utils.detection_integration import run_project_detection
                                                 detection_result = run_project_detection(
                                                     project=project,
-                                                    project_id=project_id,
+                                                    customer_id=customer_id,
                                                     filename=filename,
                                                     handler=handler,
                                                     job_id=job_id
@@ -1472,7 +1472,7 @@ def process_file_background(
                                                 temp_csv = f"/tmp/{job_id}_docx_table.csv"
                                                 df.to_csv(temp_csv, index=False)
                                                 
-                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", project_id=project_id)
+                                                result = handler.store_csv(temp_csv, project, f"{filename}_table.csv", customer_id=customer_id)
                                                 
                                                 try:
                                                     os.remove(temp_csv)
@@ -1488,7 +1488,7 @@ def process_file_background(
                                                     from utils.detection_integration import run_project_detection
                                                     detection_result = run_project_detection(
                                                         project=project,
-                                                        project_id=project_id,
+                                                        customer_id=customer_id,
                                                         filename=filename,
                                                         handler=handler,
                                                         job_id=job_id
@@ -1568,11 +1568,11 @@ def process_file_background(
             "system": system  # NEW: HCM/ERP system tag for vendor doc filtering
         }
         
-        if project_id:
-            metadata["project_id"] = project_id
-            logger.info(f"[BACKGROUND] ✓ Metadata includes project_id: {project_id}")
+        if customer_id:
+            metadata["customer_id"] = customer_id
+            logger.info(f"[BACKGROUND] ✓ Metadata includes customer_id: {customer_id}")
         else:
-            logger.warning(f"[BACKGROUND] ✗ No project_id in metadata!")
+            logger.warning(f"[BACKGROUND] ✗ No customer_id in metadata!")
         
         if functional_area:
             metadata["functional_area"] = functional_area
@@ -1607,7 +1607,7 @@ def process_file_background(
                 logger.warning(f"[BACKGROUND] ChromaDB cleanup error: {chroma_e}")
         else:
             # Normal cleanup - clean both DuckDB and ChromaDB
-            cleanup_result = _cleanup_existing_file(filename, project, project_id)
+            cleanup_result = _cleanup_existing_file(filename, project, customer_id)
             if cleanup_result['chromadb_chunks_deleted'] > 0:
                 logger.info(f"[BACKGROUND] Replaced existing file: cleaned {cleanup_result['chromadb_chunks_deleted']} chunks")
         
@@ -1638,10 +1638,10 @@ def process_file_background(
         # Step 4: Save to documents table (if we have project UUID)
         ProcessingJobModel.update_progress(job_id, 92, "Saving to database...")
         
-        if project_id:
+        if customer_id:
             try:
                 DocumentModel.create(
-                    project_id=project_id,
+                    customer_id=customer_id,
                     name=filename,
                     category=functional_area or 'General',
                     file_type=file_ext,
@@ -1663,7 +1663,7 @@ def process_file_background(
                     reg_result = RegistrationService.register_hybrid(
                         filename=filename,
                         project=project,
-                        project_id=project_id if not is_global else None,
+                        customer_id=customer_id if not is_global else None,
                         tables_created=pdf_result.get('duckdb_result', {}).get('tables_created', []) if 'pdf_result' in dir() else [],
                         row_count=pdf_result.get('duckdb_result', {}).get('total_rows', 0) if 'pdf_result' in dir() else 0,
                         chunk_count=chunks_added,
@@ -1675,7 +1675,7 @@ def process_file_background(
                         job_id=job_id,
                         source=RegistrationSource.UPLOAD,
                         metadata={
-                            'project_name': project,
+                            'customer_id': project,
                             'functional_area': functional_area,
                             'file_size': file_size,
                             'char_count': len(text),
@@ -1687,7 +1687,7 @@ def process_file_background(
                     reg_result = RegistrationService.register_embedded(
                         filename=filename,
                         project=project,
-                        project_id=project_id if not is_global else None,
+                        customer_id=customer_id if not is_global else None,
                         chunk_count=chunks_added,
                         truth_type=truth_type,
                         file_size=file_size,
@@ -1703,7 +1703,7 @@ def process_file_background(
                         embedding_time_ms=times['embedding_time_ms'],
                         storage_time_ms=times['storage_time_ms'],
                         metadata={
-                            'project_name': project,
+                            'customer_id': project,
                             'functional_area': functional_area,
                             'file_size': file_size,
                             'char_count': len(text),
@@ -1744,7 +1744,7 @@ def process_file_background(
             
             enrichment_result = enrich_upload(
                 project=project,
-                project_id=project_id,
+                customer_id=customer_id,
                 filename=filename,
                 upload_type=upload_type,
                 handler=handler,
@@ -1827,7 +1827,7 @@ def process_file_background(
                 filename=filename,
                 duration_ms=times['processing_time_ms'],
                 success=True,
-                project_id=project_id,
+                customer_id=customer_id,
                 file_size_bytes=file_size,
                 chunks_created=chunks_added
             )
@@ -1849,7 +1849,7 @@ def process_file_background(
                     filename=filename,
                     duration_ms=times['processing_time_ms'],
                     success=False,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     file_size_bytes=file_size,
                     error_message=str(e)[:500]
                 )
@@ -2024,9 +2024,9 @@ from backend.utils.compliance_engine import get_compliance_engine
 COMPLIANCE_ENGINE_AVAILABLE = True
 
 
-@router.post("/standards/compliance/check/{project_id}")
+@router.post("/standards/compliance/check/{customer_id}")
 async def run_compliance_check(
-    project_id: str,
+    customer_id: str,
     domain: Optional[str] = None
 ):
     """
@@ -2036,7 +2036,7 @@ async def run_compliance_check(
     Returns findings in Five C's format (Condition, Criteria, Cause, Consequence, Corrective Action).
     """
     try:
-        logger.info(f"[COMPLIANCE] Starting check for project {project_id}, domain={domain}")
+        logger.info(f"[COMPLIANCE] Starting check for project {customer_id}, domain={domain}")
         
         if not STANDARDS_AVAILABLE:
             raise HTTPException(503, "Standards processor not available")
@@ -2054,7 +2054,7 @@ async def run_compliance_check(
         
         if not rules:
             return {
-                "project_id": project_id,
+                "customer_id": customer_id,
                 "rules_checked": 0,
                 "findings": [],
                 "findings_count": 0,
@@ -2062,11 +2062,11 @@ async def run_compliance_check(
                 "message": "No rules found. Upload standards documents first."
             }
         
-        logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {project_id}")
+        logger.info(f"[COMPLIANCE] Running {len(rules)} rules against project {customer_id}")
         
         # Run compliance scan via engine
         engine = get_compliance_engine()
-        result = engine.run_compliance_scan(project_id)
+        result = engine.run_compliance_scan(customer_id)
         
         findings = result.get('findings', [])
         check_results = result.get('check_results', [])
@@ -2080,7 +2080,7 @@ async def run_compliance_check(
         logger.info(f"[COMPLIANCE] Scan complete: {passed} passed, {failed} failed, {skipped} skipped, {errors} errors")
         
         return {
-            "project_id": project_id,
+            "customer_id": customer_id,
             "rules_checked": len(rules),
             "passed": passed,
             "failed": failed,

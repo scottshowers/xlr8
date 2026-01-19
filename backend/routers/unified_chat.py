@@ -180,7 +180,7 @@ class UnifiedChatRequest(BaseModel):
     Attributes:
         message: The user's question or command
         project: Project identifier (e.g., "TEA1000")
-        project_id: Alias for project (for backward compatibility)
+        customer_id: Alias for project (for backward compatibility)
         persona: Persona to use for response style (default: None - professional)
         scope: Data scope - "project", "global", or "all"
         mode: Force specific intelligence mode (optional)
@@ -192,7 +192,7 @@ class UnifiedChatRequest(BaseModel):
     """
     message: str
     project: Optional[str] = None
-    project_id: Optional[str] = None  # Alias for project (backward compat)
+    customer_id: Optional[str] = None  # Alias for project (backward compat)
     persona: Optional[str] = None
     scope: Optional[str] = 'project'
     mode: Optional[str] = None
@@ -262,7 +262,7 @@ class ExportRequest(BaseModel):
 unified_sessions: Dict[str, Dict] = {}
 
 
-def get_or_create_session(session_id: str, project: str) -> Tuple[str, Dict]:
+def get_or_create_session(session_id: str, customer_id: str) -> Tuple[str, Dict]:
     """Get existing session or create new one."""
     if not session_id:
         session_id = f"session_{uuid.uuid4().hex[:8]}"
@@ -300,7 +300,7 @@ def cleanup_old_sessions(max_sessions: int = 100) -> None:
 # SCHEMA RETRIEVAL - Registry-Filtered (v3.0)
 # =============================================================================
 
-def _get_valid_files_from_registry(project: str) -> set:
+def _get_valid_files_from_registry(customer_id: str) -> set:
     """
     Get valid filenames from DocumentRegistry for this project.
     Returns lowercase filenames for case-insensitive matching.
@@ -312,16 +312,16 @@ def _get_valid_files_from_registry(project: str) -> set:
     try:
         from utils.database.models import DocumentRegistryModel, ProjectModel
         
-        # Get project_id from project name
-        project_id = None
+        # Get customer_id from project name
+        customer_id = None
         if project:
             proj_record = ProjectModel.get_by_name(project)
             if proj_record:
-                project_id = proj_record.get('id')
+                customer_id = proj_record.get('id')
         
         # Get registered files for this project
-        if project_id:
-            entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+        if customer_id:
+            entries = DocumentRegistryModel.get_by_project(customer_id, include_global=True)
         else:
             entries = DocumentRegistryModel.get_all()
         
@@ -617,37 +617,37 @@ def _get_project_domains(project: str, handler=None) -> Tuple[Optional[str], Lis
     Get detected domains for a project.
     
     Returns:
-        (project_id, domains_list)
+        (customer_id, domains_list)
     """
     if not DOMAIN_INFERENCE_AVAILABLE:
         return None, []
     
     try:
-        # First try to get project_id and cached domains
-        project_id = None
+        # First try to get customer_id and cached domains
+        customer_id = None
         if SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
                 result = supabase.table('customers').select('id, metadata').eq('name', project).execute()
                 if result.data:
-                    project_id = result.data[0].get('id')
+                    customer_id = result.data[0].get('id')
                     # Check if domains already computed
                     metadata = result.data[0].get('metadata', {}) or {}
                     detected = metadata.get('detected_domains', {})
                     if detected and detected.get('domains'):
                         logger.info(f"[UNIFIED] Using cached domains for {project}")
-                        return project_id, detected.get('domains', [])
+                        return customer_id, detected.get('domains', [])
             except Exception as e:
                 logger.warning(f"[UNIFIED] Project lookup error: {e}")
         
         # If no cached domains, infer them now
         engine = get_domain_engine(handler)
-        result = engine.infer_domains(project, project_id)
+        result = engine.infer_domains(project, customer_id)
         if result:
             logger.info(f"[UNIFIED] Inferred domains for {project}: primary={result.primary_domain}")
-            return project_id, [d.to_dict() for d in result.domains]
+            return customer_id, [d.to_dict() for d in result.domains]
         
-        return project_id, []
+        return customer_id, []
         
     except Exception as e:
         logger.warning(f"[UNIFIED] Domain inference error: {e}")
@@ -776,8 +776,8 @@ async def unified_chat(request: UnifiedChatRequest):
     """
     query_start_time = time.time()  # For metrics tracking
     
-    # Use project_id as fallback for project (backward compatibility)
-    project = request.project or request.project_id
+    # Use customer_id as fallback for project (backward compatibility)
+    project = request.project or request.customer_id
     message = request.message
     session_id, session = get_or_create_session(request.session_id, project)
     
@@ -790,8 +790,8 @@ async def unified_chat(request: UnifiedChatRequest):
     citation_builder = CitationBuilder()
     
     try:
-        # Get project_id (UUID) and project_code from project name for DuckDB/RAG operations
-        project_id = None
+        # Get customer_id (UUID) and project_code from project name for DuckDB/RAG operations
+        customer_id = None
         project_code = None  # The code used in DuckDB term index
         product_id = None  # Phase 5F: Multi-product support
         if project and SUPABASE_AVAILABLE:
@@ -799,14 +799,14 @@ async def unified_chat(request: UnifiedChatRequest):
                 supabase = get_supabase()
                 result = supabase.table('customers').select('id, code, metadata').eq('name', project).limit(1).execute()
                 if result.data:
-                    project_id = result.data[0].get('id')
+                    customer_id = result.data[0].get('id')
                     project_code = result.data[0].get('code')  # Get the project code for DuckDB
                     # Phase 5F: Extract product from metadata
                     metadata = result.data[0].get('metadata', {}) or {}
                     product_id = metadata.get('product')
-                    logger.info(f"[UNIFIED] Resolved project_id: {project_id}, project_code: {project_code}, product: {product_id}")
+                    logger.info(f"[UNIFIED] Resolved customer_id: {customer_id}, project_code: {project_code}, product: {product_id}")
             except Exception as e:
-                logger.warning(f"[UNIFIED] Could not resolve project_id: {e}")
+                logger.warning(f"[UNIFIED] Could not resolve customer_id: {e}")
         
         # Use project_code for DuckDB operations if available, otherwise fall back to project name
         project_for_duckdb = project_code or project
@@ -815,16 +815,16 @@ async def unified_chat(request: UnifiedChatRequest):
         # Get or create intelligence engine (V2 ONLY)
         if session['engine']:
             engine = session['engine']
-            # Ensure project_id is set on existing engines
-            if project_id and not getattr(engine, 'project_id', None):
-                engine.project_id = project_id
+            # Ensure customer_id is set on existing engines
+            if customer_id and not getattr(engine, 'customer_id', None):
+                engine.customer_id = customer_id
             # Phase 5F: Load product schema if changed
             if product_id and getattr(engine, 'product_id', None) != product_id:
                 engine._load_product_schema(product_id)
         elif ENGINE_V2_AVAILABLE:
             logger.warning("[UNIFIED] Creating IntelligenceEngineV2 (modular)")
             # Use project_code for the engine so term index lookups work
-            engine = IntelligenceEngineV2(project_for_duckdb or 'default', project_id=project_id, product_id=product_id)
+            engine = IntelligenceEngineV2(project_for_duckdb or 'default', customer_id=customer_id, product_id=product_id)
             session['engine'] = engine
             session['engine_type'] = 'v2'
         else:
@@ -881,7 +881,7 @@ async def unified_chat(request: UnifiedChatRequest):
             try:
                 supabase = get_supabase()
                 result = supabase.table('project_relationships').select('*').eq(
-                    'project_name', project
+                    'customer_id', project
                 ).in_('status', ['confirmed', 'auto_confirmed']).execute()
                 
                 if result.data:
@@ -1317,7 +1317,7 @@ async def unified_chat(request: UnifiedChatRequest):
                 logger.info(f"[UNIFIED] is_garbage: {is_garbage_response}, is_no_data: {is_no_data_placeholder}")
                 
                 try:
-                    project_id, project_domains = _get_project_domains(project, handler)
+                    customer_id, project_domains = _get_project_domains(project, handler)
                     
                     # Build context from what we have
                     context_parts = [f"User Question: {message}", ""]
@@ -1432,7 +1432,7 @@ async def unified_chat(request: UnifiedChatRequest):
                 else:
                     # Last resort - use Claude synthesis WITH INTELLIGENT CONTEXT
                     # Get project domains for intelligent context selection
-                    project_id, project_domains = _get_project_domains(project, handler)
+                    customer_id, project_domains = _get_project_domains(project, handler)
                     
                     synthesized, expert_context_used = await generate_synthesized_answer(
                         question=message,
@@ -1504,7 +1504,7 @@ async def unified_chat(request: UnifiedChatRequest):
             if is_analytical and EXPERT_CONTEXT_AVAILABLE:
                 # Even without data, try to provide expert guidance
                 try:
-                    project_id, project_domains = _get_project_domains(project, handler)
+                    customer_id, project_domains = _get_project_domains(project, handler)
                     
                     # Build context from what we know
                     context_parts = []
@@ -1575,9 +1575,9 @@ async def unified_chat(request: UnifiedChatRequest):
             sources_tracked = 0
             response_id = session.get('session_id', str(uuid.uuid4())[:8]) + f"_{session.get('interaction_count', 0)}"
             
-            # Get project_id
+            # Get customer_id
             project_record = ProjectModel.get_by_name(project)
-            project_id = project_record.get('id') if project_record else None
+            customer_id = project_record.get('id') if project_record else None
             
             # Track Reality sources (DuckDB tables)
             if answer and answer.from_reality:
@@ -1590,7 +1590,7 @@ async def unified_chat(request: UnifiedChatRequest):
                             target_type=LineageModel.NODE_RESPONSE,
                             target_id=response_id,
                             relationship=LineageModel.REL_CITED,
-                            project_id=project_id,
+                            customer_id=customer_id,
                             metadata={'query': message[:100], 'confidence': response.get('confidence', 0)}
                         )
                         sources_tracked += 1
@@ -1606,7 +1606,7 @@ async def unified_chat(request: UnifiedChatRequest):
                             target_type=LineageModel.NODE_RESPONSE,
                             target_id=response_id,
                             relationship=LineageModel.REL_CITED,
-                            project_id=project_id,
+                            customer_id=customer_id,
                             metadata={'query': message[:100], 'truth_type': 'intent'}
                         )
                         sources_tracked += 1
@@ -1622,7 +1622,7 @@ async def unified_chat(request: UnifiedChatRequest):
                             target_type=LineageModel.NODE_RESPONSE,
                             target_id=response_id,
                             relationship=LineageModel.REL_CITED,
-                            project_id=project_id,
+                            customer_id=customer_id,
                             metadata={'query': message[:100], 'truth_type': 'reference'}
                         )
                         sources_tracked += 1
@@ -1638,7 +1638,7 @@ async def unified_chat(request: UnifiedChatRequest):
                             target_type=LineageModel.NODE_RESPONSE,
                             target_id=response_id,
                             relationship=LineageModel.REL_CITED,
-                            project_id=project_id,
+                            customer_id=customer_id,
                             metadata={'query': message[:100], 'truth_type': 'regulatory'}
                         )
                         sources_tracked += 1
@@ -1663,7 +1663,7 @@ async def unified_chat(request: UnifiedChatRequest):
                     query_type='chat',
                     duration_ms=query_duration_ms,
                     success=True,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     rows_processed=rows_processed
                 )
                 logger.debug(f"[UNIFIED] Recorded query metric: {query_duration_ms}ms, {rows_processed} rows")
@@ -1684,7 +1684,7 @@ async def unified_chat(request: UnifiedChatRequest):
                     query_type='chat',
                     duration_ms=query_duration_ms,
                     success=False,
-                    project_id=project_id if 'project_id' in dir() else None,
+                    customer_id=customer_id if 'customer_id' in dir() else None,
                     error_message=str(e)[:200]
                 )
             except Exception:
@@ -2322,7 +2322,7 @@ async def export_to_excel(request: ExportRequest):
 # =============================================================================
 
 @router.get("/chat/unified/data/{project}")
-async def get_project_data_summary(project: str):
+async def get_project_data_summary(customer_id: str):
     """Get summary of available data for a project."""
     if not STRUCTURED_AVAILABLE:
         raise HTTPException(503, "Structured queries not available")
@@ -2453,10 +2453,10 @@ async def get_diagnostics(project: str = None):
                 # Get detected domains for project
                 if project and DOMAIN_INFERENCE_AVAILABLE:
                     try:
-                        project_id, domains = _get_project_domains(project, handler)
+                        customer_id, domains = _get_project_domains(project, handler)
                         if domains:
                             result["detected_domains"] = {
-                                "project_id": project_id,
+                                "customer_id": customer_id,
                                 "domains": domains[:5],  # Top 5
                                 "primary": domains[0].get('domain') if domains else None
                             }
