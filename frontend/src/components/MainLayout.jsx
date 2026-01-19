@@ -41,7 +41,7 @@ import logo from '../assets/logo.svg';
 // ============================================================
 
 const FLOW_STEPS = [
-  { num: 1, key: 'create', label: 'Create', path: '/projects/new' },
+  { num: 1, key: 'create', label: 'Create', path: '/customers/new' },
   { num: 2, key: 'upload', label: 'Upload', path: '/data' },
   { num: 3, key: 'playbooks', label: 'Playbooks', path: '/playbooks/select' },
   { num: 4, key: 'analysis', label: 'Analysis', path: '/processing' },
@@ -142,8 +142,8 @@ const Sidebar = () => {
     if (path === '/mission-control') {
       return location.pathname === '/mission-control' || location.pathname === '/dashboard';
     }
-    if (path === '/projects') {
-      return location.pathname === '/projects' || location.pathname.startsWith('/projects/');
+    if (path === '/customers') {
+      return location.pathname === '/customers' || location.pathname.startsWith('/customers/');
     }
     // /admin should only match exactly, not /admin/*
     if (path === '/admin') {
@@ -157,7 +157,7 @@ const Sidebar = () => {
       section: 'Main',
       items: [
         { icon: LayoutDashboard, label: 'Dashboard', path: '/dashboard' },
-        { icon: FolderKanban, label: 'Customers', path: '/projects' },
+        { icon: FolderKanban, label: 'Customers', path: '/customers' },
         { icon: HardDrive, label: 'Customer Data', path: '/data' },
         { icon: MessageSquare, label: 'AI Assist', path: '/workspace' },
         { icon: BarChart3, label: 'Analytics', path: '/analytics' }
