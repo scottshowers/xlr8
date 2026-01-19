@@ -23,7 +23,7 @@ import logging
 sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
-from backend.routers import upload, projects, jobs
+from backend.routers import upload, jobs
 
 # Import customers router (replaces projects - customers is the primary, projects is backward compat)
 try:
@@ -315,8 +315,7 @@ if CUSTOMERS_AVAILABLE:
     app.include_router(customers.router, prefix="/api/customers")
     logger.info("Customers router registered at /api/customers")
 
-# Projects router - BACKWARD COMPATIBILITY (maps to customers)
-app.include_router(projects.router, prefix="/api/projects")
+# Projects router removed - use /api/customers
 
 app.include_router(jobs.router, prefix="/api")
 
