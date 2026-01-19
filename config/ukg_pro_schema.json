@@ -1,0 +1,2385 @@
+{
+  "product": "UKG Pro",
+  "version": "5.0",
+  "source": "UKG Pro REST API Documentation",
+  "source_url": "https://developer.ukg.com/hcm/reference/welcome-to-the-ukg-pro-api",
+  "generated_date": "2026-01-19",
+  "domains": {
+    "Configuration": {
+      "description": "Configuration entities from UKG Pro API",
+      "hubs": [
+        "allergy",
+        "award_type",
+        "career_provider",
+        "child_support_type",
+        "cobra_status",
+        "company_property",
+        "course_category",
+        "course_delivery_method",
+        "course_sub_category",
+        "disability",
+        "employee_type",
+        "job_family",
+        "license_type",
+        "loan_type",
+        "marital_status",
+        "military_branch",
+        "military_era",
+        "name_prefix",
+        "other_phone_type",
+        "project",
+        "school",
+        "skill",
+        "skill_proficiency_level",
+        "term_type",
+        "waive_reason",
+        "company",
+        "earning",
+        "insurance_rate",
+        "job_group",
+        "job",
+        "location",
+        "option_rate",
+        "org_level",
+        "org_reporting_category",
+        "position",
+        "position_report",
+        "role",
+        "shift_code",
+        "tax_group"
+      ],
+      "hub_count": 39
+    },
+    "Employee_Data": {
+      "description": "Employee_Data entities from UKG Pro API",
+      "hubs": [
+        "person_details",
+        "employment_details",
+        "compensation_details",
+        "employee_demographic_details",
+        "employee_job_history",
+        "employee_education",
+        "employee_supervisor",
+        "employee_contract",
+        "employee_cobra",
+        "contact",
+        "employee_deduction",
+        "dependent_deduction",
+        "employee_changes",
+        "employee_extended_elements",
+        "employee_multiple_jobs",
+        "employee_multiple_positions",
+        "employee_phone_numbers",
+        "national_document",
+        "international_employee",
+        "pto_plan",
+        "user_defined_field",
+        "user_preferences",
+        "open_enrollment_employee_deductions",
+        "open_enrollment_dependent_deductions",
+        "deduction_history_effective_date",
+        "ded_ben_option_date",
+        "employee_global_bank",
+        "global_localization_element",
+        "employee_pay_deduction_element"
+      ],
+      "hub_count": 29
+    },
+    "Payroll": {
+      "description": "Payroll entities from UKG Pro API",
+      "hubs": [
+        "direct_deposit",
+        "earnings_history",
+        "pay_statement",
+        "company_pay_statement",
+        "general_ledger_run",
+        "pay_register",
+        "pay_group_pay_period",
+        "payroll_deductions_history",
+        "pay_details_report",
+        "accrual",
+        "earning_pending_item",
+        "deduction_pending_item"
+      ],
+      "hub_count": 12
+    },
+    "Recruiting": {
+      "description": "Recruiting entities from UKG Pro API",
+      "hubs": [
+        "candidate",
+        "application",
+        "opportunity",
+        "offer",
+        "background_check",
+        "applicant_source",
+        "disposition_reason",
+        "job_board",
+        "recruiting_legal_entity",
+        "physical_location",
+        "recruiting_process",
+        "field_of_study",
+        "behavior",
+        "motivation",
+        "proficiency_level",
+        "recruiting_prefix",
+        "recruiting_suffix",
+        "tax_location",
+        "recruiting_org_unit",
+        "assessment"
+      ],
+      "hub_count": 20
+    },
+    "Onboarding": {
+      "description": "Onboarding entities from UKG Pro API",
+      "hubs": [
+        "new_hire"
+      ],
+      "hub_count": 1
+    },
+    "Time_Attendance": {
+      "description": "Time_Attendance entities from UKG Pro API",
+      "hubs": [
+        "clock_transaction",
+        "work_summary",
+        "activity",
+        "assigned_holiday",
+        "employee_job",
+        "hour_type",
+        "schedule_detail",
+        "team",
+        "time_code",
+        "time_off_request",
+        "uta_employee",
+        "uta_user"
+      ],
+      "hub_count": 12
+    },
+    "Audit_Security": {
+      "description": "Audit_Security entities from UKG Pro API",
+      "hubs": [
+        "audit_details",
+        "integration_audit_config",
+        "user_details",
+        "employee_security_user",
+        "user_profile"
+      ],
+      "hub_count": 5
+    },
+    "Platform": {
+      "description": "Platform entities from UKG Pro API",
+      "hubs": [
+        "custom_fields_schema",
+        "custom_fields_data",
+        "brit_import",
+        "import_tool"
+      ],
+      "hub_count": 4
+    },
+    "Integration": {
+      "description": "Integration entities from UKG Pro API",
+      "hubs": [
+        "business_structure_status",
+        "kronos_employee_profile",
+        "kronos_employee_status"
+      ],
+      "hub_count": 3
+    },
+    "Webhooks": {
+      "description": "Webhooks entities from UKG Pro API",
+      "hubs": [
+        "webhook_employeeaddresschangeevent",
+        "webhook_employeealternativeemailchangeevent",
+        "webhook_employeedatedeceasedchangeevent",
+        "webhook_employeedateofbenefitssenioritychangeevent",
+        "webhook_employeedateofbirthchangeevent",
+        "webhook_employeedeductiongroupchangeevent",
+        "webhook_employeedisabilitychangeevent",
+        "webhook_employeeeducationchangeevent",
+        "webhook_employeeemailchangeevent",
+        "webhook_employeegenderchangeevent",
+        "webhook_employeehiredatechangeevent",
+        "webhook_employeehourlypayratechangeevent",
+        "webhook_employeelicensechangeevent",
+        "webhook_employeemaritalstatuschangeevent",
+        "webhook_employeenumberchangeevent",
+        "webhook_employeeorglevelupdated",
+        "webhook_employeepayperiodchangeevent",
+        "webhook_employeepersonnamechangeevent",
+        "webhook_employeephonechangeevent",
+        "webhook_employeeprojectchangeevent",
+        "webhook_employeeskillchangeevent",
+        "webhook_employeesupervisorupdated",
+        "webhook_employeeterminationchangeevent",
+        "webhook_employeetypechangeevent",
+        "webhook_employeeunionchangeevent",
+        "webhook_employeeworklocationchangeevent",
+        "webhook_employmentdatelastworkedchangeevent",
+        "webhook_employmentstatuschangeevent",
+        "webhook_employeejobdetailschangeevent",
+        "webhook_jobchangeevent",
+        "webhook_paygroupchangeevent",
+        "webhook_personhiredevent",
+        "webhook_personrehiredevent",
+        "webhook_personterminatedevent",
+        "webhook_persontransferredevent",
+        "webhook_ptochangeevent"
+      ],
+      "hub_count": 36
+    }
+  },
+  "hubs": {
+    "allergy": {
+      "domain": "Configuration",
+      "entity_name": "Allergy",
+      "api_endpoint": "/configuration/v1/code-tables/allergy",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "award_type": {
+      "domain": "Configuration",
+      "entity_name": "Award Type",
+      "api_endpoint": "/configuration/v1/code-tables/awardType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "career_provider": {
+      "domain": "Configuration",
+      "entity_name": "Career Provider",
+      "api_endpoint": "/configuration/v1/code-tables/careerProvider",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "child_support_type": {
+      "domain": "Configuration",
+      "entity_name": "Child Support Type",
+      "api_endpoint": "/configuration/v1/code-tables/childSupportType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "cobra_status": {
+      "domain": "Configuration",
+      "entity_name": "COBRA Status",
+      "api_endpoint": "/configuration/v1/code-tables/cobraStatus",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "company_property": {
+      "domain": "Configuration",
+      "entity_name": "Company Property",
+      "api_endpoint": "/configuration/v1/code-tables/companyProperty",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "course_category": {
+      "domain": "Configuration",
+      "entity_name": "Course Category",
+      "api_endpoint": "/configuration/v1/code-tables/courseCategory",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "course_delivery_method": {
+      "domain": "Configuration",
+      "entity_name": "Course Delivery Method",
+      "api_endpoint": "/configuration/v1/code-tables/courseDeliveryMet",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "course_sub_category": {
+      "domain": "Configuration",
+      "entity_name": "Course Sub Category",
+      "api_endpoint": "/configuration/v1/code-tables/courseSubCategory",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "disability": {
+      "domain": "Configuration",
+      "entity_name": "Disability",
+      "api_endpoint": "/configuration/v1/code-tables/disability",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "employee_type": {
+      "domain": "Configuration",
+      "entity_name": "Employee Type",
+      "api_endpoint": "/configuration/v1/code-tables/employeeType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "job_family": {
+      "domain": "Configuration",
+      "entity_name": "Job Family",
+      "api_endpoint": "/configuration/v1/code-tables/jobFamily",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "license_type": {
+      "domain": "Configuration",
+      "entity_name": "License Type",
+      "api_endpoint": "/configuration/v1/code-tables/licenseType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "loan_type": {
+      "domain": "Configuration",
+      "entity_name": "Loan Type",
+      "api_endpoint": "/configuration/v1/code-tables/loanType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "marital_status": {
+      "domain": "Configuration",
+      "entity_name": "Marital Status",
+      "api_endpoint": "/configuration/v1/code-tables/maritalStatus",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "military_branch": {
+      "domain": "Configuration",
+      "entity_name": "Military Branch",
+      "api_endpoint": "/configuration/v1/code-tables/militaryBranches",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "military_era": {
+      "domain": "Configuration",
+      "entity_name": "Military Era",
+      "api_endpoint": "/configuration/v1/code-tables/militaryEra",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "name_prefix": {
+      "domain": "Configuration",
+      "entity_name": "Name Prefix",
+      "api_endpoint": "/configuration/v1/code-tables/namePrefix",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "other_phone_type": {
+      "domain": "Configuration",
+      "entity_name": "Other Phone Types",
+      "api_endpoint": "/configuration/v1/code-tables/otherPhoneTypes",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "project": {
+      "domain": "Configuration",
+      "entity_name": "Project",
+      "api_endpoint": "/configuration/v1/code-tables/project",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "school": {
+      "domain": "Configuration",
+      "entity_name": "School",
+      "api_endpoint": "/configuration/v1/code-tables/school",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "skill": {
+      "domain": "Configuration",
+      "entity_name": "Skill",
+      "api_endpoint": "/configuration/v1/code-tables/skills",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "skill_proficiency_level": {
+      "domain": "Configuration",
+      "entity_name": "Skill Proficiency Level",
+      "api_endpoint": "/configuration/v1/code-tables/skillProficiencyLevel",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "term_type": {
+      "domain": "Configuration",
+      "entity_name": "Termination Type",
+      "api_endpoint": "/configuration/v1/code-tables/termType",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "waive_reason": {
+      "domain": "Configuration",
+      "entity_name": "Waive Reason",
+      "api_endpoint": "/configuration/v1/code-tables/waiveReason",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "company": {
+      "domain": "Configuration",
+      "entity_name": "Company Details",
+      "api_endpoint": "/configuration/v1/company-details",
+      "key_column": "companyId",
+      "description_column": "companyName"
+    },
+    "earning": {
+      "domain": "Configuration",
+      "entity_name": "Earning",
+      "api_endpoint": "/configuration/v1/earnings",
+      "key_column": "earningCode",
+      "description_column": "description"
+    },
+    "insurance_rate": {
+      "domain": "Configuration",
+      "entity_name": "Insurance Rate",
+      "api_endpoint": "/configuration/v1/ins-rate",
+      "key_column": "insRateCode",
+      "description_column": "description"
+    },
+    "job_group": {
+      "domain": "Configuration",
+      "entity_name": "Job Group",
+      "api_endpoint": "/configuration/v1/job-groups",
+      "key_column": "jobGroupCode",
+      "description_column": "description"
+    },
+    "job": {
+      "domain": "Configuration",
+      "entity_name": "Job",
+      "api_endpoint": "/configuration/v1/jobs",
+      "key_column": "jobCode",
+      "description_column": "jobTitle"
+    },
+    "location": {
+      "domain": "Configuration",
+      "entity_name": "Location",
+      "api_endpoint": "/configuration/v1/locations",
+      "key_column": "locationCode",
+      "description_column": "locationDescription"
+    },
+    "option_rate": {
+      "domain": "Configuration",
+      "entity_name": "Option Rate",
+      "api_endpoint": "/configuration/v1/option-rate",
+      "key_column": "optionRateCode",
+      "description_column": "description"
+    },
+    "org_level": {
+      "domain": "Configuration",
+      "entity_name": "Organization Level",
+      "api_endpoint": "/configuration/v1/org-levels",
+      "key_column": "orgLevelCode",
+      "description_column": "description"
+    },
+    "org_reporting_category": {
+      "domain": "Configuration",
+      "entity_name": "Organization Reporting Category",
+      "api_endpoint": "/configuration/v1/organization-reporting-category",
+      "key_column": "categoryCode",
+      "description_column": "description"
+    },
+    "position": {
+      "domain": "Configuration",
+      "entity_name": "Position",
+      "api_endpoint": "/configuration/v1/positions",
+      "key_column": "positionCode",
+      "description_column": "positionTitle"
+    },
+    "position_report": {
+      "domain": "Configuration",
+      "entity_name": "Position Report",
+      "api_endpoint": "/configuration/v1/position-report",
+      "key_column": "positionId",
+      "description_column": null
+    },
+    "role": {
+      "domain": "Configuration",
+      "entity_name": "Security Role",
+      "api_endpoint": "/configuration/v1/roles",
+      "key_column": "roleId",
+      "description_column": "roleName"
+    },
+    "shift_code": {
+      "domain": "Configuration",
+      "entity_name": "Shift Code",
+      "api_endpoint": "/configuration/v1/shift-codes",
+      "key_column": "shiftCode",
+      "description_column": "description"
+    },
+    "tax_group": {
+      "domain": "Configuration",
+      "entity_name": "Tax Group",
+      "api_endpoint": "/configuration/v1/tax-groups",
+      "key_column": "taxGroupCode",
+      "description_column": "description"
+    },
+    "person_details": {
+      "domain": "Employee_Data",
+      "entity_name": "Person Details",
+      "api_endpoint": "/personnel/v1/person-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employment_details": {
+      "domain": "Employee_Data",
+      "entity_name": "Employment Details",
+      "api_endpoint": "/personnel/v1/employment-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "compensation_details": {
+      "domain": "Employee_Data",
+      "entity_name": "Compensation Details",
+      "api_endpoint": "/personnel/v1/compensation-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_demographic_details": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Demographic Details",
+      "api_endpoint": "/personnel/v1/employee-demographic-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_job_history": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Job History",
+      "api_endpoint": "/personnel/v1/employee-job-history-details",
+      "key_column": "systemId",
+      "description_column": null
+    },
+    "employee_education": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Education",
+      "api_endpoint": "/personnel/v1/employee-education",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_supervisor": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Supervisor Details",
+      "api_endpoint": "/personnel/v1/employee-supervisor-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_contract": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Contract",
+      "api_endpoint": "/personnel/v1/employee-contract",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_cobra": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee COBRA Details",
+      "api_endpoint": "/personnel/v1/employee-cobra-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "contact": {
+      "domain": "Employee_Data",
+      "entity_name": "Contact",
+      "api_endpoint": "/personnel/v1/contacts",
+      "key_column": "contactId",
+      "description_column": null
+    },
+    "employee_deduction": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Deductions",
+      "api_endpoint": "/personnel/v1/emp-deductions",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "dependent_deduction": {
+      "domain": "Employee_Data",
+      "entity_name": "Dependent Deductions",
+      "api_endpoint": "/personnel/v1/dependent-deductions",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_changes": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Changes",
+      "api_endpoint": "/personnel/v1/employee-changes",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_extended_elements": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Extended Elements",
+      "api_endpoint": "/personnel/v1/employee-extended-elements",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_multiple_jobs": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Multiple Jobs",
+      "api_endpoint": "/personnel/v1/empl-multiple-jobs",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_multiple_positions": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Multiple Positions",
+      "api_endpoint": "/personnel/v1/emp-multiple-positions",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_phone_numbers": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Multiple Phone Numbers",
+      "api_endpoint": "/personnel/v1/employee-multi-phone-numbers",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "national_document": {
+      "domain": "Employee_Data",
+      "entity_name": "National Document",
+      "api_endpoint": "/personnel/v1/national-document",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "international_employee": {
+      "domain": "Employee_Data",
+      "entity_name": "International Employee",
+      "api_endpoint": "/personnel/v1/international-employees",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "pto_plan": {
+      "domain": "Employee_Data",
+      "entity_name": "PTO Plan",
+      "api_endpoint": "/personnel/v1/pto-plans",
+      "key_column": "ptoPlan",
+      "description_column": null
+    },
+    "user_defined_field": {
+      "domain": "Employee_Data",
+      "entity_name": "User Defined Fields",
+      "api_endpoint": "/personnel/v1/user-defined-fields",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "user_preferences": {
+      "domain": "Employee_Data",
+      "entity_name": "User Preferences",
+      "api_endpoint": "/personnel/v1/user-preferences",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "open_enrollment_employee_deductions": {
+      "domain": "Employee_Data",
+      "entity_name": "Open Enrollment Employee Deductions",
+      "api_endpoint": "/personnel/v1/open-enrollment-employee-deductions",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "open_enrollment_dependent_deductions": {
+      "domain": "Employee_Data",
+      "entity_name": "Open Enrollment Dependent Deductions",
+      "api_endpoint": "/personnel/v1/open-enrollment-dep-deductions",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "deduction_history_effective_date": {
+      "domain": "Employee_Data",
+      "entity_name": "Deduction History Effective Date",
+      "api_endpoint": "/personnel/v1/deduction-history-effective-change-dates",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "ded_ben_option_date": {
+      "domain": "Employee_Data",
+      "entity_name": "Deduction Benefit Option Date",
+      "api_endpoint": "/personnel/v1/emp-ded-ben-option-date",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_global_bank": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Global Bank",
+      "api_endpoint": "/personnel/v1/employee-global-bank",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "global_localization_element": {
+      "domain": "Employee_Data",
+      "entity_name": "Global Localization Element",
+      "api_endpoint": "/personnel/v1/emp-global-localization-element",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "employee_pay_deduction_element": {
+      "domain": "Employee_Data",
+      "entity_name": "Employee Pay Deduction Element",
+      "api_endpoint": "/personnel/v1/employee-pay-deduction-element",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "direct_deposit": {
+      "domain": "Payroll",
+      "entity_name": "Direct Deposit",
+      "api_endpoint": "/payroll/v1/direct-deposit",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "earnings_history": {
+      "domain": "Payroll",
+      "entity_name": "Earnings History",
+      "api_endpoint": "/personnel/v1/earnings-history",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "pay_statement": {
+      "domain": "Payroll",
+      "entity_name": "Employee Pay Statement",
+      "api_endpoint": "/payroll/v1/employees/pay-statements",
+      "key_column": "payIdentifier",
+      "description_column": null
+    },
+    "company_pay_statement": {
+      "domain": "Payroll",
+      "entity_name": "Company Pay Statement",
+      "api_endpoint": "/payroll/v1/companies/pay-statements",
+      "key_column": "companyId",
+      "description_column": null
+    },
+    "general_ledger_run": {
+      "domain": "Payroll",
+      "entity_name": "General Ledger Run Details",
+      "api_endpoint": "/payroll/v2/gl-run-details",
+      "key_column": "runId",
+      "description_column": null
+    },
+    "pay_register": {
+      "domain": "Payroll",
+      "entity_name": "Pay Register",
+      "api_endpoint": "/personnel/v1/pay-register",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "pay_group_pay_period": {
+      "domain": "Payroll",
+      "entity_name": "Pay Group Pay Period",
+      "api_endpoint": "/personnel/v1/pay-group-pay-period",
+      "key_column": "payGroupCode",
+      "description_column": null
+    },
+    "payroll_deductions_history": {
+      "domain": "Payroll",
+      "entity_name": "Payroll Deductions History",
+      "api_endpoint": "/personnel/v1/payroll-deductions-history",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "pay_details_report": {
+      "domain": "Payroll",
+      "entity_name": "Pay Details Report",
+      "api_endpoint": "/payroll/v2/pay-details-report",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "accrual": {
+      "domain": "Payroll",
+      "entity_name": "Accrual",
+      "api_endpoint": "/services/payroll/v1/import/accruals",
+      "key_column": "batchId",
+      "description_column": null
+    },
+    "earning_pending_item": {
+      "domain": "Payroll",
+      "entity_name": "Earning Pending Pay Item",
+      "api_endpoint": "/services/payroll/v1/import/pay-items/earnings",
+      "key_column": "refId",
+      "description_column": null
+    },
+    "deduction_pending_item": {
+      "domain": "Payroll",
+      "entity_name": "Deduction Pending Pay Item",
+      "api_endpoint": "/services/payroll/v1/import/pay-items/deductions",
+      "key_column": "refId",
+      "description_column": null
+    },
+    "candidate": {
+      "domain": "Recruiting",
+      "entity_name": "Candidate",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/candidates",
+      "key_column": "candidateId",
+      "description_column": "fullName"
+    },
+    "application": {
+      "domain": "Recruiting",
+      "entity_name": "Application",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/applications",
+      "key_column": "applicationId",
+      "description_column": null
+    },
+    "opportunity": {
+      "domain": "Recruiting",
+      "entity_name": "Opportunity (Job Requisition)",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/opportunities",
+      "key_column": "opportunityId",
+      "description_column": "title"
+    },
+    "offer": {
+      "domain": "Recruiting",
+      "entity_name": "Offer",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/offers",
+      "key_column": "offerId",
+      "description_column": null
+    },
+    "background_check": {
+      "domain": "Recruiting",
+      "entity_name": "Background Check",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/candidates/{candidateId}/background-checks",
+      "key_column": "backgroundCheckId",
+      "description_column": null
+    },
+    "applicant_source": {
+      "domain": "Recruiting",
+      "entity_name": "Applicant Source",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/applicant-sources",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "disposition_reason": {
+      "domain": "Recruiting",
+      "entity_name": "Disposition Reason",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/disposition-reasons",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "job_board": {
+      "domain": "Recruiting",
+      "entity_name": "Job Board",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/job-boards",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "recruiting_legal_entity": {
+      "domain": "Recruiting",
+      "entity_name": "Legal Entity (Recruiting)",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/legal-entities",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "physical_location": {
+      "domain": "Recruiting",
+      "entity_name": "Physical Location",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/physical-locations",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "recruiting_process": {
+      "domain": "Recruiting",
+      "entity_name": "Recruiting Process",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/recruiting-processes",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "field_of_study": {
+      "domain": "Recruiting",
+      "entity_name": "Field of Study",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/fields-of-study",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "behavior": {
+      "domain": "Recruiting",
+      "entity_name": "Behavior",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/behaviors",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "motivation": {
+      "domain": "Recruiting",
+      "entity_name": "Motivation",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/motivations",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "proficiency_level": {
+      "domain": "Recruiting",
+      "entity_name": "Proficiency Level",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/proficiency-levels",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "recruiting_prefix": {
+      "domain": "Recruiting",
+      "entity_name": "Prefix (Recruiting)",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/prefixes",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "recruiting_suffix": {
+      "domain": "Recruiting",
+      "entity_name": "Suffix (Recruiting)",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/suffixes",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "tax_location": {
+      "domain": "Recruiting",
+      "entity_name": "Tax Location",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/tax-locations",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "recruiting_org_unit": {
+      "domain": "Recruiting",
+      "entity_name": "Org Unit (Recruiting)",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/org-units",
+      "key_column": "id",
+      "description_column": "name"
+    },
+    "assessment": {
+      "domain": "Recruiting",
+      "entity_name": "Prehire Assessment",
+      "api_endpoint": "/talent/recruiting/v2/{tenant}/api/candidates/{candidateId}/assessments",
+      "key_column": "assessmentId",
+      "description_column": null
+    },
+    "new_hire": {
+      "domain": "Onboarding",
+      "entity_name": "New Hire",
+      "api_endpoint": "/talent/onboarding/v2/tenants/{tenant}/new-hires",
+      "key_column": "id",
+      "description_column": null
+    },
+    "clock_transaction": {
+      "domain": "Time_Attendance",
+      "entity_name": "Clock Transaction",
+      "api_endpoint": "/services/ws/mob/clock/transactions",
+      "key_column": "transactionId",
+      "description_column": null
+    },
+    "work_summary": {
+      "domain": "Time_Attendance",
+      "entity_name": "Work Summary",
+      "api_endpoint": "/services/ws/mob/work-summaries",
+      "key_column": "summaryId",
+      "description_column": null
+    },
+    "activity": {
+      "domain": "Time_Attendance",
+      "entity_name": "Activity",
+      "api_endpoint": "/services/ws/mob/activities",
+      "key_column": "activityId",
+      "description_column": "name"
+    },
+    "assigned_holiday": {
+      "domain": "Time_Attendance",
+      "entity_name": "Assigned Holiday",
+      "api_endpoint": "/services/ws/mob/assigned-holidays",
+      "key_column": "holidayId",
+      "description_column": "name"
+    },
+    "employee_job": {
+      "domain": "Time_Attendance",
+      "entity_name": "Employee Job",
+      "api_endpoint": "/services/ws/mob/employee-jobs",
+      "key_column": "jobId",
+      "description_column": null
+    },
+    "hour_type": {
+      "domain": "Time_Attendance",
+      "entity_name": "Hour Type",
+      "api_endpoint": "/services/ws/mob/hour-types",
+      "key_column": "hourTypeId",
+      "description_column": "name"
+    },
+    "schedule_detail": {
+      "domain": "Time_Attendance",
+      "entity_name": "Schedule Detail",
+      "api_endpoint": "/services/ws/mob/schedules",
+      "key_column": "scheduleId",
+      "description_column": null
+    },
+    "team": {
+      "domain": "Time_Attendance",
+      "entity_name": "Team",
+      "api_endpoint": "/services/ws/mob/teams",
+      "key_column": "teamId",
+      "description_column": "name"
+    },
+    "time_code": {
+      "domain": "Time_Attendance",
+      "entity_name": "Time Code",
+      "api_endpoint": "/services/ws/mob/time-codes",
+      "key_column": "timeCodeId",
+      "description_column": "name"
+    },
+    "time_off_request": {
+      "domain": "Time_Attendance",
+      "entity_name": "Time Off Request",
+      "api_endpoint": "/services/ws/mob/time-off-requests",
+      "key_column": "requestId",
+      "description_column": null
+    },
+    "uta_employee": {
+      "domain": "Time_Attendance",
+      "entity_name": "UTA Employee",
+      "api_endpoint": "/services/ws/mob/simpleschedule/{coId}/employees/{eeId}",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "uta_user": {
+      "domain": "Time_Attendance",
+      "entity_name": "Current User",
+      "api_endpoint": "/services/ws/mob/user/current",
+      "key_column": "userId",
+      "description_column": null
+    },
+    "audit_details": {
+      "domain": "Audit_Security",
+      "entity_name": "Audit Details",
+      "api_endpoint": "/personnel/v1/audit-details",
+      "key_column": "auditId",
+      "description_column": null
+    },
+    "integration_audit_config": {
+      "domain": "Audit_Security",
+      "entity_name": "Integration Audit Configuration",
+      "api_endpoint": "/personnel/v1/integration-audit-configuration",
+      "key_column": "configId",
+      "description_column": null
+    },
+    "user_details": {
+      "domain": "Audit_Security",
+      "entity_name": "User Details",
+      "api_endpoint": "/personnel/v1/user-details",
+      "key_column": "userId",
+      "description_column": "userName"
+    },
+    "employee_security_user": {
+      "domain": "Audit_Security",
+      "entity_name": "Employee Security User Details",
+      "api_endpoint": "/personnel/v1/employee-security-user-details",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "user_profile": {
+      "domain": "Audit_Security",
+      "entity_name": "User Profile Details",
+      "api_endpoint": "/personnel/v1/user-profile-details",
+      "key_column": "profileId",
+      "description_column": null
+    },
+    "custom_fields_schema": {
+      "domain": "Platform",
+      "entity_name": "Platform Custom Fields Schema",
+      "api_endpoint": "/personnel/v1/platform-configuration-custom-fields-schema",
+      "key_column": "schemaId",
+      "description_column": null
+    },
+    "custom_fields_data": {
+      "domain": "Platform",
+      "entity_name": "Platform Custom Fields Data",
+      "api_endpoint": "/personnel/v2/platform-configuration-custom-fields-data",
+      "key_column": "dataId",
+      "description_column": null
+    },
+    "brit_import": {
+      "domain": "Platform",
+      "entity_name": "Business Rule Import Tool",
+      "api_endpoint": "/personnel/v1/business-rule-import-tool",
+      "key_column": "fileId",
+      "description_column": null
+    },
+    "import_tool": {
+      "domain": "Platform",
+      "entity_name": "Import Tool",
+      "api_endpoint": "/personnel/v1/import-tool",
+      "key_column": "transactionId",
+      "description_column": null
+    },
+    "business_structure_status": {
+      "domain": "Integration",
+      "entity_name": "Business Structure Status",
+      "api_endpoint": "/personnel/v1/integration/kronos/business-structure-status",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "kronos_employee_profile": {
+      "domain": "Integration",
+      "entity_name": "Kronos Employee Profile",
+      "api_endpoint": "/personnel/v1/integration/kronos/employee-profiles",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "kronos_employee_status": {
+      "domain": "Integration",
+      "entity_name": "Kronos Employee Status",
+      "api_endpoint": "/personnel/v1/integration/kronos/employee-status",
+      "key_column": "employeeId",
+      "description_column": null
+    },
+    "webhook_employeeaddresschangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeAddressChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeAddressChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeealternativeemailchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeAlternativeEmailChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeAlternativeEmailChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeedatedeceasedchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeDateDeceasedChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeDateDeceasedChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeedateofbenefitssenioritychangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeDateOfBenefitsSeniorityChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeDateOfBenefitsSeniorityChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeedateofbirthchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeDateOfBirthChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeDateOfBirthChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeedeductiongroupchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeDeductionGroupChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeDeductionGroupChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeedisabilitychangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeDisabilityChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeDisabilityChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeeducationchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeEducationChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeEducationChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeemailchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeEmailChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeEmailChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeegenderchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeGenderChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeGenderChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeehiredatechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeHireDateChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeHireDateChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeehourlypayratechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeHourlyPayRateChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeHourlyPayRateChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeelicensechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeLicenseChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeLicenseChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeemaritalstatuschangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeMaritalStatusChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeMaritalStatusChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeenumberchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeNumberChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeNumberChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeorglevelupdated": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeOrgLevelUpdated",
+      "api_endpoint": "/webhooks/EmployeeOrgLevelUpdated",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeepayperiodchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeePayPeriodChangeEvent",
+      "api_endpoint": "/webhooks/EmployeePayPeriodChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeepersonnamechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeePersonNameChangeEvent",
+      "api_endpoint": "/webhooks/EmployeePersonNameChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeephonechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeePhoneChangeEvent",
+      "api_endpoint": "/webhooks/EmployeePhoneChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeprojectchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeProjectChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeProjectChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeskillchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeSkillChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeSkillChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeesupervisorupdated": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeSupervisorUpdated",
+      "api_endpoint": "/webhooks/EmployeeSupervisorUpdated",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeterminationchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeTerminationChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeTerminationChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeetypechangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeTypeChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeTypeChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeunionchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeUnionChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeUnionChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeeworklocationchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeWorkLocationChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeWorkLocationChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employmentdatelastworkedchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmploymentDateLastWorkedChangeEvent",
+      "api_endpoint": "/webhooks/EmploymentDateLastWorkedChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employmentstatuschangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmploymentStatusChangeEvent",
+      "api_endpoint": "/webhooks/EmploymentStatusChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_employeejobdetailschangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "EmployeeJobDetailsChangeEvent",
+      "api_endpoint": "/webhooks/EmployeeJobDetailsChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_jobchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "JobChangeEvent",
+      "api_endpoint": "/webhooks/JobChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_paygroupchangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "PayGroupChangeEvent",
+      "api_endpoint": "/webhooks/PayGroupChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_personhiredevent": {
+      "domain": "Webhooks",
+      "entity_name": "PersonHiredEvent",
+      "api_endpoint": "/webhooks/PersonHiredEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_personrehiredevent": {
+      "domain": "Webhooks",
+      "entity_name": "PersonRehiredEvent",
+      "api_endpoint": "/webhooks/PersonRehiredEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_personterminatedevent": {
+      "domain": "Webhooks",
+      "entity_name": "PersonTerminatedEvent",
+      "api_endpoint": "/webhooks/PersonTerminatedEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_persontransferredevent": {
+      "domain": "Webhooks",
+      "entity_name": "PersonTransferredEvent",
+      "api_endpoint": "/webhooks/PersonTransferredEvent",
+      "key_column": "eventId",
+      "description_column": null
+    },
+    "webhook_ptochangeevent": {
+      "domain": "Webhooks",
+      "entity_name": "PTOChangeEvent",
+      "api_endpoint": "/webhooks/PTOChangeEvent",
+      "key_column": "eventId",
+      "description_column": null
+    }
+  },
+  "spoke_patterns": {
+    "code": [
+      {
+        "hub": "allergy",
+        "confidence": 0.95
+      },
+      {
+        "hub": "award_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "career_provider",
+        "confidence": 0.95
+      },
+      {
+        "hub": "child_support_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "cobra_status",
+        "confidence": 0.95
+      },
+      {
+        "hub": "company_property",
+        "confidence": 0.95
+      },
+      {
+        "hub": "course_category",
+        "confidence": 0.95
+      },
+      {
+        "hub": "course_delivery_method",
+        "confidence": 0.95
+      },
+      {
+        "hub": "course_sub_category",
+        "confidence": 0.95
+      },
+      {
+        "hub": "disability",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "job_family",
+        "confidence": 0.95
+      },
+      {
+        "hub": "license_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "loan_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "marital_status",
+        "confidence": 0.95
+      },
+      {
+        "hub": "military_branch",
+        "confidence": 0.95
+      },
+      {
+        "hub": "military_era",
+        "confidence": 0.95
+      },
+      {
+        "hub": "name_prefix",
+        "confidence": 0.95
+      },
+      {
+        "hub": "other_phone_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "project",
+        "confidence": 0.95
+      },
+      {
+        "hub": "school",
+        "confidence": 0.95
+      },
+      {
+        "hub": "skill",
+        "confidence": 0.95
+      },
+      {
+        "hub": "skill_proficiency_level",
+        "confidence": 0.95
+      },
+      {
+        "hub": "term_type",
+        "confidence": 0.95
+      },
+      {
+        "hub": "waive_reason",
+        "confidence": 0.95
+      }
+    ],
+    "companyid": [
+      {
+        "hub": "company",
+        "confidence": 0.95
+      },
+      {
+        "hub": "company_pay_statement",
+        "confidence": 0.95
+      }
+    ],
+    "company_id": [
+      {
+        "hub": "company",
+        "confidence": 0.9
+      }
+    ],
+    "earningcode": [
+      {
+        "hub": "earning",
+        "confidence": 0.95
+      }
+    ],
+    "earning_code": [
+      {
+        "hub": "earning",
+        "confidence": 0.9
+      }
+    ],
+    "insratecode": [
+      {
+        "hub": "insurance_rate",
+        "confidence": 0.95
+      }
+    ],
+    "ins_rate_code": [
+      {
+        "hub": "insurance_rate",
+        "confidence": 0.9
+      }
+    ],
+    "jobgroupcode": [
+      {
+        "hub": "job_group",
+        "confidence": 0.95
+      }
+    ],
+    "job_group_code": [
+      {
+        "hub": "job_group",
+        "confidence": 0.9
+      }
+    ],
+    "jobcode": [
+      {
+        "hub": "job",
+        "confidence": 0.95
+      }
+    ],
+    "job_code": [
+      {
+        "hub": "job",
+        "confidence": 0.9
+      }
+    ],
+    "locationcode": [
+      {
+        "hub": "location",
+        "confidence": 0.95
+      }
+    ],
+    "location_code": [
+      {
+        "hub": "location",
+        "confidence": 0.9
+      }
+    ],
+    "optionratecode": [
+      {
+        "hub": "option_rate",
+        "confidence": 0.95
+      }
+    ],
+    "option_rate_code": [
+      {
+        "hub": "option_rate",
+        "confidence": 0.9
+      }
+    ],
+    "orglevelcode": [
+      {
+        "hub": "org_level",
+        "confidence": 0.95
+      }
+    ],
+    "org_level_code": [
+      {
+        "hub": "org_level",
+        "confidence": 0.9
+      }
+    ],
+    "categorycode": [
+      {
+        "hub": "org_reporting_category",
+        "confidence": 0.95
+      }
+    ],
+    "category_code": [
+      {
+        "hub": "org_reporting_category",
+        "confidence": 0.9
+      }
+    ],
+    "positioncode": [
+      {
+        "hub": "position",
+        "confidence": 0.95
+      }
+    ],
+    "position_code": [
+      {
+        "hub": "position",
+        "confidence": 0.9
+      }
+    ],
+    "positionid": [
+      {
+        "hub": "position_report",
+        "confidence": 0.95
+      }
+    ],
+    "position_id": [
+      {
+        "hub": "position_report",
+        "confidence": 0.9
+      }
+    ],
+    "roleid": [
+      {
+        "hub": "role",
+        "confidence": 0.95
+      }
+    ],
+    "role_id": [
+      {
+        "hub": "role",
+        "confidence": 0.9
+      }
+    ],
+    "shiftcode": [
+      {
+        "hub": "shift_code",
+        "confidence": 0.95
+      }
+    ],
+    "shift_code": [
+      {
+        "hub": "shift_code",
+        "confidence": 0.9
+      }
+    ],
+    "taxgroupcode": [
+      {
+        "hub": "tax_group",
+        "confidence": 0.95
+      }
+    ],
+    "tax_group_code": [
+      {
+        "hub": "tax_group",
+        "confidence": 0.9
+      }
+    ],
+    "employeeid": [
+      {
+        "hub": "person_details",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employment_details",
+        "confidence": 0.95
+      },
+      {
+        "hub": "compensation_details",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_demographic_details",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_education",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_supervisor",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_contract",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_cobra",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_deduction",
+        "confidence": 0.95
+      },
+      {
+        "hub": "dependent_deduction",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_changes",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_extended_elements",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_multiple_jobs",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_multiple_positions",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_phone_numbers",
+        "confidence": 0.95
+      },
+      {
+        "hub": "national_document",
+        "confidence": 0.95
+      },
+      {
+        "hub": "international_employee",
+        "confidence": 0.95
+      },
+      {
+        "hub": "user_defined_field",
+        "confidence": 0.95
+      },
+      {
+        "hub": "user_preferences",
+        "confidence": 0.95
+      },
+      {
+        "hub": "open_enrollment_employee_deductions",
+        "confidence": 0.95
+      },
+      {
+        "hub": "open_enrollment_dependent_deductions",
+        "confidence": 0.95
+      },
+      {
+        "hub": "deduction_history_effective_date",
+        "confidence": 0.95
+      },
+      {
+        "hub": "ded_ben_option_date",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_global_bank",
+        "confidence": 0.95
+      },
+      {
+        "hub": "global_localization_element",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_pay_deduction_element",
+        "confidence": 0.95
+      },
+      {
+        "hub": "direct_deposit",
+        "confidence": 0.95
+      },
+      {
+        "hub": "earnings_history",
+        "confidence": 0.95
+      },
+      {
+        "hub": "pay_register",
+        "confidence": 0.95
+      },
+      {
+        "hub": "payroll_deductions_history",
+        "confidence": 0.95
+      },
+      {
+        "hub": "pay_details_report",
+        "confidence": 0.95
+      },
+      {
+        "hub": "uta_employee",
+        "confidence": 0.95
+      },
+      {
+        "hub": "employee_security_user",
+        "confidence": 0.95
+      },
+      {
+        "hub": "business_structure_status",
+        "confidence": 0.95
+      },
+      {
+        "hub": "kronos_employee_profile",
+        "confidence": 0.95
+      },
+      {
+        "hub": "kronos_employee_status",
+        "confidence": 0.95
+      }
+    ],
+    "employee_id": [
+      {
+        "hub": "person_details",
+        "confidence": 0.9
+      }
+    ],
+    "systemid": [
+      {
+        "hub": "employee_job_history",
+        "confidence": 0.95
+      }
+    ],
+    "system_id": [
+      {
+        "hub": "employee_job_history",
+        "confidence": 0.9
+      }
+    ],
+    "contactid": [
+      {
+        "hub": "contact",
+        "confidence": 0.95
+      }
+    ],
+    "contact_id": [
+      {
+        "hub": "contact",
+        "confidence": 0.9
+      }
+    ],
+    "ptoplan": [
+      {
+        "hub": "pto_plan",
+        "confidence": 0.95
+      }
+    ],
+    "pto_plan": [
+      {
+        "hub": "pto_plan",
+        "confidence": 0.9
+      }
+    ],
+    "payidentifier": [
+      {
+        "hub": "pay_statement",
+        "confidence": 0.95
+      }
+    ],
+    "pay_identifier": [
+      {
+        "hub": "pay_statement",
+        "confidence": 0.9
+      }
+    ],
+    "runid": [
+      {
+        "hub": "general_ledger_run",
+        "confidence": 0.95
+      }
+    ],
+    "run_id": [
+      {
+        "hub": "general_ledger_run",
+        "confidence": 0.9
+      }
+    ],
+    "paygroupcode": [
+      {
+        "hub": "pay_group_pay_period",
+        "confidence": 0.95
+      }
+    ],
+    "pay_group_code": [
+      {
+        "hub": "pay_group_pay_period",
+        "confidence": 0.9
+      }
+    ],
+    "batchid": [
+      {
+        "hub": "accrual",
+        "confidence": 0.95
+      }
+    ],
+    "batch_id": [
+      {
+        "hub": "accrual",
+        "confidence": 0.9
+      }
+    ],
+    "refid": [
+      {
+        "hub": "earning_pending_item",
+        "confidence": 0.95
+      },
+      {
+        "hub": "deduction_pending_item",
+        "confidence": 0.95
+      }
+    ],
+    "ref_id": [
+      {
+        "hub": "earning_pending_item",
+        "confidence": 0.9
+      }
+    ],
+    "candidateid": [
+      {
+        "hub": "candidate",
+        "confidence": 0.95
+      }
+    ],
+    "candidate_id": [
+      {
+        "hub": "candidate",
+        "confidence": 0.9
+      }
+    ],
+    "applicationid": [
+      {
+        "hub": "application",
+        "confidence": 0.95
+      }
+    ],
+    "application_id": [
+      {
+        "hub": "application",
+        "confidence": 0.9
+      }
+    ],
+    "opportunityid": [
+      {
+        "hub": "opportunity",
+        "confidence": 0.95
+      }
+    ],
+    "opportunity_id": [
+      {
+        "hub": "opportunity",
+        "confidence": 0.9
+      }
+    ],
+    "offerid": [
+      {
+        "hub": "offer",
+        "confidence": 0.95
+      }
+    ],
+    "offer_id": [
+      {
+        "hub": "offer",
+        "confidence": 0.9
+      }
+    ],
+    "backgroundcheckid": [
+      {
+        "hub": "background_check",
+        "confidence": 0.95
+      }
+    ],
+    "background_check_id": [
+      {
+        "hub": "background_check",
+        "confidence": 0.9
+      }
+    ],
+    "id": [
+      {
+        "hub": "applicant_source",
+        "confidence": 0.95
+      },
+      {
+        "hub": "disposition_reason",
+        "confidence": 0.95
+      },
+      {
+        "hub": "job_board",
+        "confidence": 0.95
+      },
+      {
+        "hub": "recruiting_legal_entity",
+        "confidence": 0.95
+      },
+      {
+        "hub": "physical_location",
+        "confidence": 0.95
+      },
+      {
+        "hub": "recruiting_process",
+        "confidence": 0.95
+      },
+      {
+        "hub": "field_of_study",
+        "confidence": 0.95
+      },
+      {
+        "hub": "behavior",
+        "confidence": 0.95
+      },
+      {
+        "hub": "motivation",
+        "confidence": 0.95
+      },
+      {
+        "hub": "proficiency_level",
+        "confidence": 0.95
+      },
+      {
+        "hub": "recruiting_prefix",
+        "confidence": 0.95
+      },
+      {
+        "hub": "recruiting_suffix",
+        "confidence": 0.95
+      },
+      {
+        "hub": "tax_location",
+        "confidence": 0.95
+      },
+      {
+        "hub": "recruiting_org_unit",
+        "confidence": 0.95
+      },
+      {
+        "hub": "new_hire",
+        "confidence": 0.95
+      }
+    ],
+    "assessmentid": [
+      {
+        "hub": "assessment",
+        "confidence": 0.95
+      }
+    ],
+    "assessment_id": [
+      {
+        "hub": "assessment",
+        "confidence": 0.9
+      }
+    ],
+    "transactionid": [
+      {
+        "hub": "clock_transaction",
+        "confidence": 0.95
+      },
+      {
+        "hub": "import_tool",
+        "confidence": 0.95
+      }
+    ],
+    "transaction_id": [
+      {
+        "hub": "clock_transaction",
+        "confidence": 0.9
+      }
+    ],
+    "summaryid": [
+      {
+        "hub": "work_summary",
+        "confidence": 0.95
+      }
+    ],
+    "summary_id": [
+      {
+        "hub": "work_summary",
+        "confidence": 0.9
+      }
+    ],
+    "activityid": [
+      {
+        "hub": "activity",
+        "confidence": 0.95
+      }
+    ],
+    "activity_id": [
+      {
+        "hub": "activity",
+        "confidence": 0.9
+      }
+    ],
+    "holidayid": [
+      {
+        "hub": "assigned_holiday",
+        "confidence": 0.95
+      }
+    ],
+    "holiday_id": [
+      {
+        "hub": "assigned_holiday",
+        "confidence": 0.9
+      }
+    ],
+    "jobid": [
+      {
+        "hub": "employee_job",
+        "confidence": 0.95
+      }
+    ],
+    "job_id": [
+      {
+        "hub": "employee_job",
+        "confidence": 0.9
+      }
+    ],
+    "hourtypeid": [
+      {
+        "hub": "hour_type",
+        "confidence": 0.95
+      }
+    ],
+    "hour_type_id": [
+      {
+        "hub": "hour_type",
+        "confidence": 0.9
+      }
+    ],
+    "scheduleid": [
+      {
+        "hub": "schedule_detail",
+        "confidence": 0.95
+      }
+    ],
+    "schedule_id": [
+      {
+        "hub": "schedule_detail",
+        "confidence": 0.9
+      }
+    ],
+    "teamid": [
+      {
+        "hub": "team",
+        "confidence": 0.95
+      }
+    ],
+    "team_id": [
+      {
+        "hub": "team",
+        "confidence": 0.9
+      }
+    ],
+    "timecodeid": [
+      {
+        "hub": "time_code",
+        "confidence": 0.95
+      }
+    ],
+    "time_code_id": [
+      {
+        "hub": "time_code",
+        "confidence": 0.9
+      }
+    ],
+    "requestid": [
+      {
+        "hub": "time_off_request",
+        "confidence": 0.95
+      }
+    ],
+    "request_id": [
+      {
+        "hub": "time_off_request",
+        "confidence": 0.9
+      }
+    ],
+    "userid": [
+      {
+        "hub": "uta_user",
+        "confidence": 0.95
+      },
+      {
+        "hub": "user_details",
+        "confidence": 0.95
+      }
+    ],
+    "user_id": [
+      {
+        "hub": "uta_user",
+        "confidence": 0.9
+      }
+    ],
+    "auditid": [
+      {
+        "hub": "audit_details",
+        "confidence": 0.95
+      }
+    ],
+    "audit_id": [
+      {
+        "hub": "audit_details",
+        "confidence": 0.9
+      }
+    ],
+    "configid": [
+      {
+        "hub": "integration_audit_config",
+        "confidence": 0.95
+      }
+    ],
+    "config_id": [
+      {
+        "hub": "integration_audit_config",
+        "confidence": 0.9
+      }
+    ],
+    "profileid": [
+      {
+        "hub": "user_profile",
+        "confidence": 0.95
+      }
+    ],
+    "profile_id": [
+      {
+        "hub": "user_profile",
+        "confidence": 0.9
+      }
+    ],
+    "schemaid": [
+      {
+        "hub": "custom_fields_schema",
+        "confidence": 0.95
+      }
+    ],
+    "schema_id": [
+      {
+        "hub": "custom_fields_schema",
+        "confidence": 0.9
+      }
+    ],
+    "dataid": [
+      {
+        "hub": "custom_fields_data",
+        "confidence": 0.95
+      }
+    ],
+    "data_id": [
+      {
+        "hub": "custom_fields_data",
+        "confidence": 0.9
+      }
+    ],
+    "fileid": [
+      {
+        "hub": "brit_import",
+        "confidence": 0.95
+      }
+    ],
+    "file_id": [
+      {
+        "hub": "brit_import",
+        "confidence": 0.9
+      }
+    ],
+    "eventid": [
+      {
+        "hub": "webhook_employeeaddresschangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeealternativeemailchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeedatedeceasedchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeedateofbenefitssenioritychangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeedateofbirthchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeedeductiongroupchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeedisabilitychangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeeducationchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeemailchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeegenderchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeehiredatechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeehourlypayratechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeelicensechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeemaritalstatuschangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeenumberchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeorglevelupdated",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeepayperiodchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeepersonnamechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeephonechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeprojectchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeskillchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeesupervisorupdated",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeterminationchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeetypechangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeunionchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeeworklocationchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employmentdatelastworkedchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employmentstatuschangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_employeejobdetailschangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_jobchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_paygroupchangeevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_personhiredevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_personrehiredevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_personterminatedevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_persontransferredevent",
+        "confidence": 0.95
+      },
+      {
+        "hub": "webhook_ptochangeevent",
+        "confidence": 0.95
+      }
+    ],
+    "event_id": [
+      {
+        "hub": "webhook_employeeaddresschangeevent",
+        "confidence": 0.9
+      }
+    ]
+  }
+}
