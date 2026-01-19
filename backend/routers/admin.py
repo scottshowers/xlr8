@@ -705,14 +705,14 @@ async def force_delete_project(project_id: str):
             raise HTTPException(500, "Database unavailable")
         
         # Check if project exists
-        check = supabase.table('projects').select('id, name').eq('id', project_id).execute()
+        check = supabase.table('customers').select('id, name').eq('id', project_id).execute()
         if not check.data:
             raise HTTPException(404, f"Project {project_id} not found")
         
         project_name = check.data[0].get('name', project_id)
         
-        # Hard delete from projects table
-        result = supabase.table('projects').delete().eq('id', project_id).execute()
+        # Hard delete from customers table
+        result = supabase.table('customers').delete().eq('id', project_id).execute()
         
         logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
         
@@ -740,14 +740,14 @@ async def force_delete_project_by_name(project_name: str):
             raise HTTPException(500, "Database unavailable")
         
         # Find project
-        check = supabase.table('projects').select('id, name').eq('name', project_name).execute()
+        check = supabase.table('customers').select('id, name').eq('name', project_name).execute()
         if not check.data:
             raise HTTPException(404, f"Project '{project_name}' not found")
         
         project_id = check.data[0]['id']
         
         # Hard delete
-        supabase.table('projects').delete().eq('id', project_id).execute()
+        supabase.table('customers').delete().eq('id', project_id).execute()
         
         logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
         

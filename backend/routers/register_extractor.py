@@ -409,7 +409,7 @@ def store_to_duckdb(
         supabase = get_supabase()
         if supabase and project_id:
             try:
-                result = supabase.table('projects').select('name').eq('id', project_id).execute()
+                result = supabase.table('customers').select('name').eq('id', project_id).execute()
                 if result.data and len(result.data) > 0:
                     project_name = result.data[0].get('name', project_id)
                     logger.info(f"[REGISTER] Resolved project: {project_id} -> {project_name}")

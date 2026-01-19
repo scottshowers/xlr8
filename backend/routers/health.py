@@ -214,12 +214,12 @@ def check_supabase_health() -> Dict[str, Any]:
         
         # Test read
         conn_start = time.time()
-        response = supabase.table('projects').select('id').limit(1).execute()
+        response = supabase.table('customers').select('id').limit(1).execute()
         result["latency_ms"] = int((time.time() - conn_start) * 1000)
         
         # Get counts
         try:
-            projects = supabase.table('projects').select('id', count='exact').execute()
+            projects = supabase.table('customers').select('id', count='exact').execute()
             result["details"]["projects_count"] = projects.count if hasattr(projects, 'count') else len(projects.data)
         except Exception:
             result["details"]["projects_count"] = "unknown"
@@ -1178,8 +1178,8 @@ async def get_projects_health():
             supabase = get_supabase()
             
             if supabase:
-                # Get projects table for project_id mapping
-                projects_resp = supabase.table('projects').select('id, name').execute()
+                # Get customers table for project_id mapping
+                projects_resp = supabase.table('customers').select('id, name').execute()
                 project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
                 
                 # Get registry counts
@@ -1328,8 +1328,8 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
             supabase = get_supabase()
             
             if supabase:
-                # Get projects for name lookup
-                projects_resp = supabase.table('projects').select('id, name').execute()
+                # Get customers for name lookup
+                projects_resp = supabase.table('customers').select('id, name').execute()
                 project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
                 project_name_to_id = {p['name'].lower(): p['id'] for p in (projects_resp.data or [])}
                 
@@ -1536,7 +1536,7 @@ async def get_stale_files(days: int = Query(30, description="Files not accessed 
         ).execute()
         
         # Get project names
-        projects_resp = supabase.table('projects').select('id, name').execute()
+        projects_resp = supabase.table('customers').select('id, name').execute()
         project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
         
         for entry in registry.data or []:
@@ -1679,7 +1679,7 @@ async def find_duplicate_files():
         ).not_.is_('file_hash', 'null').execute()
         
         # Get project names
-        projects_resp = supabase.table('projects').select('id, name').execute()
+        projects_resp = supabase.table('customers').select('id, name').execute()
         project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
         
         # Group by hash
@@ -1763,7 +1763,7 @@ async def get_lineage_summary():
         result["total_edges"] = len(edges)
         
         # Get project names
-        projects_resp = supabase.table('projects').select('id, name').execute()
+        projects_resp = supabase.table('customers').select('id, name').execute()
         project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
         
         for edge in edges:
@@ -1814,7 +1814,7 @@ async def get_project_lineage(project_name: str):
             return result
         
         # Get project ID
-        proj_resp = supabase.table('projects').select('id').eq('name', project_name).execute()
+        proj_resp = supabase.table('customers').select('id').eq('name', project_name).execute()
         if not proj_resp.data:
             result["error"] = f"Project '{project_name}' not found"
             return result
@@ -1874,7 +1874,7 @@ async def trace_to_source(target_type: str, target_id: str, project: str = Query
         if project:
             supabase = get_supabase()
             if supabase:
-                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
+                proj_resp = supabase.table('customers').select('id').eq('name', project).execute()
                 if proj_resp.data:
                     project_id = proj_resp.data[0]['id']
         
@@ -1932,7 +1932,7 @@ async def get_node_lineage(node_type: str, node_id: str, project: str = Query(No
         if project:
             supabase = get_supabase()
             if supabase:
-                proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
+                proj_resp = supabase.table('customers').select('id').eq('name', project).execute()
                 if proj_resp.data:
                     project_id = proj_resp.data[0]['id']
         

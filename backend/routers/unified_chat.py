@@ -626,7 +626,7 @@ def _get_project_domains(project: str, handler=None) -> Tuple[Optional[str], Lis
         if SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id, metadata').eq('name', project).execute()
+                result = supabase.table('customers').select('id, metadata').eq('name', project).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
                     # Check if domains already computed
@@ -795,7 +795,7 @@ async def unified_chat(request: UnifiedChatRequest):
         if project and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('projects').select('id, code, metadata').eq('name', project).limit(1).execute()
+                result = supabase.table('customers').select('id, code, metadata').eq('name', project).limit(1).execute()
                 if result.data:
                     project_id = result.data[0].get('id')
                     project_code = result.data[0].get('code')  # Get the project code for DuckDB

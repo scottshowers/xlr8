@@ -1417,7 +1417,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     try:
         supabase = get_supabase()
         if supabase:
-            result = supabase.table('projects').select('name').eq('id', project_id).execute()
+            result = supabase.table('customers').select('name').eq('id', project_id).execute()
             if result.data and len(result.data) > 0:
                 project_name = result.data[0].get('name')
     except Exception as e:
