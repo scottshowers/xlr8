@@ -1611,9 +1611,8 @@ def process_extraction_job(
     file_path: str, 
     max_pages: int,
     use_textract: bool, 
-    customer_id: Optional[str],
-    vendor_type: str = "unknown", 
-    customer_id: Optional[str] = None
+    customer_id: Optional[str] = None,
+    vendor_type: str = "unknown"
 ):
     """Background task for async extraction."""
     ext = get_extractor()
