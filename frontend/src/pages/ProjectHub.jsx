@@ -102,7 +102,7 @@ export default function ProjectHub() {
         <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
           <h2>Project Not Found</h2>
           <p className="text-muted mt-2">{error}</p>
-          <button className="btn btn-primary mt-4" onClick={() => navigate('/projects')}>Back to Projects</button>
+          <button className="btn btn-primary mt-4" onClick={() => navigate('/projects')}>Back to Customers</button>
         </div>
       </div>
     );

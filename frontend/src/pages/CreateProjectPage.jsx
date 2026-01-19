@@ -185,7 +185,7 @@ const CreateProjectPage = () => {
   return (
     <div className="create-project-page">
       <div className="page-header">
-        <h1 className="page-title">Create New Project</h1>
+        <h1 className="page-title">Create New Customer</h1>
         <p className="page-subtitle">Define your client engagement scope</p>
       </div>
 
@@ -409,7 +409,7 @@ const CreateProjectPage = () => {
               </>
             ) : (
               <>
-                Create Project
+                Create Customer
                 <ChevronRight size={18} />
               </>
             )}

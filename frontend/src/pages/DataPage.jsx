@@ -118,14 +118,14 @@ export default function DataPage() {
             }}>
               <Database size={20} color="#ffffff" />
             </div>
-            Project Data
+            Customer Data
           </h1>
           <p style={{ margin: '6px 0 0 46px', fontSize: '13px', color: c.textMuted }}>
-            Select a project to upload and manage data
+            Select a customer to upload and manage data
           </p>
         </div>
         
-        {/* Project Selector */}
+        {/* Customer Selector */}
         <div style={{ 
           maxWidth: '600px',
           margin: '0 auto',
@@ -154,16 +154,16 @@ export default function DataPage() {
               color: c.text,
               marginBottom: '0.5rem'
             }}>
-              Select a Project
+              Select a Customer
             </h2>
             <p style={{ color: c.textMuted, fontSize: '0.9rem' }}>
-              Choose a project to upload files and manage data
+              Choose a customer to upload files and manage data
             </p>
           </div>
           
           {projects.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '1rem' }}>
-              <p style={{ color: c.textMuted, marginBottom: '1rem' }}>No projects yet</p>
+              <p style={{ color: c.textMuted, marginBottom: '1rem' }}>No customers yet</p>
               <a 
                 href="/projects/new"
                 style={{
@@ -179,7 +179,7 @@ export default function DataPage() {
                   fontSize: '0.9rem'
                 }}
               >
-                Create Your First Project
+                Create Your First Customer
               </a>
             </div>
           ) : (
@@ -279,10 +279,10 @@ export default function DataPage() {
             }}>
               <Database size={20} color="#ffffff" />
             </div>
-            Project Data
+            Customer Data
           </h1>
           <p style={{ margin: '6px 0 0 46px', fontSize: 'var(--text-sm)', color: c.textMuted }}>
-            Upload and manage project files
+            Upload and manage customer files
           </p>
         </div>
         

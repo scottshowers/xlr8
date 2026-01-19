@@ -195,7 +195,7 @@ const Dashboard = () => {
       {recentProjects.length === 0 ? (
         <div className="card">
           <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-            <p className="text-muted">No projects yet.</p>
+            <p className="text-muted">No customers yet.</p>
             <button className="btn btn-primary mt-4" onClick={() => navigate('/projects/new')}>Create Your First Project</button>
           </div>
         </div>

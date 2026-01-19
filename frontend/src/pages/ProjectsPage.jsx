@@ -91,12 +91,12 @@ const ProjectsPage = () => {
     <div className="projects-page">
       <div className="page-header flex justify-between items-center">
         <div>
-          <h1 className="page-title">Projects</h1>
-          <p className="page-subtitle">{projects.length} total projects</p>
+          <h1 className="page-title">Customers</h1>
+          <p className="page-subtitle">{projects.length} total customers</p>
         </div>
         <button className="btn btn-primary btn-lg" onClick={() => navigate('/projects/new')}>
           <Plus size={18} />
-          New Project
+          New Customer
         </button>
       </div>
 
@@ -109,7 +109,7 @@ const ProjectsPage = () => {
             <input
               type="text"
               className="form-input"
-              placeholder="Search projects..."
+              placeholder="Search customers..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               style={{ border: 'none', padding: 0, background: 'transparent' }}
@@ -122,7 +122,7 @@ const ProjectsPage = () => {
         <table className="table">
           <thead>
             <tr>
-              <th>Project</th>
+              <th>Customer</th>
               <th>Systems</th>
               <th>Type</th>
               <th>Start</th>
@@ -190,7 +190,7 @@ const ProjectsPage = () => {
       {filteredProjects.length === 0 && !loading && (
         <div className="card mt-4">
           <div className="card-body" style={{ textAlign: 'center', padding: 'var(--space-8)' }}>
-            <p className="text-muted">{searchTerm ? `No projects found matching "${searchTerm}"` : 'No projects yet.'}</p>
+            <p className="text-muted">{searchTerm ? `No customers found matching "${searchTerm}"` : 'No customers yet.'}</p>
           </div>
         </div>
       )}

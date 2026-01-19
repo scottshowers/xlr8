@@ -142,7 +142,7 @@ export default function DashboardPage() {
             color: '#5f6c7b',
           }}>
             <FileText size={48} style={{ marginBottom: 16, opacity: 0.3 }} />
-            <p style={{ margin: 0, marginBottom: 16 }}>No projects yet</p>
+            <p style={{ margin: 0, marginBottom: 16 }}>No customers yet</p>
             <button
               onClick={() => navigate('/projects/new')}
               className="xlr8-btn xlr8-btn-secondary"
