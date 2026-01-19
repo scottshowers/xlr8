@@ -79,7 +79,8 @@ export default function Upload({ functionalAreas = [] }) {
       try {
         const formData = new FormData()
         formData.append('file', file)
-        formData.append('project', activeProject.name)
+        // CRITICAL: Use customer ID (UUID) - this is the ONLY identifier for all operations
+        formData.append('project', activeProject.id)
         if (selectedArea) {
           formData.append('functional_area', selectedArea)
         }

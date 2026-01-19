@@ -238,7 +238,7 @@ export default function CustomerGenome({ isOpen, onClose }) {
     setLoading(true);
     try {
       // Load platform data (fast, ~1s)
-      const projectParam = activeProject ? `&project=${encodeURIComponent(activeProject.name || activeProject.id)}` : '';
+      const projectParam = activeProject ? `&project=${encodeURIComponent(activeProject.id)}` : '';
       const structuredRes = await api.get(`/platform?include=files${projectParam}`).catch(() => ({ data: {} }));
       
       const structured = structuredRes.data || {};
