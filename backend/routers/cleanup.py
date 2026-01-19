@@ -1208,21 +1208,14 @@ async def delete_all_semantic_data():
 
 
 @router.delete("/status/nuclear/all")
-async def nuclear_delete_all_data():
+async def nuclear_delete_all_data(force: bool = Query(default=True, description="If true, delete EVERYTHING including reference library")):
     """
     NUCLEAR OPTION: Delete ALL user data from DuckDB and ChromaDB.
     
-    Use this when:
-    - Orphaned data exists from old naming conventions
-    - Normal cleanup can't find data due to identifier mismatches
-    - You want a completely fresh start
-    
-    This preserves:
-    - System tables (_schema_metadata structure, etc.)
-    - Supabase project/customer records
-    - Reference library data (if marked as global)
+    With force=True (default): Deletes EVERYTHING. No exceptions.
+    With force=False: Preserves reference library data.
     """
-    logger.warning("[CLEANUP] ⚠️ NUCLEAR DELETE ALL - Starting complete data wipe")
+    logger.warning(f"[CLEANUP] ⚠️ NUCLEAR DELETE ALL - force={force}")
     
     result = {
         "tables_dropped": [],
@@ -1243,13 +1236,14 @@ async def nuclear_delete_all_data():
                            '_entity_config', '_suppression_rules'}
             
             for (table_name,) in tables:
-                # Skip system/metadata tables
+                # Skip system/metadata tables (these are structural, not data)
                 if table_name in system_tables or table_name.startswith('__'):
                     continue
                 
-                # Skip reference/global tables
-                if 'reference' in table_name.lower() or 'standards' in table_name.lower():
-                    continue
+                # If not force mode, skip reference/global tables
+                if not force:
+                    if 'reference' in table_name.lower() or 'standards' in table_name.lower():
+                        continue
                     
                 try:
                     conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
@@ -1284,15 +1278,18 @@ async def nuclear_delete_all_data():
         try:
             all_docs = collection.get()
             if all_docs and all_docs.get('ids'):
-                # Filter out reference library if desired
-                ids_to_delete = []
-                for i, doc_id in enumerate(all_docs['ids']):
-                    metadata = all_docs.get('metadatas', [{}])[i] or {}
-                    project = metadata.get('project', '')
-                    # Skip reference library
-                    if project in ('Reference Library', '__STANDARDS__', 'Global/Universal'):
-                        continue
-                    ids_to_delete.append(doc_id)
+                if force:
+                    # Delete EVERYTHING
+                    ids_to_delete = all_docs['ids']
+                else:
+                    # Filter out reference library
+                    ids_to_delete = []
+                    for i, doc_id in enumerate(all_docs['ids']):
+                        metadata = all_docs.get('metadatas', [{}])[i] or {}
+                        project = metadata.get('project', '')
+                        if project in ('Reference Library', '__STANDARDS__', 'Global/Universal'):
+                            continue
+                        ids_to_delete.append(doc_id)
                 
                 if ids_to_delete:
                     batch_size = 1000
@@ -1304,7 +1301,7 @@ async def nuclear_delete_all_data():
             result["errors"].append(f"ChromaDB: {e}")
             logger.error(f"[CLEANUP] ChromaDB error: {e}")
     
-    # 3. Supabase - Clear jobs and document registry (but NOT projects)
+    # 3. Supabase - Clear jobs, document registry, and documents
     supabase = _get_supabase()
     if supabase:
         # Clear jobs
@@ -1314,19 +1311,36 @@ async def nuclear_delete_all_data():
         except Exception as e:
             logger.debug(f"[CLEANUP] Jobs: {e}")
         
-        # Clear document_registry
+        # Clear document_registry - ALL of it
         try:
             docs = supabase.table('document_registry').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
             result["supabase_cleared"]["document_registry"] = len(docs.data) if docs.data else 0
         except Exception as e:
             logger.debug(f"[CLEANUP] document_registry: {e}")
         
-        # Clear documents (but not reference library)
+        # Clear documents table
         try:
-            docs = supabase.table('documents').delete().neq('project_id', '__STANDARDS__').execute()
+            if force:
+                docs = supabase.table('documents').delete().neq('id', '00000000-0000-0000-0000-000000000000').execute()
+            else:
+                docs = supabase.table('documents').delete().neq('project_id', '__STANDARDS__').execute()
             result["supabase_cleared"]["documents"] = len(docs.data) if docs.data else 0
         except Exception as e:
             logger.debug(f"[CLEANUP] documents: {e}")
+        
+        # Clear standards_rules and standards_documents if force
+        if force:
+            try:
+                rules = supabase.table('standards_rules').delete().neq('rule_id', '').execute()
+                result["supabase_cleared"]["standards_rules"] = len(rules.data) if rules.data else 0
+            except Exception as e:
+                logger.debug(f"[CLEANUP] standards_rules: {e}")
+            
+            try:
+                std_docs = supabase.table('standards_documents').delete().neq('document_id', '').execute()
+                result["supabase_cleared"]["standards_documents"] = len(std_docs.data) if std_docs.data else 0
+            except Exception as e:
+                logger.debug(f"[CLEANUP] standards_documents: {e}")
     
     logger.warning(f"[CLEANUP] ⚠️ NUCLEAR DELETE ALL complete: {len(result['tables_dropped'])} tables, {result['chromadb_cleared']} chunks")
     
