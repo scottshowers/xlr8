@@ -478,7 +478,7 @@ async def smart_upload(
                 filename=filename,
                 duration_ms=duration_ms,
                 success=False,
-                customer_id=customer_id,
+                project_id=customer_id,
                 file_size_bytes=file_size,
                 error_message=error_msg
             )
@@ -493,7 +493,7 @@ async def smart_upload(
             filename=filename,
             duration_ms=duration_ms,
             success=success,
-            customer_id=customer_id,
+            project_id=customer_id,
             file_size_bytes=file_size,
             rows_processed=result.get('total_rows') or result.get('row_count'),
             chunks_created=result.get('chunks_added'),
@@ -866,7 +866,7 @@ async def _route_to_structured(
         # Create job and process in background
         job_result = ProcessingJobModel.create(
             job_type='upload',
-            customer_id=customer_id,
+            project_id=customer_id,
             input_data={
                 'filename': filename,
                 'functional_area': functional_area,
@@ -964,7 +964,7 @@ async def _route_to_semantic(
         # Create job and process in background
         job_result = ProcessingJobModel.create(
             job_type='upload',
-            customer_id=customer_id,
+            project_id=customer_id,
             input_data={
                 'filename': filename,
                 'functional_area': functional_area,

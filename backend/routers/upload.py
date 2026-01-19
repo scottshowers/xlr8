@@ -980,7 +980,7 @@ def process_file_background(
                     
                     enrichment = enrich_structured_upload(
                         project=project,
-                        customer_id=customer_id,
+                        project_id=customer_id,
                         filename=filename,
                         handler=handler,
                         tables_created=result.get('tables_created', []),
@@ -1015,7 +1015,7 @@ def process_file_background(
                     try:
                         schema_summary = json.dumps(result, indent=2)
                         DocumentModel.create(
-                            customer_id=customer_id,
+                            project_id=customer_id,
                             name=filename,
                             category=functional_area or 'Structured Data',
                             file_type=file_ext,
@@ -1120,7 +1120,7 @@ def process_file_background(
                         filename=filename,
                         duration_ms=times['processing_time_ms'],
                         success=True,
-                        customer_id=customer_id,
+                        project_id=customer_id,
                         file_size_bytes=file_size,
                         rows_processed=total_rows
                     )
@@ -1141,7 +1141,7 @@ def process_file_background(
                         filename=filename,
                         duration_ms=times['processing_time_ms'],
                         success=False,
-                        customer_id=customer_id,
+                        project_id=customer_id,
                         file_size_bytes=file_size,
                         error_message=str(e)[:500]
                     )
@@ -1180,7 +1180,7 @@ def process_file_background(
                     file_path=file_path,
                     project=project,
                     filename=filename,
-                    customer_id=customer_id,
+                    project_id=customer_id,
                     truth_type=truth_type,  # Pass truth_type to skip table extraction for reference docs
                     status_callback=status_callback
                 )
@@ -1377,7 +1377,7 @@ def process_file_background(
                                                     reg_result = RegistrationService.register_structured(
                                                         filename=filename,
                                                         project=project,
-                                                        customer_id=customer_id,
+                                                        project_id=customer_id,
                                                         tables_created=result.get('tables_created', []),
                                                         row_count=result.get('row_count', 0),
                                                         file_size=file_size,
@@ -1419,7 +1419,7 @@ def process_file_background(
                                                 from utils.detection_integration import run_project_detection
                                                 detection_result = run_project_detection(
                                                     project=project,
-                                                    customer_id=customer_id,
+                                                    project_id=customer_id,
                                                     filename=filename,
                                                     handler=handler,
                                                     job_id=job_id
@@ -1488,7 +1488,7 @@ def process_file_background(
                                                     from utils.detection_integration import run_project_detection
                                                     detection_result = run_project_detection(
                                                         project=project,
-                                                        customer_id=customer_id,
+                                                        project_id=customer_id,
                                                         filename=filename,
                                                         handler=handler,
                                                         job_id=job_id
@@ -1641,7 +1641,7 @@ def process_file_background(
         if customer_id:
             try:
                 DocumentModel.create(
-                    customer_id=customer_id,
+                    project_id=customer_id,
                     name=filename,
                     category=functional_area or 'General',
                     file_type=file_ext,
@@ -1744,7 +1744,7 @@ def process_file_background(
             
             enrichment_result = enrich_upload(
                 project=project,
-                customer_id=customer_id,
+                project_id=customer_id,
                 filename=filename,
                 upload_type=upload_type,
                 handler=handler,
@@ -1827,7 +1827,7 @@ def process_file_background(
                 filename=filename,
                 duration_ms=times['processing_time_ms'],
                 success=True,
-                customer_id=customer_id,
+                project_id=customer_id,
                 file_size_bytes=file_size,
                 chunks_created=chunks_added
             )
@@ -1849,7 +1849,7 @@ def process_file_background(
                     filename=filename,
                     duration_ms=times['processing_time_ms'],
                     success=False,
-                    customer_id=customer_id,
+                    project_id=customer_id,
                     file_size_bytes=file_size,
                     error_message=str(e)[:500]
                 )
