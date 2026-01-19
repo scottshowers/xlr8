@@ -80,7 +80,7 @@ async def get_jobs(limit: int = 50):
                 input_data.get('filename') or 
                 result_data.get('filename') or 
                 job.get('filename') or
-                input_data.get('project_name')
+                input_data.get('customer_id')
             )
             if not filename or filename == 'Unknown':
                 job_type = job.get('job_type', 'upload')
@@ -113,8 +113,8 @@ async def get_jobs(limit: int = 50):
                 'id': job['id'],
                 'filename': filename,
                 'type': job.get('job_type', 'upload'),
-                'project': input_data.get('project_name') or job.get('project_id') or 'Unknown',
-                'project_id': job.get('project_id'),
+                'project': input_data.get('customer_id') or job.get('customer_id') or 'Unknown',
+                'customer_id': job.get('customer_id'),
                 'status': status,
                 'progress': job.get('progress', {}).get('percent', 0) if job.get('progress') else 0,
                 'current_step': job.get('progress', {}).get('step', '') if job.get('progress') else '',
@@ -163,7 +163,7 @@ async def get_job(job_id: str):
             'id': job['id'],
             'filename': input_data.get('filename', 'Unknown'),
             'type': job.get('job_type', 'upload'),
-            'project': job.get('project_id', 'Unknown'),
+            'project': job.get('customer_id', 'Unknown'),
             'status': status,
             'progress': job.get('progress', {}).get('percent', 0),
             'current_step': job.get('progress', {}).get('step', ''),

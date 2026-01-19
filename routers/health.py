@@ -1101,7 +1101,7 @@ async def get_projects_health():
     
     try:
         # Collect project data from all sources
-        project_data = {}  # project_name -> metrics
+        project_data = {}  # customer_id -> metrics
         
         # 1. DuckDB - tables and rows per project
         try:
@@ -1178,19 +1178,19 @@ async def get_projects_health():
             supabase = get_supabase()
             
             if supabase:
-                # Get projects table for project_id mapping
+                # Get projects table for customer_id mapping
                 projects_resp = supabase.table('projects').select('id, name').execute()
                 project_id_map = {p['id']: p['name'] for p in (projects_resp.data or [])}
                 
                 # Get registry counts
-                registry = supabase.table('document_registry').select('project_id').execute()
+                registry = supabase.table('document_registry').select('customer_id').execute()
                 project_registry_counts = {}
                 
                 for entry in registry.data or []:
-                    pid = entry.get('project_id')
+                    pid = entry.get('customer_id')
                     if pid:
-                        project_name = project_id_map.get(pid, pid)
-                        project_registry_counts[project_name] = project_registry_counts.get(project_name, 0) + 1
+                        customer_id = project_id_map.get(pid, pid)
+                        project_registry_counts[customer_id] = project_registry_counts.get(customer_id, 0) + 1
                 
                 for project, count in project_registry_counts.items():
                     if project not in project_data:
@@ -1336,16 +1336,16 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
                 query = supabase.table('document_registry').select('*')
                 
                 if project:
-                    # Find project_id for filter
+                    # Find customer_id for filter
                     pid = project_name_to_id.get(project.lower())
                     if pid:
-                        query = query.eq('project_id', pid)
+                        query = query.eq('customer_id', pid)
                 
                 registry = query.execute()
                 
                 for entry in registry.data or []:
                     filename = entry.get('filename')
-                    pid = entry.get('project_id')
+                    pid = entry.get('customer_id')
                     proj_name = project_id_map.get(pid, "unknown")
                     
                     if filename:
@@ -1446,15 +1446,15 @@ async def get_files_health(project: str = Query(None, description="Filter by pro
     return result
 
 
-@router.get("/health/project/{project_name}")
-async def get_project_detail(project_name: str):
+@router.get("/health/project/{customer_id}")
+async def get_project_detail(customer_id: str):
     """
     Detailed health for a specific project.
     
     Combines project summary + file-level details.
     """
     result = {
-        "project": project_name,
+        "project": customer_id,
         "summary": {},
         "files": [],
         "issues": [],
@@ -1467,13 +1467,13 @@ async def get_project_detail(project_name: str):
         # Get project summary
         projects_health = await get_projects_health()
         for proj in projects_health.get("projects", []):
-            if proj.get("project", "").lower() == project_name.lower():
+            if proj.get("project", "").lower() == customer_id.lower():
                 result["summary"] = proj
                 break
         
         if not result["summary"]:
             result["summary"] = {
-                "project": project_name,
+                "project": customer_id,
                 "status": "not_found",
                 "duckdb_tables": 0,
                 "duckdb_rows": 0,
@@ -1482,7 +1482,7 @@ async def get_project_detail(project_name: str):
             }
         
         # Get file details
-        files_health = await get_files_health(project=project_name)
+        files_health = await get_files_health(project=customer_id)
         result["files"] = files_health.get("files", [])
         result["file_summary"] = files_health.get("summary", {})
         
@@ -1532,7 +1532,7 @@ async def get_stale_files(days: int = Query(30, description="Files not accessed 
         
         # Get all files from registry
         registry = supabase.table('document_registry').select(
-            'filename, project_id, last_accessed_at, access_count, created_at, file_size_bytes, storage_type'
+            'filename, customer_id, last_accessed_at, access_count, created_at, file_size_bytes, storage_type'
         ).execute()
         
         # Get project names
@@ -1544,7 +1544,7 @@ async def get_stale_files(days: int = Query(30, description="Files not accessed 
             
             file_info = {
                 "filename": entry.get('filename'),
-                "project": project_id_map.get(entry.get('project_id'), 'unknown'),
+                "project": project_id_map.get(entry.get('customer_id'), 'unknown'),
                 "created_at": entry.get('created_at'),
                 "last_accessed_at": last_accessed,
                 "access_count": entry.get('access_count', 0),
@@ -1675,7 +1675,7 @@ async def find_duplicate_files():
         
         # Get all files with hashes
         registry = supabase.table('document_registry').select(
-            'filename, file_hash, file_size_bytes, project_id, created_at, uploaded_by_email'
+            'filename, file_hash, file_size_bytes, customer_id, created_at, uploaded_by_email'
         ).not_.is_('file_hash', 'null').execute()
         
         # Get project names
@@ -1691,7 +1691,7 @@ async def find_duplicate_files():
                     hash_groups[file_hash] = []
                 hash_groups[file_hash].append({
                     "filename": entry.get('filename'),
-                    "project": project_id_map.get(entry.get('project_id'), 'unknown'),
+                    "project": project_id_map.get(entry.get('customer_id'), 'unknown'),
                     "file_size_bytes": entry.get('file_size_bytes'),
                     "created_at": entry.get('created_at'),
                     "uploaded_by": entry.get('uploaded_by_email')
@@ -1757,7 +1757,7 @@ async def get_lineage_summary():
             return result
         
         # Get all edges
-        response = supabase.table('lineage_edges').select('source_type, target_type, relationship, project_id').execute()
+        response = supabase.table('lineage_edges').select('source_type, target_type, relationship, customer_id').execute()
         
         edges = response.data or []
         result["total_edges"] = len(edges)
@@ -1770,7 +1770,7 @@ async def get_lineage_summary():
             rel = edge.get('relationship', 'unknown')
             result["by_relationship"][rel] = result["by_relationship"].get(rel, 0) + 1
             
-            pid = edge.get('project_id')
+            pid = edge.get('customer_id')
             if pid:
                 proj_name = project_id_map.get(pid, pid)
                 if proj_name not in result["by_project"]:
@@ -1787,15 +1787,15 @@ async def get_lineage_summary():
     return result
 
 
-@router.get("/health/lineage/project/{project_name}")
-async def get_project_lineage(project_name: str):
+@router.get("/health/lineage/project/{customer_id}")
+async def get_project_lineage(customer_id: str):
     """
     Get lineage statistics for a specific project.
     
     Shows edge breakdown and helps identify lineage gaps.
     """
     result = {
-        "project": project_name,
+        "project": customer_id,
         "summary": {},
         "files_with_lineage": [],
         "files_without_lineage": [],
@@ -1814,22 +1814,22 @@ async def get_project_lineage(project_name: str):
             return result
         
         # Get project ID
-        proj_resp = supabase.table('projects').select('id').eq('name', project_name).execute()
+        proj_resp = supabase.table('projects').select('id').eq('name', customer_id).execute()
         if not proj_resp.data:
-            result["error"] = f"Project '{project_name}' not found"
+            result["error"] = f"Project '{customer_id}' not found"
             return result
         
-        project_id = proj_resp.data[0]['id']
+        customer_id = proj_resp.data[0]['id']
         
         # Get lineage summary
-        result["summary"] = LineageModel.get_project_summary(project_id)
+        result["summary"] = LineageModel.get_project_summary(customer_id)
         
         # Get all files in project from registry
-        registry = supabase.table('document_registry').select('filename').eq('project_id', project_id).execute()
+        registry = supabase.table('document_registry').select('filename').eq('customer_id', customer_id).execute()
         all_files = set(f['filename'] for f in (registry.data or []))
         
         # Get files that have lineage edges
-        edges = supabase.table('lineage_edges').select('source_id').eq('project_id', project_id).eq('source_type', 'file').execute()
+        edges = supabase.table('lineage_edges').select('source_id').eq('customer_id', customer_id).eq('source_type', 'file').execute()
         files_with_edges = set(e['source_id'] for e in (edges.data or []))
         
         result["files_with_lineage"] = list(files_with_edges)
@@ -1869,17 +1869,17 @@ async def trace_to_source(target_type: str, target_id: str, project: str = Query
         from utils.database.models import LineageModel
         from utils.database.supabase_client import get_supabase
         
-        # Get project_id if project name provided
-        project_id = None
+        # Get customer_id if project name provided
+        customer_id = None
         if project:
             supabase = get_supabase()
             if supabase:
                 proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
                 if proj_resp.data:
-                    project_id = proj_resp.data[0]['id']
+                    customer_id = proj_resp.data[0]['id']
         
         # Get ancestors
-        ancestors = LineageModel.get_ancestors(target_type, target_id, project_id)
+        ancestors = LineageModel.get_ancestors(target_type, target_id, customer_id)
         
         # Build trace path
         for ancestor in ancestors:
@@ -1891,7 +1891,7 @@ async def trace_to_source(target_type: str, target_id: str, project: str = Query
             })
         
         # Get root files
-        result["source_files"] = LineageModel.get_root_files(target_type, target_id, project_id)
+        result["source_files"] = LineageModel.get_root_files(target_type, target_id, customer_id)
         
     except Exception as e:
         logger.error(f"[HEALTH] Trace to source failed: {e}")
@@ -1927,19 +1927,19 @@ async def get_node_lineage(node_type: str, node_id: str, project: str = Query(No
         from utils.database.models import LineageModel
         from utils.database.supabase_client import get_supabase
         
-        # Get project_id if project name provided
-        project_id = None
+        # Get customer_id if project name provided
+        customer_id = None
         if project:
             supabase = get_supabase()
             if supabase:
                 proj_resp = supabase.table('projects').select('id').eq('name', project).execute()
                 if proj_resp.data:
-                    project_id = proj_resp.data[0]['id']
+                    customer_id = proj_resp.data[0]['id']
         
         # Get ancestors and descendants
-        result["ancestors"] = LineageModel.get_ancestors(node_type, node_id, project_id)
-        result["descendants"] = LineageModel.get_descendants(node_type, node_id, project_id)
-        result["root_files"] = LineageModel.get_root_files(node_type, node_id, project_id)
+        result["ancestors"] = LineageModel.get_ancestors(node_type, node_id, customer_id)
+        result["descendants"] = LineageModel.get_descendants(node_type, node_id, customer_id)
+        result["root_files"] = LineageModel.get_root_files(node_type, node_id, customer_id)
         
     except Exception as e:
         logger.error(f"[HEALTH] Node lineage failed: {e}")

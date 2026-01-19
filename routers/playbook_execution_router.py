@@ -9,7 +9,7 @@ Endpoints:
 - GET  /api/playbooks/{playbook_id}/standards - Get linked standards
 - POST /api/playbooks/{playbook_id}/standards - Link a standard
 - DELETE /api/playbooks/{playbook_id}/standards/{standard_id} - Unlink
-- GET  /api/playbooks/runs/{project_id} - Get run history
+- GET  /api/playbooks/runs/{customer_id} - Get run history
 - GET  /api/playbooks/run/{run_id} - Get run details
 """
 
@@ -28,7 +28,7 @@ router = APIRouter()
 
 class ExecutePlaybookRequest(BaseModel):
     """Request to execute a playbook."""
-    project_id: Optional[str] = None  # Can come from header
+    customer_id: Optional[str] = None  # Can come from header
     run_by: str = "user"
 
 
@@ -42,7 +42,7 @@ class ExecutePlaybookResponse(BaseModel):
     """Response from playbook execution."""
     run_id: str
     playbook_id: str
-    project_id: str
+    customer_id: str
     status: str
     total_rules_checked: int
     violations_found: int
@@ -137,23 +137,23 @@ async def execute_playbook_endpoint(
         raise HTTPException(503, "Playbook engine not available")
     
     # Get project ID from request or header
-    project_id = request.project_id or x_project_id
-    if not project_id:
+    customer_id = request.customer_id or x_project_id
+    if not customer_id:
         raise HTTPException(400, "Project ID required (in body or X-Project-ID header)")
     
-    logger.info(f"[PLAYBOOK-API] Executing {playbook_id} for project {project_id}")
+    logger.info(f"[PLAYBOOK-API] Executing {playbook_id} for project {customer_id}")
     
     try:
         result = engine["execute_playbook"](
             playbook_id=playbook_id,
-            project_id=project_id,
+            customer_id=customer_id,
             run_by=request.run_by
         )
         
         return {
             "run_id": result.run_id,
             "playbook_id": result.playbook_id,
-            "project_id": result.project_id,
+            "customer_id": result.customer_id,
             "status": result.status,
             "started_at": result.started_at,
             "completed_at": result.completed_at,
@@ -310,8 +310,8 @@ async def list_available_standards():
 # RUN HISTORY
 # =============================================================================
 
-@router.get("/playbooks/runs/{project_id}")
-async def get_project_runs(project_id: str, limit: int = 20):
+@router.get("/playbooks/runs/{customer_id}")
+async def get_project_runs(customer_id: str, limit: int = 20):
     """
     Get playbook run history for a project.
     """
@@ -323,13 +323,13 @@ async def get_project_runs(project_id: str, limit: int = 20):
         result = supabase.table("playbook_runs")\
             .select("run_id, playbook_id, status, started_at, completed_at, "
                    "total_rules_checked, violations_found, warnings_found")\
-            .eq("project_id", project_id)\
+            .eq("customer_id", customer_id)\
             .order("started_at", desc=True)\
             .limit(limit)\
             .execute()
         
         return {
-            "project_id": project_id,
+            "customer_id": customer_id,
             "runs": result.data or [],
             "count": len(result.data or [])
         }

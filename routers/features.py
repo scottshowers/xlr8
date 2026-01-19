@@ -33,7 +33,7 @@ class CompareRequest(BaseModel):
     table_b: str
     join_keys: Optional[List[str]] = None
     compare_columns: Optional[List[str]] = None
-    project_id: Optional[str] = None
+    customer_id: Optional[str] = None
     limit: int = 100
 
 
@@ -56,7 +56,7 @@ class ExportComparisonRequest(BaseModel):
     table_b: str
     join_keys: Optional[List[str]] = None
     compare_columns: Optional[List[str]] = None
-    project_id: Optional[str] = None
+    customer_id: Optional[str] = None
     format: str = "xlsx"  # xlsx, csv, json
     limit: int = 100
 
@@ -97,7 +97,7 @@ async def compare_tables(request: CompareRequest):
             table_b=request.table_b,
             join_keys=request.join_keys,
             compare_columns=request.compare_columns,
-            project_id=request.project_id,
+            customer_id=request.customer_id,
             limit=request.limit
         )
         
@@ -119,7 +119,7 @@ async def compare_tables(request: CompareRequest):
                 "source_b_rows": result.source_b_rows,
                 "join_keys": result.join_keys,
                 "compared_columns": result.compared_columns,
-                "project_id": result.project_id,
+                "customer_id": result.customer_id,
                 "comparison_id": result.comparison_id,
                 "executed_at": result.executed_at
             }
@@ -133,7 +133,7 @@ async def compare_tables(request: CompareRequest):
 
 
 @router.get("/compare/tables")
-async def list_comparable_tables(project_id: Optional[str] = None):
+async def list_comparable_tables(customer_id: Optional[str] = None):
     """
     List tables available for comparison.
     
@@ -208,7 +208,7 @@ async def export_comparison(request: ExportComparisonRequest):
             table_b=request.table_b,
             join_keys=request.join_keys,
             compare_columns=request.compare_columns,
-            project_id=request.project_id,
+            customer_id=request.customer_id,
             limit=request.limit
         )
         

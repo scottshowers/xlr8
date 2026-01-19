@@ -43,15 +43,15 @@ def _get_supabase():
     return None
 
 
-def _get_duckdb(project_id: str = None):
+def _get_duckdb(customer_id: str = None):
     """Get DuckDB connection - tries multiple import paths."""
     try:
         from services.duckdb_service import get_duckdb_connection
-        return get_duckdb_connection(project_id)
+        return get_duckdb_connection(customer_id)
     except ImportError:
         try:
             from backend.services.duckdb_service import get_duckdb_connection
-            return get_duckdb_connection(project_id)
+            return get_duckdb_connection(customer_id)
         except ImportError:
             # Try structured data handler as fallback
             try:
@@ -151,7 +151,7 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
         for intel_table in ['_intelligence_findings', '_intelligence_tasks', '_intelligence_lookups', '_intelligence_relationships']:
             try:
                 if project:
-                    conn.execute(f"DELETE FROM {intel_table} WHERE project_name = ?", [project])
+                    conn.execute(f"DELETE FROM {intel_table} WHERE customer_id = ?", [project])
                     cleaned[intel_table] = 1
                     logger.info(f"[CLEANUP] Cleaned {intel_table}")
             except Exception as e:
@@ -174,7 +174,7 @@ def _clean_metadata_tables(conn, table_name: str = None, filename: str = None, p
 # /jobs/all must be before /jobs/{job_id} or "all" gets treated as a job_id
 
 @router.delete("/jobs/all")
-async def delete_all_jobs(project_id: str = Query(None)):
+async def delete_all_jobs(customer_id: str = Query(None)):
     """Delete all jobs, optionally filtered by project."""
     supabase = _get_supabase()
     if not supabase:
@@ -183,8 +183,8 @@ async def delete_all_jobs(project_id: str = Query(None)):
     try:
         query = supabase.table("jobs").delete()
         
-        if project_id:
-            query = query.eq("project_id", project_id)
+        if customer_id:
+            query = query.eq("customer_id", customer_id)
         else:
             # Delete all - need a condition that matches everything
             query = query.neq("id", "IMPOSSIBLE_ID_THAT_WILL_NEVER_EXIST")
@@ -204,7 +204,7 @@ async def delete_all_jobs(project_id: str = Query(None)):
 async def delete_jobs_in_range(
     start_date: str = Query(...),
     end_date: str = Query(...),
-    project_id: str = Query(None)
+    customer_id: str = Query(None)
 ):
     """Delete jobs within a date range."""
     supabase = _get_supabase()
@@ -221,8 +221,8 @@ async def delete_jobs_in_range(
             .gte("created_at", start.isoformat())\
             .lte("created_at", end.isoformat())
         
-        if project_id:
-            query = query.eq("project_id", project_id)
+        if customer_id:
+            query = query.eq("customer_id", customer_id)
         
         result = query.execute()
         count = len(result.data) if result.data else 0
@@ -243,8 +243,8 @@ async def delete_jobs_in_range(
 # STRUCTURED FILE DELETION (DuckDB)
 # =============================================================================
 
-@router.delete("/status/structured/{project_id}/{filename:path}")
-async def delete_structured_file(project_id: str, filename: str):
+@router.delete("/status/structured/{customer_id}/{filename:path}")
+async def delete_structured_file(customer_id: str, filename: str):
     """
     Delete a structured data file - CASCADE to all storage systems.
     
@@ -255,12 +255,12 @@ async def delete_structured_file(project_id: str, filename: str):
     3. ChromaDB chunks (if any exist for this file)
     4. document_registry entry
     """
-    logger.info(f"[CLEANUP] Deleting file (cascade): {filename} from {project_id}")
+    logger.info(f"[CLEANUP] Deleting file (cascade): {filename} from {customer_id}")
     
     result = {
         "success": True,
         "filename": filename,
-        "project": project_id,
+        "project": customer_id,
         "tables_dropped": [],
         "chunks_removed": 0,
         "registry_removed": False,
@@ -268,7 +268,7 @@ async def delete_structured_file(project_id: str, filename: str):
     }
     
     # 1. DUCKDB - Drop tables and clean metadata
-    conn = _get_duckdb(project_id)
+    conn = _get_duckdb(customer_id)
     if conn:
         try:
             # Convert filename to table name pattern
@@ -349,7 +349,7 @@ async def delete_structured_file(project_id: str, filename: str):
         try:
             del_result = supabase.table('document_registry').delete().eq(
                 'filename', filename
-            ).eq('project_id', project_id).execute()
+            ).eq('customer_id', customer_id).execute()
             
             if del_result.data:
                 result['registry_removed'] = True
@@ -409,7 +409,7 @@ async def delete_structured_table(table_name: str, project: str = Query(None)):
 # =============================================================================
 
 @router.delete("/status/documents/{filename:path}")
-async def delete_document(filename: str, project_id: str = Query(None)):
+async def delete_document(filename: str, customer_id: str = Query(None)):
     """
     Delete a document's chunks from ChromaDB - CASCADE to registry.
     
@@ -466,8 +466,8 @@ async def delete_document(filename: str, project_id: str = Query(None)):
         try:
             # Try exact match first
             query = supabase.table('document_registry').delete().eq('filename', filename)
-            if project_id:
-                query = query.eq('project_id', project_id)
+            if customer_id:
+                query = query.eq('customer_id', customer_id)
             del_result = query.execute()
             
             if del_result.data:
@@ -476,8 +476,8 @@ async def delete_document(filename: str, project_id: str = Query(None)):
             else:
                 # Try case-insensitive via ilike
                 query = supabase.table('document_registry').delete().ilike('filename', filename)
-                if project_id:
-                    query = query.eq('project_id', project_id)
+                if customer_id:
+                    query = query.eq('customer_id', customer_id)
                 del_result = query.execute()
                 if del_result.data:
                     result['registry_removed'] = True
@@ -569,26 +569,26 @@ async def clear_all_system_tables():
     return {"success": True, "cleared": cleared}
 
 
-@router.delete("/status/project/{project_id}/all")
-async def delete_all_project_data(project_id: str):
+@router.delete("/status/project/{customer_id}/all")
+async def delete_all_project_data(customer_id: str):
     """
     Delete ALL data for a project. Use with caution!
     
     FIXED: Now cleans _schema_metadata and _pdf_tables
     """
-    logger.info(f"[CLEANUP] Deleting ALL data for project: {project_id}")
+    logger.info(f"[CLEANUP] Deleting ALL data for project: {customer_id}")
     
     deleted = {"tables": 0, "documents": 0, "jobs": 0, "metadata": {}}
     
     # 1. DuckDB tables
-    conn = _get_duckdb(project_id)
+    conn = _get_duckdb(customer_id)
     if conn:
         try:
             tables = conn.execute("SHOW TABLES").fetchall()
             system_tables = {'_schema_metadata', '_pdf_tables', 'file_metadata', 'column_profiles', 'schema_info'}
             
             # Build project prefixes for matching
-            project_lower = project_id.lower()
+            project_lower = customer_id.lower()
             project_prefixes = [
                 project_lower + '__',
                 project_lower + '_',
@@ -612,7 +612,7 @@ async def delete_all_project_data(project_id: str):
                         logger.warning(f"[CLEANUP] Failed to drop {table_name}: {drop_e}")
             
             # Clean metadata tables for this project
-            deleted["metadata"] = _clean_metadata_tables(conn, project=project_id)
+            deleted["metadata"] = _clean_metadata_tables(conn, project=customer_id)
             
         except Exception as e:
             logger.warning(f"[CLEANUP] DuckDB cleanup error: {e}")
@@ -621,19 +621,19 @@ async def delete_all_project_data(project_id: str):
     collection = _get_chromadb()
     if collection:
         try:
-            # Try both field names - some chunks use project_id, others use project
-            results = collection.get(where={"project_id": project_id})
+            # Try both field names - some chunks use customer_id, others use project
+            results = collection.get(where={"customer_id": customer_id})
             if results and results['ids']:
                 collection.delete(ids=results['ids'])
                 deleted["documents"] = len(results['ids'])
-                logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (project_id)")
+                logger.info(f"[CLEANUP] Deleted {len(results['ids'])} ChromaDB chunks (customer_id)")
         except Exception as e1:
-            logger.debug(f"[CLEANUP] project_id query failed: {e1}")
+            logger.debug(f"[CLEANUP] customer_id query failed: {e1}")
         
         # Also try 'project' field
         if deleted["documents"] == 0:
             try:
-                results = collection.get(where={"project": project_id})
+                results = collection.get(where={"project": customer_id})
                 if results and results['ids']:
                     collection.delete(ids=results['ids'])
                     deleted["documents"] = len(results['ids'])
@@ -645,21 +645,21 @@ async def delete_all_project_data(project_id: str):
     supabase = _get_supabase()
     if supabase:
         try:
-            result = supabase.table("jobs").delete().eq("project_id", project_id).execute()
+            result = supabase.table("jobs").delete().eq("customer_id", customer_id).execute()
             deleted["jobs"] = len(result.data) if result.data else 0
         except Exception as e:
             logger.debug(f"Suppressed jobs cleanup: {e}")
         
         # Clean project_relationships (context graph relationships)
         try:
-            result = supabase.table("project_relationships").delete().eq("project_name", project_id).execute()
+            result = supabase.table("project_relationships").delete().eq("customer_id", customer_id).execute()
             deleted["relationships"] = len(result.data) if result.data else 0
             logger.info(f"[CLEANUP] Deleted {deleted['relationships']} relationships from Supabase")
         except Exception as e:
             logger.debug(f"Suppressed relationships cleanup: {e}")
     
-    logger.info(f"[CLEANUP] Deleted for {project_id}: {deleted}")
-    return {"success": True, "deleted": deleted, "project_id": project_id}
+    logger.info(f"[CLEANUP] Deleted for {customer_id}: {deleted}")
+    return {"success": True, "deleted": deleted, "customer_id": customer_id}
 
 
 # =============================================================================
@@ -815,7 +815,7 @@ async def list_documents():
                 if source not in doc_metadata:
                     doc_metadata[source] = {
                         'truth_type': meta.get('truth_type'),
-                        'project': meta.get('project_id') or meta.get('project'),
+                        'project': meta.get('customer_id') or meta.get('project'),
                     }
         
         documents = []

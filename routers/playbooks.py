@@ -7,10 +7,10 @@ Playbook-specific customization comes from registered playbook definitions.
 
 Endpoints:
 - GET /playbooks/{type}/structure - Get playbook structure
-- GET /playbooks/{type}/progress/{project_id} - Get progress
-- POST /playbooks/{type}/progress/{project_id} - Update progress
-- POST /playbooks/{type}/scan/{project_id}/{action_id} - Scan for action
-- GET /playbooks/{type}/export/{project_id} - Export as XLSX
+- GET /playbooks/{type}/progress/{customer_id} - Get progress
+- POST /playbooks/{type}/progress/{customer_id} - Update progress
+- POST /playbooks/{type}/scan/{customer_id}/{action_id} - Scan for action
+- GET /playbooks/{type}/export/{customer_id} - Export as XLSX
 
 Author: XLR8 Team
 Version: 4.0.0 - Framework Integration
@@ -252,17 +252,17 @@ async def refresh_playbook_structure():
         }
 
 
-@router.get("/year-end/progress/{project_id}")
-async def get_progress(project_id: str):
+@router.get("/year-end/progress/{customer_id}")
+async def get_progress(customer_id: str):
     """Get progress for a project."""
     try:
         if FRAMEWORK_AVAILABLE:
-            progress = PROGRESS_MANAGER.get_raw_progress("year-end", project_id)
+            progress = PROGRESS_MANAGER.get_raw_progress("year-end", customer_id)
         else:
-            progress = PLAYBOOK_PROGRESS.get(project_id, {})
+            progress = PLAYBOOK_PROGRESS.get(customer_id, {})
         
         return {
-            "project_id": project_id,
+            "customer_id": customer_id,
             "progress": progress
         }
     except Exception as e:
@@ -270,27 +270,27 @@ async def get_progress(project_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/year-end/progress/{project_id}")
-async def update_progress(project_id: str, action_id: str, update: ProgressUpdate):
+@router.post("/year-end/progress/{customer_id}")
+async def update_progress(customer_id: str, action_id: str, update: ProgressUpdate):
     """Update progress for an action."""
     try:
         if FRAMEWORK_AVAILABLE:
             engine = get_playbook_engine("year-end")
             if engine:
                 result = engine.update_status(
-                    project_id, action_id, update.status, update.notes
+                    customer_id, action_id, update.status, update.notes
                 )
                 return result
         
         # Fallback
-        if project_id not in PLAYBOOK_PROGRESS:
-            PLAYBOOK_PROGRESS[project_id] = {}
+        if customer_id not in PLAYBOOK_PROGRESS:
+            PLAYBOOK_PROGRESS[customer_id] = {}
         
-        existing = PLAYBOOK_PROGRESS[project_id].get(action_id, {})
+        existing = PLAYBOOK_PROGRESS[customer_id].get(action_id, {})
         existing["status"] = update.status
         if update.notes is not None:
             existing["notes"] = update.notes
-        PLAYBOOK_PROGRESS[project_id][action_id] = existing
+        PLAYBOOK_PROGRESS[customer_id][action_id] = existing
         
         return {"success": True, "status": update.status}
         
@@ -299,13 +299,13 @@ async def update_progress(project_id: str, action_id: str, update: ProgressUpdat
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/year-end/summary/{project_id}")
-async def get_ai_summary(project_id: str):
+@router.get("/year-end/summary/{customer_id}")
+async def get_ai_summary(customer_id: str):
     """Get consolidated AI summary across all scanned actions."""
     if FRAMEWORK_AVAILABLE:
-        progress = PROGRESS_MANAGER.get_raw_progress("year-end", project_id)
+        progress = PROGRESS_MANAGER.get_raw_progress("year-end", customer_id)
     else:
-        progress = PLAYBOOK_PROGRESS.get(project_id, {})
+        progress = PLAYBOOK_PROGRESS.get(customer_id, {})
     
     # Aggregate data
     all_issues = []
@@ -395,7 +395,7 @@ async def get_ai_summary(project_id: str):
     total_in_progress = sum(1 for p in progress.values() if p.get("status") == "in_progress")
     
     return {
-        "project_id": project_id,
+        "customer_id": customer_id,
         "overall_risk": overall_risk,
         "summary_text": " | ".join(summary_parts) if summary_parts else "No critical issues detected",
         "stats": {
@@ -416,14 +416,14 @@ async def get_ai_summary(project_id: str):
     }
 
 
-@router.post("/year-end/scan/{project_id}/{action_id}")
-async def scan_for_action(project_id: str, action_id: str):
+@router.post("/year-end/scan/{customer_id}/{action_id}")
+async def scan_for_action(customer_id: str, action_id: str):
     """
     Scan documents for a specific action.
     
     This is the main scan endpoint - delegates to framework.
     """
-    logger.info(f"[SCAN] {action_id} in project {project_id[:8]}")
+    logger.info(f"[SCAN] {action_id} in project {customer_id[:8]}")
     
     try:
         if FRAMEWORK_AVAILABLE:
@@ -435,11 +435,11 @@ async def scan_for_action(project_id: str, action_id: str):
                     # Update engine's playbook with parsed structure
                     _sync_structure_to_engine(engine, structure)
                 
-                result = await engine.scan_action(project_id, action_id)
+                result = await engine.scan_action(customer_id, action_id)
                 return result.to_dict()
         
         # Fallback to legacy implementation
-        return await _legacy_scan(project_id, action_id)
+        return await _legacy_scan(customer_id, action_id)
         
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -508,7 +508,7 @@ def _sync_structure_to_engine(engine: PlaybookEngine, structure: Dict):
     engine.dependencies = InheritanceManager.build_dependencies(engine.playbook)
 
 
-async def _legacy_scan(project_id: str, action_id: str) -> Dict:
+async def _legacy_scan(customer_id: str, action_id: str) -> Dict:
     """Legacy scan implementation for backward compatibility."""
     # This would contain the old scan logic
     # For now, return a placeholder
@@ -525,9 +525,9 @@ async def _legacy_scan(project_id: str, action_id: str) -> Dict:
 # FEEDBACK ENDPOINT - Learning integration
 # =============================================================================
 
-@router.post("/year-end/feedback/{project_id}/{action_id}")
+@router.post("/year-end/feedback/{customer_id}/{action_id}")
 async def record_feedback(
-    project_id: str, 
+    customer_id: str, 
     action_id: str, 
     request: FeedbackRequest
 ):
@@ -537,7 +537,7 @@ async def record_feedback(
             engine = get_playbook_engine("year-end")
             if engine:
                 success = engine.record_feedback(
-                    project_id=project_id,
+                    customer_id=customer_id,
                     action_id=action_id,
                     finding_text=request.finding_text,
                     feedback=request.feedback,
@@ -557,8 +557,8 @@ async def record_feedback(
 # DOCUMENT CHECKLIST ENDPOINT
 # =============================================================================
 
-@router.get("/year-end/document-checklist/{project_id}")
-async def get_document_checklist(project_id: str):
+@router.get("/year-end/document-checklist/{customer_id}")
+async def get_document_checklist(customer_id: str):
     """
     Get the document checklist with real-time upload status.
     Shows which reports are needed per step, matched vs missing.
@@ -582,7 +582,7 @@ async def get_document_checklist(project_id: str):
     
     try:
         # Get files for this project (including global/reference library)
-        registry_entries = DocumentRegistryModel.get_by_project(project_id, include_global=True)
+        registry_entries = DocumentRegistryModel.get_by_project(customer_id, include_global=True)
         
         for entry in registry_entries:
             filename = entry.get('filename')
@@ -595,13 +595,13 @@ async def get_document_checklist(project_id: str):
                 
                 uploaded_files_list.append(filename)
         
-        logger.info(f"[DOC-CHECKLIST] Registry: {len(uploaded_files_list)} files for project {project_id[:8]}")
+        logger.info(f"[DOC-CHECKLIST] Registry: {len(uploaded_files_list)} files for project {customer_id[:8]}")
         
     except Exception as reg_e:
         logger.warning(f"[DOC-CHECKLIST] Registry query failed: {reg_e}")
         # Return empty if registry unavailable
         return {
-            "project_id": project_id,
+            "customer_id": customer_id,
             "has_step_documents": False,
             "uploaded_files": [],
             "step_checklists": [],
@@ -619,8 +619,8 @@ async def get_document_checklist(project_id: str):
         all_jobs = ProcessingJobModel.get_all(limit=20)
         for job in all_jobs:
             job_status = job.get("status", "")
-            job_project = job.get("input_data", {}).get("project_id", "")
-            if job_status in ["pending", "processing"] and job_project == project_id:
+            job_project = job.get("input_data", {}).get("customer_id", "")
+            if job_status in ["pending", "processing"] and job_project == customer_id:
                 processing_jobs.append({
                     "filename": job.get("input_data", {}).get("filename", "Unknown"),
                     "progress": job.get("progress", 0),
@@ -676,7 +676,7 @@ async def get_document_checklist(project_id: str):
         logger.warning(f"[DOC-CHECKLIST] Could not load Step_Documents: {e}")
     
     return {
-        "project_id": project_id,
+        "customer_id": customer_id,
         "has_step_documents": has_step_documents,
         "uploaded_files": uploaded_files_list,
         "step_checklists": step_checklists,
@@ -694,8 +694,8 @@ async def get_document_checklist(project_id: str):
 # EXPORT ENDPOINT
 # =============================================================================
 
-@router.get("/year-end/export/{project_id}")
-async def export_playbook(project_id: str):
+@router.get("/year-end/export/{customer_id}")
+async def export_playbook(customer_id: str):
     """
     Export playbook progress as comprehensive Excel workbook.
     
@@ -710,9 +710,9 @@ async def export_playbook(project_id: str):
         structure = await get_year_end_structure()
         
         if FRAMEWORK_AVAILABLE:
-            progress = PROGRESS_MANAGER.get_raw_progress("year-end", project_id)
+            progress = PROGRESS_MANAGER.get_raw_progress("year-end", customer_id)
         else:
-            progress = PLAYBOOK_PROGRESS.get(project_id, {})
+            progress = PLAYBOOK_PROGRESS.get(customer_id, {})
         
         # Create workbook
         wb = openpyxl.Workbook()
@@ -807,7 +807,7 @@ async def export_playbook(project_id: str):
         ws_summary['A1'].font = Font(bold=True, size=16)
         
         ws_summary['A3'] = "Project ID:"
-        ws_summary['B3'] = project_id
+        ws_summary['B3'] = customer_id
         ws_summary['A4'] = "Export Date:"
         ws_summary['B4'] = datetime.now().strftime("%Y-%m-%d %H:%M")
         ws_summary['A5'] = "Total Actions:"
@@ -985,7 +985,7 @@ async def export_playbook(project_id: str):
         wb.save(output)
         output.seek(0)
         
-        filename = f"Year_End_Playbook_{project_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
+        filename = f"Year_End_Playbook_{customer_id[:8]}_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
         
         return StreamingResponse(
             output,
@@ -1002,12 +1002,12 @@ async def export_playbook(project_id: str):
 # ENTITY CONFIGURATION ENDPOINTS
 # =============================================================================
 
-@router.get("/year-end/entity-config/{project_id}")
-async def get_entity_config(project_id: str):
+@router.get("/year-end/entity-config/{customer_id}")
+async def get_entity_config(customer_id: str):
     """Get entity configuration for a project."""
     try:
         from utils.database.models import EntityConfigModel
-        config = EntityConfigModel.get(project_id, "year-end")
+        config = EntityConfigModel.get(customer_id, "year-end")
         return {"config": config}
     except ImportError:
         return {"config": None, "message": "Entity config not available"}
@@ -1016,13 +1016,13 @@ async def get_entity_config(project_id: str):
         return {"config": None, "error": str(e)}
 
 
-@router.post("/year-end/entity-config/{project_id}")
-async def set_entity_config(project_id: str, request: EntityConfigRequest):
+@router.post("/year-end/entity-config/{customer_id}")
+async def set_entity_config(customer_id: str, request: EntityConfigRequest):
     """Set entity configuration for a project."""
     try:
         from utils.database.models import EntityConfigModel
         result = EntityConfigModel.save(
-            project_id=project_id,
+            customer_id=customer_id,
             playbook_type="year-end",
             primary_entity=request.primary_entity,
             analysis_scope="selected" if request.primary_entity else "all",
@@ -1041,13 +1041,13 @@ async def set_entity_config(project_id: str, request: EntityConfigRequest):
 # SUPPRESSION ENDPOINTS
 # =============================================================================
 
-@router.get("/year-end/suppressions/{project_id}")
-async def get_suppressions(project_id: str):
+@router.get("/year-end/suppressions/{customer_id}")
+async def get_suppressions(customer_id: str):
     """Get suppression rules for a project."""
     try:
         from utils.database.models import FindingSuppressionModel
-        rules = FindingSuppressionModel.get_by_project(project_id, "year-end")
-        stats = FindingSuppressionModel.get_stats(project_id, "year-end")
+        rules = FindingSuppressionModel.get_by_project(customer_id, "year-end")
+        stats = FindingSuppressionModel.get_stats(customer_id, "year-end")
         return {"rules": rules, "stats": stats}
     except ImportError:
         return {"rules": [], "stats": {}, "message": "Suppression not available"}
@@ -1076,8 +1076,8 @@ class SuppressRequest(BaseModel):
         return self.finding_text or self.pattern_text or self.text or self.pattern or ""
 
 
-@router.post("/year-end/suppress/{project_id}")
-async def suppress_finding(project_id: str, request: SuppressRequest):
+@router.post("/year-end/suppress/{customer_id}")
+async def suppress_finding(customer_id: str, request: SuppressRequest):
     """
     Suppress a finding - feeds BOTH suppression model AND learning system.
     
@@ -1103,7 +1103,7 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
     try:
         from utils.database.models import FindingSuppressionModel
         result = FindingSuppressionModel.create(
-            project_id=project_id,
+            customer_id=customer_id,
             playbook_type="year-end",
             action_id=action_id,
             suppression_type=suppress_type,
@@ -1126,7 +1126,7 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
             engine = get_playbook_engine("year-end")
             if engine:
                 engine.record_feedback(
-                    project_id=project_id,
+                    customer_id=customer_id,
                     action_id=action_id,
                     finding_text=finding_text,
                     feedback='discard',
@@ -1142,9 +1142,9 @@ async def suppress_finding(project_id: str, request: SuppressRequest):
     return {"success": False, "message": "Both systems unavailable"}
 
 
-@router.post("/year-end/suppress/quick/{project_id}/{action_id}")
+@router.post("/year-end/suppress/quick/{customer_id}/{action_id}")
 async def quick_suppress(
-    project_id: str, 
+    customer_id: str, 
     action_id: str, 
     request: QuickSuppressRequest
 ):
@@ -1156,7 +1156,7 @@ async def quick_suppress(
     try:
         from utils.database.models import FindingSuppressionModel
         result = FindingSuppressionModel.create(
-            project_id=project_id,
+            customer_id=customer_id,
             playbook_type="year-end",
             action_id=action_id,
             suppression_type=request.suppress_type,
@@ -1179,7 +1179,7 @@ async def quick_suppress(
             engine = get_playbook_engine("year-end")
             if engine:
                 engine.record_feedback(
-                    project_id=project_id,
+                    customer_id=customer_id,
                     action_id=action_id,
                     finding_text=request.finding_text,
                     feedback='discard',
@@ -1227,8 +1227,8 @@ async def get_learning_stats():
 # SCAN ALL ENDPOINT
 # =============================================================================
 
-@router.post("/year-end/scan-all/{project_id}")
-async def scan_all_actions(project_id: str, background_tasks: BackgroundTasks):
+@router.post("/year-end/scan-all/{customer_id}")
+async def scan_all_actions(customer_id: str, background_tasks: BackgroundTasks):
     """Scan all actions for a project (background job)."""
     try:
         structure = await get_year_end_structure()
@@ -1244,7 +1244,7 @@ async def scan_all_actions(project_id: str, background_tasks: BackgroundTasks):
         # Initialize job status
         SCAN_JOBS[job_id] = {
             "status": "running",
-            "project_id": project_id,
+            "customer_id": customer_id,
             "total": total_actions,
             "completed": 0,
             "successful": 0,
@@ -1255,13 +1255,13 @@ async def scan_all_actions(project_id: str, background_tasks: BackgroundTasks):
         }
         
         # Run scan in background
-        background_tasks.add_task(run_scan_all_background, job_id, project_id, structure)
+        background_tasks.add_task(run_scan_all_background, job_id, customer_id, structure)
         
-        logger.info(f"[SCAN-ALL] Started background job {job_id} for {project_id} with {total_actions} actions")
+        logger.info(f"[SCAN-ALL] Started background job {job_id} for {customer_id} with {total_actions} actions")
         
         return {
             "job_id": job_id,
-            "project_id": project_id,
+            "customer_id": customer_id,
             "total_actions": total_actions,
             "status": "started"
         }
@@ -1271,7 +1271,7 @@ async def scan_all_actions(project_id: str, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-async def run_scan_all_background(job_id: str, project_id: str, structure: Dict):
+async def run_scan_all_background(job_id: str, customer_id: str, structure: Dict):
     """Background task to scan all actions."""
     try:
         for step in structure.get('steps', []):
@@ -1283,7 +1283,7 @@ async def run_scan_all_background(job_id: str, project_id: str, structure: Dict)
                 SCAN_JOBS[job_id]["current_action"] = f"Scanning {action_id}: {action_title}..."
                 
                 try:
-                    result = await scan_for_action(project_id, action_id)
+                    result = await scan_for_action(customer_id, action_id)
                     SCAN_JOBS[job_id]["results"][action_id] = {
                         "success": True,
                         "status": result.get('suggested_status', 'not_started')
@@ -1377,7 +1377,7 @@ async def get_learning_stats():
 
 
 @router.get("/learning/patterns/{playbook_id}")
-async def get_learning_patterns(playbook_id: str, project_id: str = "global"):
+async def get_learning_patterns(playbook_id: str, customer_id: str = "global"):
     """Get learned suppression patterns for a playbook."""
     try:
         try:
@@ -1386,11 +1386,11 @@ async def get_learning_patterns(playbook_id: str, project_id: str = "global"):
             from utils.learning_engine import get_learning_system
         
         learning = get_learning_system()
-        patterns = learning.get_patterns(project_id, playbook_id)
+        patterns = learning.get_patterns(customer_id, playbook_id)
         
         return {
             "playbook_id": playbook_id,
-            "project_id": project_id,
+            "customer_id": customer_id,
             "patterns": patterns
         }
         
@@ -1398,7 +1398,7 @@ async def get_learning_patterns(playbook_id: str, project_id: str = "global"):
         logger.error(f"[LEARNING] Patterns error: {e}")
         return {
             "playbook_id": playbook_id,
-            "project_id": project_id,
+            "customer_id": customer_id,
             "patterns": {"suppressions": [], "preferences": {}},
             "error": str(e)
         }
@@ -1408,23 +1408,23 @@ async def get_learning_patterns(playbook_id: str, project_id: str = "global"):
 # ENTITY DETECTION ENDPOINT
 # =============================================================================
 
-async def get_project_documents_text(project_id: str) -> List[str]:
+async def get_project_documents_text(customer_id: str) -> List[str]:
     """Get all document text for a project (for entity detection)."""
     texts = []
-    project_name = None
+    customer_id = None
     
     # Get project NAME from Supabase
     try:
         supabase = get_supabase()
         if supabase:
-            result = supabase.table('projects').select('name').eq('id', project_id).execute()
+            result = supabase.table('projects').select('name').eq('id', customer_id).execute()
             if result.data and len(result.data) > 0:
-                project_name = result.data[0].get('name')
+                customer_id = result.data[0].get('name')
     except Exception as e:
         logger.debug(f"[ENTITIES] Could not get project name: {e}")
     
     # 1. Try DuckDB (structured data)
-    if project_name:
+    if customer_id:
         try:
             from backend.utils.playbook_parser import get_duckdb_connection
             conn = get_duckdb_connection()
@@ -1434,7 +1434,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                         SELECT table_name, file_name 
                         FROM _schema_metadata 
                         WHERE LOWER(project) = LOWER(?) AND is_current = TRUE
-                    """, [project_name]).fetchall()
+                    """, [customer_id]).fetchall()
                     
                     for table_name, file_name in tables:
                         try:
@@ -1449,8 +1449,8 @@ async def get_project_documents_text(project_id: str) -> List[str]:
                         pdf_tables = conn.execute("""
                             SELECT table_name, source_file 
                             FROM _pdf_tables 
-                            WHERE project = ? OR project_id = ?
-                        """, [project_name, project_id]).fetchall()
+                            WHERE project = ? OR customer_id = ?
+                        """, [customer_id, customer_id]).fetchall()
                         
                         for table_name, source_file in pdf_tables:
                             try:
@@ -1480,7 +1480,7 @@ async def get_project_documents_text(project_id: str) -> List[str]:
             collection_name="documents",
             query="company FEIN EIN employer tax federal identification",
             n_results=50,
-            project_id=project_id
+            customer_id=customer_id
         )
         if results:
             for result in results:
@@ -1490,17 +1490,17 @@ async def get_project_documents_text(project_id: str) -> List[str]:
     except Exception:
         pass
     
-    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {project_id[:8]}")
+    logger.info(f"[ENTITIES] Retrieved {len(texts)} text chunks for project {customer_id[:8]}")
     return texts
 
 
-@router.post("/{playbook_type}/detect-entities/{project_id}")
-async def detect_entities(playbook_type: str, project_id: str):
+@router.post("/{playbook_type}/detect-entities/{customer_id}")
+async def detect_entities(playbook_type: str, customer_id: str):
     """Scan project documents for US FEINs and Canada BNs using LLM."""
-    logger.info(f"[ENTITIES] Starting entity detection for project {project_id}")
+    logger.info(f"[ENTITIES] Starting entity detection for project {customer_id}")
     
     try:
-        docs = await get_project_documents_text(project_id)
+        docs = await get_project_documents_text(customer_id)
         
         if not docs:
             return {
@@ -1640,7 +1640,7 @@ DOCUMENTS:
         
         return {
             "success": True,
-            "project_id": project_id,
+            "customer_id": customer_id,
             "playbook_type": playbook_type,
             "entities": {"us": us_entities, "canada": ca_entities},
             "summary": {

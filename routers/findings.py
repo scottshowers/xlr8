@@ -78,7 +78,7 @@ class FindingsResponse(BaseModel):
 # SAMPLE FINDINGS GENERATOR
 # =============================================================================
 
-def generate_sample_findings(project_name: str) -> List[Finding]:
+def generate_sample_findings(customer_id: str) -> List[Finding]:
     """
     Generate sample findings for demonstration.
     In production, these would come from actual data analysis.
@@ -207,9 +207,9 @@ def calculate_sample_cost_equivalent() -> Dict[str, Any]:
 # ENDPOINTS
 # =============================================================================
 
-@router.get("/{project_name}/findings", response_model=FindingsResponse)
+@router.get("/{customer_id}/findings", response_model=FindingsResponse)
 async def get_project_findings(
-    project_name: str,
+    customer_id: str,
     severity: Optional[str] = Query(None, description="Filter by severity"),
     category: Optional[str] = Query(None, description="Filter by category"),
     status: Optional[str] = Query(None, description="Filter by status")
@@ -225,7 +225,7 @@ async def get_project_findings(
     try:
         # Generate sample findings for now
         # In production, this would query actual analysis results
-        all_findings = generate_sample_findings(project_name)
+        all_findings = generate_sample_findings(customer_id)
         
         # Apply filters
         filtered = all_findings
@@ -256,7 +256,7 @@ async def get_project_findings(
         cost_equiv = calculate_sample_cost_equivalent()
         
         return FindingsResponse(
-            project=project_name,
+            project=customer_id,
             findings=filtered,
             summary=summary,
             cost_equivalent=cost_equiv,
@@ -264,13 +264,13 @@ async def get_project_findings(
         )
         
     except Exception as e:
-        logger.error(f"Error getting findings for {project_name}: {e}")
+        logger.error(f"Error getting findings for {customer_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project_name}/cost-equivalent")
+@router.get("/{customer_id}/cost-equivalent")
 async def get_cost_equivalent(
-    project_name: str,
+    customer_id: str,
     hourly_rate: float = Query(250.0, description="Consultant hourly rate")
 ):
     """
@@ -288,16 +288,16 @@ async def get_cost_equivalent(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project_name}/findings/{finding_id}/acknowledge")
-async def acknowledge_finding(project_name: str, finding_id: str):
+@router.post("/{customer_id}/findings/{finding_id}/acknowledge")
+async def acknowledge_finding(customer_id: str, finding_id: str):
     """Mark a finding as acknowledged."""
     # For now, findings are generated on-the-fly
     # In future, store acknowledgments in database
     return {"success": True, "finding_id": finding_id, "status": "acknowledged"}
 
 
-@router.post("/{project_name}/findings/{finding_id}/resolve")
-async def resolve_finding(project_name: str, finding_id: str):
+@router.post("/{customer_id}/findings/{finding_id}/resolve")
+async def resolve_finding(customer_id: str, finding_id: str):
     """Mark a finding as resolved."""
     return {"success": True, "finding_id": finding_id, "status": "resolved"}
 

@@ -693,8 +693,8 @@ async def clear_rules(confirm: bool = False, user: User = Depends(require_permis
 # FORCE DELETE PROJECT
 # =============================================================================
 
-@router.delete("/force-delete-project/{project_id}")
-async def force_delete_project(project_id: str):
+@router.delete("/force-delete-project/{customer_id}")
+async def force_delete_project(customer_id: str):
     """
     Force delete a project from Supabase regardless of is_active status.
     Use this when normal delete fails due to is_active filtering.
@@ -705,21 +705,21 @@ async def force_delete_project(project_id: str):
             raise HTTPException(500, "Database unavailable")
         
         # Check if project exists
-        check = supabase.table('projects').select('id, name').eq('id', project_id).execute()
+        check = supabase.table('projects').select('id, name').eq('id', customer_id).execute()
         if not check.data:
-            raise HTTPException(404, f"Project {project_id} not found")
+            raise HTTPException(404, f"Project {customer_id} not found")
         
-        project_name = check.data[0].get('name', project_id)
+        customer_id = check.data[0].get('name', customer_id)
         
         # Hard delete from projects table
-        result = supabase.table('projects').delete().eq('id', project_id).execute()
+        result = supabase.table('projects').delete().eq('id', customer_id).execute()
         
-        logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
+        logger.info(f"[ADMIN] Force deleted project: {customer_id} ({customer_id})")
         
         return {
             'success': True,
-            'message': f'Project {project_name} permanently deleted',
-            'project_id': project_id
+            'message': f'Project {customer_id} permanently deleted',
+            'customer_id': customer_id
         }
         
     except HTTPException:
@@ -729,8 +729,8 @@ async def force_delete_project(project_id: str):
         raise HTTPException(500, str(e))
 
 
-@router.delete("/force-delete-project-by-name/{project_name}")
-async def force_delete_project_by_name(project_name: str):
+@router.delete("/force-delete-project-by-name/{customer_id}")
+async def force_delete_project_by_name(customer_id: str):
     """
     Force delete a project by name from Supabase.
     """
@@ -740,21 +740,21 @@ async def force_delete_project_by_name(project_name: str):
             raise HTTPException(500, "Database unavailable")
         
         # Find project
-        check = supabase.table('projects').select('id, name').eq('name', project_name).execute()
+        check = supabase.table('projects').select('id, name').eq('name', customer_id).execute()
         if not check.data:
-            raise HTTPException(404, f"Project '{project_name}' not found")
+            raise HTTPException(404, f"Project '{customer_id}' not found")
         
-        project_id = check.data[0]['id']
+        customer_id = check.data[0]['id']
         
         # Hard delete
-        supabase.table('projects').delete().eq('id', project_id).execute()
+        supabase.table('projects').delete().eq('id', customer_id).execute()
         
-        logger.info(f"[ADMIN] Force deleted project: {project_name} ({project_id})")
+        logger.info(f"[ADMIN] Force deleted project: {customer_id} ({customer_id})")
         
         return {
             'success': True,
-            'message': f'Project {project_name} permanently deleted',
-            'project_id': project_id
+            'message': f'Project {customer_id} permanently deleted',
+            'customer_id': customer_id
         }
         
     except HTTPException:
@@ -825,16 +825,16 @@ async def get_registry_status():
                         continue
                     source = meta.get('source') or meta.get('filename')
                     if source:
-                        project = meta.get('project_id', meta.get('project'))
+                        project = meta.get('customer_id', meta.get('project'))
                         if source not in sources:
-                            sources[source] = {'count': 0, 'project_id': project}
+                            sources[source] = {'count': 0, 'customer_id': project}
                         sources[source]['count'] += 1
                 
                 for source, info in sources.items():
                     chromadb_docs.append({
                         'document_name': source,
                         'chunk_count': info['count'],
-                        'project_id': info['project_id']
+                        'customer_id': info['customer_id']
                     })
         except Exception as e:
             logger.error(f"[ADMIN] ChromaDB scan error: {e}")
@@ -945,10 +945,10 @@ async def repair_registry(dry_run: bool = True):
         # Check if any orphan docs match table source files (hybrid)
         doc_names = {d.get('document_name') for d in orphan_docs}
         
-        # Get project_id from first orphan doc or table
-        project_id = None
+        # Get customer_id from first orphan doc or table
+        customer_id = None
         if orphan_docs:
-            project_id = orphan_docs[0].get('project_id')
+            customer_id = orphan_docs[0].get('customer_id')
         
         # Register each file
         for source_file, info in tables_by_file.items():
@@ -964,7 +964,7 @@ async def repair_registry(dry_run: bool = True):
                     # Hybrid registration
                     result = RegistrationService.register_hybrid(
                         filename=source_file,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         tables_created=info['tables'],
                         row_count=info['total_rows'],
                         chunk_count=chunk_count,
@@ -975,7 +975,7 @@ async def repair_registry(dry_run: bool = True):
                     # Structured only
                     result = RegistrationService.register_structured(
                         filename=source_file,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         tables_created=info['tables'],
                         row_count=info['total_rows'],
                         source=RegistrationSource.MIGRATION
@@ -1010,7 +1010,7 @@ async def repair_registry(dry_run: bool = True):
                 try:
                     result = RegistrationService.register_embedded(
                         filename=doc_name,
-                        project_id=d.get('project_id') or project_id,
+                        customer_id=d.get('customer_id') or customer_id,
                         chunk_count=d.get('chunk_count', 0),
                         truth_type='intent',
                         source=RegistrationSource.MIGRATION

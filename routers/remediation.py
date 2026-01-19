@@ -66,8 +66,8 @@ class FindingInput(BaseModel):
 
 class GeneratePlaybookRequest(BaseModel):
     """Request to generate a playbook from findings."""
-    project_id: str
-    project_name: str
+    customer_id: str
+    customer_id: str
     customer_name: str
     findings: List[FindingInput]
     default_assignee: str = "Project Lead"
@@ -114,8 +114,8 @@ async def generate_remediation_playbook(request: GeneratePlaybookRequest):
         findings_data = [f.model_dump() for f in request.findings]
         
         playbook = generate_playbook_from_findings(
-            project_id=request.project_id,
-            project_name=request.project_name,
+            customer_id=request.customer_id,
+            customer_id=request.customer_id,
             customer_name=request.customer_name,
             findings=findings_data,
             default_assignee=request.default_assignee,
@@ -136,13 +136,13 @@ async def generate_remediation_playbook(request: GeneratePlaybookRequest):
         raise HTTPException(500, f"Failed to generate playbook: {e}")
 
 
-@router.get("/remediation/playbooks/{project_id}")
-async def list_project_playbooks(project_id: str):
+@router.get("/remediation/playbooks/{customer_id}")
+async def list_project_playbooks(customer_id: str):
     """
     List all remediation playbooks for a project.
     """
     try:
-        playbooks = get_project_playbooks(project_id)
+        playbooks = get_project_playbooks(customer_id)
         
         # Include progress summary for each
         result = []
@@ -154,7 +154,7 @@ async def list_project_playbooks(project_id: str):
             })
         
         return {
-            "project_id": project_id,
+            "customer_id": customer_id,
             "playbooks": result,
             "total": len(result)
         }

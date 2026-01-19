@@ -48,7 +48,7 @@ class UserCreate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     role: str = "customer"
-    project_id: Optional[str] = None
+    customer_id: Optional[str] = None
     mfa_method: str = "totp"  # 'totp' or 'sms'
 
 
@@ -56,7 +56,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = None
     phone: Optional[str] = None
     role: Optional[str] = None
-    project_id: Optional[str] = None
+    customer_id: Optional[str] = None
     mfa_method: Optional[str] = None
 
 
@@ -82,7 +82,7 @@ async def get_me(user: User = Depends(require_auth)) -> Dict[str, Any]:
         "email": user.email,
         "full_name": user.full_name,
         "role": user.role,
-        "project_id": user.project_id,
+        "customer_id": user.customer_id,
         "mfa_enabled": user.mfa_enabled,
     }
 
@@ -108,9 +108,9 @@ async def list_users(
     if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
         # Dev mode - return mock users
         return [
-            {"id": "1", "email": "admin@xlr8.com", "full_name": "Admin User", "role": "admin", "project_id": None},
-            {"id": "2", "email": "consultant@xlr8.com", "full_name": "Consultant User", "role": "consultant", "project_id": None},
-            {"id": "3", "email": "customer@acme.com", "full_name": "Customer User", "role": "customer", "project_id": "proj-123"},
+            {"id": "1", "email": "admin@xlr8.com", "full_name": "Admin User", "role": "admin", "customer_id": None},
+            {"id": "2", "email": "consultant@xlr8.com", "full_name": "Consultant User", "role": "consultant", "customer_id": None},
+            {"id": "3", "email": "customer@acme.com", "full_name": "Customer User", "role": "customer", "customer_id": "proj-123"},
         ]
     
     async with httpx.AsyncClient(timeout=30.0) as client:
@@ -164,7 +164,7 @@ async def create_user(
         new_user = response.json()
         user_id = new_user.get("id")
         
-        # Update profile with role, phone, mfa_method and project_id
+        # Update profile with role, phone, mfa_method and customer_id
         await client.patch(
             f"{SUPABASE_URL}/rest/v1/profiles?id=eq.{user_id}",
             headers={
@@ -174,7 +174,7 @@ async def create_user(
             },
             json={
                 "role": data.role,
-                "project_id": data.project_id,
+                "customer_id": data.customer_id,
                 "full_name": data.full_name,
                 "phone": data.phone,
                 "mfa_method": data.mfa_method,
@@ -209,8 +209,8 @@ async def update_user(
         if data.role not in ["admin", "consultant", "customer"]:
             raise HTTPException(400, "Invalid role")
         update_data["role"] = data.role
-    if data.project_id is not None:
-        update_data["project_id"] = data.project_id
+    if data.customer_id is not None:
+        update_data["customer_id"] = data.customer_id
     if data.mfa_method is not None:
         if data.mfa_method not in ["totp", "sms"]:
             raise HTTPException(400, "Invalid MFA method")

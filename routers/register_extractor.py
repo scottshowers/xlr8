@@ -178,7 +178,7 @@ def _safe_decimal(value) -> Optional[float]:
 
 
 def save_extraction_job(
-    project_id: Optional[str], 
+    customer_id: Optional[str], 
     source_file: str,
     employee_count: int,
     confidence: float,
@@ -208,7 +208,7 @@ def save_extraction_job(
     try:
         job_data = {
             'customer_id': customer_id,
-            'project_id': project_id,
+            'customer_id': customer_id,
             'source_file': source_file,
             'employee_count': employee_count,
             'confidence': confidence,
@@ -235,7 +235,7 @@ def save_extraction_job(
         return None
 
 
-def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
+def get_extractions(customer_id: Optional[str] = None, limit: int = 50) -> List[Dict]:
     """Get extraction history from Supabase."""
     supabase = get_supabase()
     if not supabase:
@@ -243,8 +243,8 @@ def get_extractions(project_id: Optional[str] = None, limit: int = 50) -> List[D
     
     try:
         query = supabase.table('extraction_jobs').select('*').order('created_at', desc=True).limit(limit)
-        if project_id:
-            query = query.eq('project_id', project_id)
+        if customer_id:
+            query = query.eq('customer_id', customer_id)
         response = query.execute()
         return response.data or []
     except Exception as e:
@@ -376,7 +376,7 @@ def delete_extraction(extract_id: str) -> bool:
 # =============================================================================
 
 def store_to_duckdb(
-    project_id: str,
+    customer_id: str,
     source_file: str,
     employees: List[Dict],
     vendor_type: str = "unknown",
@@ -405,19 +405,19 @@ def store_to_duckdb(
         handler = get_structured_handler()
         
         # Look up project name from UUID
-        project_name = project_id  # Default to ID if lookup fails
+        customer_id = customer_id  # Default to ID if lookup fails
         supabase = get_supabase()
-        if supabase and project_id:
+        if supabase and customer_id:
             try:
-                result = supabase.table('projects').select('name').eq('id', project_id).execute()
+                result = supabase.table('projects').select('name').eq('id', customer_id).execute()
                 if result.data and len(result.data) > 0:
-                    project_name = result.data[0].get('name', project_id)
-                    logger.info(f"[REGISTER] Resolved project: {project_id} -> {project_name}")
+                    customer_id = result.data[0].get('name', customer_id)
+                    logger.info(f"[REGISTER] Resolved project: {customer_id} -> {customer_id}")
             except Exception as e:
                 logger.warning(f"[REGISTER] Could not look up project name: {e}")
         
         # Generate table name using project NAME (not UUID)
-        safe_project = re.sub(r'[^a-zA-Z0-9]', '_', project_name.lower())
+        safe_project = re.sub(r'[^a-zA-Z0-9]', '_', customer_id.lower())
         safe_file = re.sub(r'[^a-zA-Z0-9]', '_', source_file.lower().replace('.pdf', ''))
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         table_name = f"{safe_project}__payroll__{safe_file}_{timestamp}"
@@ -486,7 +486,7 @@ def store_to_duckdb(
                 (id, project, file_name, sheet_name, table_name, entity_type, category, columns, row_count, version, is_current)
                 VALUES (nextval('schema_metadata_seq'), ?, ?, 'payroll', ?, 'payroll_register', 'payroll', ?, ?, 1, TRUE)
             """, [
-                project_name,
+                customer_id,
                 source_file,
                 table_name,
                 json.dumps(columns_info),
@@ -502,8 +502,8 @@ def store_to_duckdb(
             try:
                 reg_result = RegistrationService.register_structured(
                     filename=source_file,
-                    project=project_name,
-                    project_id=project_id,
+                    project=customer_id,
+                    customer_id=customer_id,
                     tables_created=[table_name],
                     row_count=len(df),
                     column_count=len(df.columns),
@@ -513,7 +513,7 @@ def store_to_duckdb(
                     classification_confidence=0.95,  # High confidence - we know it's payroll
                     content_domain=['payroll'],
                     metadata={
-                        'project_name': project_name,
+                        'customer_id': customer_id,
                         'vendor_type': vendor_type,
                         'extraction_method': 'register_extractor',
                         'employee_count': len(employees),
@@ -545,13 +545,13 @@ def store_to_duckdb(
             }]
             
             # Queue it - don't wait
-            queue_inference_job(handler, f"reg_{table_name[:20]}", project_name, source_file, tables_info)
+            queue_inference_job(handler, f"reg_{table_name[:20]}", customer_id, source_file, tables_info)
             logger.info(f"[REGISTER] Queued profiling for: {table_name}")
         except Exception as prof_err:
             # Fallback to sync profiling if queue not available
             logger.warning(f"[REGISTER] Queue not available, running sync profiling: {prof_err}")
             try:
-                handler.profile_columns_fast(project_name, table_name)
+                handler.profile_columns_fast(customer_id, table_name)
                 logger.info(f"[REGISTER] Profiled table: {table_name}")
             except Exception as e:
                 logger.warning(f"[REGISTER] Profiling failed: {e}")
@@ -559,9 +559,9 @@ def store_to_duckdb(
         # Run relationship detection (SAME as regular upload)
         try:
             from backend.utils.project_intelligence import ProjectIntelligenceService, AnalysisTier
-            intelligence = ProjectIntelligenceService(project_name, handler)
+            intelligence = ProjectIntelligenceService(customer_id, handler)
             intelligence.analyze(tier=AnalysisTier.BASIC)
-            logger.info(f"[REGISTER] Relationship detection complete for: {project_name}")
+            logger.info(f"[REGISTER] Relationship detection complete for: {customer_id}")
         except Exception as intel_err:
             logger.warning(f"[REGISTER] Relationship detection failed: {intel_err}")
         
@@ -659,7 +659,7 @@ class RegisterExtractor:
         use_textract: bool = False, 
         job_id: str = None,
         vendor_type: str = "unknown",
-        project_id: str = None
+        customer_id: str = None
     ) -> Dict:
         """
         Extract employee pay data from PDF.
@@ -734,8 +734,8 @@ class RegisterExtractor:
             
             # Step 5: Store to DuckDB
             duckdb_table = None
-            if employees and project_id:
-                duckdb_table = store_to_duckdb(project_id, filename, employees, vendor_type, job_id)
+            if employees and customer_id:
+                duckdb_table = store_to_duckdb(customer_id, filename, employees, vendor_type, job_id)
             
             result = {
                 "success": len(employees) > 0,
@@ -1613,7 +1613,7 @@ def process_extraction_job(
     file_path: str, 
     max_pages: int,
     use_textract: bool, 
-    project_id: Optional[str],
+    customer_id: Optional[str],
     vendor_type: str = "unknown", 
     customer_id: Optional[str] = None
 ):
@@ -1627,7 +1627,7 @@ def process_extraction_job(
             use_textract=use_textract, 
             job_id=job_id,
             vendor_type=vendor_type,
-            project_id=project_id
+            customer_id=customer_id
         )
         
         for emp in result.get('employees', []):
@@ -1636,7 +1636,7 @@ def process_extraction_job(
         # Save job metadata to Supabase
         if result.get('success'):
             saved = save_extraction_job(
-                project_id=project_id,
+                customer_id=customer_id,
                 source_file=result['source_file'],
                 employee_count=result['employee_count'],
                 confidence=result['confidence'],
@@ -1716,18 +1716,18 @@ async def extract(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     max_pages: int = Form(0),
-    project_id: Optional[str] = Form(None),
+    customer_id: Optional[str] = Form(None),
     use_textract: bool = Form(False),
     async_mode: bool = Form(True)
 ):
     """Alias for /register/upload"""
-    return await upload(background_tasks, file, max_pages, project_id, use_textract, async_mode)
+    return await upload(background_tasks, file, max_pages, customer_id, use_textract, async_mode)
 
 
 @router.get("/register/extracts")
-async def get_extracts_list(project_id: Optional[str] = None, limit: int = 50):
+async def get_extracts_list(customer_id: Optional[str] = None, limit: int = 50):
     """Get extraction history"""
-    extracts = get_extractions(project_id=project_id, limit=limit)
+    extracts = get_extractions(customer_id=customer_id, limit=limit)
     
     return {
         "extracts": [
@@ -1822,9 +1822,9 @@ async def vacuum_job_status(job_id: str):
     return await get_job_status(job_id)
 
 @router.get("/vacuum/extracts")
-async def vacuum_extracts(project_id: Optional[str] = None, limit: int = 50):
+async def vacuum_extracts(customer_id: Optional[str] = None, limit: int = 50):
     """Backward compatibility for /vacuum/extracts"""
-    return await get_extracts_list(project_id, limit)
+    return await get_extracts_list(customer_id, limit)
 
 @router.get("/vacuum/extract/{extract_id}")
 async def vacuum_extract(extract_id: str):

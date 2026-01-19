@@ -430,7 +430,7 @@ def apply_transforms(data: List[Dict], columns: List[str], transforms: List[Tran
 # SCHEMA HELPER (mirrors unified_chat pattern)
 # =============================================================================
 
-def _build_bi_schema(handler, project: str) -> Dict[str, Any]:
+def _build_bi_schema(handler, customer_id: str) -> Dict[str, Any]:
     """
     Get schema for BI queries - compatible with IntelligenceEngine.
     Returns {'tables': [...], 'filter_candidates': {...}}
@@ -875,7 +875,7 @@ def _get_available_transforms(columns: List[str], data: List[Dict], schema: Dict
 # =============================================================================
 
 @router.get("/bi/suggestions/{project}")
-async def get_suggestions(project: str):
+async def get_suggestions(customer_id: str):
     """
     Get smart query suggestions for a project.
     
@@ -1040,7 +1040,7 @@ async def get_suggestions(project: str):
 # =============================================================================
 
 @router.get("/bi/schema/{project}")
-async def get_bi_schema(project: str):
+async def get_bi_schema(customer_id: str):
     """Get schema info for BI builder."""
     if not STRUCTURED_AVAILABLE:
         raise HTTPException(503, "Not available")
@@ -1312,7 +1312,7 @@ async def export_bi_data(request: BIExportRequest):
 # =============================================================================
 
 @router.get("/bi/saved/{project}")
-async def get_saved_queries(project: str):
+async def get_saved_queries(customer_id: str):
     """Get saved queries for a project."""
     if not SUPABASE_AVAILABLE:
         return {"queries": []}

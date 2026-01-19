@@ -65,7 +65,7 @@ class TaskCompleteRequest(BaseModel):
 # HELPER - Get Intelligence Service
 # =============================================================================
 
-def _get_intelligence_service(project: str):
+def _get_intelligence_service(customer_id: str):
     """Get or create intelligence service for a project."""
     try:
         from backend.utils.project_intelligence import ProjectIntelligenceService, get_project_intelligence
@@ -87,8 +87,8 @@ def _get_intelligence_service(project: str):
 # ENDPOINTS
 # =============================================================================
 
-@router.get("/{project}/summary")
-async def get_summary(project: str):
+@router.get("/{customer_id}/summary")
+async def get_summary(customer_id: str):
     """
     Get intelligence summary for a project.
     
@@ -141,7 +141,7 @@ async def get_summary(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/findings")
+@router.get("/{customer_id}/findings")
 async def get_findings(
     project: str,
     severity: Optional[str] = Query(None, description="Filter by severity: critical, warning, info"),
@@ -173,7 +173,7 @@ async def get_findings(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/tasks")
+@router.get("/{customer_id}/tasks")
 async def get_tasks(
     project: str,
     status: Optional[str] = Query(None, description="Filter by status: pending, in_progress, complete, skipped"),
@@ -206,7 +206,7 @@ async def get_tasks(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/evidence/{finding_id}")
+@router.get("/{customer_id}/evidence/{finding_id}")
 async def get_evidence(project: str, finding_id: str):
     """
     Get full evidence package for a finding.
@@ -237,7 +237,7 @@ async def get_evidence(project: str, finding_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/analyze")
+@router.post("/{customer_id}/analyze")
 async def analyze_project(project: str, request: AnalyzeRequest = None):
     """
     Trigger analysis for a project.
@@ -283,9 +283,9 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
             from utils.database.models import LineageModel, ProjectModel
             import uuid
             
-            # Get project_id
+            # Get customer_id
             project_record = ProjectModel.get_by_name(project)
-            project_id = project_record.get('id') if project_record else None
+            customer_id = project_record.get('id') if project_record else None
             
             # Generate analysis ID
             analysis_id = str(uuid.uuid4())[:8]
@@ -305,7 +305,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
                     target_type=LineageModel.NODE_ANALYSIS,
                     target_id=f"analysis_{analysis_id}",
                     relationship=LineageModel.REL_ANALYZED,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     metadata={'tiers': [t.value for t in tiers], 'project': project}
                 )
             
@@ -321,7 +321,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
                         target_type=LineageModel.NODE_FINDING,
                         target_id=finding_id,
                         relationship=LineageModel.REL_GENERATED,
-                        project_id=project_id,
+                        customer_id=customer_id,
                         metadata={
                             'severity': getattr(finding, 'severity', {}).value if hasattr(getattr(finding, 'severity', None), 'value') else 'unknown',
                             'category': getattr(finding, 'category', 'unknown')
@@ -348,7 +348,7 @@ async def analyze_project(project: str, request: AnalyzeRequest = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/lookups")
+@router.get("/{customer_id}/lookups")
 async def get_lookups(
     project: str,
     lookup_type: Optional[str] = Query(None, description="Filter by type: location, department, status, etc.")
@@ -378,7 +378,7 @@ async def get_lookups(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/metrics")
+@router.get("/{customer_id}/metrics")
 async def get_organizational_metrics(
     project: str,
     category: Optional[str] = Query(None, description="Filter by category: workforce, compensation, benefits, demographics, configuration, dimensional")
@@ -420,8 +420,8 @@ async def get_organizational_metrics(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/relationships")
-async def get_relationships(project: str):
+@router.get("/{customer_id}/relationships")
+async def get_relationships(customer_id: str):
     """
     Get detected table relationships.
     
@@ -443,7 +443,7 @@ async def get_relationships(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/debug-columns")
+@router.get("/{customer_id}/debug-columns")
 async def debug_columns(project: str, table: str = None):
     """
     Debug endpoint: Show column names from profile.
@@ -495,8 +495,8 @@ async def debug_columns(project: str, table: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/detect-relationships")
-async def run_relationship_detection(project: str):
+@router.get("/{customer_id}/detect-relationships")
+async def run_relationship_detection(customer_id: str):
     """
     Debug endpoint: Force run relationship detection.
     
@@ -542,7 +542,7 @@ async def run_relationship_detection(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/test-multi-hop")
+@router.get("/{customer_id}/test-multi-hop")
 async def test_multi_hop_detection(project: str, query: str = "manager's department"):
     """
     Debug endpoint: Test multi-hop detection.
@@ -585,7 +585,7 @@ async def test_multi_hop_detection(project: str, query: str = "manager's departm
     return result
 
 
-@router.get("/{project}/run-multi-hop")
+@router.get("/{customer_id}/run-multi-hop")
 async def run_multi_hop_query(project: str, query: str = "manager's department"):
     """
     Debug endpoint: Actually run a multi-hop query and see what happens.
@@ -708,7 +708,7 @@ LIMIT 100'''
     return result
 
 
-@router.post("/{project}/stuck")
+@router.post("/{customer_id}/stuck")
 async def help_stuck(project: str, request: StuckRequest):
     """
     The "I'M STUCK" button.
@@ -732,7 +732,7 @@ async def help_stuck(project: str, request: StuckRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/work-trail")
+@router.get("/{customer_id}/work-trail")
 async def get_work_trail(
     project: str,
     limit: int = Query(50, description="Number of entries to return")
@@ -757,7 +757,7 @@ async def get_work_trail(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/task/{task_id}/complete")
+@router.post("/{customer_id}/task/{task_id}/complete")
 async def complete_task(project: str, task_id: str, request: TaskCompleteRequest = None):
     """
     Mark a task as complete.
@@ -804,7 +804,7 @@ async def complete_task(project: str, task_id: str, request: TaskCompleteRequest
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.post("/{project}/collision-check")
+@router.post("/{customer_id}/collision-check")
 async def check_collision(project: str, request: CollisionCheckRequest):
     """
     Check what will break if an action is taken.
@@ -841,7 +841,7 @@ async def check_collision(project: str, request: CollisionCheckRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/decode/{column}/{value}")
+@router.get("/{customer_id}/decode/{column}/{value}")
 async def decode_value(project: str, column: str, value: str):
     """
     Decode a coded value using detected lookups.
@@ -871,8 +871,8 @@ async def decode_value(project: str, column: str, value: str):
 # DIAGNOSTIC ENDPOINTS
 # =============================================================================
 
-@router.get("/{project}/diag/numeric-columns")
-async def diag_numeric_columns(project: str):
+@router.get("/{customer_id}/diag/numeric-columns")
+async def diag_numeric_columns(customer_id: str):
     """
     Diagnostic: Show all numeric columns found for a project.
     
@@ -950,7 +950,7 @@ async def diag_numeric_columns(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-numeric")
+@router.get("/{customer_id}/diag/test-numeric")
 async def diag_test_numeric(project: str, q: str = "salary above 75000"):
     """
     Diagnostic: Test numeric expression resolution directly.
@@ -989,8 +989,8 @@ async def diag_test_numeric(project: str, q: str = "salary above 75000"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/date-columns")
-async def diag_date_columns(project: str):
+@router.get("/{customer_id}/diag/date-columns")
+async def diag_date_columns(customer_id: str):
     """
     Diagnostic: Show all date columns for Evolution 4.
     """
@@ -1043,7 +1043,7 @@ async def diag_date_columns(project: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-date")
+@router.get("/{customer_id}/diag/test-date")
 async def diag_test_date(project: str, q: str = "last year"):
     """
     Diagnostic: Test date expression resolution directly.
@@ -1084,7 +1084,7 @@ async def diag_test_date(project: str, q: str = "last year"):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@router.get("/{project}/diag/test-deterministic")
+@router.get("/{customer_id}/diag/test-deterministic")
 async def diag_test_deterministic(project: str, q: str = "employees hired last year"):
     """
     Diagnostic: Test full deterministic path for a question.
@@ -1225,7 +1225,7 @@ async def diag_test_deterministic(project: str, q: str = "employees hired last y
         }
 
 
-@router.get("/{project}/diag/test-aggregation")
+@router.get("/{customer_id}/diag/test-aggregation")
 async def diag_test_aggregation(project: str, q: str = "average salary"):
     """
     Diagnostic: Test aggregation intent detection.
@@ -1294,7 +1294,7 @@ async def diag_test_aggregation(project: str, q: str = "average salary"):
         }
 
 
-@router.get("/{project}/diag/test-agg-target")
+@router.get("/{customer_id}/diag/test-agg-target")
 async def diag_test_agg_target(project: str, term: str = "salary", domain: str = None):
     """
     Diagnostic: Test aggregation target resolution.

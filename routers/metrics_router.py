@@ -145,15 +145,15 @@ async def get_metrics_health():
 # =============================================================================
 
 @router.get("/costs")
-async def get_cost_summary(days: int = 30, project_id: Optional[str] = None):
+async def get_cost_summary(days: int = 30, customer_id: Optional[str] = None):
     """Get cost summary for System Monitor dashboard."""
     try:
         from backend.utils.cost_tracker import get_cost_summary
-        return get_cost_summary(days=days, project_id=project_id)
+        return get_cost_summary(days=days, customer_id=customer_id)
     except ImportError:
         try:
             from utils.cost_tracker import get_cost_summary
-            return get_cost_summary(days=days, project_id=project_id)
+            return get_cost_summary(days=days, customer_id=customer_id)
         except ImportError:
             return {"error": "Cost tracker not available", "total_cost": 0}
     except Exception as e:

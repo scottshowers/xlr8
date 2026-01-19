@@ -362,22 +362,22 @@ async def smart_upload(
     # =================================================================
     # RESOLVE PROJECT ID
     # =================================================================
-    project_id = None
+    customer_id = None
     if MODELS_AVAILABLE:
         try:
             global_names = ['global', '__global__', 'global/universal', 'reference library', '__standards__']
             if project.lower() in global_names:
-                project_id = None
+                customer_id = None
             else:
                 uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
                 if re.match(uuid_pattern, project.lower()):
                     project_record = ProjectModel.get_by_id(project)
                     if project_record:
-                        project_id = project
+                        customer_id = project
                 else:
                     project_record = ProjectModel.get_by_name(project)
                     if project_record:
-                        project_id = project_record.get('id')
+                        customer_id = project_record.get('id')
         except Exception as e:
             logger.warning(f"[SMART-ROUTER] Could not resolve project: {e}")
     
@@ -397,7 +397,7 @@ async def smart_upload(
                 background_tasks=background_tasks,
                 file_path=file_path,
                 filename=filename,
-                project_id=project_id,
+                customer_id=customer_id,
                 max_pages=max_pages,
                 use_textract=use_textract,
                 vendor_type=vendor_type,
@@ -429,7 +429,7 @@ async def smart_upload(
                 file_hash=file_hash,
                 extension=extension,
                 project=project,
-                project_id=project_id,
+                customer_id=customer_id,
                 functional_area=functional_area,
                 truth_type=truth_type,
                 content_domain=content_domain,
@@ -449,7 +449,7 @@ async def smart_upload(
                 file_hash=file_hash,
                 extension=extension,
                 project=project,
-                project_id=project_id,
+                customer_id=customer_id,
                 functional_area=functional_area,
                 truth_type=truth_type,
                 content_domain=content_domain,
@@ -478,7 +478,7 @@ async def smart_upload(
                 filename=filename,
                 duration_ms=duration_ms,
                 success=False,
-                project_id=project_id,
+                customer_id=customer_id,
                 file_size_bytes=file_size,
                 error_message=error_msg
             )
@@ -493,7 +493,7 @@ async def smart_upload(
             filename=filename,
             duration_ms=duration_ms,
             success=success,
-            project_id=project_id,
+            customer_id=customer_id,
             file_size_bytes=file_size,
             rows_processed=result.get('total_rows') or result.get('row_count'),
             chunks_created=result.get('chunks_added'),
@@ -511,7 +511,7 @@ async def _route_to_register(
     background_tasks: BackgroundTasks,
     file_path: str,
     filename: str,
-    project_id: Optional[str],
+    customer_id: Optional[str],
     max_pages: int,
     use_textract: bool,
     vendor_type: str,
@@ -539,7 +539,7 @@ async def _route_to_register(
             job_queue.enqueue(
                 job_id,
                 process_extraction_job,
-                args=(job_id, file_path, max_pages, use_textract, project_id, vendor_type, None),
+                args=(job_id, file_path, max_pages, use_textract, customer_id, vendor_type, None),
                 priority=10
             )
             queue_msg = "queued"
@@ -547,7 +547,7 @@ async def _route_to_register(
             # Fallback to concurrent background tasks
             background_tasks.add_task(
                 process_extraction_job,
-                job_id, file_path, max_pages, use_textract, project_id,
+                job_id, file_path, max_pages, use_textract, customer_id,
                 vendor_type, None  # customer_id
             )
             queue_msg = "processing"
@@ -561,7 +561,7 @@ async def _route_to_register(
         }
     else:
         try:
-            result = ext.extract(file_path, max_pages=max_pages, use_textract=use_textract, project_id=project_id)
+            result = ext.extract(file_path, max_pages=max_pages, use_textract=use_textract, customer_id=customer_id)
             result['route'] = 'register'
             return result
         finally:
@@ -845,7 +845,7 @@ async def _route_to_structured(
     file_hash: str,
     extension: str,
     project: str,
-    project_id: Optional[str],
+    customer_id: Optional[str],
     functional_area: Optional[str],
     truth_type: Optional[str],
     content_domain: Optional[str],
@@ -866,11 +866,11 @@ async def _route_to_structured(
         # Create job and process in background
         job_result = ProcessingJobModel.create(
             job_type='upload',
-            project_id=project_id,
+            customer_id=customer_id,
             input_data={
                 'filename': filename,
                 'functional_area': functional_area,
-                'project_name': project,
+                'customer_id': project,
                 'file_hash': file_hash,
                 'route': 'structured'
             }
@@ -891,7 +891,7 @@ async def _route_to_structured(
             job_queue.enqueue(
                 job_id,
                 process_file_background,
-                args=(job_id, file_path, filename, project, project_id,
+                args=(job_id, file_path, filename, project, customer_id,
                       functional_area, file_size, truth_type, content_domain,
                       file_hash, uploaded_by_id, uploaded_by_email),
                 priority=10
@@ -901,7 +901,7 @@ async def _route_to_structured(
             # Fallback to concurrent background tasks
             background_tasks.add_task(
                 process_file_background,
-                job_id, file_path, filename, project, project_id,
+                job_id, file_path, filename, project, customer_id,
                 functional_area, file_size, truth_type, content_domain,
                 file_hash, uploaded_by_id, uploaded_by_email
             )
@@ -942,7 +942,7 @@ async def _route_to_semantic(
     file_hash: str,
     extension: str,
     project: str,
-    project_id: Optional[str],
+    customer_id: Optional[str],
     functional_area: Optional[str],
     truth_type: Optional[str],
     content_domain: Optional[str],
@@ -964,11 +964,11 @@ async def _route_to_semantic(
         # Create job and process in background
         job_result = ProcessingJobModel.create(
             job_type='upload',
-            project_id=project_id,
+            customer_id=customer_id,
             input_data={
                 'filename': filename,
                 'functional_area': functional_area,
-                'project_name': project,
+                'customer_id': project,
                 'file_hash': file_hash,
                 'route': 'semantic'
             }
@@ -987,7 +987,7 @@ async def _route_to_semantic(
             job_queue.enqueue(
                 job_id,
                 process_file_background,
-                args=(job_id, file_path, filename, project, project_id,
+                args=(job_id, file_path, filename, project, customer_id,
                       functional_area, file_size, truth_type, content_domain,
                       file_hash, uploaded_by_id, uploaded_by_email, system),
                 priority=10
@@ -996,7 +996,7 @@ async def _route_to_semantic(
             # Fallback to concurrent background tasks
             background_tasks.add_task(
                 process_file_background,
-                job_id, file_path, filename, project, project_id,
+                job_id, file_path, filename, project, customer_id,
                 functional_area, file_size, truth_type, content_domain,
                 file_hash, uploaded_by_id, uploaded_by_email, system
             )
@@ -1024,7 +1024,7 @@ async def _route_to_semantic(
                 'source': filename,
                 'filename': filename,
                 'project': project,
-                'project_id': project_id,
+                'customer_id': customer_id,
                 'truth_type': truth_type or 'intent',
                 'system': system,  # NEW: HCM/ERP system tag
                 'file_type': extension
@@ -1042,7 +1042,7 @@ async def _route_to_semantic(
                 from backend.utils.upload_enrichment import enrich_semantic_upload
                 enrichment = enrich_semantic_upload(
                     project=project,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     filename=filename,
                     text_content=text,
                     chunks_added=chunks_added,
@@ -1128,7 +1128,7 @@ async def register_upload_alias(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     max_pages: int = Form(0),
-    project_id: Optional[str] = Form(None),
+    customer_id: Optional[str] = Form(None),
     use_textract: bool = Form(False),
     async_mode: bool = Form(True),
     vendor_type: str = Form("unknown")
@@ -1143,7 +1143,7 @@ async def register_upload_alias(
         request=request,
         background_tasks=background_tasks,
         file=file,
-        project=project_id or "unknown",
+        project=customer_id or "unknown",
         processing_type="register",
         max_pages=max_pages,
         use_textract=use_textract,
@@ -1158,7 +1158,7 @@ async def vacuum_upload_alias(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     max_pages: int = Form(0),
-    project_id: Optional[str] = Form(None),
+    customer_id: Optional[str] = Form(None),
     use_textract: bool = Form(False),
     async_mode: bool = Form(True),
     vendor_type: str = Form("unknown")
@@ -1173,7 +1173,7 @@ async def vacuum_upload_alias(
         request=request,
         background_tasks=background_tasks,
         file=file,
-        project=project_id or "unknown",
+        project=customer_id or "unknown",
         processing_type="register",
         max_pages=max_pages,
         use_textract=use_textract,
