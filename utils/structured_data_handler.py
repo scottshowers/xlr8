@@ -1502,14 +1502,26 @@ class StructuredDataHandler:
             logger.warning(f"Vertical table detection failed for '{sheet_name}': {e}")
             return []
     
-    def _generate_table_name(self, project: str, file_name: str, sheet_name: str) -> str:
-        """Generate unique internal table name for DuckDB storage"""
-        clean_project = self._sanitize_name(project)[:20]  # Limit project
-        clean_file = self._sanitize_name(file_name.split('.')[0])[:40]  # Limit file
-        clean_sheet = self._sanitize_name(sheet_name)  # Keep full sheet name - it's what makes tables unique!
+    def _generate_table_name(self, customer_id: str, file_name: str, sheet_name: str) -> str:
+        """Generate unique internal table name for DuckDB storage.
         
-        # DuckDB handles long names fine - don't truncate the sheet name
-        table_name = f"{clean_project}_{clean_file}_{clean_sheet}"
+        Args:
+            customer_id: Customer UUID (e.g., "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
+            file_name: Original filename
+            sheet_name: Sheet name (for Excel) or 'data' (for CSV)
+            
+        Returns:
+            Table name like "a1b2c3d4_employees_sheet1"
+            
+        Note: Uses first 8 chars of UUID (no hyphens) as the customer prefix.
+        This provides 16^8 = ~4 billion unique combinations.
+        """
+        # Extract first 8 chars of UUID, removing hyphens
+        clean_customer = customer_id.replace('-', '')[:8].lower() if customer_id else 'unknown'
+        clean_file = self._sanitize_name(file_name.split('.')[0])[:40]  # Limit file
+        clean_sheet = self._sanitize_name(sheet_name)  # Keep full sheet name
+        
+        table_name = f"{clean_customer}_{clean_file}_{clean_sheet}"
         return table_name
     
     def _generate_display_name(self, file_name: str, sheet_name: str = None) -> str:
