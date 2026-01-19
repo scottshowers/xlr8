@@ -33,7 +33,7 @@ class ProjectModel:
     
     IMPORTANT: Always use project.id, never project.name or project.code
     
-    Table: 'projects' in Supabase
+    Table: 'customers' in Supabase
     """
     
     @staticmethod
@@ -63,7 +63,7 @@ class ProjectModel:
                 }
             }
             
-            response = supabase.table('projects').insert(data).execute()
+            response = supabase.table('customers').insert(data).execute()
             return response.data[0] if response.data else None
         
         except Exception as e:
@@ -78,7 +78,7 @@ class ProjectModel:
             return []
         
         try:
-            query = supabase.table('projects').select('*').order('created_at', desc=True)
+            query = supabase.table('customers').select('*').order('created_at', desc=True)
             if status:
                 query = query.eq('status', status)
             response = query.execute()
@@ -95,7 +95,7 @@ class ProjectModel:
             return None
         
         try:
-            response = supabase.table('projects').select('*').eq('id', project_id).execute()
+            response = supabase.table('customers').select('*').eq('id', project_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"getting project: {e}")
@@ -109,7 +109,7 @@ class ProjectModel:
             return None
         
         try:
-            response = supabase.table('projects').select('*').ilike('name', name).execute()
+            response = supabase.table('customers').select('*').ilike('name', name).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"getting project by name: {e}")
@@ -124,7 +124,7 @@ class ProjectModel:
         
         try:
             kwargs['updated_at'] = datetime.utcnow().isoformat()
-            response = supabase.table('projects').update(kwargs).eq('id', project_id).execute()
+            response = supabase.table('customers').update(kwargs).eq('id', project_id).execute()
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"updating project: {e}")
@@ -138,7 +138,7 @@ class ProjectModel:
             return False
         
         try:
-            supabase.table('projects').update({'status': 'deleted'}).eq('id', project_id).execute()
+            supabase.table('customers').update({'status': 'deleted'}).eq('id', project_id).execute()
             return True
         except Exception as e:
             logger.error(f"deleting project: {e}")

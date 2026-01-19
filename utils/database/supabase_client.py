@@ -59,12 +59,12 @@ class SupabaseClient:
             }
         
         try:
-            response = client.table('projects').select('id').limit(1).execute()
+            response = client.table('customers').select('id').limit(1).execute()
             
             return {
                 'connected': True,
                 'message': 'Connected',
-                'tables': ['projects', 'documents', 'chat_history', 'user_preferences']
+                'tables': ['customers', 'documents', 'chat_history', 'user_preferences']
             }
         except Exception as e:
             return {
