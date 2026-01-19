@@ -137,16 +137,15 @@ export function UploadProvider({ children }) {
   const addUpload = useCallback((file, project, projectName, options = {}) => {
     const id = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    const projName = projectName || project?.name || 'Unknown';
-    const projCode = project?.code || projName;  // Use code for DuckDB, fall back to name
-    const projId = project?.id || null;
+    // Use customer ID (UUID) for all operations
+    const customerId = project?.id || null;
+    const customerName = projectName || project?.name || 'Unknown';
     
     const uploadEntry = {
       id,
       filename: file.name,
-      projectId: projId,
-      projectName: projName,
-      projectCode: projCode,
+      projectId: customerId,  // Store customer ID
+      projectName: customerName,  // Display name only
       progress: 0,
       status: 'uploading',
       message: STAGE_MESSAGES.uploading,
@@ -159,10 +158,10 @@ export function UploadProvider({ children }) {
 
     const formData = new FormData();
     formData.append('file', file);
-    // Use project CODE for DuckDB term index, not display name
-    formData.append('project', projCode);
-    if (projId) {
-      formData.append('project_id', projId);
+    // CRITICAL: Use customer ID (UUID) for all data operations
+    formData.append('project', customerId || '__UNKNOWN__');
+    if (customerId) {
+      formData.append('project_id', customerId);
     }
     
     // Track who uploaded the file
