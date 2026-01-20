@@ -494,10 +494,14 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
             # =====================================================
             table_index = 0
             for table_info in available_tables:
+                # Handle different response formats from code-tables endpoint
                 if isinstance(table_info, dict):
-                    table_name = table_info.get('name') or table_info.get('tableName') or str(table_info)
+                    # Format: {'codeTable': 'GENDER', 'url': 'https://...'}
+                    table_name = table_info.get('codeTable') or table_info.get('name') or table_info.get('tableName')
+                    table_url = table_info.get('url')
                 else:
                     table_name = str(table_info)
+                    table_url = None
                 
                 if not table_name or table_name == 'None':
                     continue
@@ -507,7 +511,11 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 job['tables_processed'] = table_index
                 logger.info(f"[UKG-SYNC] [{job_id}] [{table_index}/{len(available_tables)}] Pulling {table_name}...")
                 
-                url = f"https://{hostname}/configuration/v1/{table_name}"
+                # Use the provided URL if available, otherwise construct it
+                if table_url:
+                    url = table_url
+                else:
+                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
