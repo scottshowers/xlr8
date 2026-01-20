@@ -150,6 +150,10 @@ DOMAIN_INFERENCE_AVAILABLE = True
 from utils.database.supabase_client import get_supabase
 SUPABASE_AVAILABLE = True
 
+# CustomerResolver - Single source of truth for customer identification
+from backend.utils.customer_resolver import CustomerResolver
+CUSTOMER_RESOLVER_AVAILABLE = True
+
 # Metrics Service (for query tracking)
 from backend.utils.metrics_service import MetricsService
 METRICS_AVAILABLE = True
@@ -228,7 +232,8 @@ class FeedbackRequest(BaseModel):
 class ResetPreferencesRequest(BaseModel):
     """Request to reset user preferences."""
     session_id: Optional[str] = None
-    project: Optional[str] = None
+    customer_id: Optional[str] = None  # UUID - primary identifier
+    project: Optional[str] = None  # Deprecated - use customer_id
     reset_type: str = "session"  # "session" or "learned"
 
 
@@ -776,37 +781,51 @@ async def unified_chat(request: UnifiedChatRequest):
     """
     query_start_time = time.time()  # For metrics tracking
     
-    # Use customer_id as fallback for project (backward compatibility)
-    project = request.project or request.customer_id
+    # Use customer_id as primary identifier (backward compatible with project name)
+    identifier = request.customer_id or request.project
     message = request.message
+    
+    # Resolve customer using CustomerResolver (handles UUID, name, or code)
+    customer_id = None
+    customer_name = None  # For display/logging only
+    project_code = None  # The code used in DuckDB term index
+    if identifier and CUSTOMER_RESOLVER_AVAILABLE:
+        try:
+            resolver = CustomerResolver()
+            customer = resolver.resolve(identifier)
+            if customer:
+                customer_id = customer.get('id')
+                customer_name = customer.get('name')
+                project_code = customer.get('code')
+                logger.info(f"[UNIFIED] CustomerResolver resolved '{identifier}' → id={customer_id}, name={customer_name}")
+        except Exception as e:
+            logger.warning(f"[UNIFIED] CustomerResolver failed: {e}")
+    
+    # For backward compatibility, fall back to identifier as project name
+    project = customer_name or identifier
     session_id, session = get_or_create_session(request.session_id, project)
     
     logger.warning(f"[UNIFIED] ===== NEW REQUEST =====")
     logger.warning(f"[UNIFIED] Message: {message[:100]}...")
-    logger.warning(f"[UNIFIED] Project: {project}, Session: {session_id}")
+    logger.warning(f"[UNIFIED] Customer ID: {customer_id}, Project: {project}, Session: {session_id}")
     
     # Initialize services
     redactor = ReversibleRedactor()
     citation_builder = CitationBuilder()
     
     try:
-        # Get customer_id (UUID) and project_code from project name for DuckDB/RAG operations
-        customer_id = None
-        project_code = None  # The code used in DuckDB term index
-        product_id = None  # Phase 5F: Multi-product support
-        if project and SUPABASE_AVAILABLE:
+        # Phase 5F: Multi-product support - get product_id from customer metadata
+        product_id = None
+        if customer_id and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
-                result = supabase.table('customers').select('id, code, metadata').eq('name', project).limit(1).execute()
+                result = supabase.table('customers').select('metadata').eq('id', customer_id).limit(1).execute()
                 if result.data:
-                    customer_id = result.data[0].get('id')
-                    project_code = result.data[0].get('code')  # Get the project code for DuckDB
-                    # Phase 5F: Extract product from metadata
                     metadata = result.data[0].get('metadata', {}) or {}
                     product_id = metadata.get('product')
-                    logger.info(f"[UNIFIED] Resolved customer_id: {customer_id}, project_code: {project_code}, product: {product_id}")
+                    logger.info(f"[UNIFIED] Product ID: {product_id}")
             except Exception as e:
-                logger.warning(f"[UNIFIED] Could not resolve customer_id: {e}")
+                logger.warning(f"[UNIFIED] Could not get product_id: {e}")
         
         # Use project_code for DuckDB operations if available, otherwise fall back to project name
         project_for_duckdb = project_code or project
