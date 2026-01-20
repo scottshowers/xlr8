@@ -422,6 +422,66 @@ async def compute_context_graph(customer_id: str):
         import traceback
         logger.error(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data-model/detect-fk/{customer_id}")
+async def detect_foreign_keys_endpoint(customer_id: str, apply: bool = False):
+    """
+    Detect FK relationships using ACTUAL DATA, not fuzzy name matching.
+    
+    This is the NEW, CORRECT approach:
+    1. Find columns with same name in reality + config tables
+    2. Verify with actual data: are reality values a subset of config values?
+    3. Return real metrics (coverage_pct, is_subset, cardinalities)
+    
+    Args:
+        customer_id: Customer/project identifier
+        apply: If True, update _column_mappings with verified FKs
+        
+    Returns:
+        Detailed FK detection report with all relationships found
+    """
+    try:
+        try:
+            from utils.structured_data_handler import get_structured_handler
+            from backend.utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+            from backend.utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
+        
+        handler = get_structured_handler()
+        
+        # Run FK detection
+        fk_results = detect_foreign_keys(handler.conn, customer_id)
+        
+        # Generate human-readable report
+        report = generate_fk_report(fk_results)
+        
+        # Optionally apply to column mappings
+        update_stats = None
+        if apply:
+            update_stats = update_column_mappings(handler.conn, customer_id, fk_results)
+        
+        return {
+            "success": True,
+            "customer_id": customer_id,
+            "applied": apply,
+            "stats": fk_results.get('stats', {}),
+            "fk_relationships": fk_results.get('fk_relationships', []),
+            "pk_columns": fk_results.get('pk_columns', []),
+            "update_stats": update_stats,
+            "report": report,
+            "errors": fk_results.get('errors', [])
+        }
+        
+    except Exception as e:
+        logger.error(f"Failed to detect FKs: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/data-model/relationships/{customer_id}/confirm")
 async def confirm_relationship(customer_id: str, confirmation: RelationshipConfirmation):
     """
     Confirm or reject a suggested relationship.
@@ -705,6 +765,8 @@ async def get_project_tables(customer_id: str) -> List[Dict]:
                     project_clean.lower().replace(' ', '_').replace('-', '_'),
                     # Handle UUID-based customer IDs: extract first 8 chars without hyphens
                     project_clean.replace('-', '')[:8].lower() if '-' in project_clean else None,
+                    # Also match full UUID with hyphens (for API-synced tables)
+                    project_clean.lower() + '_api_' if '-' in project_clean else None,
                 ]
                 project_prefixes = [p for p in project_prefixes if p]
                 
