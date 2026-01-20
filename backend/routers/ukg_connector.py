@@ -398,13 +398,13 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
 
 
 async def save_to_duckdb(project_id: str, table_name: str, data: List[Dict]) -> int:
-    """Save data to DuckDB."""
+    """Save data to DuckDB using the existing structured data handler."""
     if not data:
         return 0
         
     try:
-        import duckdb
         import pandas as pd
+        from utils.structured_data_handler import get_structured_handler
         
         # Flatten nested objects if needed
         flat_data = []
@@ -426,14 +426,13 @@ async def save_to_duckdb(project_id: str, table_name: str, data: List[Dict]) -> 
         safe_table = table_name.replace('-', '_').replace(' ', '_').lower()
         full_table_name = f"{project_id}_api_{safe_table}"
         
-        # Connect to project database
-        db_path = f"/data/duckdb/{project_id}.duckdb"
+        # Use the existing structured data handler
+        handler = get_structured_handler()
         
-        conn = duckdb.connect(db_path)
-        conn.execute(f'DROP TABLE IF EXISTS "{full_table_name}"')
-        conn.register("temp_df", df)
-        conn.execute(f'CREATE TABLE "{full_table_name}" AS SELECT * FROM temp_df')
-        conn.close()
+        handler.conn.execute(f'DROP TABLE IF EXISTS "{full_table_name}"')
+        handler.conn.register("temp_df", df)
+        handler.conn.execute(f'CREATE TABLE "{full_table_name}" AS SELECT * FROM temp_df')
+        handler.conn.unregister("temp_df")
         
         logger.info(f"[UKG-SYNC] Saved {len(df)} rows to {full_table_name}")
         return len(df)
