@@ -702,7 +702,7 @@ class LearningHook:
             
             learning = get_learning_module()
             success = learning.record_playbook_feedback(
-                project_id=project_id,
+                customer_id=customer_id,
                 playbook_id=playbook_id,
                 action_id=action_id,
                 finding_text=finding_text,
@@ -1023,7 +1023,7 @@ class DocumentScanner:
                         collection_name="documents",
                         query=primary_query,
                         n_results=40,
-                        project_id=project_id
+                        customer_id=customer_id
                     )
                     if search_results:
                         results.extend(search_results)
@@ -1037,7 +1037,7 @@ class DocumentScanner:
                         collection_name="documents",
                         query=action_description[:100],
                         n_results=20,
-                        project_id=project_id
+                        customer_id=customer_id
                     )
                     if search_results:
                         results.extend(search_results)
@@ -1327,7 +1327,7 @@ class FindingsExtractor:
             
             # Gather Reference (global)
             try:
-                ref_gatherer = ReferenceGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                ref_gatherer = ReferenceGatherer(project_name=project_name, customer_id=customer_id, rag_handler=rag)
                 reference_truths = ref_gatherer.gather(question, analysis)
                 logger.warning(f"[EXTRACT] Gathered {len(reference_truths)} REFERENCE truths")
             except Exception as e:
@@ -1335,7 +1335,7 @@ class FindingsExtractor:
             
             # Gather Regulatory (global)
             try:
-                reg_gatherer = RegulatoryGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                reg_gatherer = RegulatoryGatherer(project_name=project_name, customer_id=customer_id, rag_handler=rag)
                 regulatory_truths = reg_gatherer.gather(question, analysis)
                 logger.warning(f"[EXTRACT] Gathered {len(regulatory_truths)} REGULATORY truths")
             except Exception as e:
@@ -1343,7 +1343,7 @@ class FindingsExtractor:
             
             # Gather Intent (project-scoped)
             try:
-                intent_gatherer = IntentGatherer(project_name=project_name, project_id=project_id, rag_handler=rag)
+                intent_gatherer = IntentGatherer(project_name=project_name, customer_id=customer_id, rag_handler=rag)
                 intent_truths = intent_gatherer.gather(question, analysis)
                 logger.warning(f"[EXTRACT] Gathered {len(intent_truths)} INTENT truths")
             except Exception as e:
@@ -1596,7 +1596,7 @@ class FindingsExtractor:
             try:
                 ref_gatherer = ReferenceGatherer(
                     project_name=project_name,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     rag_handler=rag
                 )
                 ref_truths = ref_gatherer.gather(action_description, analysis)
@@ -1620,7 +1620,7 @@ class FindingsExtractor:
             try:
                 reg_gatherer = RegulatoryGatherer(
                     project_name=project_name,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     rag_handler=rag
                 )
                 reg_truths = reg_gatherer.gather(action_description, analysis)
@@ -1644,7 +1644,7 @@ class FindingsExtractor:
             try:
                 intent_gatherer = IntentGatherer(
                     project_name=project_name,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     rag_handler=rag
                 )
                 intent_truths = intent_gatherer.gather(action_description, analysis)
@@ -1680,7 +1680,7 @@ class FindingsExtractor:
                 
                 config_gatherer = ConfigurationGatherer(
                     project_name=project_name,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     structured_handler=structured_handler,
                     schema=schema,
                     table_selector=table_selector
@@ -1778,7 +1778,7 @@ Empty arrays are FINE. Don't invent problems. Return ONLY valid JSON."""
                 result_text, success = _playbook_orchestrator._call_claude(
                     prompt=prompt,
                     system_prompt=system_prompt,
-                    project_id=project_id,
+                    customer_id=customer_id,
                     operation="playbook_extract"
                 )
                 
@@ -2278,7 +2278,7 @@ class PlaybookEngine:
                         comparison_result = compare(
                             table_a=table_a,
                             table_b=table_b,
-                            project_id=project_id,
+                            customer_id=customer_id,
                             limit=500  # Increased for fuller picture
                         )
                         
@@ -2487,7 +2487,7 @@ Respond with:
                     action=action,
                     content=final_content,
                     inherited_findings=inherited["findings"],
-                    project_id=project_id,
+                    customer_id=customer_id,
                     consultative_prompt=consultative_prompt,
                     intelligence_findings=intelligence_findings
                 )
@@ -2680,7 +2680,7 @@ Respond with:
     ) -> bool:
         """Record user feedback on a finding."""
         return LearningHook.record_feedback(
-            project_id=project_id,
+            customer_id=customer_id,
             playbook_id=self.playbook.playbook_id,
             action_id=action_id,
             finding_text=finding_text,
