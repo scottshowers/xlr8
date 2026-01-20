@@ -640,6 +640,60 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
         
         logger.info(f"[UKG-SYNC] [{job_id}] COMPLETE: {tables_synced} tables, {total_rows} rows, {tables_failed} failures")
         
+        # =====================================================
+        # STEP 4: Post-sync - Register tables and profile columns
+        # This enables the intelligence layer to find and query these tables
+        # =====================================================
+        job['current_step'] = 'Post-processing: registering tables and profiling columns...'
+        logger.info(f"[UKG-SYNC] [{job_id}] Starting post-sync processing...")
+        
+        try:
+            handler = get_structured_handler()
+            
+            # Get all synced table names
+            synced_tables = [r['table'] for r in results if r.get('success') and r.get('rows', 0) > 0]
+            
+            for table_info in results:
+                if not table_info.get('success') or table_info.get('rows', 0) == 0:
+                    continue
+                    
+                table_name = f"{project_id}_api_{table_info['table'].replace('-', '_').replace(' ', '_').lower()}"
+                display_name = f"API: {table_info['table']}"
+                row_count = table_info.get('rows', 0)
+                truth_type = 'configuration' if table_info.get('type') == 'config' else 'reality'
+                
+                try:
+                    # Register in _schema_metadata
+                    handler.conn.execute("""
+                        INSERT INTO _schema_metadata 
+                        (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category)
+                        VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, 'api')
+                        ON CONFLICT (table_name) DO UPDATE SET
+                            row_count = EXCLUDED.row_count,
+                            is_current = TRUE
+                    """, [project_id, display_name, table_name, row_count, display_name, truth_type])
+                    
+                    # Profile columns
+                    handler.profile_columns_fast(project_id, table_name)
+                    
+                except Exception as profile_err:
+                    logger.warning(f"[UKG-SYNC] Could not profile {table_name}: {profile_err}")
+            
+            # Recalc term index
+            try:
+                from backend.utils.intelligence.term_index import recalc_term_index
+                recalc_term_index(handler.conn, project_id)
+                logger.info(f"[UKG-SYNC] [{job_id}] Term index recalculated")
+            except Exception as term_err:
+                logger.warning(f"[UKG-SYNC] Could not recalc term index: {term_err}")
+            
+            logger.info(f"[UKG-SYNC] [{job_id}] Post-sync processing complete")
+            job['current_step'] = 'Complete (with profiling)!'
+            
+        except Exception as post_err:
+            logger.error(f"[UKG-SYNC] [{job_id}] Post-sync processing failed: {post_err}")
+            job['errors'].append(f"Post-sync profiling failed: {post_err}")
+        
     except Exception as e:
         logger.error(f"[UKG-SYNC] [{job_id}] Job failed: {e}")
         job['status'] = 'failed'

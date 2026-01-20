@@ -310,3 +310,279 @@ async def verify_chromadb() -> Dict[str, Any]:
     """
     # Reuse diagnose
     return await diagnose_chromadb()
+
+
+@router.post("/duckdb/profile-all/{customer_id}")
+async def profile_all_tables(customer_id: str) -> Dict[str, Any]:
+    """
+    Profile all tables for a customer that are missing column profiles.
+    
+    This is needed when tables were created (e.g., via API sync) but never profiled.
+    Profiling populates _column_profiles which enables:
+    - Term index to find tables by column values
+    - Hub-spoke detection to find relationships
+    - Intelligence layer to answer queries
+    
+    Args:
+        customer_id: The customer UUID
+        
+    Returns:
+        Summary of profiling results
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        if not handler or not handler.conn:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Get all tables for this customer from _schema_metadata
+        tables_result = handler.conn.execute("""
+            SELECT table_name, row_count, display_name 
+            FROM _schema_metadata 
+            WHERE project = ? AND is_current = TRUE
+        """, [customer_id]).fetchall()
+        
+        if not tables_result:
+            return {
+                "success": True,
+                "customer_id": customer_id,
+                "message": "No tables found in schema metadata",
+                "profiled": 0
+            }
+        
+        # Check which tables already have profiles
+        profiled_tables = set()
+        try:
+            existing = handler.conn.execute("""
+                SELECT DISTINCT table_name FROM _column_profiles WHERE project = ?
+            """, [customer_id]).fetchall()
+            profiled_tables = {r[0] for r in existing}
+        except:
+            pass
+        
+        # Profile tables that need it
+        results = {
+            "already_profiled": 0,
+            "newly_profiled": 0,
+            "failed": 0,
+            "details": []
+        }
+        
+        for row in tables_result:
+            table_name = row[0]
+            row_count = row[1] or 0
+            display_name = row[2] or table_name
+            
+            if table_name in profiled_tables:
+                results["already_profiled"] += 1
+                continue
+            
+            try:
+                # Profile this table
+                handler.profile_columns_fast(customer_id, table_name)
+                results["newly_profiled"] += 1
+                results["details"].append({
+                    "table": display_name,
+                    "status": "profiled",
+                    "rows": row_count
+                })
+                logger.info(f"[PROFILE] Profiled {table_name} ({row_count} rows)")
+            except Exception as e:
+                results["failed"] += 1
+                results["details"].append({
+                    "table": display_name,
+                    "status": "failed",
+                    "error": str(e)
+                })
+                logger.warning(f"[PROFILE] Failed to profile {table_name}: {e}")
+        
+        # Recalc term index after profiling
+        recalc_message = None
+        try:
+            from backend.utils.intelligence.term_index import recalc_term_index
+            stats = recalc_term_index(handler.conn, customer_id)
+            recalc_message = f"Term index recalculated: {stats}"
+            logger.info(f"[PROFILE] Term index recalculated for {customer_id}")
+        except Exception as e:
+            recalc_message = f"Term index recalc failed: {e}"
+            logger.warning(f"[PROFILE] Term index recalc failed: {e}")
+        
+        return {
+            "success": True,
+            "customer_id": customer_id,
+            "total_tables": len(tables_result),
+            "already_profiled": results["already_profiled"],
+            "newly_profiled": results["newly_profiled"],
+            "failed": results["failed"],
+            "term_index": recalc_message,
+            "details": results["details"][:20]  # Limit details to first 20
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Batch profile failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/duckdb/register-missing/{customer_id}")
+async def register_missing_tables(customer_id: str) -> Dict[str, Any]:
+    """
+    Register any DuckDB tables that exist but aren't in _schema_metadata.
+    
+    This catches tables created by API sync or other processes that
+    bypassed the normal registration flow.
+    
+    Args:
+        customer_id: The customer UUID
+        
+    Returns:
+        Summary of registration results
+    """
+    try:
+        from utils.structured_data_handler import get_structured_handler
+        handler = get_structured_handler()
+        
+        if not handler or not handler.conn:
+            raise HTTPException(status_code=503, detail="Database not available")
+        
+        # Get all actual tables in DuckDB for this customer
+        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+        customer_tables = [t[0] for t in all_tables if t[0].startswith(customer_id[:8]) or t[0].startswith(customer_id)]
+        
+        # Get tables already in _schema_metadata
+        registered = handler.conn.execute("""
+            SELECT table_name FROM _schema_metadata WHERE project = ?
+        """, [customer_id]).fetchall()
+        registered_set = {r[0] for r in registered}
+        
+        # Find missing tables
+        missing = [t for t in customer_tables if t not in registered_set]
+        
+        if not missing:
+            return {
+                "success": True,
+                "customer_id": customer_id,
+                "message": "All tables already registered",
+                "registered": 0
+            }
+        
+        # Register missing tables
+        registered_count = 0
+        for table_name in missing:
+            try:
+                # Get row count
+                count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                row_count = count_result[0] if count_result else 0
+                
+                # Determine display name and type
+                if '_api_' in table_name:
+                    short_name = table_name.split('_api_')[-1]
+                    display_name = f"API: {short_name.replace('_', ' ').title()}"
+                    truth_type = 'configuration'
+                    category = 'api'
+                else:
+                    display_name = table_name
+                    truth_type = 'reality'
+                    category = 'upload'
+                
+                # Insert into _schema_metadata
+                handler.conn.execute("""
+                    INSERT INTO _schema_metadata 
+                    (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category)
+                    VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, ?)
+                """, [customer_id, display_name, table_name, row_count, display_name, truth_type, category])
+                
+                registered_count += 1
+                logger.info(f"[REGISTER] Registered {table_name}")
+                
+            except Exception as e:
+                logger.warning(f"[REGISTER] Failed to register {table_name}: {e}")
+        
+        return {
+            "success": True,
+            "customer_id": customer_id,
+            "total_duckdb_tables": len(customer_tables),
+            "already_registered": len(registered_set),
+            "newly_registered": registered_count,
+            "missing_tables_found": len(missing)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Register missing tables failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/full-repair/{customer_id}")
+async def full_repair(customer_id: str) -> Dict[str, Any]:
+    """
+    Run a full repair for a customer:
+    1. Register any missing tables in _schema_metadata
+    2. Profile all unprofile tables in _column_profiles
+    3. Recalc term index
+    4. Recompute hub-spoke graph
+    
+    This is the "fix everything" endpoint.
+    
+    Args:
+        customer_id: The customer UUID
+        
+    Returns:
+        Combined results from all repair steps
+    """
+    results = {
+        "customer_id": customer_id,
+        "steps": {}
+    }
+    
+    # Step 1: Register missing tables
+    try:
+        register_result = await register_missing_tables(customer_id)
+        results["steps"]["register_tables"] = {
+            "success": True,
+            "newly_registered": register_result.get("newly_registered", 0)
+        }
+    except Exception as e:
+        results["steps"]["register_tables"] = {"success": False, "error": str(e)}
+    
+    # Step 2: Profile all tables
+    try:
+        profile_result = await profile_all_tables(customer_id)
+        results["steps"]["profile_columns"] = {
+            "success": True,
+            "newly_profiled": profile_result.get("newly_profiled", 0),
+            "term_index": profile_result.get("term_index")
+        }
+    except Exception as e:
+        results["steps"]["profile_columns"] = {"success": False, "error": str(e)}
+    
+    # Step 3: Recompute hub-spoke graph
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                f"https://hcmpact-xlr8-production.up.railway.app/api/data-model/context-graph/{customer_id}/compute",
+                timeout=60.0
+            )
+            if response.status_code == 200:
+                graph_result = response.json()
+                results["steps"]["hub_spoke"] = {
+                    "success": True,
+                    "hubs": graph_result.get("result", {}).get("hubs", 0),
+                    "spokes": graph_result.get("result", {}).get("spokes", 0)
+                }
+            else:
+                results["steps"]["hub_spoke"] = {"success": False, "error": f"HTTP {response.status_code}"}
+    except Exception as e:
+        results["steps"]["hub_spoke"] = {"success": False, "error": str(e)}
+    
+    # Overall success
+    results["success"] = all(
+        step.get("success", False) 
+        for step in results["steps"].values()
+    )
+    
+    return results
