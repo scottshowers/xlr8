@@ -276,9 +276,11 @@ export default function EnginePlaybookBuilder() {
   
   const loadTables = async () => {
     try {
-      const response = await fetch(`${API_BASE}/api/engines/${projectId}/tables`);
+      // Use new canonical endpoint: /customers/{id}/tables
+      const response = await fetch(`${API_BASE}/api/customers/${projectId}/tables`);
       const data = await response.json();
-      setTables(data.tables || []);
+      // Extract just table names for compatibility
+      setTables((data.tables || []).map(t => t.table_name));
     } catch (err) {
       console.error('Failed to load tables:', err);
     }

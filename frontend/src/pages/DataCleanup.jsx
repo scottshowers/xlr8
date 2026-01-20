@@ -38,18 +38,12 @@ export default function DataCleanup() {
   const loadProjectStats = async (customerId) => {
     setLoadingStats(true);
     try {
-      // Get table count
-      const filesRes = await api.get(`/files?project=${encodeURIComponent(customerId)}`);
-      const files = filesRes.data?.files || [];
+      // Use new canonical endpoint: /customers/{id}/tables
+      const tablesRes = await api.get(`/customers/${customerId}/tables`);
+      const tables = tablesRes.data?.tables || [];
       
-      let tableCount = 0;
-      let rowCount = 0;
-      files.forEach(f => {
-        if (f.sheets) {
-          tableCount += f.sheets.length;
-          f.sheets.forEach(s => { rowCount += s.row_count || 0; });
-        }
-      });
+      const tableCount = tables.length;
+      const rowCount = tables.reduce((sum, t) => sum + (t.row_count || 0), 0);
 
       // Try to get document count
       let docCount = 0;
@@ -60,8 +54,11 @@ export default function DataCleanup() {
         // Documents endpoint may not exist
       }
 
+      // Group tables by filename for file count
+      const uniqueFiles = new Set(tables.map(t => t.filename).filter(Boolean));
+
       setProjectStats({
-        files: files.length,
+        files: uniqueFiles.size || tableCount,
         tables: tableCount,
         rows: rowCount,
         documents: docCount

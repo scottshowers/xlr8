@@ -361,27 +361,20 @@ export default function DataExplorer() {
     if (!customerId) return;
     setLoading(true);
     try {
-      const res = await api.get(`/files?project=${encodeURIComponent(customerId)}`);
-      const files = res.data?.files || [];
+      // Use new canonical endpoint: /customers/{id}/tables
+      const res = await api.get(`/customers/${customerId}/tables`);
+      const tableList = res.data?.tables || [];
       
-      // Build tables from files
-      const allTables = [];
-      files.forEach(file => {
-        if (file.sheets && file.sheets.length > 0) {
-          file.sheets.forEach(sheet => {
-            allTables.push({
-              table_name: sheet.table_name,
-              display_name: sheet.display_name || sheet.table_name,
-              row_count: sheet.row_count || 0,
-              column_count: sheet.column_count || 0,
-              columns: sheet.columns || [],
-              filename: file.filename,
-              project: file.project,
-              truth_type: file.truth_type
-            });
-          });
-        }
-      });
+      // Tables already come in the right format from CustomerResolver
+      const allTables = tableList.map(t => ({
+        table_name: t.table_name,
+        display_name: t.display_name || t.table_name,
+        row_count: t.row_count || 0,
+        column_count: t.columns?.length || 0,
+        columns: t.columns || [],
+        filename: t.filename,
+        source: t.source
+      }));
       
       setTables(allTables);
     } catch (err) {

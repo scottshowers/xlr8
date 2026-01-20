@@ -1095,30 +1095,42 @@ function FilesPanel({ c, project, targetScope }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      // Use project UUID for querying - data is stored with project_id (UUID)
+      // Use project UUID for querying - CustomerResolver handles everything
       const projectId = project?.id || '';
       const shouldFilterByProject = targetScope !== 'global' && projectId;
       
       const [filesRes, refRes] = await Promise.all([
-        api.get(`/files${shouldFilterByProject ? `?project=${encodeURIComponent(projectId)}` : ''}`).catch(() => ({ data: {} })),
+        // Use new canonical endpoint: /customers/{id}/files
+        shouldFilterByProject 
+          ? api.get(`/customers/${projectId}/files`).catch(() => ({ data: {} }))
+          : api.get('/status/references').catch(() => ({ data: { files: [] } })),  // Global scope gets references only
         api.get('/status/references').catch(() => ({ data: { files: [], rules: [] } })),
       ]);
       
       // Map files response to expected format
+      // New endpoint returns { files: { upload: [], api: [], pdf: [] }, total_files, by_source }
       const filesData = filesRes.data;
+      const allFiles = shouldFilterByProject 
+        ? [
+            ...(filesData?.files?.upload || []),
+            ...(filesData?.files?.api || []),
+            ...(filesData?.files?.pdf || [])
+          ]
+        : (filesData?.files || []);
+      
       const structuredData = {
-        files: filesData?.files || [],
-        total_rows: filesData?.total_rows || 0,
-        total_files: filesData?.total_files || 0,
-        total_tables: filesData?.total_tables || 0,
+        files: allFiles,
+        total_rows: allFiles.reduce((sum, f) => sum + (f.row_count || 0), 0),
+        total_files: filesData?.total_files || allFiles.length,
+        total_tables: allFiles.length,
       };
       
       // Documents from files that have chunks (chromadb or hybrid)
       const documents = {
-        documents: (filesData?.files || []).filter(f => 
+        documents: allFiles.filter(f => 
           f.type === 'chromadb' || f.type === 'hybrid' || (f.chunks && f.chunks > 0)
         ),
-        count: (filesData?.files || []).filter(f => f.chunks > 0).length,
+        count: allFiles.filter(f => f.chunks > 0).length,
       };
       
       setStructuredData(structuredData);
