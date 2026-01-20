@@ -754,6 +754,14 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
             except Exception as term_err:
                 logger.warning(f"[UKG-SYNC] Could not recalc term index: {term_err}")
             
+            # v5.2: Auto-compute context graph after sync
+            try:
+                job['current_step'] = 'Computing context graph...'
+                handler.compute_context_graph(project_id)
+                logger.info(f"[UKG-SYNC] [{job_id}] Context graph computed")
+            except Exception as cg_err:
+                logger.warning(f"[UKG-SYNC] Could not compute context graph: {cg_err}")
+            
             logger.info(f"[UKG-SYNC] [{job_id}] Post-sync processing complete")
             job['current_step'] = 'Complete (with profiling)!'
             

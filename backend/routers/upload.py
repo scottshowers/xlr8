@@ -719,6 +719,15 @@ def run_intelligence_analysis(project: str, handler, job_id: str) -> dict:
         except Exception as term_e:
             logger.warning(f"[INTELLIGENCE] Term index rebuild failed: {term_e}")
         
+        # v5.2: Auto-compute context graph after upload
+        # =====================================================
+        try:
+            handler.compute_context_graph(project)
+            logger.info(f"[INTELLIGENCE] Context graph computed for {project}")
+            ProcessingJobModel.update_progress(job_id, 85, f"✅ Context graph computed")
+        except Exception as cg_e:
+            logger.warning(f"[INTELLIGENCE] Context graph compute failed: {cg_e}")
+        
         return intelligence_summary
         
     except Exception as e:
