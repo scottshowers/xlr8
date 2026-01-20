@@ -55,7 +55,10 @@ const getColors = (dark) => ({
 })
 
 export default function Chat({ functionalAreas = [] }) {
-  const { activeProject, projectName } = useProject()
+  const { activeProject, projectName, customerName } = useProject()
+  // Get customer ID for API calls, name for display
+  const customerId = activeProject?.id
+  const displayName = customerName || projectName
   const { darkMode } = useTheme()
   const colors = getColors(darkMode)
   
@@ -126,7 +129,7 @@ export default function Chat({ functionalAreas = [] }) {
     try {
       const response = await api.post('/chat/unified/reset-preferences', {
         session_id: sessionId,
-        project: projectName || null,
+        customer_id: customerId || null,  // Send ID, not name
         reset_type: resetType
       })
       
@@ -195,7 +198,7 @@ export default function Chat({ functionalAreas = [] }) {
     try {
       const response = await api.post('/chat/unified', {
         message: messageText,
-        project: projectName || null,
+        customer_id: customerId || null,  // Send ID, not name
         persona: currentPersona?.id || 'bessie',
         scope: scope,
         session_id: sessionId,

@@ -16,7 +16,7 @@ import api from '../services/api';
  * - tableName: DuckDB table name
  * - columnName: Column to split
  * - sampleValues: Array of sample values (strings)
- * - projectName: Project for API calls
+ * - customerId: Customer UUID for API calls
  * - onComplete: Callback after successful split
  * - onCancel: Close without saving
  */
@@ -24,7 +24,7 @@ export default function ClickToSplit({
   tableName,
   columnName,
   sampleValues = [], 
-  projectName,
+  customerId,
   onComplete,
   onCancel 
 }) {
@@ -141,7 +141,7 @@ export default function ClickToSplit({
 
     try {
       const response = await api.post('/data-model/split-column', {
-        project: projectName,
+        customer_id: customerId,
         table_name: tableName,
         column_name: columnName,
         split_type: pattern.type,
