@@ -10,7 +10,7 @@ Version: 2.3 - ChromaDB Singleton Fix (Jan 7, 2026)
 
 Version: 2.2 - Five Truths Architecture Support
 - Added support for 5 truth types: intent, configuration, reference, regulatory, compliance
-- Customer Truths (project-scoped): intent, configuration
+- Customer Truths (customer-scoped): intent, configuration
 - Reference Library Truths (global-scoped): reference, regulatory, compliance
 - Added search helpers for all 5 truth types
 
@@ -25,11 +25,11 @@ Version: 2.1 - Fixed chunking fallback + better embedding diagnostics
 
 FIVE TRUTHS TAXONOMY:
 ---------------------
-Customer Truths (require project_id):
+Customer Truths (require customer_id):
   - intent: Customer goals, SOWs, requirements
   - configuration: Code tables, mappings, system setup
 
-Reference Library Truths (global, no project_id):
+Reference Library Truths (global, no customer_id):
   - reference: Product docs, how-to guides, implementation standards
   - regulatory: Laws, IRS rules, state/federal mandates
   - compliance: Audit requirements, SOC 2, internal controls
@@ -40,9 +40,9 @@ NOW USES UNIVERSAL DOCUMENT INTELLIGENCE SYSTEM:
 - Rich metadata preservation (structure, strategy, parent_section, etc.)
 - Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
 
-PROJECT ISOLATION:
-- Preserves project_id in chunk metadata
-- Filters search by project_id (optional)
+CUSTOMER ISOLATION:
+- Preserves customer_id in chunk metadata
+- Filters search by customer_id (optional)
 - Filters search by truth_type (optional)
 """
 
@@ -153,9 +153,9 @@ class RAGHandler:
     - Rich metadata preservation (structure, strategy, parent_section, etc.)
     - Optimized for Excel, PDF, Word, Code, CSV, Markdown, and more
     
-    PROJECT ISOLATION:
-    - Preserves project_id in chunk metadata
-    - Filters search by project_id (optional)
+    CUSTOMER ISOLATION:
+    - Preserves customer_id in chunk metadata
+    - Filters search by customer_id (optional)
     
     TRUTH TYPE FILTERING (v2.0):
     - Preserves truth_type in chunk metadata
@@ -483,7 +483,9 @@ class RAGHandler:
                 metadata={"hnsw:space": "cosine"}
             )
             
-            project_id = metadata.get('project_id')
+            # FIXED: Accept both 'customer_id' and 'customer_id' for backwards compatibility
+            # Some code paths use 'customer_id', others use 'customer_id' - accept either
+            customer_id = metadata.get('customer_id') or metadata.get('customer_id')
             truth_type = metadata.get('truth_type')  # May be pre-classified
             system = metadata.get('system')  # System tag (UKG, Workday, etc.)
             domain = metadata.get('domain')  # May be pre-classified
@@ -533,8 +535,8 @@ class RAGHandler:
                 if system:
                     metadata['system'] = system
             
-            if project_id:
-                logger.info(f"[PROJECT] Document tagged with project_id: {project_id}")
+            if customer_id:
+                logger.info(f"[CUSTOMER] Document tagged with customer_id: {customer_id}")
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] Document tagged with truth_type: {truth_type}")
             if domain:
@@ -587,9 +589,9 @@ class RAGHandler:
                 
                 chunk_metadata = {**base_metadata, "chunk_index": i}
                 
-                # Preserve project_id, truth_type, domain, source_authority, and system in chunk metadata
-                if project_id:
-                    chunk_metadata['project_id'] = project_id
+                # Preserve customer_id, truth_type, domain, source_authority, and system in chunk metadata
+                if customer_id:
+                    chunk_metadata['customer_id'] = customer_id
                 if truth_type:
                     chunk_metadata['truth_type'] = truth_type
                 if domain:
@@ -687,8 +689,8 @@ class RAGHandler:
             logger.info(f"Added {chunks_added}/{len(chunks)} chunks to collection '{collection_name}'")
             if chunks_added == 0:
                 logger.warning(f"[RAG] WARNING: 0 chunks added for {filename} - check embedding logs above")
-            if project_id:
-                logger.info(f"[PROJECT] All chunks tagged with project_id: {project_id}")
+            if customer_id:
+                logger.info(f"[CUSTOMER] All chunks tagged with customer_id: {customer_id}")
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] All chunks tagged with truth_type: {truth_type}")
             
@@ -715,7 +717,7 @@ class RAGHandler:
                             document_id=doc_hash,
                             document_name=filename,
                             hub_references=list(all_hub_refs),
-                            project_id=project_id,
+                            customer_id=customer_id,
                             confidence=0.8  # Default confidence for document-level detection
                         )
                         logger.info(f"[ENTITY_REGISTRY] Registered {registered} entity mentions for {filename}")
@@ -733,7 +735,7 @@ class RAGHandler:
         collection_name: str, 
         query: str, 
         n_results: int = 12,
-        project_id: Optional[str] = None,
+        customer_id: Optional[str] = None,
         functional_areas: Optional[List[str]] = None,
         truth_type: Optional[str] = None,  # NEW: Filter by truth_type
         system: Optional[str] = None,  # NEW: Filter by system (UKG, Workday, etc.)
@@ -748,7 +750,7 @@ class RAGHandler:
             collection_name: Name of the collection to search
             query: Search query
             n_results: Number of results to return
-            project_id: Optional project ID to filter by
+            customer_id: Optional customer ID to filter by
             functional_areas: Optional list of functional areas to filter by
             truth_type: Optional truth_type to filter by (intent, reference, etc.)
             system: Optional system to filter by (ukg, workday, etc.) - for vendor docs
@@ -777,12 +779,12 @@ class RAGHandler:
             elif truth_type:
                 conditions = [{"truth_type": truth_type}]
                 
-                if project_id and project_id != "Global/Universal":
-                    # Match full or short project_id
+                if customer_id and customer_id != "Global/Universal":
+                    # Match full or short customer_id
                     conditions.append({
                         "$or": [
-                            {"project_id": project_id},
-                            {"project_id": project_id[:8]}
+                            {"customer_id": customer_id},
+                            {"customer_id": customer_id[:8]}
                         ]
                     })
                 
@@ -805,14 +807,14 @@ class RAGHandler:
                 else:
                     where_clause = {"$and": conditions}
                 
-                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={project_id}, system={system}")
+                logger.info(f"[FILTER] Filtering by truth_type={truth_type}, project={customer_id}, system={system}")
             
             # Legacy filter logic (kept for backward compatibility)
-            elif project_id and functional_areas:
-                if project_id == "Global/Universal":
+            elif customer_id and functional_areas:
+                if customer_id == "Global/Universal":
                     where_clause = {
                         "$and": [
-                            {"project_id": "Global/Universal"},
+                            {"customer_id": "Global/Universal"},
                             {"functional_area": {"$in": functional_areas}}
                         ]
                     }
@@ -820,29 +822,29 @@ class RAGHandler:
                     where_clause = {
                         "$and": [
                             {"$or": [
-                                {"project_id": project_id},
-                                {"project_id": project_id[:8]},
-                                {"project_id": "Global/Universal"}
+                                {"customer_id": customer_id},
+                                {"customer_id": customer_id[:8]},
+                                {"customer_id": "Global/Universal"}
                             ]},
                             {"functional_area": {"$in": functional_areas}}
                         ]
                     }
-                logger.info(f"[PROJECT] Filtering by project_id: {project_id} (and short) + Global/Universal")
+                logger.info(f"[CUSTOMER] Filtering by customer_id: {customer_id} (and short) + Global/Universal")
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
-            elif project_id:
-                if project_id == "Global/Universal":
-                    where_clause = {"project_id": "Global/Universal"}
-                    logger.info(f"[PROJECT] Filtering search by Global/Universal only")
+            elif customer_id:
+                if customer_id == "Global/Universal":
+                    where_clause = {"customer_id": "Global/Universal"}
+                    logger.info(f"[CUSTOMER] Filtering search by Global/Universal only")
                 else:
                     # Match full UUID, short UUID (8 chars), or Global
                     where_clause = {
                         "$or": [
-                            {"project_id": project_id},
-                            {"project_id": project_id[:8]},
-                            {"project_id": "Global/Universal"}
+                            {"customer_id": customer_id},
+                            {"customer_id": customer_id[:8]},
+                            {"customer_id": "Global/Universal"}
                         ]
                     }
-                    logger.info(f"[PROJECT] Filtering search by project_id: {project_id} (and short: {project_id[:8]}) + Global/Universal")
+                    logger.info(f"[CUSTOMER] Filtering search by customer_id: {customer_id} (and short: {customer_id[:8]}) + Global/Universal")
             elif functional_areas:
                 where_clause = {"functional_area": {"$in": functional_areas}}
                 logger.info(f"[FUNCTIONAL AREA] Filtering by areas: {', '.join(functional_areas)}")
@@ -882,11 +884,11 @@ class RAGHandler:
             logger.info(f"Search returned {len(formatted_results)} results from '{collection_name}'")
             if truth_type:
                 logger.info(f"[TRUTH_TYPE] Results filtered by: {truth_type}")
-            if project_id:
-                if project_id == "Global/Universal":
-                    logger.info(f"[PROJECT] Results filtered by: Global/Universal only")
+            if customer_id:
+                if customer_id == "Global/Universal":
+                    logger.info(f"[CUSTOMER] Results filtered by: Global/Universal only")
                 else:
-                    logger.info(f"[PROJECT] Results filtered by: {project_id} + Global/Universal")
+                    logger.info(f"[CUSTOMER] Results filtered by: {customer_id} + Global/Universal")
             if formatted_results and formatted_results[0].get('distance') is not None:
                 logger.info(f"Best match distance: {formatted_results[0]['distance']:.4f}")
             
@@ -907,38 +909,38 @@ class RAGHandler:
         self,
         collection_name: str,
         query: str,
-        project_id: str,
+        customer_id: str,
         n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Search for INTENT documents (customer goals, SOWs, requirements).
-        Customer-scoped - requires project_id.
+        Customer-scoped - requires customer_id.
         """
         return self.search(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
             truth_type='intent',
-            project_id=project_id
+            customer_id=customer_id
         )
     
     def search_configuration(
         self,
         collection_name: str,
         query: str,
-        project_id: str,
+        customer_id: str,
         n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
         Search for CONFIGURATION documents (code tables, mappings, system setup).
-        Customer-scoped - requires project_id.
+        Customer-scoped - requires customer_id.
         """
         return self.search(
             collection_name=collection_name,
             query=query,
             n_results=n_results,
             truth_type='configuration',
-            project_id=project_id
+            customer_id=customer_id
         )
     
     def search_reference(
@@ -1002,7 +1004,7 @@ class RAGHandler:
         collection_name: str,
         query: str,
         truth_type: str,
-        project_id: Optional[str] = None,
+        customer_id: Optional[str] = None,
         n_results: int = 10
     ) -> List[Dict[str, Any]]:
         """
@@ -1012,7 +1014,7 @@ class RAGHandler:
             collection_name: Collection to search
             query: Search query
             truth_type: One of: 'intent', 'configuration', 'reference', 'regulatory', 'compliance'
-            project_id: Required for customer truths (intent, configuration), optional for global
+            customer_id: Required for customer truths (intent, configuration), optional for global
             n_results: Number of results
             
         Returns:
@@ -1023,7 +1025,7 @@ class RAGHandler:
             query=query,
             n_results=n_results,
             truth_type=truth_type,
-            project_id=project_id
+            customer_id=customer_id
         )
 
     # ==========================================================================
@@ -1048,13 +1050,13 @@ class RAGHandler:
             logger.error(f"Error getting collection count: {str(e)}")
             return 0
 
-    def delete_document(self, filename: str, project_id: str = None) -> int:
+    def delete_document(self, filename: str, customer_id: str = None) -> int:
         """
         Delete all chunks for a document from ChromaDB.
         
         Args:
             filename: The filename to delete
-            project_id: Optional project ID filter
+            customer_id: Optional customer ID filter
             
         Returns:
             Number of chunks deleted
@@ -1072,11 +1074,11 @@ class RAGHandler:
                 {"filename": filename},
             ]
             
-            if project_id:
+            if customer_id:
                 search_attempts.extend([
-                    {"$and": [{"source": filename}, {"project_id": project_id}]},
-                    {"$and": [{"source": filename}, {"project_id": project_id[:8]}]},
-                    {"$and": [{"filename": filename}, {"project_id": project_id}]},
+                    {"$and": [{"source": filename}, {"customer_id": customer_id}]},
+                    {"$and": [{"source": filename}, {"customer_id": customer_id[:8]}]},
+                    {"$and": [{"filename": filename}, {"customer_id": customer_id}]},
                 ])
             
             seen_ids = set()
