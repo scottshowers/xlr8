@@ -750,7 +750,60 @@ async def get_project_tables(customer_id: str) -> List[Dict]:
         # Note: PDF tables are now in _schema_metadata (via store_dataframe)
         # No separate _pdf_tables query needed
         
-        # FALLBACK: If metadata returned nothing, query DuckDB directly
+        # ALWAYS check DuckDB for API-synced tables (they won't be in _schema_metadata)
+        try:
+            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+            
+            # Build project prefixes for matching
+            project_clean = customer_id.strip()
+            api_prefix = f"{project_clean.lower()}_api_"
+            
+            for (table_name,) in all_tables:
+                # Only look for API tables here
+                if not table_name.lower().startswith(api_prefix):
+                    continue
+                
+                # Skip if already in tables list
+                if any(t['table_name'] == table_name for t in tables):
+                    continue
+                
+                # Get columns
+                columns = []
+                try:
+                    result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                    columns = [desc[0] for desc in result.description]
+                except Exception:
+                    try:
+                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                        columns = [row[1] for row in col_result]
+                    except Exception as e:
+                        logger.debug(f"Suppressed: {e}")
+                
+                # Get row count
+                try:
+                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                    row_count = count_result[0] if count_result else 0
+                except Exception:
+                    row_count = 0
+                
+                # Extract clean table name for display
+                display_name = table_name.replace(api_prefix, '').replace(project_clean.lower() + '_api_', '')
+                
+                tables.append({
+                    'table_name': table_name,
+                    'columns': columns,
+                    'row_count': row_count,
+                    'sheet_name': 'API Sync',
+                    'filename': f'UKG Pro: {display_name}',
+                    'source': 'api'
+                })
+            
+            logger.info(f"Found {len([t for t in tables if t.get('source') == 'api'])} API tables for {customer_id}")
+            
+        except Exception as api_e:
+            logger.warning(f"API table query failed: {api_e}")
+        
+        # FALLBACK: If metadata returned nothing, query DuckDB directly for non-API tables
         if not tables:
             logger.warning(f"No tables from metadata - querying DuckDB directly for {customer_id}")
             try:
