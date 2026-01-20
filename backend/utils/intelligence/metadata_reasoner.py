@@ -70,10 +70,10 @@ class MetadataReasoner:
         #                         operator='ILIKE', match_value='%401%')]
     """
     
-    def __init__(self, conn: duckdb.DuckDBPyConnection, project: str, project_id: str = None):
+    def __init__(self, conn: duckdb.DuckDBPyConnection, project: str, customer_id: str = None):
         self.conn = conn
         self.project = project.lower() if project else 'default'
-        self.project_id = project_id  # UUID for precise matching
+        self.customer_id = customer_id  # UUID for precise matching
         
         # Cache metadata on init (small, fast queries)
         self._domain_tables: Dict[str, List[str]] = {}
@@ -87,21 +87,21 @@ class MetadataReasoner:
     def _load_metadata(self):
         """Load and cache metadata for fast reasoning."""
         
-        # Check if project_id column exists
-        has_project_id = False
+        # Check if customer_id column exists
+        has_customer_id = False
         try:
             cols = [row[1] for row in self.conn.execute("PRAGMA table_info(_column_profiles)").fetchall()]
-            has_project_id = 'project_id' in cols
+            has_customer_id = 'customer_id' in cols
         except Exception:
             pass
         
-        # Build project filter - prefer project_id (UUID) when available
-        if has_project_id and self.project_id:
-            project_filter = "project_id = ?"
-            project_param = self.project_id
-        elif has_project_id and self.project:
-            # Try to match by project_id OR project name
-            project_filter = "(project_id = ? OR LOWER(project) = LOWER(?))"
+        # Build project filter - prefer customer_id (UUID) when available
+        if has_customer_id and self.customer_id:
+            project_filter = "customer_id = ?"
+            project_param = self.customer_id
+        elif has_customer_id and self.project:
+            # Try to match by customer_id OR project name
+            project_filter = "(customer_id = ? OR LOWER(project) = LOWER(?))"
             project_param = [self.project, self.project]
         else:
             project_filter = "LOWER(project) = ?"
@@ -128,7 +128,7 @@ class MetadataReasoner:
         
         # 2. Load column classifications by name patterns
         try:
-            # Use project_id when available
+            # Use customer_id when available
             if isinstance(project_param, list):
                 results = self.conn.execute(f"""
                     SELECT table_name, column_name, inferred_type
@@ -142,7 +142,7 @@ class MetadataReasoner:
                     WHERE {project_filter}
                 """, [project_param]).fetchall()
             
-            logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}' (project_id={self.project_id})")
+            logger.warning(f"[REASONER] Found {len(results)} column profiles for project '{self.project}' (customer_id={self.customer_id})")
             
             for table_name, column_name, inferred_type in results:
                 col_lower = column_name.lower()

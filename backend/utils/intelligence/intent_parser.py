@@ -15,7 +15,7 @@ Output:
 - Enables requirement coverage analysis
 
 Usage:
-    parser = IntentParser(project_id="xxx")
+    parser = IntentParser(customer_id="xxx")
     requirements = parser.parse_document(text, filename="sow.pdf")
     # Returns list of ParsedRequirement with:
     #   - requirement_id
@@ -164,14 +164,14 @@ class IntentParser:
         'other'
     ]
     
-    def __init__(self, project_id: str = None):
+    def __init__(self, customer_id: str = None):
         """
         Initialize the parser.
         
         Args:
-            project_id: Project ID for tracking
+            customer_id: Project ID for tracking
         """
-        self.project_id = project_id
+        self.customer_id = customer_id
         self.orchestrator = None
         
         if LLM_AVAILABLE:
@@ -269,7 +269,7 @@ class IntentParser:
                 model="mistral:7b",
                 prompt=prompt,
                 system_prompt="You are a precise requirements extraction assistant. Extract all requirements from documents. Return only valid JSON.",
-                project_id=self.project_id,
+                customer_id=self.customer_id,
                 processor="intent_parser"
             )
             
@@ -300,7 +300,7 @@ class IntentParser:
             result, success = self.orchestrator._call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                project_id=self.project_id,
+                customer_id=self.customer_id,
                 operation="intent_parser"
             )
             
@@ -457,19 +457,19 @@ class IntentParser:
 # =============================================================================
 
 def parse_sow(text: str, filename: str = "sow.pdf", 
-              project_id: str = None) -> List[ParsedRequirement]:
+              customer_id: str = None) -> List[ParsedRequirement]:
     """
     Convenience function to parse a SOW document.
     
     Args:
         text: Document text
         filename: Source filename
-        project_id: Project ID
+        customer_id: Project ID
         
     Returns:
         List of ParsedRequirement objects
     """
-    parser = IntentParser(project_id=project_id)
+    parser = IntentParser(customer_id=customer_id)
     return parser.parse_document(text, filename)
 
 

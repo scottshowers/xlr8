@@ -326,17 +326,17 @@ class IntelligenceEngineV2:
         'compare our', 'versus our', 'vs our',
     ]
     
-    def __init__(self, project_name: str, project_id: str = None, product_id: str = None):
+    def __init__(self, project_name: str, customer_id: str = None, product_id: str = None):
         """
         Initialize the engine.
         
         Args:
             project_name: Project code (e.g., "TEA1000")
-            project_id: Project UUID for RAG filtering
+            customer_id: Project UUID for RAG filtering
             product_id: Product type ID for schema loading (e.g., "ukg_pro", "workday_hcm")
         """
         self.project = project_name
-        self.project_id = project_id
+        self.customer_id = customer_id
         self.product_id = product_id  # Phase 5F: Multi-product support
         
         # Data handlers
@@ -526,7 +526,7 @@ class IntelligenceEngineV2:
         
         self.reality_gatherer = RealityGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             structured_handler=structured_handler,
             schema=self.schema,
             sql_generator=self.sql_generator,
@@ -536,7 +536,7 @@ class IntelligenceEngineV2:
         # Intent gatherer (ChromaDB - customer documents)
         self.intent_gatherer = IntentGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             rag_handler=rag_handler
         )
         
@@ -544,7 +544,7 @@ class IntelligenceEngineV2:
         # Pass table_selector so it can use the same scoring logic
         self.configuration_gatherer = ConfigurationGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             structured_handler=structured_handler,
             schema=self.schema,
             table_selector=self.table_selector  # Use same selector for consistent scoring
@@ -553,24 +553,24 @@ class IntelligenceEngineV2:
         # Global gatherers (Reference Library - no project filter)
         self.reference_gatherer = ReferenceGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             rag_handler=rag_handler
         )
         
         self.regulatory_gatherer = RegulatoryGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             rag_handler=rag_handler
         )
         
         self.compliance_gatherer = ComplianceGatherer(
             project_name=self.project,
-            project_id=self.project_id,
+            customer_id=self.customer_id,
             rag_handler=rag_handler
         )
         
         # Truth Enricher (LLM Lookups) - extracts structured data from raw truths
-        self.truth_enricher = TruthEnricher(project_id=self.project_id)
+        self.truth_enricher = TruthEnricher(customer_id=self.customer_id)
         
         # v3.0: Log Context Graph availability
         context_graph_available = False
@@ -3270,7 +3270,7 @@ DO NOT:
             result = engine.compare(
                 table_a=table_a,
                 table_b=table_b,
-                project_id=self.project_id
+                customer_id=self.customer_id
             )
             
             # Format consultative response
@@ -3353,7 +3353,7 @@ DO NOT:
         selector = TableSelector(
             structured_handler=self.structured_handler,
             filter_candidates=self.filter_candidates,
-            project=self.project_id
+            project=self.customer_id
         )
         
         # Select best matches for this reference
@@ -3488,7 +3488,7 @@ DO NOT:
         Returns:
             Tuple of (reference, regulatory, compliance) Truth lists
             
-        These are GLOBAL - they apply to all projects and are not filtered by project_id.
+        These are GLOBAL - they apply to all projects and are not filtered by customer_id.
         
         Phase 2B.2: Now uses TruthRouter to determine which truth types to gather
         based on query patterns. This improves relevance and reduces noise.
@@ -3746,7 +3746,7 @@ DO NOT:
         
         try:
             # If we have compliance results, surface them as insights
-            if COMPLIANCE_ENGINE_AVAILABLE and self.project_id:
+            if COMPLIANCE_ENGINE_AVAILABLE and self.customer_id:
                 compliance_result = self._check_compliance([], [], [])
                 if compliance_result and compliance_result.get('findings'):
                     for finding in compliance_result['findings'][:3]:  # Top 3
@@ -3778,13 +3778,13 @@ DO NOT:
             logger.debug("[ENGINE-V2] ComplianceEngine not available")
             return None
         
-        if not self.project_id:
-            logger.debug("[ENGINE-V2] No project_id for compliance check")
+        if not self.customer_id:
+            logger.debug("[ENGINE-V2] No customer_id for compliance check")
             return None
         
         try:
             result = run_compliance_check(
-                project_id=self.project_id,
+                customer_id=self.customer_id,
                 db_handler=self.structured_handler
             )
             

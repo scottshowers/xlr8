@@ -146,14 +146,14 @@ class TruthEnricher:
     Caches extractions to avoid redundant LLM calls.
     """
     
-    def __init__(self, project_id: str = None):
+    def __init__(self, customer_id: str = None):
         """
         Initialize the enricher.
         
         Args:
-            project_id: Project ID for metrics tracking
+            customer_id: Project ID for metrics tracking
         """
-        self.project_id = project_id
+        self.customer_id = customer_id
         self.orchestrator = None
         self._extraction_cache: Dict[str, Dict] = {}
         
@@ -294,7 +294,7 @@ class TruthEnricher:
                 model="mistral:7b",
                 prompt=prompt,
                 system_prompt="You are a precise data extraction assistant. Return only valid JSON.",
-                project_id=self.project_id,
+                customer_id=self.customer_id,
                 processor=f"truth_enricher_{truth_type}"
             )
             
@@ -327,7 +327,7 @@ class TruthEnricher:
             result, success = self.orchestrator._call_claude(
                 prompt=prompt,
                 system_prompt=system_prompt,
-                project_id=getattr(self, 'project_id', None),
+                customer_id=getattr(self, 'customer_id', None),
                 operation="truth_enricher"
             )
             
