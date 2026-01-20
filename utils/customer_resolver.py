@@ -312,22 +312,50 @@ class CustomerResolver:
         """Generate human-readable display name from table name.
         
         Args:
-            table_name: Internal table name (e.g., "a1b2c3d4_employees_personal")
+            table_name: Internal table name. Can be:
+                - Short prefix: "a1b2c3d4_employees_personal"
+                - Full UUID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890_api_1099m"
             prefix: Customer prefix (e.g., "a1b2c3d4")
             
         Returns:
-            Display name (e.g., "Employees Personal")
+            Display name (e.g., "Employees Personal" or "API: 1099M")
         """
-        # Remove prefix
-        name = table_name[len(prefix):] if table_name.lower().startswith(prefix) else table_name
-        name = name.lstrip('_')
+        name = table_name.lower()
+        
+        # Strategy 1: Remove full UUID prefix if present (with hyphens)
+        # Pattern: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx_
+        import re
+        uuid_pattern = r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_'
+        match = re.match(uuid_pattern, name)
+        if match:
+            name = name[match.end():]
+        # Strategy 2: Remove short prefix if present
+        elif name.startswith(prefix.lower()):
+            name = name[len(prefix):]
+            name = name.lstrip('_')
         
         # Handle API tables
         if name.startswith('api_'):
             name = name[4:]
-            name = f"API: {name}"
+            # Title case the API endpoint name
+            display = name.replace('_', ' ')
+            words = display.split()
+            titled = []
+            for word in words:
+                # Keep short uppercase words as-is (acronyms)
+                if len(word) <= 4:
+                    titled.append(word.upper())
+                else:
+                    titled.append(word.title())
+            return f"API: {' '.join(titled)}"
         
-        # Replace underscores with spaces and title case
+        # Handle PDF tables
+        if name.startswith('pdf_'):
+            name = name[4:]
+            display = name.replace('_', ' ')
+            return f"PDF: {display.title()}"
+        
+        # Regular tables - replace underscores with spaces and title case
         name = name.replace('_', ' ')
         
         # Title case but preserve acronyms
