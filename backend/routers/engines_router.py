@@ -656,35 +656,7 @@ async def execute_batch(customer_id: str, request: BatchRequest):
 # SCHEMA/METADATA
 # =============================================================================
 
-@router.get("/{customer_id}/tables")
-async def get_available_tables(customer_id: str):
-    """Get list of tables available for engine operations."""
-    try:
-        conn = _get_connection(customer_id)
-        
-        tables = conn.execute(f"""
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = 'main' 
-            AND (
-                table_name LIKE '{customer_id.lower()}%' 
-                OR table_name LIKE '{customer_id.upper()}%'
-            )
-            AND table_name NOT LIKE '\\_%' ESCAPE '\\'
-            ORDER BY table_name
-        """).fetchall()
-        
-        return {
-            'customer_id': customer_id,
-            'tables': [t[0] for t in tables],
-            'count': len(tables)
-        }
-        
-    except Exception as e:
-        logger.error(f"[ENGINES] Tables error: {e}")
-        return {
-            'error': str(e)
-        }
+# /{customer_id}/tables endpoint REMOVED - Use /api/customers/{customer_id}/tables instead
 
 
 @router.get("/{customer_id}/table/{table_name}/columns")
