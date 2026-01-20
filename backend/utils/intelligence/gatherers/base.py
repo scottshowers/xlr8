@@ -35,16 +35,16 @@ class BaseGatherer(ABC):
     truth_type: TruthType = None
     storage_type: StorageType = None
     
-    def __init__(self, project_name: str, project_id: str = None):
+    def __init__(self, project_name: str, customer_id: str = None):
         """
         Initialize the gatherer.
         
         Args:
             project_name: The project code (e.g., "TEA1000")
-            project_id: The project UUID for filtering
+            customer_id: The project UUID for filtering
         """
         self.project_name = project_name
-        self.project_id = project_id
+        self.customer_id = customer_id
         
         if self.truth_type is None:
             raise NotImplementedError("Subclass must define truth_type")
@@ -117,17 +117,17 @@ class DuckDBGatherer(BaseGatherer):
     
     storage_type = StorageType.DUCKDB
     
-    def __init__(self, project_name: str, project_id: str = None, 
+    def __init__(self, project_name: str, customer_id: str = None, 
                  structured_handler=None):
         """
         Initialize DuckDB gatherer.
         
         Args:
             project_name: The project code
-            project_id: The project UUID
+            customer_id: The project UUID
             structured_handler: DuckDB handler instance
         """
-        super().__init__(project_name, project_id)
+        super().__init__(project_name, customer_id)
         self.handler = structured_handler
     
     def execute_sql(self, sql: str) -> List[Dict]:
@@ -156,18 +156,18 @@ class ChromaDBGatherer(BaseGatherer):
     
     storage_type = StorageType.CHROMADB
     
-    def __init__(self, project_name: str, project_id: str = None,
+    def __init__(self, project_name: str, customer_id: str = None,
                  rag_handler=None, collection_name: str = None):
         """
         Initialize ChromaDB gatherer.
         
         Args:
             project_name: The project code
-            project_id: The project UUID
+            customer_id: The project UUID
             rag_handler: RAG/ChromaDB handler instance
             collection_name: Name of the ChromaDB collection
         """
-        super().__init__(project_name, project_id)
+        super().__init__(project_name, customer_id)
         self.rag_handler = rag_handler
         self.collection_name = collection_name
     
@@ -197,8 +197,8 @@ class ChromaDBGatherer(BaseGatherer):
                 for key, value in filters.items():
                     conditions.append({key: value})
             
-            if self.project_id:
-                conditions.append({"project_id": self.project_id})
+            if self.customer_id:
+                conditions.append({"customer_id": self.customer_id})
             
             # Build where clause
             if len(conditions) == 0:

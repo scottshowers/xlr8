@@ -6,7 +6,7 @@ Gathers INTENT truths - what the customer says they want.
 
 Storage: ChromaDB (semantic search)
 Source: Customer documents (SOWs, requirements, meeting notes)
-Scope: Project-scoped (filtered by project_id)
+Scope: Project-scoped (filtered by customer_id)
 
 Deploy to: backend/utils/intelligence/gatherers/intent.py
 """
@@ -38,17 +38,17 @@ class IntentGatherer(ChromaDBGatherer):
     
     truth_type = TruthType.INTENT
     
-    def __init__(self, project_name: str, project_id: str = None,
+    def __init__(self, project_name: str, customer_id: str = None,
                  rag_handler=None):
         """
         Initialize Intent gatherer.
         
         Args:
             project_name: Project code
-            project_id: Project UUID (required for scoping)
+            customer_id: Project UUID (required for scoping)
             rag_handler: ChromaDB/RAG handler instance
         """
-        super().__init__(project_name, project_id, rag_handler)
+        super().__init__(project_name, customer_id, rag_handler)
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
         """
@@ -67,8 +67,8 @@ class IntentGatherer(ChromaDBGatherer):
             logger.debug("[GATHER-INTENT] No RAG handler available")
             return []
         
-        if not self.project_id:
-            logger.debug("[GATHER-INTENT] No project_id - intent is project-scoped")
+        if not self.customer_id:
+            logger.debug("[GATHER-INTENT] No customer_id - intent is project-scoped")
             return []
         
         truths = []
@@ -77,9 +77,9 @@ class IntentGatherer(ChromaDBGatherer):
             # Search for intent documents in this project
             # ChromaDB requires $and for multiple conditions
             where_filter = {"$and": [
-                {"project_id": self.project_id},
+                {"customer_id": self.customer_id},
                 {"truth_type": "intent"}
-            ]} if self.project_id else {"truth_type": "intent"}
+            ]} if self.customer_id else {"truth_type": "intent"}
             
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection

@@ -6,7 +6,7 @@ Gathers REGULATORY truths - laws, rules, and compliance requirements.
 
 Storage: ChromaDB (semantic search)
 Source: Laws, IRS rules, DOL guidelines, state/federal mandates
-Scope: GLOBAL (no project_id filter - regulations apply to all)
+Scope: GLOBAL (no customer_id filter - regulations apply to all)
 
 Deploy to: backend/utils/intelligence/gatherers/regulatory.py
 """
@@ -32,7 +32,7 @@ class RegulatoryGatherer(ChromaDBGatherer):
     - Secure 2.0, COBRA, etc.
     
     IMPORTANT: Regulatory is GLOBAL - it applies to all projects.
-    We do NOT filter by project_id.
+    We do NOT filter by customer_id.
     
     This enables compliance checking:
     - Regulatory says "Secure 2.0 requires X"
@@ -43,17 +43,17 @@ class RegulatoryGatherer(ChromaDBGatherer):
     
     truth_type = TruthType.REGULATORY
     
-    def __init__(self, project_name: str = None, project_id: str = None,
+    def __init__(self, project_name: str = None, customer_id: str = None,
                  rag_handler=None):
         """
         Initialize Regulatory gatherer.
         
         Args:
             project_name: Project code (optional, for logging only)
-            project_id: Project UUID (NOT used for filtering - Regulatory is global)
+            customer_id: Project UUID (NOT used for filtering - Regulatory is global)
             rag_handler: ChromaDB/RAG handler instance
         """
-        super().__init__(project_name or "global", project_id, rag_handler)
+        super().__init__(project_name or "global", customer_id, rag_handler)
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
         """
@@ -96,13 +96,13 @@ class RegulatoryGatherer(ChromaDBGatherer):
                     break
         
         try:
-            # Search GLOBAL regulatory documents (NO project_id filter)
+            # Search GLOBAL regulatory documents (NO customer_id filter)
             logger.warning(f"[GATHER-REGULATORY] Searching ChromaDB for: {search_query[:50]}...")
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
                 query=search_query,  # v5.1: Use domain-enhanced query
                 n_results=5,
-                where={"truth_type": "regulatory"}  # Global - no project_id!
+                where={"truth_type": "regulatory"}  # Global - no customer_id!
             )
             
             logger.warning(f"[GATHER-REGULATORY] Got {len(results)} results from ChromaDB")

@@ -48,7 +48,7 @@ class ConfigurationGatherer(DuckDBGatherer):
     
     truth_type = TruthType.CONFIGURATION
     
-    def __init__(self, project_name: str, project_id: str = None,
+    def __init__(self, project_name: str, customer_id: str = None,
                  structured_handler=None, schema: Dict = None,
                  table_selector=None):
         """
@@ -56,12 +56,12 @@ class ConfigurationGatherer(DuckDBGatherer):
         
         Args:
             project_name: Project code
-            project_id: Project UUID
+            customer_id: Project UUID
             structured_handler: DuckDB handler (has get_context_graph)
             schema: Schema metadata (tables, columns) - used as fallback
             table_selector: TableSelector instance - NOT USED in v6.0, kept for interface compatibility
         """
-        super().__init__(project_name, project_id, structured_handler)
+        super().__init__(project_name, customer_id, structured_handler)
         self.schema = schema or {}
         # table_selector kept for interface compatibility but not used
         self.table_selector = table_selector

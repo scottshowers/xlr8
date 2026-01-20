@@ -6,7 +6,7 @@ Gathers REFERENCE truths - vendor documentation and best practices.
 
 Storage: ChromaDB (semantic search)
 Source: Product docs, how-to guides, implementation standards
-Scope: GLOBAL (no project_id filter - these apply to all projects)
+Scope: GLOBAL (no customer_id filter - these apply to all projects)
 
 Deploy to: backend/utils/intelligence/gatherers/reference.py
 """
@@ -32,7 +32,7 @@ class ReferenceGatherer(ChromaDBGatherer):
     - Best practices
     
     IMPORTANT: Reference is GLOBAL - it applies to all projects.
-    We do NOT filter by project_id, BUT we DO filter by system (UKG, Workday, etc.)
+    We do NOT filter by customer_id, BUT we DO filter by system (UKG, Workday, etc.)
     
     This enables the "Regulatory ↔ Reference dovetail" described in ARCHITECTURE.md:
     - Regulatory says "Secure 2.0 requires X"
@@ -41,19 +41,19 @@ class ReferenceGatherer(ChromaDBGatherer):
     
     truth_type = TruthType.REFERENCE
     
-    def __init__(self, project_name: str = None, project_id: str = None,
+    def __init__(self, project_name: str = None, customer_id: str = None,
                  rag_handler=None, system: str = None):
         """
         Initialize Reference gatherer.
         
         Args:
             project_name: Project code (optional, for logging only)
-            project_id: Project UUID (NOT used for filtering - Reference is global)
+            customer_id: Project UUID (NOT used for filtering - Reference is global)
             rag_handler: ChromaDB/RAG handler instance
             system: System filter (ukg, workday, etc.) - filters vendor docs
         """
-        # Pass project_id to parent but we won't use it for filtering
-        super().__init__(project_name or "global", project_id, rag_handler)
+        # Pass customer_id to parent but we won't use it for filtering
+        super().__init__(project_name or "global", customer_id, rag_handler)
         self.system = system.lower() if system else None
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
@@ -104,7 +104,7 @@ class ReferenceGatherer(ChromaDBGatherer):
                     break
         
         try:
-            # Build where clause - Reference is GLOBAL (no project_id)
+            # Build where clause - Reference is GLOBAL (no customer_id)
             # But we DO filter by system for vendor docs
             if system:
                 where_clause = {

@@ -6,7 +6,7 @@ Gathers COMPLIANCE truths - audit requirements and controls.
 
 Storage: ChromaDB (semantic search)
 Source: SOC 2 requirements, audit controls, compliance frameworks
-Scope: GLOBAL (no project_id filter - compliance standards apply to all)
+Scope: GLOBAL (no customer_id filter - compliance standards apply to all)
 
 This is a sub-type of Regulatory, focused on:
 - Audit requirements
@@ -38,7 +38,7 @@ class ComplianceGatherer(ChromaDBGatherer):
     - Access control requirements
     
     IMPORTANT: Compliance is GLOBAL - it applies to all projects.
-    We do NOT filter by project_id.
+    We do NOT filter by customer_id.
     
     Usage in analysis:
     - Compliance says "Require annual review of X"
@@ -48,17 +48,17 @@ class ComplianceGatherer(ChromaDBGatherer):
     
     truth_type = TruthType.COMPLIANCE
     
-    def __init__(self, project_name: str = None, project_id: str = None,
+    def __init__(self, project_name: str = None, customer_id: str = None,
                  rag_handler=None):
         """
         Initialize Compliance gatherer.
         
         Args:
             project_name: Project code (optional, for logging only)
-            project_id: Project UUID (NOT used for filtering - Compliance is global)
+            customer_id: Project UUID (NOT used for filtering - Compliance is global)
             rag_handler: ChromaDB/RAG handler instance
         """
-        super().__init__(project_name or "global", project_id, rag_handler)
+        super().__init__(project_name or "global", customer_id, rag_handler)
     
     def gather(self, question: str, context: Dict[str, Any]) -> List[Truth]:
         """
@@ -80,12 +80,12 @@ class ComplianceGatherer(ChromaDBGatherer):
         truths = []
         
         try:
-            # Search GLOBAL compliance documents (NO project_id filter)
+            # Search GLOBAL compliance documents (NO customer_id filter)
             results = self.rag_handler.search(
                 collection_name="documents",  # CRITICAL: Must specify collection
                 query=question,
                 n_results=5,
-                where={"truth_type": "compliance"}  # Global - no project_id!
+                where={"truth_type": "compliance"}  # Global - no customer_id!
             )
             
             # Process results - rag_handler.search returns list of dicts

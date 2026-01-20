@@ -41,7 +41,7 @@ class RealityGatherer(DuckDBGatherer):
     
     truth_type = TruthType.REALITY
     
-    def __init__(self, project_name: str, project_id: str = None,
+    def __init__(self, project_name: str, customer_id: str = None,
                  structured_handler=None, schema: Dict = None,
                  sql_generator=None, pattern_cache=None):
         """
@@ -49,13 +49,13 @@ class RealityGatherer(DuckDBGatherer):
         
         Args:
             project_name: Project code
-            project_id: Project UUID
+            customer_id: Project UUID
             structured_handler: DuckDB handler
             schema: Schema metadata (tables, columns)
             sql_generator: SQL generator instance
             pattern_cache: Optional SQL pattern cache for learning
         """
-        super().__init__(project_name, project_id, structured_handler)
+        super().__init__(project_name, customer_id, structured_handler)
         self.schema = schema or {}
         self.sql_generator = sql_generator
         self.pattern_cache = pattern_cache
