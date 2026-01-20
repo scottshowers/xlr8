@@ -2242,27 +2242,27 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Compute hub/spoke relationships for the context graph.
         
-        SCHEMA-FIRST APPROACH (v4.0):
-        =============================
-        v4.0 CHANGE: Use BRIT/schema reference FIRST, inference SECOND.
+        DATA-FIRST APPROACH (v5.0):
+        ===========================
+        v5.0 CHANGE: FK detection (data values) FIRST, schema matching SECOND.
         
         Algorithm:
-        1. Load known FK patterns from ukg_pro_schema.json
-        2. Identify hub candidates from DATA PATTERNS
-        3. Find spokes by SCHEMA MATCHING (known FKs) - 100% confidence
-        4. Find additional spokes by VALUE MATCHING (inference) - lower confidence
-        5. Apply vocabulary labels
+        1. Run FK detection using ACTUAL DATA VALUES (authoritative)
+        2. Build hubs from FK detection results
+        3. Run schema/name matching for ADDITIONAL relationships
+        4. Deduplicate, FK results take priority
+        5. Store results
         
         Returns:
             Dict with stats about the computed graph
         """
-        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (SCHEMA-FIRST v4.0)")
+        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-FIRST v5.0)")
         
         # Configurable thresholds
-        HUB_PATTERN_SCORE_THRESHOLD = 4   # Minimum score to be hub candidate
-        MIN_COVERAGE_PCT = 20             # Minimum overlap for inferred relationships  
-        MIN_HUB_CARDINALITY = 1           # v3.0: Allow single-row config tables
-        MAX_HUB_CARDINALITY = 10000       # Skip if too large (not a lookup)
+        MIN_FK_COVERAGE_PCT = 50        # Minimum % coverage for FK detection
+        HUB_PATTERN_SCORE_THRESHOLD = 4 # Minimum score for schema-based hub candidates
+        MIN_HUB_CARDINALITY = 1         # Allow single-row config tables
+        MAX_HUB_CARDINALITY = 10000     # Skip if too large (not a lookup)
         
         try:
             from collections import defaultdict
@@ -2270,8 +2270,39 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             import os
             
             # =================================================================
-            # STEP 0: Load known FK patterns from schema reference
-            # This is the BRIT - we KNOW these relationships
+            # STEP 0: RUN FK DETECTION (DATA-BASED, AUTHORITATIVE)
+            # This uses actual values to find real relationships
+            # =================================================================
+            fk_relationships = []
+            fk_hubs = {}  # (table, column) -> hub_info
+            fk_spokes = set()  # (spoke_table, spoke_column) for deduplication
+            
+            try:
+                fk_relationships = self._detect_foreign_keys_fast(project, MIN_FK_COVERAGE_PCT)
+                logger.warning(f"[CONTEXT-GRAPH] FK detection found {len(fk_relationships)} data-verified relationships")
+                
+                # Build hub index from FK results
+                for fk in fk_relationships:
+                    hub_key = (fk['target_table'], fk['target_column'])
+                    if hub_key not in fk_hubs:
+                        fk_hubs[hub_key] = {
+                            'table_name': fk['target_table'],
+                            'key_column': fk['target_column'],
+                            'cardinality': fk['target_cardinality'],
+                            'semantic_type': fk['column_pattern'] + '_code',
+                            'truth_type': 'configuration',
+                            'is_discovered': True,
+                            'match_source': 'fk_detection',
+                            'values': set()  # Will be populated if needed
+                        }
+                    fk_spokes.add((fk['source_table'], fk['source_column']))
+                    
+            except Exception as e:
+                logger.warning(f"[CONTEXT-GRAPH] FK detection failed, continuing with schema matching: {e}")
+            
+            # =================================================================
+            # STEP 1: Load known FK patterns from schema reference (BRIT)
+            # These supplement FK detection for edge cases
             # =================================================================
             known_spoke_patterns = {}  # column_name_normalized -> hub_type
             known_hubs = {}  # hub_type -> {key_column, semantic_type, ...}
@@ -2779,14 +2810,14 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Added {identity_hubs_added} identity hubs from multi-sheet files")
             
             # =================================================================
-            # STEP 6A: Find spokes by SCHEMA MATCHING (known FKs)
-            # These are 100% confidence - we KNOW the relationship from BRIT
+            # STEP 6: BUILD RELATIONSHIPS
+            # v5.0: FK detection results go FIRST (authoritative)
+            # Then schema matching adds ADDITIONAL relationships
             # =================================================================
             relationships = []
-            schema_matched_columns = set()  # Track columns already matched by schema
+            fk_matched_columns = set()  # Track columns found by FK detection
             
-            # Get ALL columns from all tables (not just cached values)
-            # Moved outside if block so it's available for Step 6B
+            # Get ALL columns from all tables
             all_table_columns = self.conn.execute("""
                 SELECT 
                     s.table_name,
@@ -2800,10 +2831,69 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                   AND s.table_name NOT LIKE '\\_%' ESCAPE '\\'
             """, [project]).fetchall()
             
+            # Build table metadata lookup
+            table_meta = {}
+            for table_name, file_name, entity_type, category, truth_type in all_table_columns:
+                table_meta[table_name] = {
+                    'file_name': file_name,
+                    'entity_type': entity_type,
+                    'category': category,
+                    'truth_type': truth_type
+                }
+            
+            # -----------------------------------------------------------------
+            # STEP 6A: ADD FK-DETECTED RELATIONSHIPS FIRST (authoritative)
+            # These were found using actual data values in Step 0
+            # -----------------------------------------------------------------
+            fk_relationship_count = 0
+            for fk in fk_relationships:
+                # Find or create hub for this FK
+                hub_key = (fk['target_table'], fk['target_column'])
+                
+                # Check if we already have a hub for this
+                matching_hub = None
+                for hub in final_hubs:
+                    if hub['table_name'] == fk['target_table'] and hub['key_column'] == fk['target_column']:
+                        matching_hub = hub
+                        break
+                
+                # If no existing hub, create one from FK detection
+                if not matching_hub and hub_key in fk_hubs:
+                    matching_hub = fk_hubs[hub_key]
+                    # Also add to final_hubs
+                    final_hubs.append(matching_hub)
+                
+                if matching_hub:
+                    # Get spoke metadata
+                    spoke_meta = table_meta.get(fk['source_table'], {})
+                    
+                    relationships.append({
+                        'hub': matching_hub,
+                        'spoke_table': fk['source_table'],
+                        'spoke_column': fk['source_column'],
+                        'spoke_cardinality': fk['source_cardinality'],
+                        'coverage_pct': fk['coverage_pct'],
+                        'is_subset': fk['is_subset'],
+                        'truth_type': spoke_meta.get('truth_type', 'unknown'),
+                        'entity_type': spoke_meta.get('entity_type', ''),
+                        'file_name': spoke_meta.get('file_name', ''),
+                        'match_source': 'fk_detection'
+                    })
+                    fk_matched_columns.add((fk['source_table'], fk['source_column']))
+                    fk_relationship_count += 1
+            
+            if fk_relationship_count > 0:
+                logger.warning(f"[CONTEXT-GRAPH] Added {fk_relationship_count} FK-detected relationships (authoritative)")
+            
+            # -----------------------------------------------------------------
+            # STEP 6B: SCHEMA MATCHING for additional relationships
+            # Skip anything already found by FK detection
+            # -----------------------------------------------------------------
+            schema_matched_columns = set()
+            
             if known_spoke_patterns:
                 for table_name, file_name, entity_type, category, truth_type in all_table_columns:
                     try:
-                        # Get columns for this table
                         columns = self.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
                         
                         for col_info in columns:
@@ -2811,11 +2901,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             if not col_name or col_name.startswith('_'):
                                 continue
                             
-                            # Normalize column name for matching
+                            # v5.0: Skip if already found by FK detection
+                            if (table_name, col_name) in fk_matched_columns:
+                                continue
+                            
                             col_normalized = col_name.lower().replace('_', '').replace(' ', '')
                             
                             # Check if this column matches a known FK pattern
-                            # EXACT match first, then FUZZY match (pattern contained in column)
                             target_hub_type = None
                             
                             if col_normalized in known_spoke_patterns:
@@ -2897,47 +2989,29 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                     except Exception as col_err:
                         logger.debug(f"[CONTEXT-GRAPH] Error checking columns for {table_name}: {col_err}")
                 
-                logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships)} relationships")
+                logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships) - fk_relationship_count} additional relationships")
             
             # =================================================================
-            # STEP 6B: COLUMN-NAME MATCHING (v4.3)
-            # For any column not already matched, check if it matches a hub's
-            # key_column by name. This catches relationships not in BRIT.
-            # e.g., api_compensation.companyID → api_companies.companyId
-            # 
-            # v4.3: Exclude generic column names that cause false positives
+            # STEP 6C: COLUMN-NAME MATCHING
+            # For any column not already matched by FK or schema, check if it
+            # matches a hub's key_column by name.
+            # v5.0: Skip FK-detected and schema-matched columns
             # =================================================================
             column_match_count = 0
             
-            # Generic columns that are too ambiguous for column-name matching
-            # These create false positives when matched by name alone
-            GENERIC_COLUMNS = {
-                'code', 'id', 'name', 'description', 'desc', 'status', 'type',
-                'value', 'date', 'number', 'num', 'key', 'index', 'seq',
-                'sequence', 'sort', 'order', 'active', 'enabled', 'flag'
-            }
-            
             # Build lookup: normalized_key_column -> hub
-            # Exclude generic columns from being hub keys for column matching
             hub_by_key_column = {}
-            generic_excluded = 0
             for hub in final_hubs:
                 key_col = hub.get('key_column', '')
                 if key_col:
                     key_normalized = key_col.lower().replace('_', '').replace(' ', '')
-                    
-                    # Skip generic columns - they cause too many false positives
-                    if key_normalized in GENERIC_COLUMNS:
-                        generic_excluded += 1
-                        continue
-                    
                     # Only add if not already present (first hub wins for each column name)
                     if key_normalized not in hub_by_key_column:
                         hub_by_key_column[key_normalized] = hub
             
-            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns ({generic_excluded} generic excluded)")
+            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns")
             
-            # Check all tables again for column-name matches
+            # Check all tables for column-name matches
             for table_name, file_name, entity_type, category, truth_type in all_table_columns:
                 try:
                     columns = self.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
@@ -2947,15 +3021,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         if not col_name or col_name.startswith('_'):
                             continue
                         
-                        # Skip if already matched by schema
+                        # v5.0: Skip if already matched by FK detection or schema
+                        if (table_name, col_name) in fk_matched_columns:
+                            continue
                         if (table_name, col_name) in schema_matched_columns:
                             continue
                         
                         col_normalized = col_name.lower().replace('_', '').replace(' ', '')
-                        
-                        # Skip generic spoke columns too
-                        if col_normalized in GENERIC_COLUMNS:
-                            continue
                         
                         # Check if this column matches any hub's key column
                         if col_normalized in hub_by_key_column:
@@ -2970,7 +3042,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                 'spoke_table': table_name,
                                 'spoke_column': col_name,
                                 'spoke_cardinality': 0,
-                                'coverage_pct': 80.0,  # Column-name match = 80% confidence
+                                'coverage_pct': 70.0,  # Column-name match = lower confidence
                                 'is_subset': True,
                                 'truth_type': truth_type,
                                 'entity_type': entity_type,
@@ -2988,7 +3060,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Column-name matching found {column_match_count} additional relationships")
             
             # =================================================================
-            # STEP 6C: Create spokes for IDENTITY HUBS
+            # STEP 6D: Create spokes for IDENTITY HUBS
             # Identity hubs detected in Step 5C have spoke_tables already identified
             # =================================================================
             identity_spoke_count = 0
@@ -3000,7 +3072,9 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 key_column = hub['key_column']
                 
                 for spoke_table in spoke_tables:
-                    # Skip if already matched by schema
+                    # v5.0: Skip if already matched by FK detection or schema
+                    if (spoke_table, key_column) in fk_matched_columns:
+                        continue
                     if (spoke_table, key_column) in schema_matched_columns:
                         continue
                     
@@ -3143,6 +3217,147 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             import traceback
             logger.error(traceback.format_exc())
             return {'hubs': 0, 'spokes': 0, 'semantic_types': 0, 'error': str(e)}
+    
+    def _detect_foreign_keys_fast(self, project: str, min_coverage: float = 50.0) -> List[Dict]:
+        """
+        Detect FK relationships using actual data values.
+        
+        v5.0: This is the PRIMARY detection method - uses real data.
+        
+        Algorithm:
+        1. Find all key-like columns (_code, _id, Code, Id, etc.)
+        2. Get distinct values for each
+        3. Compare values between tables
+        4. If Table A's values are a SUBSET of Table B's → FK relationship
+        
+        Args:
+            project: Customer UUID (table prefix)
+            min_coverage: Minimum % of spoke values that must exist in hub
+            
+        Returns:
+            List of FK relationships with coverage stats
+        """
+        logger.info(f"[FK-DETECT] Starting data-based FK detection for {project}")
+        
+        # Get all tables for this customer
+        prefix = project[:8]
+        all_tables = self.conn.execute("SHOW TABLES").fetchall()
+        customer_tables = [t[0] for t in all_tables 
+                          if (t[0].startswith(prefix) or t[0].startswith(project)) 
+                          and not t[0].startswith('_')]
+        
+        if not customer_tables:
+            logger.warning(f"[FK-DETECT] No tables found for {project}")
+            return []
+        
+        logger.info(f"[FK-DETECT] Analyzing {len(customer_tables)} tables")
+        
+        # Build index of all key columns and their distinct values
+        # key_columns[normalized_col_name] = [(table_name, col_name, values_set, cardinality)]
+        from collections import defaultdict
+        key_columns = defaultdict(list)
+        
+        # Patterns that indicate a key column
+        KEY_SUFFIXES = ['code', 'id', 'no', 'num', 'key', 'number']
+        
+        for table_name in customer_tables:
+            try:
+                columns = self.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                
+                for col_info in columns:
+                    col_name = col_info[1]
+                    if not col_name or col_name.startswith('_'):
+                        continue
+                    
+                    col_lower = col_name.lower()
+                    
+                    # Check if this looks like a key column
+                    is_key_col = any(col_lower.endswith(s) or col_lower.endswith('_' + s) 
+                                     for s in KEY_SUFFIXES)
+                    if not is_key_col:
+                        continue
+                    
+                    # Get distinct values (limit for performance)
+                    try:
+                        values_result = self.conn.execute(f'''
+                            SELECT DISTINCT LOWER(TRIM(CAST("{col_name}" AS VARCHAR))) as val
+                            FROM "{table_name}"
+                            WHERE "{col_name}" IS NOT NULL 
+                              AND TRIM(CAST("{col_name}" AS VARCHAR)) != ''
+                            LIMIT 10000
+                        ''').fetchall()
+                        
+                        values_set = {r[0] for r in values_result if r[0]}
+                        cardinality = len(values_set)
+                        
+                        if cardinality > 0:
+                            # Normalize column name for grouping
+                            col_normalized = col_lower.replace('_', '').replace(' ', '')
+                            key_columns[col_normalized].append({
+                                'table': table_name,
+                                'column': col_name,
+                                'values': values_set,
+                                'cardinality': cardinality
+                            })
+                            
+                    except Exception as e:
+                        logger.debug(f"[FK-DETECT] Error getting values for {table_name}.{col_name}: {e}")
+                        
+            except Exception as e:
+                logger.debug(f"[FK-DETECT] Error analyzing {table_name}: {e}")
+        
+        logger.info(f"[FK-DETECT] Found {len(key_columns)} unique key column patterns")
+        
+        # For each column pattern, find hub (highest cardinality) and spokes
+        foreign_keys = []
+        
+        for col_pattern, tables_with_col in key_columns.items():
+            if len(tables_with_col) < 2:
+                continue  # Need at least 2 tables to have a relationship
+            
+            # Sort by cardinality descending - highest is likely the hub
+            tables_with_col.sort(key=lambda x: x['cardinality'], reverse=True)
+            
+            # Hub is the one with most distinct values
+            hub = tables_with_col[0]
+            hub_values = hub['values']
+            
+            # Check each other table as potential spoke
+            for spoke in tables_with_col[1:]:
+                spoke_values = spoke['values']
+                
+                if not spoke_values:
+                    continue
+                
+                # Calculate overlap: how many spoke values exist in hub?
+                overlap = spoke_values & hub_values
+                coverage_pct = (len(overlap) / len(spoke_values)) * 100 if spoke_values else 0
+                
+                # Also check if spoke is subset of hub
+                is_subset = spoke_values <= hub_values
+                
+                if coverage_pct >= min_coverage:
+                    foreign_keys.append({
+                        'source_table': spoke['table'],
+                        'source_column': spoke['column'],
+                        'target_table': hub['table'],
+                        'target_column': hub['column'],
+                        'source_cardinality': spoke['cardinality'],
+                        'target_cardinality': hub['cardinality'],
+                        'overlap_count': len(overlap),
+                        'coverage_pct': round(coverage_pct, 1),
+                        'is_subset': is_subset,
+                        'column_pattern': col_pattern
+                    })
+                    
+                    logger.debug(f"[FK-DETECT] Found: {spoke['table']}.{spoke['column']} → {hub['table']}.{hub['column']} ({coverage_pct:.0f}%)")
+        
+        # Sort by coverage descending
+        foreign_keys.sort(key=lambda x: x['coverage_pct'], reverse=True)
+        
+        logger.warning(f"[FK-DETECT] Detected {len(foreign_keys)} FK relationships from data")
+        
+        return foreign_keys
     
     def _derive_semantic_type(self, entity_type: str, column_name: str, category: str = None) -> str:
         """
