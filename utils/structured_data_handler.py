@@ -2900,24 +2900,42 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships)} relationships")
             
             # =================================================================
-            # STEP 6B: COLUMN-NAME MATCHING (v4.2)
+            # STEP 6B: COLUMN-NAME MATCHING (v4.3)
             # For any column not already matched, check if it matches a hub's
             # key_column by name. This catches relationships not in BRIT.
             # e.g., api_compensation.companyID → api_companies.companyId
+            # 
+            # v4.3: Exclude generic column names that cause false positives
             # =================================================================
             column_match_count = 0
             
+            # Generic columns that are too ambiguous for column-name matching
+            # These create false positives when matched by name alone
+            GENERIC_COLUMNS = {
+                'code', 'id', 'name', 'description', 'desc', 'status', 'type',
+                'value', 'date', 'number', 'num', 'key', 'index', 'seq',
+                'sequence', 'sort', 'order', 'active', 'enabled', 'flag'
+            }
+            
             # Build lookup: normalized_key_column -> hub
+            # Exclude generic columns from being hub keys for column matching
             hub_by_key_column = {}
+            generic_excluded = 0
             for hub in final_hubs:
                 key_col = hub.get('key_column', '')
                 if key_col:
                     key_normalized = key_col.lower().replace('_', '').replace(' ', '')
+                    
+                    # Skip generic columns - they cause too many false positives
+                    if key_normalized in GENERIC_COLUMNS:
+                        generic_excluded += 1
+                        continue
+                    
                     # Only add if not already present (first hub wins for each column name)
                     if key_normalized not in hub_by_key_column:
                         hub_by_key_column[key_normalized] = hub
             
-            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns")
+            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns ({generic_excluded} generic excluded)")
             
             # Check all tables again for column-name matches
             for table_name, file_name, entity_type, category, truth_type in all_table_columns:
@@ -2934,6 +2952,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             continue
                         
                         col_normalized = col_name.lower().replace('_', '').replace(' ', '')
+                        
+                        # Skip generic spoke columns too
+                        if col_normalized in GENERIC_COLUMNS:
+                            continue
                         
                         # Check if this column matches any hub's key column
                         if col_normalized in hub_by_key_column:
