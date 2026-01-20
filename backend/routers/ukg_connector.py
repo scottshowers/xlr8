@@ -434,6 +434,9 @@ async def save_to_duckdb(project_id: str, table_name: str, data: List[Dict]) -> 
         handler.conn.execute(f'CREATE TABLE "{full_table_name}" AS SELECT * FROM temp_df')
         handler.conn.unregister("temp_df")
         
+        # v5.2 FIX: Persist to disk! Without this, data is lost on process restart
+        handler.conn.execute("CHECKPOINT")
+        
         logger.info(f"[UKG-SYNC] Saved {len(df)} rows to {full_table_name}")
         return len(df)
         
@@ -730,14 +733,15 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 truth_type = 'configuration' if table_info.get('type') == 'config' else 'reality'
                 
                 try:
-                    # Register in _schema_metadata
+                    # Register in _schema_metadata (DELETE + INSERT since no unique constraint on table_name)
+                    handler.conn.execute("""
+                        DELETE FROM _schema_metadata WHERE table_name = ?
+                    """, [table_name])
+                    
                     handler.conn.execute("""
                         INSERT INTO _schema_metadata 
-                        (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category)
-                        VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, 'api')
-                        ON CONFLICT (table_name) DO UPDATE SET
-                            row_count = EXCLUDED.row_count,
-                            is_current = TRUE
+                        (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category, columns)
+                        VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, 'api', '[]')
                     """, [project_id, display_name, table_name, row_count, display_name, truth_type])
                     
                     # Profile columns
@@ -761,6 +765,13 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 logger.info(f"[UKG-SYNC] [{job_id}] Context graph computed")
             except Exception as cg_err:
                 logger.warning(f"[UKG-SYNC] Could not compute context graph: {cg_err}")
+            
+            # v5.2 FIX: Final checkpoint to persist ALL changes (schema, profiles, context graph)
+            try:
+                handler.conn.execute("CHECKPOINT")
+                logger.info(f"[UKG-SYNC] [{job_id}] Final checkpoint completed - data persisted")
+            except Exception as ckpt_err:
+                logger.warning(f"[UKG-SYNC] Checkpoint warning: {ckpt_err}")
             
             logger.info(f"[UKG-SYNC] [{job_id}] Post-sync processing complete")
             job['current_step'] = 'Complete (with profiling)!'
