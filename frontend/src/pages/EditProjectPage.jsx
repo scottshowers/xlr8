@@ -164,11 +164,13 @@ const EditProjectPage = () => {
     try {
       const engagementLabel = ENGAGEMENT_TYPES.find(t => t.value === formData.engagement_type)?.label || formData.engagement_type;
       
+      // v5.2 FIX: Don't regenerate name on edit - only update individual fields
+      // Previously this caused "Team Inc - Optimization - Optimization - Optimization..."
       const res = await fetch(`${API_BASE}/api/customers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: `${formData.customer} - ${engagementLabel}`,
+          // name: intentionally NOT sent on edit - preserve existing name
           customer: formData.customer,
           systems: formData.selectedSystems,
           domains: formData.selectedDomains,
