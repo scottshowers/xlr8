@@ -480,7 +480,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 if response.status_code == 200:
                     available_tables = response.json()
                     logger.info(f"[UKG-SYNC] [{job_id}] Found {len(available_tables)} code tables")
-                    job['total_tables'] = len(available_tables) + 20  # +13 config + +7 reality endpoints
+                    job['total_tables'] = len(available_tables) + 17  # +10 config + +7 reality endpoints
                 else:
                     available_tables = []
                     errors.append(f"Could not fetch code tables list: HTTP {response.status_code}")
@@ -565,16 +565,13 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 {"name": "jobs", "path": "/configuration/v1/jobs"},
                 {"name": "org_levels", "path": "/configuration/v1/org-levels"},
                 {"name": "locations", "path": "/configuration/v1/locations"},
-                {"name": "companies", "path": "/configuration/v1/companies"},
-                {"name": "pay_groups", "path": "/configuration/v1/pay-groups"},
+                {"name": "company_details", "path": "/configuration/v1/company-details"},
+                {"name": "pay_group_pay_period", "path": "/personnel/v1/pay-group-pay-period"},
                 {"name": "earnings", "path": "/configuration/v1/earnings"},
                 {"name": "deductions", "path": "/configuration/v1/deductions"},
-                {"name": "employee_types", "path": "/configuration/v1/employee-types"},
                 {"name": "positions", "path": "/configuration/v1/positions"},
                 {"name": "shift_codes", "path": "/configuration/v1/shift-codes"},
-                {"name": "job_groups", "path": "/configuration/v1/job-groups"},
                 {"name": "tax_groups", "path": "/configuration/v1/tax-groups"},
-                {"name": "projects", "path": "/configuration/v1/projects"},
             ]
             
             for endpoint in config_endpoints:
@@ -717,6 +714,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
         logger.info(f"[UKG-SYNC] [{job_id}] Starting post-sync processing...")
         
         try:
+            from utils.structured_data_handler import get_structured_handler
             handler = get_structured_handler()
             
             # Get all synced table names
