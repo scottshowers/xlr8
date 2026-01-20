@@ -599,6 +599,14 @@ try:
 except ImportError as e:
     logger.warning(f"Remediation router import failed: {e}")
 
+# Register ChromaDB repair router (fix customer_id metadata)
+try:
+    from backend.routers import repair_chromadb
+    app.include_router(repair_chromadb.router, tags=["repair"])
+    logger.info("ChromaDB repair router registered at /api/repair")
+except ImportError as e:
+    logger.warning(f"ChromaDB repair router import failed: {e}")
+
 
 @app.get("/api/debug/imports")
 async def debug_imports():
