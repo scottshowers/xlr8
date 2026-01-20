@@ -59,7 +59,7 @@ def _get_service() -> ClassificationService:
 @router.get("/classification/table/{table_name}")
 async def get_table_classification(
     table_name: str,
-    project_id: Optional[str] = Query(None, description="Filter by project")
+    customer_id: Optional[str] = Query(None, description="Filter by project")
 ):
     """
     Get complete classification report for a table.
@@ -73,7 +73,7 @@ async def get_table_classification(
     """
     service = _get_service()
     
-    classification = service.get_table_classification(table_name, project_id)
+    classification = service.get_table_classification(table_name, customer_id)
     
     if not classification:
         raise HTTPException(status_code=404, detail=f"Table '{table_name}' not found")
@@ -86,7 +86,7 @@ async def get_table_classification(
 
 @router.get("/classification/tables")
 async def get_all_table_classifications(
-    project_id: Optional[str] = Query(None, description="Filter by project")
+    customer_id: Optional[str] = Query(None, description="Filter by project")
 ):
     """
     Get classification summary for all tables.
@@ -99,7 +99,7 @@ async def get_all_table_classifications(
     """
     service = _get_service()
     
-    classifications = service.get_all_table_classifications(project_id)
+    classifications = service.get_all_table_classifications(customer_id)
     
     # Create summary view
     summaries = []
@@ -182,7 +182,7 @@ async def get_column_classification(table_name: str, column_name: str):
 @router.get("/classification/chunks/{document_name}")
 async def get_document_chunks(
     document_name: str,
-    project_id: Optional[str] = Query(None, description="Filter by project"),
+    customer_id: Optional[str] = Query(None, description="Filter by project"),
     collection: str = Query("documents", description="ChromaDB collection name")
 ):
     """
@@ -201,7 +201,7 @@ async def get_document_chunks(
     if not service.rag_handler:
         raise HTTPException(status_code=503, detail="RAG handler not available")
     
-    chunks = service.get_document_chunks(document_name, project_id, collection)
+    chunks = service.get_document_chunks(document_name, customer_id, collection)
     
     if not chunks:
         raise HTTPException(status_code=404, detail=f"Document '{document_name}' not found")
@@ -214,7 +214,7 @@ async def get_document_chunks(
 
 @router.get("/classification/chunks")
 async def list_all_documents_with_chunks(
-    project_id: Optional[str] = Query(None, description="Filter by project"),
+    customer_id: Optional[str] = Query(None, description="Filter by project"),
     collection: str = Query("documents", description="ChromaDB collection name")
 ):
     """
@@ -243,15 +243,15 @@ async def list_all_documents_with_chunks(
                 if source not in doc_metadata:
                     doc_metadata[source] = {
                         'truth_type': meta.get('truth_type'),
-                        'project_id': meta.get('project_id'),
+                        'customer_id': meta.get('customer_id'),
                         'structure': meta.get('structure')
                     }
         
         # Filter by project if specified
-        if project_id:
+        if customer_id:
             doc_counts = {
                 k: v for k, v in doc_counts.items()
-                if doc_metadata.get(k, {}).get('project_id') == project_id
+                if doc_metadata.get(k, {}).get('customer_id') == customer_id
             }
         
         documents = [
@@ -259,7 +259,7 @@ async def list_all_documents_with_chunks(
                 "document_name": name,
                 "chunk_count": count,
                 "truth_type": doc_metadata.get(name, {}).get('truth_type'),
-                "project_id": doc_metadata.get(name, {}).get('project_id'),
+                "customer_id": doc_metadata.get(name, {}).get('customer_id'),
                 "structure": doc_metadata.get(name, {}).get('structure')
             }
             for name, count in sorted(doc_counts.items())
