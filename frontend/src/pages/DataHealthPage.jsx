@@ -71,7 +71,7 @@ export default function DataHealthPage({ embedded = false }) {
     setIntegrityError(null);
     try {
       const res = await api.get('/status/data-integrity', {
-        params: { project: activeProject?.name || '' },
+        params: { customer_id: activeProject?.id || '' },
         timeout: 15000 // 15 second timeout
       });
       setIntegrityData(res.data);
