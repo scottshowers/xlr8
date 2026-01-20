@@ -26,7 +26,7 @@ export default function Status() {
     try {
       const chromaRes = await api.get('/status/chromadb').catch(() => ({ data: { total_chunks: 0 } }))
       const docsRes = await api.get('/status/documents', { 
-        params: selectedProject !== 'all' ? { project: selectedProject } : {} 
+        params: selectedProject !== 'all' ? { customer_id: selectedProject } : {} 
       }).catch(() => ({ data: { documents: [] } }))
       const jobsRes = await api.get('/jobs').catch(() => ({ data: { jobs: [] } }))
       const projectsRes = await api.get('/customers/list').catch(() => ({ data: [] }))
@@ -249,7 +249,7 @@ export default function Status() {
             <option value="all">All Customers</option>
             <option value="__GLOBAL__">Global</option>
             {projects.map(p => (
-              <option key={p.id} value={p.name}>{p.name}</option>
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
         </div>
