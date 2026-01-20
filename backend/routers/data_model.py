@@ -3,6 +3,8 @@ Data Model Router - Endpoints for table relationship analysis.
 
 Deploy to: backend/routers/data_model.py
 
+Uses CustomerResolver for all customer identification.
+
 Then add to main.py:
     from routers import data_model
     app.include_router(data_model.router, prefix="/api")
@@ -16,6 +18,16 @@ import logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["data-model"])
+
+# Import CustomerResolver - THE source of truth
+try:
+    from backend.utils.customer_resolver import CustomerResolver
+except ImportError:
+    try:
+        from utils.customer_resolver import CustomerResolver
+    except ImportError:
+        CustomerResolver = None
+        logger.warning("[DATA_MODEL] CustomerResolver not available")
 
 
 def _get_read_handler():
@@ -697,8 +709,34 @@ async def delete_all_relationships(customer_id: str, confirm: bool = False):
 
 async def get_project_tables(customer_id: str) -> List[Dict]:
     """
-    Get table schemas for a project - tries metadata first, falls back to direct DuckDB query.
+    Get table schemas for a project.
+    
+    DELEGATES to CustomerResolver - the single source of truth for table lookups.
+    This function exists for backward compatibility.
+    
+    Args:
+        customer_id: Customer UUID or identifier
+        
+    Returns:
+        List of table dicts with table_name, columns, row_count, etc.
     """
+    # Use CustomerResolver if available (preferred)
+    if CustomerResolver:
+        try:
+            # Resolve customer first
+            customer = CustomerResolver.resolve(customer_id)
+            if customer:
+                tables = CustomerResolver.get_tables(customer['id'])
+                logger.info(f"CustomerResolver found {len(tables)} tables for {customer_id}")
+                return tables
+            else:
+                logger.warning(f"CustomerResolver could not resolve: {customer_id}")
+        except Exception as e:
+            logger.warning(f"CustomerResolver failed: {e}, falling back to legacy")
+    
+    # LEGACY FALLBACK: Direct DuckDB query (for backward compatibility)
+    logger.warning(f"Using legacy get_project_tables for {customer_id}")
+    
     import json
     
     try:
@@ -714,158 +752,46 @@ async def get_project_tables(customer_id: str) -> List[Dict]:
         handler = get_structured_handler()
         tables = []
         
-        # Query _schema_metadata for Excel files
-        try:
-            metadata_result = handler.conn.execute("""
-                SELECT table_name, project, file_name, sheet_name, columns, row_count
-                FROM _schema_metadata 
-                WHERE is_current = TRUE
-            """).fetchall()
-            
-            for row in metadata_result:
-                table_name, proj, filename, sheet, columns_json, row_count = row
-                
-                if proj.lower() != customer_id.lower():
-                    continue
-                
-                try:
-                    columns_data = json.loads(columns_json) if columns_json else []
-                    columns = [c.get('name', c) if isinstance(c, dict) else c for c in columns_data]
-                except Exception:
-                    columns = []
-                
-                tables.append({
-                    'table_name': table_name,
-                    'columns': columns,
-                    'row_count': row_count or 0,
-                    'sheet_name': sheet,
-                    'filename': filename
-                })
-            
-            logger.info(f"Found {len(tables)} tables for {customer_id}")
-            
-        except Exception as e:
-            logger.warning(f"Metadata query failed: {e}")
+        # Build project prefixes for matching
+        project_clean = customer_id.strip()
+        # Handle UUID-based customer IDs: extract first 8 chars without hyphens
+        uuid_prefix = project_clean.replace('-', '')[:8].lower() if '-' in project_clean else project_clean.lower()
         
-        # Note: PDF tables are now in _schema_metadata (via store_dataframe)
-        # No separate _pdf_tables query needed
+        all_tables = handler.conn.execute("SHOW TABLES").fetchall()
         
-        # ALWAYS check DuckDB for API-synced tables (they won't be in _schema_metadata)
-        try:
-            all_tables = handler.conn.execute("SHOW TABLES").fetchall()
+        for (table_name,) in all_tables:
+            # Skip system tables
+            if table_name.startswith('_'):
+                continue
             
-            # Build project prefixes for matching
-            project_clean = customer_id.strip()
-            api_prefix = f"{project_clean.lower()}_api_"
+            # Check if matches project prefix
+            if not table_name.lower().startswith(uuid_prefix):
+                continue
             
-            for (table_name,) in all_tables:
-                # Only look for API tables here
-                if not table_name.lower().startswith(api_prefix):
-                    continue
-                
-                # Skip if already in tables list
-                if any(t['table_name'] == table_name for t in tables):
-                    continue
-                
-                # Get columns
-                columns = []
-                try:
-                    result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                    columns = [desc[0] for desc in result.description]
-                except Exception:
-                    try:
-                        col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                        columns = [row[1] for row in col_result]
-                    except Exception as e:
-                        logger.debug(f"Suppressed: {e}")
-                
-                # Get row count
-                try:
-                    count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                    row_count = count_result[0] if count_result else 0
-                except Exception:
-                    row_count = 0
-                
-                # Extract clean table name for display
-                display_name = table_name.replace(api_prefix, '').replace(project_clean.lower() + '_api_', '')
-                
-                tables.append({
-                    'table_name': table_name,
-                    'columns': columns,
-                    'row_count': row_count,
-                    'sheet_name': 'API Sync',
-                    'filename': f'UKG Pro: {display_name}',
-                    'source': 'api'
-                })
-            
-            logger.info(f"Found {len([t for t in tables if t.get('source') == 'api'])} API tables for {customer_id}")
-            
-        except Exception as api_e:
-            logger.warning(f"API table query failed: {api_e}")
-        
-        # FALLBACK: If metadata returned nothing, query DuckDB directly for non-API tables
-        if not tables:
-            logger.warning(f"No tables from metadata - querying DuckDB directly for {customer_id}")
+            # Get columns
+            columns = []
             try:
-                all_tables = handler.conn.execute("SHOW TABLES").fetchall()
-                
-                # Build project prefixes for matching
-                # Tables use first 8 chars of UUID (no hyphens) as prefix
-                project_clean = customer_id.strip()
-                project_prefixes = [
-                    project_clean.lower(),
-                    project_clean.lower().replace(' ', '_'),
-                    project_clean.lower().replace(' ', '_').replace('-', '_'),
-                    # Handle UUID-based customer IDs: extract first 8 chars without hyphens
-                    project_clean.replace('-', '')[:8].lower() if '-' in project_clean else None,
-                    # Also match full UUID with hyphens (for API-synced tables)
-                    project_clean.lower() + '_api_' if '-' in project_clean else None,
-                ]
-                project_prefixes = [p for p in project_prefixes if p]
-                
-                for (table_name,) in all_tables:
-                    # Skip system tables
-                    if table_name.startswith('_'):
-                        continue
-                    
-                    # Check if matches project
-                    table_lower = table_name.lower()
-                    if not any(table_lower.startswith(prefix) for prefix in project_prefixes if prefix):
-                        continue
-                    
-                    # Get columns
-                    columns = []
-                    try:
-                        result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
-                        columns = [desc[0] for desc in result.description]
-                    except Exception:
-                        try:
-                            col_result = handler.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
-                            columns = [row[1] for row in col_result]
-                        except Exception as e:
-                            logger.debug(f"Suppressed: {e}")
-                    
-                    # Get row count
-                    try:
-                        count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
-                        row_count = count_result[0] if count_result else 0
-                    except Exception:
-                        row_count = 0
-                    
-                    tables.append({
-                        'table_name': table_name,
-                        'columns': columns,
-                        'row_count': row_count,
-                        'sheet_name': 'Direct Query',
-                        'filename': 'DuckDB'
-                    })
-                
-                logger.info(f"Direct query found {len(tables)} tables for {customer_id}")
-                
-            except Exception as direct_e:
-                logger.error(f"Direct table query failed: {direct_e}")
+                result = handler.conn.execute(f'SELECT * FROM "{table_name}" LIMIT 0')
+                columns = [desc[0] for desc in result.description]
+            except Exception:
+                pass
+            
+            # Get row count
+            try:
+                count_result = handler.conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                row_count = count_result[0] if count_result else 0
+            except Exception:
+                row_count = 0
+            
+            tables.append({
+                'table_name': table_name,
+                'columns': columns,
+                'row_count': row_count,
+                'sheet_name': 'Unknown',
+                'filename': 'Unknown'
+            })
         
-        logger.info(f"Total {len(tables)} tables for project {customer_id}")
+        logger.info(f"Legacy found {len(tables)} tables for {customer_id}")
         return tables
         
     except Exception as e:

@@ -6,12 +6,12 @@ IMPORTANT: customer.id (UUID) is the ONLY identifier used throughout the system.
 - DuckDB tables: {customer_id}_{filename}_{sheet}
 - All API calls: /customers/{customer_id}/...
 
-Updated: January 2026 - Refactored from projects to customers
+Updated: January 2026 - CustomerResolver Integration
 """
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 import sys
 import logging
 
@@ -19,6 +19,12 @@ sys.path.insert(0, '/app')
 sys.path.insert(0, '/data')
 
 from utils.database.models import ProjectModel
+
+# Import CustomerResolver - THE source of truth for customer identification
+try:
+    from backend.utils.customer_resolver import CustomerResolver, get_customer_tables
+except ImportError:
+    from utils.customer_resolver import CustomerResolver, get_customer_tables
 
 logger = logging.getLogger(__name__)
 
@@ -326,6 +332,166 @@ async def get_customer(customer_id: str):
         raise
     except Exception as e:
         logger.error(f"Error getting customer: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# TABLE AND FILE ENDPOINTS (Using CustomerResolver)
+# These are THE canonical endpoints for getting customer tables/files
+# =============================================================================
+
+@router.get("/{customer_id}/tables")
+async def get_customer_tables_endpoint(customer_id: str):
+    """
+    Get all tables for a customer - THE canonical endpoint.
+    
+    Uses CustomerResolver to get tables by UUID prefix.
+    Returns both internal names and display names.
+    """
+    try:
+        # Resolve customer to ensure they exist
+        customer = CustomerResolver.resolve(customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
+        
+        # Get tables using CustomerResolver
+        tables = CustomerResolver.get_tables(customer['id'])
+        
+        return {
+            "success": True,
+            "customer_id": customer['id'],
+            "customer_name": customer.get('name'),
+            "prefix": CustomerResolver.get_table_prefix(customer['id']),
+            "table_count": len(tables),
+            "tables": tables
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting tables for {customer_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{customer_id}/files")
+async def get_customer_files_endpoint(customer_id: str):
+    """
+    Get all files for a customer - THE canonical endpoint.
+    
+    Files are grouped by source (upload, api, pdf).
+    """
+    try:
+        # Resolve customer
+        customer = CustomerResolver.resolve(customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
+        
+        # Get tables and group by source
+        tables = CustomerResolver.get_tables(customer['id'])
+        
+        files_by_source = {
+            'upload': [],
+            'api': [],
+            'pdf': []
+        }
+        
+        for table in tables:
+            source = table.get('source', 'upload')
+            files_by_source.setdefault(source, []).append({
+                'table_name': table['table_name'],
+                'display_name': table['display_name'],
+                'filename': table.get('filename'),
+                'sheet_name': table.get('sheet_name'),
+                'row_count': table.get('row_count', 0),
+                'column_count': len(table.get('columns', []))
+            })
+        
+        return {
+            "success": True,
+            "customer_id": customer['id'],
+            "customer_name": customer.get('name'),
+            "files": files_by_source,
+            "total_files": len(tables),
+            "by_source": {k: len(v) for k, v in files_by_source.items()}
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting files for {customer_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{customer_id}/table/{table_ref}")
+async def get_customer_table_detail(customer_id: str, table_ref: str):
+    """
+    Get details for a specific table.
+    
+    Args:
+        customer_id: Customer UUID
+        table_ref: Table name (internal or display name)
+    """
+    try:
+        # Resolve customer
+        customer = CustomerResolver.resolve(customer_id)
+        if not customer:
+            raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
+        
+        # Get specific table
+        table = CustomerResolver.get_table_by_name(customer['id'], table_ref)
+        if not table:
+            raise HTTPException(status_code=404, detail=f"Table not found: {table_ref}")
+        
+        # Validate access
+        if not CustomerResolver.validate_access(customer['id'], table['table_name']):
+            raise HTTPException(status_code=403, detail="Access denied to table")
+        
+        return {
+            "success": True,
+            "customer_id": customer['id'],
+            "table": table
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting table {table_ref} for {customer_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{customer_id}/resolve")
+async def resolve_customer_endpoint(customer_id: str):
+    """
+    Debug endpoint to test CustomerResolver.
+    
+    Shows how any identifier resolves to canonical customer data.
+    """
+    try:
+        customer = CustomerResolver.resolve(customer_id)
+        
+        if not customer:
+            return {
+                "success": False,
+                "identifier": customer_id,
+                "resolved": False,
+                "message": "Could not resolve identifier to a customer"
+            }
+        
+        return {
+            "success": True,
+            "identifier": customer_id,
+            "resolved": True,
+            "customer": {
+                "id": customer.get('id'),
+                "name": customer.get('name'),
+                "status": customer.get('status'),
+                "prefix": CustomerResolver.get_table_prefix(customer['id']),
+            },
+            "table_count": len(CustomerResolver.get_tables(customer['id']))
+        }
+        
+    except Exception as e:
+        logger.error(f"Error resolving {customer_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
