@@ -442,8 +442,8 @@ async def detect_foreign_keys_endpoint(customer_id: str, apply: bool = False):
     Detect FK relationships using ACTUAL DATA, not fuzzy name matching.
     
     This is the NEW, CORRECT approach:
-    1. Find columns with same name in reality + config tables
-    2. Verify with actual data: are reality values a subset of config values?
+    1. Find columns with same name across tables
+    2. Verify with actual data: are values in table A a subset of table B?
     3. Return real metrics (coverage_pct, is_subset, cardinalities)
     
     Args:
@@ -458,8 +458,12 @@ async def detect_foreign_keys_endpoint(customer_id: str, apply: bool = False):
             from utils.structured_data_handler import get_structured_handler
             from backend.utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
         except ImportError:
-            from backend.utils.structured_data_handler import get_structured_handler
-            from backend.utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
+            try:
+                from backend.utils.structured_data_handler import get_structured_handler
+                from backend.utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
+            except ImportError:
+                from utils.structured_data_handler import get_structured_handler
+                from utils.fk_detector import detect_foreign_keys, update_column_mappings, generate_fk_report
         
         handler = get_structured_handler()
         
@@ -478,12 +482,10 @@ async def detect_foreign_keys_endpoint(customer_id: str, apply: bool = False):
             "success": True,
             "customer_id": customer_id,
             "applied": apply,
-            "stats": fk_results.get('stats', {}),
-            "fk_relationships": fk_results.get('fk_relationships', []),
-            "pk_columns": fk_results.get('pk_columns', []),
-            "update_stats": update_stats,
+            "total_fks": len(fk_results),
+            "foreign_keys": fk_results,
             "report": report,
-            "errors": fk_results.get('errors', [])
+            "update_stats": update_stats
         }
         
     except Exception as e:
