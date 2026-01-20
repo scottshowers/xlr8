@@ -2293,7 +2293,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             'truth_type': 'configuration',
                             'is_discovered': True,
                             'match_source': 'fk_detection',
-                            'values': set()  # Will be populated if needed
+                            'file_name': fk['target_table'],  # Use table name as file_name placeholder
+                            'values': set()
                         }
                     fk_spokes.add((fk['source_table'], fk['source_column']))
                     
