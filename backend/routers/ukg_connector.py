@@ -480,7 +480,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 if response.status_code == 200:
                     available_tables = response.json()
                     logger.info(f"[UKG-SYNC] [{job_id}] Found {len(available_tables)} code tables")
-                    job['total_tables'] = len(available_tables) + 7  # +7 for reality endpoints
+                    job['total_tables'] = len(available_tables) + 20  # +13 config + +7 reality endpoints
                 else:
                     available_tables = []
                     errors.append(f"Could not fetch code tables list: HTTP {response.status_code}")
@@ -557,7 +557,76 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 await asyncio.sleep(1.0)
             
             # =====================================================
-            # STEP 3: Pull employee/personnel data (REALITY)
+            # STEP 3: Pull CONFIGURATION master data
+            # These are the lookup tables that transactional data references
+            # e.g., jobs, org_levels, locations - NOT the simple code tables
+            # =====================================================
+            config_endpoints = [
+                {"name": "jobs", "path": "/configuration/v1/jobs"},
+                {"name": "org_levels", "path": "/configuration/v1/org-levels"},
+                {"name": "locations", "path": "/configuration/v1/locations"},
+                {"name": "companies", "path": "/configuration/v1/companies"},
+                {"name": "pay_groups", "path": "/configuration/v1/pay-groups"},
+                {"name": "earnings", "path": "/configuration/v1/earnings"},
+                {"name": "deductions", "path": "/configuration/v1/deductions"},
+                {"name": "employee_types", "path": "/configuration/v1/employee-types"},
+                {"name": "positions", "path": "/configuration/v1/positions"},
+                {"name": "shift_codes", "path": "/configuration/v1/shift-codes"},
+                {"name": "job_groups", "path": "/configuration/v1/job-groups"},
+                {"name": "tax_groups", "path": "/configuration/v1/tax-groups"},
+                {"name": "projects", "path": "/configuration/v1/projects"},
+            ]
+            
+            for endpoint in config_endpoints:
+                table_index += 1
+                job['current_step'] = f'Pulling config: {endpoint["name"]}...'
+                job['tables_processed'] = table_index
+                logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
+                
+                url = f"https://{hostname}{endpoint['path']}"
+                
+                try:
+                    data = await fetch_all_pages(client, url, headers, job_id)
+                    
+                    if data:
+                        rows = await save_to_duckdb(project_id, endpoint['name'], data)
+                        total_rows += rows
+                        tables_synced += 1
+                        results.append({
+                            "table": endpoint['name'],
+                            "rows": rows,
+                            "success": True,
+                            "type": "configuration_master"
+                        })
+                        logger.info(f"[UKG-SYNC] [{job_id}] {endpoint['name']}: {rows} rows")
+                    else:
+                        results.append({
+                            "table": endpoint['name'],
+                            "rows": 0,
+                            "success": True,
+                            "type": "configuration_master",
+                            "note": "empty or no permission"
+                        })
+                        
+                except Exception as e:
+                    tables_failed += 1
+                    error_msg = str(e)
+                    errors.append(f"{endpoint['name']}: {error_msg}")
+                    results.append({
+                        "table": endpoint['name'],
+                        "rows": 0,
+                        "success": False,
+                        "error": error_msg
+                    })
+                
+                job['tables_synced'] = tables_synced
+                job['total_rows'] = total_rows
+                
+                # Polite delay
+                await asyncio.sleep(0.5)
+            
+            # =====================================================
+            # STEP 4: Pull employee/personnel data (REALITY)
             # =====================================================
             reality_endpoints = [
                 {"name": "person_details", "path": "/personnel/v1/person-details"},
@@ -641,7 +710,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
         logger.info(f"[UKG-SYNC] [{job_id}] COMPLETE: {tables_synced} tables, {total_rows} rows, {tables_failed} failures")
         
         # =====================================================
-        # STEP 4: Post-sync - Register tables and profile columns
+        # STEP 5: Post-sync - Register tables and profile columns
         # This enables the intelligence layer to find and query these tables
         # =====================================================
         job['current_step'] = 'Post-processing: registering tables and profiling columns...'
