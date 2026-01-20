@@ -251,6 +251,95 @@ def call_llm(prompt: str, max_tokens: int = 4000, operation: str = "pdf_parse", 
 # PDF TEXT EXTRACTION
 # =============================================================================
 
+def extract_document_title(text: str, filename: str = None) -> str:
+    """
+    Extract document title from PDF text content.
+    
+    Priority:
+    1. First non-empty line that looks like a title (not a date, page number, etc.)
+    2. File name (cleaned)
+    3. "data" as fallback
+    
+    This is MORE RELIABLE than LLM-generated descriptions which can hallucinate.
+    """
+    if not text:
+        return _clean_filename_for_title(filename) if filename else "data"
+    
+    lines = text.strip().split('\n')[:10]  # Check first 10 lines
+    
+    # Patterns to skip (not titles)
+    skip_patterns = [
+        r'^\s*$',                      # Empty
+        r'^\s*page\s*\d+',             # Page numbers
+        r'^\d{1,2}[/-]\d{1,2}[/-]\d{2,4}',  # Dates
+        r'^\w{3}\s+\d{1,2},?\s+\d{4}', # "Nov 25, 2025"
+        r'^\d{1,2}:\d{2}',             # Times
+        r'^select:',                   # UI elements
+        r'^report\s*date',             # Report metadata
+        r'^generated',                 # Generated timestamps
+        r'^printed',                   # Print timestamps
+    ]
+    
+    for line in lines:
+        line_clean = line.strip()
+        if not line_clean:
+            continue
+        
+        # Skip lines matching non-title patterns
+        is_skip = False
+        for pattern in skip_patterns:
+            if re.match(pattern, line_clean, re.IGNORECASE):
+                is_skip = True
+                break
+        if is_skip:
+            continue
+        
+        # Skip very short lines (likely codes or fragments)
+        if len(line_clean) < 5:
+            continue
+        
+        # Skip lines that are ALL CAPS single words (likely headers/codes)
+        if line_clean.isupper() and ' ' not in line_clean:
+            continue
+        
+        # Found a candidate title - clean it up
+        title = line_clean
+        
+        # Remove "Page X" suffix
+        title = re.sub(r'\s+page\s*\d+\s*$', '', title, flags=re.IGNORECASE)
+        
+        # Remove company names at start (e.g., "Team, Inc.")
+        title = re.sub(r'^[A-Za-z]+,?\s+(Inc\.?|LLC|Corp\.?|Company)\s*', '', title, flags=re.IGNORECASE)
+        
+        title = title.strip()
+        if len(title) >= 5:
+            logger.info(f"[TITLE-EXTRACT] Extracted title from PDF: '{title}'")
+            return title
+    
+    # Fallback to filename
+    return _clean_filename_for_title(filename) if filename else "data"
+
+
+def _clean_filename_for_title(filename: str) -> str:
+    """Clean filename for use as title."""
+    if not filename:
+        return "data"
+    
+    # Remove extension
+    base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
+    
+    # Remove common prefixes
+    for prefix in ['TEAM ', 'TEAM_', 'CLIENT ', 'CLIENT_', 'CUSTOMER ', 'CUSTOMER_']:
+        if base_name.upper().startswith(prefix.upper()):
+            base_name = base_name[len(prefix):]
+            break
+    
+    # Convert underscores to spaces
+    base_name = base_name.replace('_', ' ')
+    
+    return base_name.strip()[:50] or "data"
+
+
 def extract_pdf_text(file_path: str) -> str:
     """Extract all text from a PDF, with OCR fallback for image-based PDFs."""
     if not PDFPLUMBER_AVAILABLE:
@@ -919,7 +1008,8 @@ def store_to_duckdb(
     project: str, 
     filename: str, 
     project_id: str = None,
-    table_description: str = None
+    table_description: str = None,
+    pdf_text: str = None
 ) -> Dict[str, Any]:
     """
     Store parsed rows to DuckDB using the shared structured data handler.
@@ -932,7 +1022,8 @@ def store_to_duckdb(
         project: Project name
         filename: Source filename
         project_id: Optional project ID
-        table_description: Optional description from Vision (used for display name)
+        table_description: Optional description from Vision (NOT TRUSTED - can hallucinate)
+        pdf_text: Raw PDF text for reliable title extraction
     
     Note: With the sys.modules singleton pattern, import path doesn't matter -
     we always get the same handler instance.
@@ -949,20 +1040,19 @@ def store_to_duckdb(
         if df.empty:
             return {"success": False, "error": "DataFrame is empty"}
         
-        # Generate meaningful sheet_name from table_description or filename
-        # This affects both table_name (for DuckDB) and display_name (for UI)
-        if table_description and len(table_description) > 3:
-            # Clean up description for use as sheet name
+        # v5.2: Extract document title from PDF text - MORE RELIABLE than Vision description
+        # Vision can hallucinate descriptions that don't match the actual document
+        # The actual PDF text contains the real title (usually in first few lines)
+        if pdf_text:
+            sheet_name = extract_document_title(pdf_text, filename)
+            logger.info(f"[DUCKDB] Using extracted title: '{sheet_name}' (from PDF text)")
+        elif table_description and len(table_description) > 3:
+            # Fallback to Vision description if no PDF text (shouldn't happen)
             sheet_name = table_description.strip()[:50]
+            logger.warning(f"[DUCKDB] Using Vision description (may be unreliable): '{sheet_name}'")
         else:
-            # Extract from filename: "TEAM Company Tax Verification.pdf" -> "Company Tax Verification"
-            base_name = filename.rsplit('.', 1)[0] if '.' in filename else filename
-            # Remove common prefixes like "TEAM ", "Client ", etc.
-            for prefix in ['TEAM ', 'CLIENT ', 'CUSTOMER ']:
-                if base_name.upper().startswith(prefix):
-                    base_name = base_name[len(prefix):]
-                    break
-            sheet_name = base_name.strip()[:50] or 'data'
+            # Final fallback: clean filename
+            sheet_name = _clean_filename_for_title(filename)
         
         # Get the shared handler - uses sys.modules singleton so import path doesn't matter
         try:
@@ -1121,7 +1211,8 @@ def process_pdf_intelligently(
         if rows:
             update_status(f"Storing {len(rows)} rows to DuckDB...", 70)
             
-            # Get table_description from analysis (Vision) or None
+            # Get table_description from analysis (Vision) - but this can hallucinate
+            # We'll also pass the raw PDF text for reliable title extraction
             table_description = analysis.get('table_description', '')
             
             duckdb_result = store_to_duckdb(
@@ -1129,7 +1220,8 @@ def process_pdf_intelligently(
                 project, 
                 filename, 
                 project_id,
-                table_description=table_description
+                table_description=table_description,
+                pdf_text=text  # v5.2: Pass raw text for reliable title extraction
             )
             result['duckdb_result'] = duckdb_result
             
