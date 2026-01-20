@@ -2785,21 +2785,22 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             relationships = []
             schema_matched_columns = set()  # Track columns already matched by schema
             
+            # Get ALL columns from all tables (not just cached values)
+            # Moved outside if block so it's available for Step 6B
+            all_table_columns = self.conn.execute("""
+                SELECT 
+                    s.table_name,
+                    s.file_name,
+                    s.entity_type,
+                    s.category,
+                    COALESCE(s.truth_type, 'unknown') as truth_type
+                FROM _schema_metadata s
+                WHERE s.project = ? 
+                  AND s.is_current = TRUE
+                  AND s.table_name NOT LIKE '\\_%' ESCAPE '\\'
+            """, [project]).fetchall()
+            
             if known_spoke_patterns:
-                # Get ALL columns from all tables (not just cached values)
-                all_table_columns = self.conn.execute("""
-                    SELECT 
-                        s.table_name,
-                        s.file_name,
-                        s.entity_type,
-                        s.category,
-                        COALESCE(s.truth_type, 'unknown') as truth_type
-                    FROM _schema_metadata s
-                    WHERE s.project = ? 
-                      AND s.is_current = TRUE
-                      AND s.table_name NOT LIKE '\\_%' ESCAPE '\\'
-                """, [project]).fetchall()
-                
                 for table_name, file_name, entity_type, category, truth_type in all_table_columns:
                     try:
                         # Get columns for this table
@@ -2840,6 +2841,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                 for hub in final_hubs:
                                     hub_semantic = hub.get('semantic_type', '').lower()
                                     hub_entity = hub.get('entity_type', '').lower().replace('_', '').replace(' ', '')
+                                    hub_key_normalized = hub.get('key_column', '').lower().replace('_', '').replace(' ', '')
                                     
                                     # Match by semantic type or entity type (with plural/singular flexibility)
                                     target_normalized = target_hub_type.replace('_', '')
@@ -2850,6 +2852,14 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                     target_singular = target_normalized.replace('ings', 'ing').replace('ions', 'ion')
                                     hub_singular = hub_semantic_normalized.replace('ings', 'ing').replace('ions', 'ion')
                                     
+                                    # v4.2: COLUMN NAME MATCHING - most reliable approach
+                                    # If spoke column name matches hub key_column, it's a spoke relationship
+                                    # e.g., api_compensation.employeeID → api_person_details.employeeID
+                                    if col_normalized == hub_key_normalized:
+                                        matching_hub = hub
+                                        break
+                                    
+                                    # Existing semantic/entity matching
                                     if (target_hub_type in hub_semantic or 
                                         target_hub_type == hub_entity or
                                         f"{target_hub_type}_code" == hub_semantic or
@@ -2890,11 +2900,70 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 logger.warning(f"[CONTEXT-GRAPH] Schema matching found {len(relationships)} relationships")
             
             # =================================================================
-            # STEP 6B: REMOVED - No more value-based inference
-            # Schema matching is the ONLY source of truth now.
-            # The BRIT tells us exactly what columns map to what hubs.
-            # Inference was polluting the graph with bad guesses.
+            # STEP 6B: COLUMN-NAME MATCHING (v4.2)
+            # For any column not already matched, check if it matches a hub's
+            # key_column by name. This catches relationships not in BRIT.
+            # e.g., api_compensation.companyID → api_companies.companyId
             # =================================================================
+            column_match_count = 0
+            
+            # Build lookup: normalized_key_column -> hub
+            hub_by_key_column = {}
+            for hub in final_hubs:
+                key_col = hub.get('key_column', '')
+                if key_col:
+                    key_normalized = key_col.lower().replace('_', '').replace(' ', '')
+                    # Only add if not already present (first hub wins for each column name)
+                    if key_normalized not in hub_by_key_column:
+                        hub_by_key_column[key_normalized] = hub
+            
+            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns")
+            
+            # Check all tables again for column-name matches
+            for table_name, file_name, entity_type, category, truth_type in all_table_columns:
+                try:
+                    columns = self.conn.execute(f"PRAGMA table_info('{table_name}')").fetchall()
+                    
+                    for col_info in columns:
+                        col_name = col_info[1]
+                        if not col_name or col_name.startswith('_'):
+                            continue
+                        
+                        # Skip if already matched by schema
+                        if (table_name, col_name) in schema_matched_columns:
+                            continue
+                        
+                        col_normalized = col_name.lower().replace('_', '').replace(' ', '')
+                        
+                        # Check if this column matches any hub's key column
+                        if col_normalized in hub_by_key_column:
+                            matching_hub = hub_by_key_column[col_normalized]
+                            
+                            # Skip if this is the hub itself
+                            if table_name == matching_hub['table_name']:
+                                continue
+                            
+                            relationships.append({
+                                'hub': matching_hub,
+                                'spoke_table': table_name,
+                                'spoke_column': col_name,
+                                'spoke_cardinality': 0,
+                                'coverage_pct': 80.0,  # Column-name match = 80% confidence
+                                'is_subset': True,
+                                'truth_type': truth_type,
+                                'entity_type': entity_type,
+                                'file_name': file_name,
+                                'match_source': 'column_name'
+                            })
+                            schema_matched_columns.add((table_name, col_name))
+                            column_match_count += 1
+                            logger.debug(f"[CONTEXT-GRAPH] COLUMN MATCH: {table_name}.{col_name} → {matching_hub['table_name']}.{matching_hub['key_column']}")
+                            
+                except Exception as col_err:
+                    logger.debug(f"[CONTEXT-GRAPH] Error in column matching for {table_name}: {col_err}")
+            
+            if column_match_count > 0:
+                logger.warning(f"[CONTEXT-GRAPH] Column-name matching found {column_match_count} additional relationships")
             
             # =================================================================
             # STEP 6C: Create spokes for IDENTITY HUBS
