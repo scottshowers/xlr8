@@ -3223,13 +3223,16 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Detect FK relationships using actual data values.
         
-        v5.0: This is the PRIMARY detection method - uses real data.
+        v5.1: Compare ALL key columns against ALL others by VALUE.
+        This finds relationships even when column names differ:
+        - employment.orgLevel1Code → compensation.orgLevel1Code (same name)
+        - employment.locationCode → locations.code (different names, same values)
         
         Algorithm:
-        1. Find all key-like columns (_code, _id, Code, Id, etc.)
-        2. Get distinct values for each
-        3. Compare values between tables
-        4. If Table A's values are a SUBSET of Table B's → FK relationship
+        1. Find all key-like columns and get their distinct values
+        2. For each pair of columns, check value overlap
+        3. Higher cardinality = hub, lower = spoke
+        4. If coverage > threshold → FK relationship
         
         Args:
             project: Customer UUID (table prefix)
@@ -3253,13 +3256,15 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         
         logger.info(f"[FK-DETECT] Analyzing {len(customer_tables)} tables")
         
-        # Build index of all key columns and their distinct values
-        # key_columns[normalized_col_name] = [(table_name, col_name, values_set, cardinality)]
-        from collections import defaultdict
-        key_columns = defaultdict(list)
+        # Collect ALL key columns with their values
+        # key_columns = [(table, column, values_set, cardinality), ...]
+        key_columns = []
         
         # Patterns that indicate a key column
-        KEY_SUFFIXES = ['code', 'id', 'no', 'num', 'key', 'number']
+        KEY_SUFFIXES = ['code', 'id', 'no', 'num', 'key', 'number', 'type']
+        
+        # Generic columns to skip (too broad)
+        SKIP_COLUMNS = {'id', 'code', 'type', 'status', 'name', 'description', 'date', 'datetime'}
         
         for table_name in customer_tables:
             try:
@@ -3271,6 +3276,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         continue
                     
                     col_lower = col_name.lower()
+                    
+                    # Skip if too generic (just "code" or "id")
+                    if col_lower in SKIP_COLUMNS:
+                        continue
                     
                     # Check if this looks like a key column
                     is_key_col = any(col_lower.endswith(s) or col_lower.endswith('_' + s) 
@@ -3285,16 +3294,14 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             FROM "{table_name}"
                             WHERE "{col_name}" IS NOT NULL 
                               AND TRIM(CAST("{col_name}" AS VARCHAR)) != ''
-                            LIMIT 10000
+                            LIMIT 5000
                         ''').fetchall()
                         
-                        values_set = {r[0] for r in values_result if r[0]}
+                        values_set = frozenset(r[0] for r in values_result if r[0])
                         cardinality = len(values_set)
                         
-                        if cardinality > 0:
-                            # Normalize column name for grouping
-                            col_normalized = col_lower.replace('_', '').replace(' ', '')
-                            key_columns[col_normalized].append({
+                        if 1 <= cardinality <= 5000:  # Skip empty and huge columns
+                            key_columns.append({
                                 'table': table_name,
                                 'column': col_name,
                                 'values': values_set,
@@ -3307,37 +3314,46 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             except Exception as e:
                 logger.debug(f"[FK-DETECT] Error analyzing {table_name}: {e}")
         
-        logger.info(f"[FK-DETECT] Found {len(key_columns)} unique key column patterns")
+        logger.info(f"[FK-DETECT] Found {len(key_columns)} key columns to compare")
         
-        # For each column pattern, find hub (highest cardinality) and spokes
+        # Compare ALL pairs of columns
         foreign_keys = []
+        seen_pairs = set()  # Avoid duplicate A→B and B→A
         
-        for col_pattern, tables_with_col in key_columns.items():
-            if len(tables_with_col) < 2:
-                continue  # Need at least 2 tables to have a relationship
-            
-            # Sort by cardinality descending - highest is likely the hub
-            tables_with_col.sort(key=lambda x: x['cardinality'], reverse=True)
-            
-            # Hub is the one with most distinct values
-            hub = tables_with_col[0]
-            hub_values = hub['values']
-            
-            # Check each other table as potential spoke
-            for spoke in tables_with_col[1:]:
-                spoke_values = spoke['values']
-                
-                if not spoke_values:
+        for i, col_a in enumerate(key_columns):
+            for col_b in key_columns[i+1:]:
+                # Skip same table
+                if col_a['table'] == col_b['table']:
                     continue
                 
-                # Calculate overlap: how many spoke values exist in hub?
-                overlap = spoke_values & hub_values
-                coverage_pct = (len(overlap) / len(spoke_values)) * 100 if spoke_values else 0
+                # Skip if no overlap possible
+                if not col_a['values'] or not col_b['values']:
+                    continue
                 
-                # Also check if spoke is subset of hub
-                is_subset = spoke_values <= hub_values
+                # Calculate overlap
+                overlap = col_a['values'] & col_b['values']
+                if not overlap:
+                    continue
+                
+                # Determine hub (higher cardinality) vs spoke (lower)
+                if col_a['cardinality'] >= col_b['cardinality']:
+                    hub, spoke = col_a, col_b
+                else:
+                    hub, spoke = col_b, col_a
+                
+                # Coverage: what % of spoke values exist in hub?
+                coverage_pct = (len(overlap) / len(spoke['values'])) * 100
                 
                 if coverage_pct >= min_coverage:
+                    # Create unique key for this relationship
+                    pair_key = (spoke['table'], spoke['column'], hub['table'], hub['column'])
+                    if pair_key in seen_pairs:
+                        continue
+                    seen_pairs.add(pair_key)
+                    
+                    # Derive column pattern from the more specific column name
+                    col_pattern = spoke['column'].lower().replace('_', '')
+                    
                     foreign_keys.append({
                         'source_table': spoke['table'],
                         'source_column': spoke['column'],
@@ -3347,7 +3363,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                         'target_cardinality': hub['cardinality'],
                         'overlap_count': len(overlap),
                         'coverage_pct': round(coverage_pct, 1),
-                        'is_subset': is_subset,
+                        'is_subset': spoke['values'] <= hub['values'],
                         'column_pattern': col_pattern
                     })
                     
