@@ -96,7 +96,7 @@ function SyncFromUKGButton({ c, projectId }) {
     fetch(`${API_BASE}/api/integrations/connections/${projectId}`)
       .then(res => res.json())
       .then(data => {
-        const ukgConn = (data.connections || []).find(c => c.system_id === 'ukg_pro' && c.status === 'connected');
+        const ukgConn = (data.connections || []).find(c => c.system_id === 'ukg_pro' && (c.status === 'connected' || c.status === 'saved'));
         setHasConnection(!!ukgConn);
       })
       .catch(() => setHasConnection(false));
