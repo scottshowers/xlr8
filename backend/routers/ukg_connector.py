@@ -19,6 +19,9 @@ import httpx
 import base64
 import logging
 import asyncio
+import uuid
+import re
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -320,10 +323,6 @@ async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 10
 # SYNC ALL CONFIG TABLES - BACKGROUND JOB
 # =============================================================================
 
-import uuid
-import re
-from datetime import datetime
-
 # In-memory job tracking (would use Redis in production)
 _sync_jobs: Dict[str, Dict] = {}
 
@@ -537,6 +536,10 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
     tables_synced = 0
     tables_failed = 0
     
+    # Get sync configuration for this project
+    sync_config = await get_sync_config(project_id)
+    logger.info(f"[UKG-SYNC] [{job_id}] Loaded sync config: {len(sync_config)} endpoints configured")
+    
     try:
         # Global timeout for entire sync: 15 minutes max
         # Individual requests: 60s (UKG can be slow)
@@ -702,41 +705,65 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
             
             # =====================================================
             # STEP 4: Pull employee/personnel data (REALITY)
+            # Uses sync_config to determine which endpoints and filters
             # =====================================================
-            reality_endpoints = [
-                {"name": "person_details", "path": "/personnel/v1/person-details"},
-                {"name": "employment_details", "path": "/personnel/v1/employment-details"},
-                {"name": "compensation_details", "path": "/personnel/v1/compensation-details"},
-                {"name": "employee_deductions", "path": "/personnel/v1/emp-deductions"},
-                {"name": "pto_plans", "path": "/personnel/v1/pto-plans"},
-                {"name": "contacts", "path": "/personnel/v1/contacts"},
-                {"name": "direct_deposit", "path": "/payroll/v1/direct-deposit"},
-            ]
             
-            for endpoint in reality_endpoints:
+            # Build list of enabled endpoints from config
+            enabled_endpoints = []
+            for endpoint_name, endpoint_config in sync_config.items():
+                if endpoint_config.get('enabled', True) and endpoint_name in REALITY_ENDPOINT_PATHS:
+                    enabled_endpoints.append({
+                        "name": endpoint_name,
+                        "path": REALITY_ENDPOINT_PATHS[endpoint_name],
+                        "config": endpoint_config
+                    })
+            
+            logger.info(f"[UKG-SYNC] [{job_id}] Will pull {len(enabled_endpoints)} reality endpoints")
+            
+            for endpoint in enabled_endpoints:
                 table_index += 1
-                job['current_step'] = f'Pulling {endpoint["name"]}...'
-                job['tables_processed'] = table_index
-                logger.info(f"[UKG-SYNC] [{job_id}] Pulling {endpoint['name']}...")
+                endpoint_name = endpoint["name"]
+                endpoint_config = endpoint["config"]
                 
-                url = f"https://{hostname}{endpoint['path']}"
+                job['current_step'] = f'Pulling {endpoint_name}...'
+                job['tables_processed'] = table_index
+                job['last_heartbeat'] = datetime.now().isoformat()
+                logger.info(f"[UKG-SYNC] [{job_id}] Pulling {endpoint_name}...")
+                
+                # Build URL with filter parameters
+                base_url = f"https://{hostname}{endpoint['path']}"
+                filter_params = build_filter_params(endpoint_name, sync_config)
+                
+                if filter_params is None:
+                    # Endpoint disabled
+                    logger.info(f"[UKG-SYNC] [{job_id}] Skipping disabled endpoint: {endpoint_name}")
+                    continue
+                
+                # Add filter params to URL
+                if filter_params:
+                    param_str = '&'.join(f"{k}={v}" for k, v in filter_params.items())
+                    url = f"{base_url}?{param_str}"
+                    logger.info(f"[UKG-SYNC] [{job_id}] Fetching with filters: {filter_params}")
+                else:
+                    url = base_url
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
                     
                     if data:
-                        rows = await save_to_duckdb(project_id, endpoint['name'], data)
+                        rows = await save_to_duckdb(project_id, endpoint_name, data)
                         total_rows += rows
                         tables_synced += 1
                         results.append({
-                            "table": endpoint['name'],
+                            "table": endpoint_name,
                             "rows": rows,
                             "success": True,
-                            "type": "reality"
+                            "type": "reality",
+                            "filters": filter_params
                         })
                     else:
                         results.append({
-                            "table": endpoint['name'],
+                            "table": endpoint_name,
                             "rows": 0,
                             "success": True,
                             "type": "reality",
@@ -746,9 +773,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 except Exception as e:
                     tables_failed += 1
                     error_msg = str(e)
-                    errors.append(f"{endpoint['name']}: {error_msg}")
+                    errors.append(f"{endpoint_name}: {error_msg}")
                     results.append({
-                        "table": endpoint['name'],
+                        "table": endpoint_name,
                         "rows": 0,
                         "success": False,
                         "error": error_msg
@@ -900,6 +927,192 @@ class SyncStatusResponse(BaseModel):
     last_heartbeat: Optional[str] = None
     success: Optional[bool] = None
     errors: Optional[List[str]] = None
+
+
+# =============================================================================
+# SYNC CONFIGURATION
+# =============================================================================
+
+class EndpointConfig(BaseModel):
+    """Configuration for a single endpoint"""
+    enabled: bool = True
+    statuses: List[str] = ["A"]  # A=Active, L=Leave, T=Terminated
+    term_cutoff_date: Optional[str] = "2025-01-01"  # For terminated employees
+
+class SyncConfig(BaseModel):
+    """Full sync configuration for a project"""
+    endpoint_configs: Dict[str, EndpointConfig] = {}
+
+# Default endpoint configurations
+DEFAULT_SYNC_CONFIG = {
+    "person_details": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "employment_details": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "compensation_details": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "employee_job_history": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "employee_changes": {
+        "enabled": True,
+        "statuses": [],  # Uses rolling 6 months, not status filter
+        "term_cutoff_date": None  # Rolling 6 months computed at sync time
+    },
+    "employee_demographic_details": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "employee_education": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "contacts": {
+        "enabled": True,
+        "statuses": ["A", "L", "T"],
+        "term_cutoff_date": "2025-01-01"
+    },
+    "pto_plans": {
+        "enabled": True,
+        "statuses": ["A", "L"],
+        "term_cutoff_date": None  # No terms for PTO
+    }
+}
+
+# Endpoint path mapping
+REALITY_ENDPOINT_PATHS = {
+    "person_details": "/personnel/v1/person-details",
+    "employment_details": "/personnel/v1/employment-details",
+    "compensation_details": "/personnel/v1/compensation-details",
+    "employee_job_history": "/personnel/v1/employee-job-history-details",
+    "employee_changes": "/personnel/v1/employee-changes",
+    "employee_demographic_details": "/personnel/v1/employee-demographic-details",
+    "employee_education": "/personnel/v1/employee-education",
+    "contacts": "/personnel/v1/contacts",
+    "pto_plans": "/personnel/v1/pto-plans",
+}
+
+
+@router.get("/sync-settings/{project_id}")
+async def get_sync_settings(project_id: str):
+    """Get sync configuration for a customer. Returns defaults if none saved."""
+    try:
+        supabase = get_supabase()
+        result = supabase.table('ukg_sync_config') \
+            .select('*') \
+            .eq('customer_id', project_id) \
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            config = result.data[0].get('endpoint_configs', {})
+            # Merge with defaults to ensure all endpoints are present
+            merged = {**DEFAULT_SYNC_CONFIG}
+            for k, v in config.items():
+                if k in merged:
+                    merged[k].update(v)
+                else:
+                    merged[k] = v
+            return {"customer_id": project_id, "endpoint_configs": merged}
+        else:
+            return {"customer_id": project_id, "endpoint_configs": DEFAULT_SYNC_CONFIG}
+    except Exception as e:
+        logger.warning(f"[UKG-SYNC] Could not fetch sync config: {e}, using defaults")
+        return {"customer_id": project_id, "endpoint_configs": DEFAULT_SYNC_CONFIG}
+
+
+@router.post("/sync-settings/{project_id}")
+async def save_sync_settings(project_id: str, config: SyncConfig):
+    """Save sync configuration for a customer."""
+    try:
+        supabase = get_supabase()
+        
+        # Convert Pydantic models to dicts
+        config_dict = {k: v.dict() if hasattr(v, 'dict') else v for k, v in config.endpoint_configs.items()}
+        
+        # Upsert the config
+        result = supabase.table('ukg_sync_config') \
+            .upsert({
+                'customer_id': project_id,
+                'endpoint_configs': config_dict
+            }, on_conflict='customer_id') \
+            .execute()
+        
+        return {"success": True, "message": "Sync settings saved"}
+    except Exception as e:
+        logger.error(f"[UKG-SYNC] Failed to save sync config: {e}")
+        raise HTTPException(500, f"Failed to save sync settings: {str(e)}")
+
+
+async def get_sync_config(project_id: str) -> Dict:
+    """Get sync config for use in sync job."""
+    try:
+        supabase = get_supabase()
+        result = supabase.table('ukg_sync_config') \
+            .select('endpoint_configs') \
+            .eq('customer_id', project_id) \
+            .execute()
+        
+        if result.data and len(result.data) > 0:
+            saved = result.data[0].get('endpoint_configs', {})
+            # Merge with defaults
+            merged = {**DEFAULT_SYNC_CONFIG}
+            for k, v in saved.items():
+                if k in merged:
+                    merged[k] = {**merged[k], **v}
+                else:
+                    merged[k] = v
+            return merged
+        return DEFAULT_SYNC_CONFIG
+    except Exception as e:
+        logger.warning(f"[UKG-SYNC] Could not fetch sync config: {e}, using defaults")
+        return DEFAULT_SYNC_CONFIG
+
+
+def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
+    """Build query parameters for filtering employee data."""
+    params = {}
+    endpoint_config = config.get(endpoint_name, {})
+    
+    if not endpoint_config.get('enabled', True):
+        return None  # Signal to skip this endpoint
+    
+    statuses = endpoint_config.get('statuses', [])
+    term_cutoff = endpoint_config.get('term_cutoff_date')
+    
+    # Special handling for employee_changes - rolling 6 months
+    if endpoint_name == 'employee_changes':
+        six_months_ago = (datetime.now() - timedelta(days=180)).strftime('%Y-%m-%d')
+        params['startDate'] = six_months_ago
+        return params
+    
+    # Build status filter
+    # UKG uses employmentStatus parameter
+    if statuses:
+        # If we have T (terminated), we need to handle the date filter
+        if 'T' in statuses and term_cutoff:
+            # Pull actives/leaves normally, terms with date filter
+            # We'll need multiple calls or use their filter syntax
+            # For now, let's use comma-separated if supported, otherwise just pass first
+            params['employmentStatus'] = ','.join(statuses)
+            if 'T' in statuses:
+                params['terminationDate'] = f'>={term_cutoff}'
+        else:
+            params['employmentStatus'] = ','.join(statuses)
+    
+    return params
 
 
 @router.post("/sync-config/{project_id}", response_model=SyncJobResponse)
