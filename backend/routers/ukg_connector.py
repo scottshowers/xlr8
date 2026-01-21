@@ -400,40 +400,66 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
     all_data = []
     page = 1
     per_page = 100
+    max_retries = 2
     
     while True:
-        try:
-            params = {"page": page, "per_page": per_page}
-            response = await client.get(url, headers=headers, params=params, timeout=30.0)
-            
-            if response.status_code != 200:
-                logger.warning(f"[UKG-SYNC] {url} returned {response.status_code}")
-                break
-            
-            data = response.json()
-            
-            if not data:
-                break
+        retry_count = 0
+        while retry_count <= max_retries:
+            try:
+                params = {"page": page, "per_page": per_page}
+                logger.debug(f"[UKG-SYNC] Fetching {url} page {page}...")
+                response = await client.get(url, headers=headers, params=params)
                 
-            if isinstance(data, list):
-                all_data.extend(data)
-                if len(data) < per_page:
-                    break
-                page += 1
-            else:
-                # Single object response
-                all_data = [data] if data else []
-                break
+                if response.status_code == 429:
+                    # Rate limited - wait and retry
+                    retry_after = int(response.headers.get('Retry-After', 30))
+                    logger.warning(f"[UKG-SYNC] Rate limited on {url}, waiting {retry_after}s...")
+                    await asyncio.sleep(retry_after)
+                    retry_count += 1
+                    continue
                 
-            # Safety limit
-            if page > 100:
-                break
+                if response.status_code != 200:
+                    logger.warning(f"[UKG-SYNC] {url} returned {response.status_code}: {response.text[:200]}")
+                    return all_data  # Return what we have
                 
-            # Polite delay - don't hammer UKG
-            await asyncio.sleep(0.5)
-            
-        except Exception as e:
-            logger.error(f"[UKG-SYNC] Error fetching {url}: {e}")
+                data = response.json()
+                
+                if not data:
+                    return all_data
+                    
+                if isinstance(data, list):
+                    all_data.extend(data)
+                    logger.debug(f"[UKG-SYNC] {url} page {page}: {len(data)} rows (total: {len(all_data)})")
+                    if len(data) < per_page:
+                        return all_data
+                    page += 1
+                else:
+                    # Single object response
+                    return [data] if data else []
+                    
+                # Safety limit
+                if page > 100:
+                    logger.warning(f"[UKG-SYNC] {url} hit page limit (100)")
+                    return all_data
+                    
+                # Polite delay - don't hammer UKG
+                await asyncio.sleep(0.5)
+                break  # Success - exit retry loop
+                
+            except httpx.TimeoutException as e:
+                retry_count += 1
+                logger.warning(f"[UKG-SYNC] Timeout fetching {url} page {page} (attempt {retry_count}/{max_retries+1}): {e}")
+                if retry_count > max_retries:
+                    logger.error(f"[UKG-SYNC] Giving up on {url} after {max_retries+1} attempts")
+                    return all_data
+                await asyncio.sleep(5)  # Wait before retry
+                
+            except Exception as e:
+                logger.error(f"[UKG-SYNC] Error fetching {url} page {page}: {e}")
+                return all_data
+        
+        # If we exhausted retries, exit
+        if retry_count > max_retries:
             break
     
     return all_data
@@ -512,11 +538,16 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
     tables_failed = 0
     
     try:
-        async with httpx.AsyncClient() as client:
+        # Global timeout for entire sync: 15 minutes max
+        # Individual requests: 60s (UKG can be slow)
+        timeout = httpx.Timeout(60.0, connect=10.0)
+        
+        async with httpx.AsyncClient(timeout=timeout) as client:
             # =====================================================
             # STEP 1: Discover all available code tables
             # =====================================================
             job['current_step'] = 'Discovering code tables...'
+            job['last_heartbeat'] = datetime.now().isoformat()
             logger.info(f"[UKG-SYNC] [{job_id}] Discovering available code tables...")
             
             code_tables_url = f"https://{hostname}/configuration/v1/code-tables"
@@ -553,6 +584,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 table_index += 1
                 job['current_step'] = f'Pulling {table_name}...'
                 job['tables_processed'] = table_index
+                job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] [{table_index}/{len(available_tables)}] Pulling {table_name}...")
                 
                 # Use the provided URL if available, otherwise construct it
@@ -623,6 +655,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 table_index += 1
                 job['current_step'] = f'Pulling config: {endpoint["name"]}...'
                 job['tables_processed'] = table_index
+                job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
                 
                 url = f"https://{hostname}{endpoint['path']}"
@@ -738,18 +771,16 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
         except Exception as e:
             logger.warning(f"[UKG-SYNC] Could not update last_pull_at: {e}")
         
-        # Mark job complete
-        job['status'] = 'completed'
-        job['completed_at'] = datetime.now().isoformat()
-        job['success'] = tables_failed < tables_synced
+        # Track sync stats (but don't mark complete yet - post-processing still needed)
         job['tables_synced'] = tables_synced
         job['tables_failed'] = tables_failed
         job['total_rows'] = total_rows
         job['results'] = results
         job['errors'] = errors
-        job['current_step'] = 'Complete!'
+        job['current_step'] = 'Data sync complete, starting post-processing...'
+        job['last_heartbeat'] = datetime.now().isoformat()
         
-        logger.info(f"[UKG-SYNC] [{job_id}] COMPLETE: {tables_synced} tables, {total_rows} rows, {tables_failed} failures")
+        logger.info(f"[UKG-SYNC] [{job_id}] DATA SYNC COMPLETE: {tables_synced} tables, {total_rows} rows, {tables_failed} failures")
         
         # =====================================================
         # STEP 5: Post-sync - Register tables and profile columns
@@ -822,17 +853,29 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 logger.warning(f"[UKG-SYNC] Checkpoint warning: {ckpt_err}")
             
             logger.info(f"[UKG-SYNC] [{job_id}] Post-sync processing complete")
-            job['current_step'] = 'Complete (with profiling)!'
+            job['current_step'] = 'Complete!'
+            job['status'] = 'completed'
+            job['completed_at'] = datetime.now().isoformat()
+            job['success'] = tables_failed < tables_synced
             
         except Exception as post_err:
             logger.error(f"[UKG-SYNC] [{job_id}] Post-sync processing failed: {post_err}")
+            import traceback
+            logger.error(f"[UKG-SYNC] [{job_id}] Traceback: {traceback.format_exc()}")
             job['errors'].append(f"Post-sync profiling failed: {post_err}")
+            job['status'] = 'completed_with_errors'
+            job['completed_at'] = datetime.now().isoformat()
+            job['success'] = False
+            job['current_step'] = f'Completed with errors: {post_err}'
         
     except Exception as e:
+        import traceback
         logger.error(f"[UKG-SYNC] [{job_id}] Job failed: {e}")
+        logger.error(f"[UKG-SYNC] [{job_id}] Traceback: {traceback.format_exc()}")
         job['status'] = 'failed'
         job['error'] = str(e)
         job['completed_at'] = datetime.now().isoformat()
+        job['current_step'] = f'FAILED: {e}'
 
 
 class SyncJobResponse(BaseModel):
@@ -854,6 +897,7 @@ class SyncStatusResponse(BaseModel):
     total_rows: Optional[int] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
+    last_heartbeat: Optional[str] = None
     success: Optional[bool] = None
     errors: Optional[List[str]] = None
 
@@ -932,6 +976,7 @@ async def get_sync_status(job_id: str):
         total_rows=job.get('total_rows'),
         started_at=job.get('started_at'),
         completed_at=job.get('completed_at'),
+        last_heartbeat=job.get('last_heartbeat'),
         success=job.get('success'),
         errors=job.get('errors'),
     )
