@@ -24,6 +24,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
 import { useUpload } from '../context/UploadContext';
 import { Tooltip } from '../components/ui';
+import UKGSyncSettings from '../components/UKGSyncSettings';
 import api from '../services/api';
 // import ProjectContext from '../components/ProjectContext'; // TODO: deploy component first
 
@@ -88,6 +89,7 @@ function SyncFromUKGButton({ c, projectId }) {
   const [jobId, setJobId] = useState(null);
   const [status, setStatus] = useState(null);
   const [showStatus, setShowStatus] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   
   // Check if project has UKG connection
   useEffect(() => {
@@ -220,29 +222,61 @@ function SyncFromUKGButton({ c, projectId }) {
   
   return (
     <>
-      <Tooltip title="Sync from UKG Pro" detail="Pull all configuration and employee data directly from UKG Pro API." action="Sync now to get latest data">
-        <button
-          onClick={handleSync}
-          disabled={syncing}
-          style={{
-            display: 'flex', alignItems: 'center', gap: '0.5rem',
-            padding: '0.5rem 1rem', 
-            background: syncing ? '#f0f0f0' : '#dcfce7',
-            border: '1px solid #16a34a',
-            borderRadius: 8, 
-            color: '#166534',
-            fontSize: 'var(--text-sm)', 
-            cursor: syncing ? 'wait' : 'pointer',
-            transition: 'all 0.2s', 
-            fontWeight: 500, 
-            whiteSpace: 'nowrap',
-            fontFamily: 'var(--font-body)'
-          }}
-        >
-          {syncing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
-          {syncing ? 'Syncing...' : 'Sync from UKG'}
-        </button>
-      </Tooltip>
+      <div style={{ display: 'flex', gap: '4px' }}>
+        {/* Settings button */}
+        <Tooltip title="Sync Settings" detail="Configure which endpoints to sync and filter by employment status.">
+          <button
+            onClick={() => setShowSettings(true)}
+            disabled={syncing}
+            style={{
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              padding: '0.5rem',
+              background: '#f8fafc',
+              border: '1px solid #e2e8f0',
+              borderRadius: '8px 0 0 8px',
+              color: '#64748b',
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <Settings size={16} />
+          </button>
+        </Tooltip>
+        
+        {/* Sync button */}
+        <Tooltip title="Sync from UKG Pro" detail="Pull configuration and employee data directly from UKG Pro API." action="Sync now to get latest data">
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            style={{
+              display: 'flex', alignItems: 'center', gap: '0.5rem',
+              padding: '0.5rem 1rem', 
+              background: syncing ? '#f0f0f0' : '#dcfce7',
+              border: '1px solid #16a34a',
+              borderRadius: '0 8px 8px 0', 
+              borderLeft: 'none',
+              color: '#166534',
+              fontSize: 'var(--text-sm)', 
+              cursor: syncing ? 'wait' : 'pointer',
+              transition: 'all 0.2s', 
+              fontWeight: 500, 
+              whiteSpace: 'nowrap',
+              fontFamily: 'var(--font-body)'
+            }}
+          >
+            {syncing ? <Loader2 size={16} className="spin" /> : <RefreshCw size={16} />}
+            {syncing ? 'Syncing...' : 'Sync from UKG'}
+          </button>
+        </Tooltip>
+      </div>
+      
+      {/* Settings modal */}
+      <UKGSyncSettings
+        projectId={projectId}
+        isOpen={showSettings}
+        onClose={() => setShowSettings(false)}
+        onSaved={() => console.log('Sync settings saved')}
+      />
       
       {/* Status popup */}
       {showStatus && status && (
