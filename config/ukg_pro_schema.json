@@ -1354,654 +1354,116 @@
       "api_endpoint": "/webhooks/PTOChangeEvent",
       "key_column": "eventId",
       "description_column": null
+    },
+    "currency": {
+      "domain": "Payroll",
+      "entity_name": "Currency",
+      "api_endpoint": "/configuration/v1/currency-codes",
+      "key_column": "currencyCode",
+      "description_column": "description"
+    },
+    "distribution_center": {
+      "domain": "Payroll",
+      "entity_name": "DistributionCenter",
+      "api_endpoint": "/configuration/v1/distribution-centers",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "employee_status": {
+      "domain": "Personnel",
+      "entity_name": "EmployeeStatus",
+      "api_endpoint": "/configuration/v1/employee-statuses",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "ethnic_id": {
+      "domain": "Personnel",
+      "entity_name": "EthnicId",
+      "api_endpoint": "/configuration/v1/ethnic-ids",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "full_time_part_time": {
+      "domain": "Personnel",
+      "entity_name": "FullTimePartTime",
+      "api_endpoint": "/configuration/v1/full-time-part-time",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "gender": {
+      "domain": "Personnel",
+      "entity_name": "Gender",
+      "api_endpoint": "/configuration/v1/genders",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "hire_source": {
+      "domain": "Personnel",
+      "entity_name": "HireSource",
+      "api_endpoint": "/configuration/v1/hire-sources",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "i9_status": {
+      "domain": "Personnel",
+      "entity_name": "I9Status",
+      "api_endpoint": "/configuration/v1/i9-statuses",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "language": {
+      "domain": "Personnel",
+      "entity_name": "Language",
+      "api_endpoint": "/configuration/v1/languages",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "name_suffix": {
+      "domain": "Personnel",
+      "entity_name": "NameSuffix",
+      "api_endpoint": "/configuration/v1/name-suffixes",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "pay_scale": {
+      "domain": "Payroll",
+      "entity_name": "PayScale",
+      "api_endpoint": "/configuration/v1/pay-scales",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "salary_grade": {
+      "domain": "Payroll",
+      "entity_name": "SalaryGrade",
+      "api_endpoint": "/configuration/v1/salary-grades",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "salary_hourly": {
+      "domain": "Payroll",
+      "entity_name": "SalaryHourly",
+      "api_endpoint": "/configuration/v1/salary-hourly",
+      "key_column": "code",
+      "description_column": "description"
+    },
+    "state_province": {
+      "domain": "Personnel",
+      "entity_name": "StateProvince",
+      "api_endpoint": "/configuration/v1/states-provinces",
+      "key_column": "code",
+      "description_column": "description"
     }
   },
   "spoke_patterns": {
-    "code": [
+    "activityid": [
       {
-        "hub": "allergy",
+        "hub": "activity",
         "confidence": 0.95
-      },
-      {
-        "hub": "award_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "career_provider",
-        "confidence": 0.95
-      },
-      {
-        "hub": "child_support_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "cobra_status",
-        "confidence": 0.95
-      },
-      {
-        "hub": "company_property",
-        "confidence": 0.95
-      },
-      {
-        "hub": "course_category",
-        "confidence": 0.95
-      },
-      {
-        "hub": "course_delivery_method",
-        "confidence": 0.95
-      },
-      {
-        "hub": "course_sub_category",
-        "confidence": 0.95
-      },
-      {
-        "hub": "disability",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "job_family",
-        "confidence": 0.95
-      },
-      {
-        "hub": "license_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "loan_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "marital_status",
-        "confidence": 0.95
-      },
-      {
-        "hub": "military_branch",
-        "confidence": 0.95
-      },
-      {
-        "hub": "military_era",
-        "confidence": 0.95
-      },
-      {
-        "hub": "name_prefix",
-        "confidence": 0.95
-      },
-      {
-        "hub": "other_phone_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "project",
-        "confidence": 0.95
-      },
-      {
-        "hub": "school",
-        "confidence": 0.95
-      },
-      {
-        "hub": "skill",
-        "confidence": 0.95
-      },
-      {
-        "hub": "skill_proficiency_level",
-        "confidence": 0.95
-      },
-      {
-        "hub": "term_type",
-        "confidence": 0.95
-      },
-      {
-        "hub": "waive_reason",
-        "confidence": 0.95
-      }
-    ],
-    "companyid": [
-      {
-        "hub": "company",
-        "confidence": 0.95
-      },
-      {
-        "hub": "company_pay_statement",
-        "confidence": 0.95
-      }
-    ],
-    "company_id": [
-      {
-        "hub": "company",
-        "confidence": 0.9
-      }
-    ],
-    "earningcode": [
-      {
-        "hub": "earning",
-        "confidence": 0.95
-      }
-    ],
-    "earning_code": [
-      {
-        "hub": "earning",
-        "confidence": 0.9
-      }
-    ],
-    "insratecode": [
-      {
-        "hub": "insurance_rate",
-        "confidence": 0.95
-      }
-    ],
-    "ins_rate_code": [
-      {
-        "hub": "insurance_rate",
-        "confidence": 0.9
-      }
-    ],
-    "jobgroupcode": [
-      {
-        "hub": "job_group",
-        "confidence": 0.95
-      }
-    ],
-    "job_group_code": [
-      {
-        "hub": "job_group",
-        "confidence": 0.9
-      }
-    ],
-    "jobcode": [
-      {
-        "hub": "job",
-        "confidence": 0.95
-      }
-    ],
-    "job_code": [
-      {
-        "hub": "job",
-        "confidence": 0.9
-      }
-    ],
-    "locationcode": [
-      {
-        "hub": "location",
-        "confidence": 0.95
-      }
-    ],
-    "location_code": [
-      {
-        "hub": "location",
-        "confidence": 0.9
-      }
-    ],
-    "optionratecode": [
-      {
-        "hub": "option_rate",
-        "confidence": 0.95
-      }
-    ],
-    "option_rate_code": [
-      {
-        "hub": "option_rate",
-        "confidence": 0.9
-      }
-    ],
-    "orglevelcode": [
-      {
-        "hub": "org_level",
-        "confidence": 0.95
-      }
-    ],
-    "org_level_code": [
-      {
-        "hub": "org_level",
-        "confidence": 0.9
-      }
-    ],
-    "categorycode": [
-      {
-        "hub": "org_reporting_category",
-        "confidence": 0.95
-      }
-    ],
-    "category_code": [
-      {
-        "hub": "org_reporting_category",
-        "confidence": 0.9
-      }
-    ],
-    "positioncode": [
-      {
-        "hub": "position",
-        "confidence": 0.95
-      }
-    ],
-    "position_code": [
-      {
-        "hub": "position",
-        "confidence": 0.9
-      }
-    ],
-    "positionid": [
-      {
-        "hub": "position_report",
-        "confidence": 0.95
-      }
-    ],
-    "position_id": [
-      {
-        "hub": "position_report",
-        "confidence": 0.9
-      }
-    ],
-    "roleid": [
-      {
-        "hub": "role",
-        "confidence": 0.95
-      }
-    ],
-    "role_id": [
-      {
-        "hub": "role",
-        "confidence": 0.9
-      }
-    ],
-    "shiftcode": [
-      {
-        "hub": "shift_code",
-        "confidence": 0.95
-      }
-    ],
-    "shift_code": [
-      {
-        "hub": "shift_code",
-        "confidence": 0.9
-      }
-    ],
-    "taxgroupcode": [
-      {
-        "hub": "tax_group",
-        "confidence": 0.95
-      }
-    ],
-    "tax_group_code": [
-      {
-        "hub": "tax_group",
-        "confidence": 0.9
-      }
-    ],
-    "employeeid": [
-      {
-        "hub": "person_details",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employment_details",
-        "confidence": 0.95
-      },
-      {
-        "hub": "compensation_details",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_demographic_details",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_education",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_supervisor",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_contract",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_cobra",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_deduction",
-        "confidence": 0.95
-      },
-      {
-        "hub": "dependent_deduction",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_changes",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_extended_elements",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_multiple_jobs",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_multiple_positions",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_phone_numbers",
-        "confidence": 0.95
-      },
-      {
-        "hub": "national_document",
-        "confidence": 0.95
-      },
-      {
-        "hub": "international_employee",
-        "confidence": 0.95
-      },
-      {
-        "hub": "user_defined_field",
-        "confidence": 0.95
-      },
-      {
-        "hub": "user_preferences",
-        "confidence": 0.95
-      },
-      {
-        "hub": "open_enrollment_employee_deductions",
-        "confidence": 0.95
-      },
-      {
-        "hub": "open_enrollment_dependent_deductions",
-        "confidence": 0.95
-      },
-      {
-        "hub": "deduction_history_effective_date",
-        "confidence": 0.95
-      },
-      {
-        "hub": "ded_ben_option_date",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_global_bank",
-        "confidence": 0.95
-      },
-      {
-        "hub": "global_localization_element",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_pay_deduction_element",
-        "confidence": 0.95
-      },
-      {
-        "hub": "direct_deposit",
-        "confidence": 0.95
-      },
-      {
-        "hub": "earnings_history",
-        "confidence": 0.95
-      },
-      {
-        "hub": "pay_register",
-        "confidence": 0.95
-      },
-      {
-        "hub": "payroll_deductions_history",
-        "confidence": 0.95
-      },
-      {
-        "hub": "pay_details_report",
-        "confidence": 0.95
-      },
-      {
-        "hub": "uta_employee",
-        "confidence": 0.95
-      },
-      {
-        "hub": "employee_security_user",
-        "confidence": 0.95
-      },
-      {
-        "hub": "business_structure_status",
-        "confidence": 0.95
-      },
-      {
-        "hub": "kronos_employee_profile",
-        "confidence": 0.95
-      },
-      {
-        "hub": "kronos_employee_status",
-        "confidence": 0.95
-      }
-    ],
-    "employee_id": [
-      {
-        "hub": "person_details",
-        "confidence": 0.9
-      }
-    ],
-    "systemid": [
-      {
-        "hub": "employee_job_history",
-        "confidence": 0.95
-      }
-    ],
-    "system_id": [
-      {
-        "hub": "employee_job_history",
-        "confidence": 0.9
-      }
-    ],
-    "contactid": [
-      {
-        "hub": "contact",
-        "confidence": 0.95
-      }
-    ],
-    "contact_id": [
-      {
-        "hub": "contact",
-        "confidence": 0.9
-      }
-    ],
-    "ptoplan": [
-      {
-        "hub": "pto_plan",
-        "confidence": 0.95
-      }
-    ],
-    "pto_plan": [
-      {
-        "hub": "pto_plan",
-        "confidence": 0.9
-      }
-    ],
-    "payidentifier": [
-      {
-        "hub": "pay_statement",
-        "confidence": 0.95
-      }
-    ],
-    "pay_identifier": [
-      {
-        "hub": "pay_statement",
-        "confidence": 0.9
-      }
-    ],
-    "runid": [
-      {
-        "hub": "general_ledger_run",
-        "confidence": 0.95
-      }
-    ],
-    "run_id": [
-      {
-        "hub": "general_ledger_run",
-        "confidence": 0.9
-      }
-    ],
-    "paygroupcode": [
-      {
-        "hub": "pay_group_pay_period",
-        "confidence": 0.95
-      }
-    ],
-    "pay_group_code": [
-      {
-        "hub": "pay_group_pay_period",
-        "confidence": 0.9
-      }
-    ],
-    "batchid": [
-      {
-        "hub": "accrual",
-        "confidence": 0.95
-      }
-    ],
-    "batch_id": [
-      {
-        "hub": "accrual",
-        "confidence": 0.9
-      }
-    ],
-    "refid": [
-      {
-        "hub": "earning_pending_item",
-        "confidence": 0.95
-      },
-      {
-        "hub": "deduction_pending_item",
-        "confidence": 0.95
-      }
-    ],
-    "ref_id": [
-      {
-        "hub": "earning_pending_item",
-        "confidence": 0.9
-      }
-    ],
-    "candidateid": [
-      {
-        "hub": "candidate",
-        "confidence": 0.95
-      }
-    ],
-    "candidate_id": [
-      {
-        "hub": "candidate",
-        "confidence": 0.9
       }
     ],
     "applicationid": [
       {
         "hub": "application",
-        "confidence": 0.95
-      }
-    ],
-    "application_id": [
-      {
-        "hub": "application",
-        "confidence": 0.9
-      }
-    ],
-    "opportunityid": [
-      {
-        "hub": "opportunity",
-        "confidence": 0.95
-      }
-    ],
-    "opportunity_id": [
-      {
-        "hub": "opportunity",
-        "confidence": 0.9
-      }
-    ],
-    "offerid": [
-      {
-        "hub": "offer",
-        "confidence": 0.95
-      }
-    ],
-    "offer_id": [
-      {
-        "hub": "offer",
-        "confidence": 0.9
-      }
-    ],
-    "backgroundcheckid": [
-      {
-        "hub": "background_check",
-        "confidence": 0.95
-      }
-    ],
-    "background_check_id": [
-      {
-        "hub": "background_check",
-        "confidence": 0.9
-      }
-    ],
-    "id": [
-      {
-        "hub": "applicant_source",
-        "confidence": 0.95
-      },
-      {
-        "hub": "disposition_reason",
-        "confidence": 0.95
-      },
-      {
-        "hub": "job_board",
-        "confidence": 0.95
-      },
-      {
-        "hub": "recruiting_legal_entity",
-        "confidence": 0.95
-      },
-      {
-        "hub": "physical_location",
-        "confidence": 0.95
-      },
-      {
-        "hub": "recruiting_process",
-        "confidence": 0.95
-      },
-      {
-        "hub": "field_of_study",
-        "confidence": 0.95
-      },
-      {
-        "hub": "behavior",
-        "confidence": 0.95
-      },
-      {
-        "hub": "motivation",
-        "confidence": 0.95
-      },
-      {
-        "hub": "proficiency_level",
-        "confidence": 0.95
-      },
-      {
-        "hub": "recruiting_prefix",
-        "confidence": 0.95
-      },
-      {
-        "hub": "recruiting_suffix",
-        "confidence": 0.95
-      },
-      {
-        "hub": "tax_location",
-        "confidence": 0.95
-      },
-      {
-        "hub": "recruiting_org_unit",
-        "confidence": 0.95
-      },
-      {
-        "hub": "new_hire",
         "confidence": 0.95
       }
     ],
@@ -2011,162 +1473,46 @@
         "confidence": 0.95
       }
     ],
-    "assessment_id": [
-      {
-        "hub": "assessment",
-        "confidence": 0.9
-      }
-    ],
-    "transactionid": [
-      {
-        "hub": "clock_transaction",
-        "confidence": 0.95
-      },
-      {
-        "hub": "import_tool",
-        "confidence": 0.95
-      }
-    ],
-    "transaction_id": [
-      {
-        "hub": "clock_transaction",
-        "confidence": 0.9
-      }
-    ],
-    "summaryid": [
-      {
-        "hub": "work_summary",
-        "confidence": 0.95
-      }
-    ],
-    "summary_id": [
-      {
-        "hub": "work_summary",
-        "confidence": 0.9
-      }
-    ],
-    "activityid": [
-      {
-        "hub": "activity",
-        "confidence": 0.95
-      }
-    ],
-    "activity_id": [
-      {
-        "hub": "activity",
-        "confidence": 0.9
-      }
-    ],
-    "holidayid": [
-      {
-        "hub": "assigned_holiday",
-        "confidence": 0.95
-      }
-    ],
-    "holiday_id": [
-      {
-        "hub": "assigned_holiday",
-        "confidence": 0.9
-      }
-    ],
-    "jobid": [
-      {
-        "hub": "employee_job",
-        "confidence": 0.95
-      }
-    ],
-    "job_id": [
-      {
-        "hub": "employee_job",
-        "confidence": 0.9
-      }
-    ],
-    "hourtypeid": [
-      {
-        "hub": "hour_type",
-        "confidence": 0.95
-      }
-    ],
-    "hour_type_id": [
-      {
-        "hub": "hour_type",
-        "confidence": 0.9
-      }
-    ],
-    "scheduleid": [
-      {
-        "hub": "schedule_detail",
-        "confidence": 0.95
-      }
-    ],
-    "schedule_id": [
-      {
-        "hub": "schedule_detail",
-        "confidence": 0.9
-      }
-    ],
-    "teamid": [
-      {
-        "hub": "team",
-        "confidence": 0.95
-      }
-    ],
-    "team_id": [
-      {
-        "hub": "team",
-        "confidence": 0.9
-      }
-    ],
-    "timecodeid": [
-      {
-        "hub": "time_code",
-        "confidence": 0.95
-      }
-    ],
-    "time_code_id": [
-      {
-        "hub": "time_code",
-        "confidence": 0.9
-      }
-    ],
-    "requestid": [
-      {
-        "hub": "time_off_request",
-        "confidence": 0.95
-      }
-    ],
-    "request_id": [
-      {
-        "hub": "time_off_request",
-        "confidence": 0.9
-      }
-    ],
-    "userid": [
-      {
-        "hub": "uta_user",
-        "confidence": 0.95
-      },
-      {
-        "hub": "user_details",
-        "confidence": 0.95
-      }
-    ],
-    "user_id": [
-      {
-        "hub": "uta_user",
-        "confidence": 0.9
-      }
-    ],
     "auditid": [
       {
         "hub": "audit_details",
         "confidence": 0.95
       }
     ],
-    "audit_id": [
+    "backgroundcheckid": [
       {
-        "hub": "audit_details",
-        "confidence": 0.9
+        "hub": "background_check",
+        "confidence": 0.95
+      }
+    ],
+    "batchid": [
+      {
+        "hub": "accrual",
+        "confidence": 0.95
+      }
+    ],
+    "candidateid": [
+      {
+        "hub": "candidate",
+        "confidence": 0.95
+      }
+    ],
+    "cobrastatus": [
+      {
+        "hub": "cobra_status",
+        "confidence": 0.95
+      }
+    ],
+    "companycode": [
+      {
+        "hub": "company",
+        "confidence": 0.95
+      }
+    ],
+    "companyid": [
+      {
+        "hub": "company",
+        "confidence": 0.95
       }
     ],
     "configid": [
@@ -2175,34 +1521,16 @@
         "confidence": 0.95
       }
     ],
-    "config_id": [
+    "contactid": [
       {
-        "hub": "integration_audit_config",
-        "confidence": 0.9
-      }
-    ],
-    "profileid": [
-      {
-        "hub": "user_profile",
+        "hub": "contact",
         "confidence": 0.95
       }
     ],
-    "profile_id": [
+    "currencycode": [
       {
-        "hub": "user_profile",
-        "confidence": 0.9
-      }
-    ],
-    "schemaid": [
-      {
-        "hub": "custom_fields_schema",
+        "hub": "currency",
         "confidence": 0.95
-      }
-    ],
-    "schema_id": [
-      {
-        "hub": "custom_fields_schema",
-        "confidence": 0.9
       }
     ],
     "dataid": [
@@ -2211,10 +1539,70 @@
         "confidence": 0.95
       }
     ],
-    "data_id": [
+    "deductiongroupcode": [
       {
-        "hub": "custom_fields_data",
-        "confidence": 0.9
+        "hub": "earning",
+        "confidence": 0.95
+      }
+    ],
+    "disabilitytype": [
+      {
+        "hub": "disability",
+        "confidence": 0.95
+      }
+    ],
+    "distributioncentercode": [
+      {
+        "hub": "distribution_center",
+        "confidence": 0.95
+      }
+    ],
+    "earninggroupcode": [
+      {
+        "hub": "earning",
+        "confidence": 0.95
+      }
+    ],
+    "employeeid": [
+      {
+        "hub": "person_details",
+        "confidence": 0.95
+      }
+    ],
+    "employeenumber": [
+      {
+        "hub": "person_details",
+        "confidence": 0.95
+      }
+    ],
+    "employeestatuscode": [
+      {
+        "hub": "employee_status",
+        "confidence": 0.95
+      }
+    ],
+    "employeetypecode": [
+      {
+        "hub": "employee_type",
+        "confidence": 0.95
+      }
+    ],
+    "ethniccode": [
+      {
+        "hub": "ethnic_id",
+        "confidence": 0.95
+      }
+    ],
+    "ethnicidcode": [
+      {
+        "hub": "ethnic_id",
+        "confidence": 0.95
+      }
+    ],
+    "eventid": [
+      {
+        "hub": "webhook_employeeaddresschangeevent",
+        "confidence": 0.95
       }
     ],
     "fileid": [
@@ -2223,163 +1611,537 @@
         "confidence": 0.95
       }
     ],
-    "file_id": [
+    "fulltimeorparttimecode": [
       {
-        "hub": "brit_import",
-        "confidence": 0.9
-      }
-    ],
-    "eventid": [
-      {
-        "hub": "webhook_employeeaddresschangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeealternativeemailchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeedatedeceasedchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeedateofbenefitssenioritychangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeedateofbirthchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeedeductiongroupchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeedisabilitychangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeeducationchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeemailchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeegenderchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeehiredatechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeehourlypayratechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeelicensechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeemaritalstatuschangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeenumberchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeorglevelupdated",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeepayperiodchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeepersonnamechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeephonechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeprojectchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeskillchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeesupervisorupdated",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeterminationchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeetypechangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeunionchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeeworklocationchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employmentdatelastworkedchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employmentstatuschangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_employeejobdetailschangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_jobchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_paygroupchangeevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_personhiredevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_personrehiredevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_personterminatedevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_persontransferredevent",
-        "confidence": 0.95
-      },
-      {
-        "hub": "webhook_ptochangeevent",
+        "hub": "full_time_part_time",
         "confidence": 0.95
       }
     ],
-    "event_id": [
+    "gendercode": [
       {
-        "hub": "webhook_employeeaddresschangeevent",
-        "confidence": 0.9
+        "hub": "gender",
+        "confidence": 0.95
+      }
+    ],
+    "hiresource": [
+      {
+        "hub": "hire_source",
+        "confidence": 0.95
+      }
+    ],
+    "hiresourcecode": [
+      {
+        "hub": "hire_source",
+        "confidence": 0.95
+      }
+    ],
+    "holidayid": [
+      {
+        "hub": "assigned_holiday",
+        "confidence": 0.95
+      }
+    ],
+    "hourtypeid": [
+      {
+        "hub": "hour_type",
+        "confidence": 0.95
+      }
+    ],
+    "i9verifiedcode": [
+      {
+        "hub": "i9_status",
+        "confidence": 0.95
+      }
+    ],
+    "jobchangereasoncode": [
+      {
+        "hub": "term_type",
+        "confidence": 0.95
+      }
+    ],
+    "jobcode": [
+      {
+        "hub": "job",
+        "confidence": 0.95
+      }
+    ],
+    "jobgroupcode": [
+      {
+        "hub": "job_group",
+        "confidence": 0.95
+      }
+    ],
+    "jobid": [
+      {
+        "hub": "employee_job",
+        "confidence": 0.95
+      }
+    ],
+    "jobsalarygrade": [
+      {
+        "hub": "salary_grade",
+        "confidence": 0.95
+      }
+    ],
+    "languagecode": [
+      {
+        "hub": "language",
+        "confidence": 0.95
+      }
+    ],
+    "leavereasoncode": [
+      {
+        "hub": "term_type",
+        "confidence": 0.95
+      }
+    ],
+    "locationcode": [
+      {
+        "hub": "location",
+        "confidence": 0.95
+      }
+    ],
+    "maritalstatuscode": [
+      {
+        "hub": "marital_status",
+        "confidence": 0.95
+      }
+    ],
+    "militarybranchserved": [
+      {
+        "hub": "military_branch",
+        "confidence": 0.95
+      }
+    ],
+    "militaryera": [
+      {
+        "hub": "military_era",
+        "confidence": 0.95
+      }
+    ],
+    "nameprefixcode": [
+      {
+        "hub": "name_prefix",
+        "confidence": 0.95
+      }
+    ],
+    "namesuffixcode": [
+      {
+        "hub": "name_suffix",
+        "confidence": 0.95
+      }
+    ],
+    "offerid": [
+      {
+        "hub": "offer",
+        "confidence": 0.95
+      }
+    ],
+    "opportunityid": [
+      {
+        "hub": "opportunity",
+        "confidence": 0.95
+      }
+    ],
+    "orglevel1code": [
+      {
+        "hub": "org_level",
+        "confidence": 0.95
+      }
+    ],
+    "orglevel2code": [
+      {
+        "hub": "org_level",
+        "confidence": 0.95
+      }
+    ],
+    "orglevel3code": [
+      {
+        "hub": "org_level",
+        "confidence": 0.95
+      }
+    ],
+    "orglevel4code": [
+      {
+        "hub": "org_level",
+        "confidence": 0.95
+      }
+    ],
+    "otherphonettypecode": [
+      {
+        "hub": "other_phone_type",
+        "confidence": 0.95
+      }
+    ],
+    "paygroup": [
+      {
+        "hub": "pay_group_pay_period",
+        "confidence": 0.95
+      }
+    ],
+    "paygroupcode": [
+      {
+        "hub": "pay_group_pay_period",
+        "confidence": 0.95
+      }
+    ],
+    "payidentifier": [
+      {
+        "hub": "pay_statement",
+        "confidence": 0.95
+      }
+    ],
+    "payperiod": [
+      {
+        "hub": "pay_group_pay_period",
+        "confidence": 0.95
+      }
+    ],
+    "payscalecode": [
+      {
+        "hub": "pay_scale",
+        "confidence": 0.95
+      }
+    ],
+    "positioncode": [
+      {
+        "hub": "position",
+        "confidence": 0.95
+      }
+    ],
+    "primaryjobecode": [
+      {
+        "hub": "job",
+        "confidence": 0.95
+      }
+    ],
+    "primaryprojectcode": [
+      {
+        "hub": "project",
+        "confidence": 0.95
+      }
+    ],
+    "primaryshiftcode": [
+      {
+        "hub": "shift_code",
+        "confidence": 0.95
+      }
+    ],
+    "primaryworklocationcode": [
+      {
+        "hub": "location",
+        "confidence": 0.95
+      }
+    ],
+    "profileid": [
+      {
+        "hub": "user_profile",
+        "confidence": 0.95
+      }
+    ],
+    "ptoplan": [
+      {
+        "hub": "pto_plan",
+        "confidence": 0.95
+      }
+    ],
+    "requestid": [
+      {
+        "hub": "time_off_request",
+        "confidence": 0.95
+      }
+    ],
+    "roleid": [
+      {
+        "hub": "role",
+        "confidence": 0.95
+      }
+    ],
+    "runid": [
+      {
+        "hub": "general_ledger_run",
+        "confidence": 0.95
+      }
+    ],
+    "salaryorhourly": [
+      {
+        "hub": "salary_hourly",
+        "confidence": 0.95
+      }
+    ],
+    "salaryorhourlycode": [
+      {
+        "hub": "salary_hourly",
+        "confidence": 0.95
+      }
+    ],
+    "scheduleid": [
+      {
+        "hub": "schedule_detail",
+        "confidence": 0.95
+      }
+    ],
+    "schemaid": [
+      {
+        "hub": "custom_fields_schema",
+        "confidence": 0.95
+      }
+    ],
+    "shift": [
+      {
+        "hub": "shift_code",
+        "confidence": 0.95
+      }
+    ],
+    "shiftgroup": [
+      {
+        "hub": "shift_code",
+        "confidence": 0.95
+      }
+    ],
+    "stateorprovincecode": [
+      {
+        "hub": "state_province",
+        "confidence": 0.95
+      }
+    ],
+    "summaryid": [
+      {
+        "hub": "work_summary",
+        "confidence": 0.95
+      }
+    ],
+    "supervisorcoid": [
+      {
+        "hub": "company",
+        "confidence": 0.95
+      }
+    ],
+    "supervisorcompanycode": [
+      {
+        "hub": "company",
+        "confidence": 0.95
+      }
+    ],
+    "supervisoremployeenumber": [
+      {
+        "hub": "person_details",
+        "confidence": 0.95
+      }
+    ],
+    "supervisorid": [
+      {
+        "hub": "person_details",
+        "confidence": 0.95
+      }
+    ],
+    "systemid": [
+      {
+        "hub": "employee_job_history",
+        "confidence": 0.95
+      }
+    ],
+    "teamid": [
+      {
+        "hub": "team",
+        "confidence": 0.95
+      }
+    ],
+    "termreason": [
+      {
+        "hub": "term_type",
+        "confidence": 0.95
+      }
+    ],
+    "termtype": [
+      {
+        "hub": "term_type",
+        "confidence": 0.95
+      }
+    ],
+    "timeclockid": [
+      {
+        "hub": "time_code",
+        "confidence": 0.95
+      }
+    ],
+    "timecodeid": [
+      {
+        "hub": "time_code",
+        "confidence": 0.95
+      }
+    ],
+    "transactionid": [
+      {
+        "hub": "clock_transaction",
+        "confidence": 0.95
+      }
+    ],
+    "userid": [
+      {
+        "hub": "uta_user",
+        "confidence": 0.95
+      }
+    ],
+    "deductioncode": [
+      {
+        "hub": "earning",
+        "confidence": 0.95
       }
     ]
+  },
+  "reality_tables": {
+    "employment_details": {
+      "description": "Employee employment records from /personnel/v1/employment-details",
+      "key_columns": [
+        "employeeid",
+        "companyid"
+      ],
+      "fk_columns": {
+        "companyid": "company",
+        "companycode": "company",
+        "employeetypecode": "employee_type",
+        "fulltimeorparttimecode": "full_time_part_time",
+        "hiresource": "hire_source",
+        "jobchangereasoncode": "term_type",
+        "jobgroupcode": "job_group",
+        "languagecode": "language",
+        "leavereasoncode": "term_type",
+        "orglevel1code": "org_level",
+        "orglevel2code": "org_level",
+        "orglevel3code": "org_level",
+        "orglevel4code": "org_level",
+        "paygroup": "pay_group_pay_period",
+        "payperiod": "pay_group_pay_period",
+        "positioncode": "position",
+        "primaryjobecode": "job",
+        "primaryprojectcode": "project",
+        "primaryworklocationcode": "location",
+        "salaryorhourly": "salary_hourly",
+        "shift": "shift_code",
+        "shiftgroup": "shift_code",
+        "supervisorcompanycode": "company",
+        "supervisoremployeenumber": "person_details",
+        "supervisorid": "person_details",
+        "termreason": "term_type",
+        "termtype": "term_type",
+        "deductiongroupcode": "earning",
+        "earninggroupcode": "earning"
+      }
+    },
+    "person_details": {
+      "description": "Employee personal data from /personnel/v1/person-details",
+      "key_columns": [
+        "employeeid",
+        "companyid"
+      ],
+      "fk_columns": {
+        "companyid": "company",
+        "cobrastatus": "cobra_status",
+        "disabilitytype": "disability",
+        "ethnicidcode": "ethnic_id",
+        "gendercode": "gender",
+        "i9verifiedcode": "i9_status",
+        "maritalstatuscode": "marital_status",
+        "militarybranchserved": "military_branch",
+        "militaryera": "military_era",
+        "nameprefixcode": "name_prefix",
+        "namesuffixcode": "name_suffix"
+      }
+    },
+    "compensation_details": {
+      "description": "Employee compensation data from /personnel/v1/compensation-details",
+      "key_columns": [
+        "employeeid",
+        "companyid"
+      ],
+      "fk_columns": {
+        "companyid": "company",
+        "currencycode": "currency",
+        "distributioncentercode": "distribution_center",
+        "jobsalarygrade": "salary_grade",
+        "paygroupcode": "pay_group_pay_period",
+        "payperiod": "pay_group_pay_period",
+        "payscalecode": "pay_scale",
+        "primaryshiftcode": "shift_code",
+        "salaryorhourlycode": "salary_hourly"
+      }
+    },
+    "employee_deductions": {
+      "description": "Employee deduction records from /personnel/v1/emp-deductions",
+      "key_columns": [
+        "employeeid",
+        "companyid"
+      ],
+      "fk_columns": {
+        "companyid": "company",
+        "deductioncode": "earning"
+      }
+    },
+    "pto_plans": {
+      "description": "Employee PTO plan assignments from /personnel/v1/pto-plans",
+      "key_columns": [
+        "employeeid",
+        "companyid",
+        "ptoplan"
+      ],
+      "fk_columns": {
+        "companyid": "company",
+        "ptoplan": "pto_plan"
+      }
+    },
+    "contacts": {
+      "description": "Employee emergency contacts from /personnel/v1/contacts",
+      "key_columns": [
+        "contactid"
+      ],
+      "fk_columns": {
+        "employeeid": "person_details",
+        "companyid": "company"
+      }
+    },
+    "direct_deposit": {
+      "description": "Employee direct deposit from /payroll/v1/direct-deposit",
+      "key_columns": [
+        "employeeid",
+        "companyid"
+      ],
+      "fk_columns": {
+        "companyid": "company"
+      }
+    },
+    "jobs": {
+      "description": "Job configuration from /configuration/v1/jobs",
+      "key_columns": [
+        "jobcode"
+      ],
+      "fk_columns": {
+        "jobgroupcode": "job_group"
+      }
+    },
+    "locations": {
+      "description": "Location configuration from /configuration/v1/locations",
+      "key_columns": [
+        "locationcode"
+      ],
+      "fk_columns": {}
+    },
+    "org_levels": {
+      "description": "Organization level configuration from /configuration/v1/org-levels",
+      "key_columns": [
+        "orglevelcode"
+      ],
+      "fk_columns": {}
+    },
+    "positions": {
+      "description": "Position configuration from /configuration/v1/positions",
+      "key_columns": [
+        "positioncode"
+      ],
+      "fk_columns": {
+        "jobcode": "job",
+        "locationcode": "location"
+      }
+    }
   }
 }
