@@ -805,7 +805,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 table_name = f"{project_id}_api_{safe_name}"
                 display_name = f"API: {table_info['table']}"
                 row_count = table_info.get('rows', 0)
-                truth_type = 'configuration' if table_info.get('type') == 'config' else 'reality'
+                truth_type = 'reality' if table_info.get('type') == 'reality' else 'configuration'
                 
                 # entity_type matches hub names in schema (snake_case)
                 # EMPLOYEETYPE → employee_type, person_details → person_details
