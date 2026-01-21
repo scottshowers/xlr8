@@ -2321,8 +2321,13 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                             schema_ref = json.load(f)
                         
                         # Load spoke patterns: column_name -> hub_type
+                        # v5.3: Skip generic patterns like 'code', 'id' that match everything
+                        GENERIC_SPOKE_PATTERNS = {'code', 'id', 'type', 'name'}
                         for col_pattern, mappings in schema_ref.get('spoke_patterns', {}).items():
                             col_normalized = col_pattern.lower().replace('_', '').replace(' ', '')
+                            # v5.3: Skip generic patterns
+                            if col_normalized in GENERIC_SPOKE_PATTERNS:
+                                continue
                             for mapping in mappings:
                                 hub_type = mapping.get('hub', '')
                                 if hub_type:
@@ -2634,12 +2639,21 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # STEP 5B: Add VIRTUAL HUBS from schema reference
             # These are hubs that exist in BRIT but may not have dedicated config tables
             # Example: org_level_1, org_level_2 (values stored in Sub-Org Levels)
+            # v5.3: Skip hubs with generic key columns (code, id) - too many false positives
             # =================================================================
             existing_semantic_types = {h['semantic_type'] for h in final_hubs}
             virtual_hubs_added = 0
             
+            # v5.3: Generic key columns that shouldn't create virtual hubs
+            GENERIC_KEY_COLUMNS = {'code', 'id', 'type', 'name'}
+            
             for hub_type, hub_def in known_hubs.items():
                 semantic_type = hub_def.get('semantic_type', f'{hub_type}_code')
+                key_column = hub_def.get('key_column', 'code')
+                
+                # v5.3: Skip if key column is generic - would match everything
+                if key_column.lower() in GENERIC_KEY_COLUMNS:
+                    continue
                 
                 # Skip if we already have a hub for this semantic type
                 if semantic_type in existing_semantic_types:
@@ -2653,7 +2667,7 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                 # Add as virtual hub (no actual table, but enables spoke matching)
                 virtual_hub = {
                     'table_name': f'_virtual_{hub_type}',  # Marker for virtual
-                    'key_column': hub_def.get('key_column', 'code'),
+                    'key_column': key_column,
                     'semantic_type': semantic_type,
                     'entity_type': hub_def.get('entity_name', hub_type),
                     'cardinality': 0,  # Unknown
@@ -2889,8 +2903,12 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # -----------------------------------------------------------------
             # STEP 6B: SCHEMA MATCHING for additional relationships
             # Skip anything already found by FK detection
+            # v5.3: Skip generic column names that create false positives
             # -----------------------------------------------------------------
             schema_matched_columns = set()
+            
+            # v5.3: Generic column names that should NOT match by schema pattern alone
+            GENERIC_COLUMNS_SCHEMA = {'code', 'id', 'type', 'name', 'description', 'status'}
             
             if known_spoke_patterns:
                 for table_name, file_name, entity_type, category, truth_type in all_table_columns:
@@ -2907,6 +2925,10 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
                                 continue
                             
                             col_normalized = col_name.lower().replace('_', '').replace(' ', '')
+                            
+                            # v5.3: Skip generic column names - they need FK/value matching
+                            if col_normalized in GENERIC_COLUMNS_SCHEMA:
+                                continue
                             
                             # Check if this column matches a known FK pattern
                             target_hub_type = None
@@ -2997,20 +3019,33 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
             # For any column not already matched by FK or schema, check if it
             # matches a hub's key_column by name.
             # v5.0: Skip FK-detected and schema-matched columns
+            # v5.3: EXCLUDE generic column names (code, id, type, name, etc)
+            #       These create false positives (90 tables with 'code' → one hub)
             # =================================================================
             column_match_count = 0
             
+            # v5.3: Generic column names that should NOT match by name alone
+            # These require context (table name, entity type) to disambiguate
+            GENERIC_COLUMN_NAMES = {
+                'code', 'id', 'type', 'name', 'description', 'status',
+                'value', 'key', 'number', 'text', 'date', 'amount'
+            }
+            
             # Build lookup: normalized_key_column -> hub
+            # v5.3: Skip hubs with generic key columns - they need FK/value matching
             hub_by_key_column = {}
             for hub in final_hubs:
                 key_col = hub.get('key_column', '')
                 if key_col:
                     key_normalized = key_col.lower().replace('_', '').replace(' ', '')
+                    # v5.3: Skip generic key columns
+                    if key_normalized in GENERIC_COLUMN_NAMES:
+                        continue
                     # Only add if not already present (first hub wins for each column name)
                     if key_normalized not in hub_by_key_column:
                         hub_by_key_column[key_normalized] = hub
             
-            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns")
+            logger.info(f"[CONTEXT-GRAPH] Built hub lookup with {len(hub_by_key_column)} unique key columns (excluding generic)")
             
             # Check all tables for column-name matches
             for table_name, file_name, entity_type, category, truth_type in all_table_columns:
