@@ -14,17 +14,22 @@ import os
 logger = logging.getLogger(__name__)
 
 # Try pdfplumber first (better quality), fall back to PyPDF2
+# v5.3: Always try to import PyPDF2 as runtime fallback
 try:
     import pdfplumber
     PDF_LIBRARY = 'pdfplumber'
 except ImportError:
     pdfplumber = None
-    try:
-        import PyPDF2
+    PDF_LIBRARY = None
+
+# Always try to import PyPDF2 as fallback (even if pdfplumber succeeded)
+try:
+    import PyPDF2
+    if PDF_LIBRARY is None:
         PDF_LIBRARY = 'PyPDF2'
-    except ImportError:
-        PyPDF2 = None
-        PDF_LIBRARY = None
+except ImportError:
+    PyPDF2 = None
+    if PDF_LIBRARY is None:
         logger.warning("[TEXT_EXTRACTION] No PDF library available")
 
 # Try python-docx for Word documents
