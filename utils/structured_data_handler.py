@@ -3381,6 +3381,8 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         Derive semantic type from entity_type and column name.
         
         v3.1: Fixed doubling issue (last_check_no_last_check_no → last_check_no_code)
+        v5.3: For generic columns (code, id, type), use CATEGORY (filename context) 
+              instead of entity_type when entity_type looks unreliable
         
         Pattern: entity_type (singularized) + column suffix = semantic_type
         
@@ -3389,12 +3391,39 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         - entity_type="pay_groups" + col="pay_group_code" → "pay_group_code"
         - entity_type="earnings" + col="earnings_code" → "earning_code"
         - entity_type="last_check_no" + col="last_check_no" → "last_check_no_code" (FIXED)
+        - category="team_earnings_codes" + col="code" → "earning_code" (v5.3 - category fallback)
         """
         col = column_name.lower().strip()
         
         # If column already looks like a semantic type with _code suffix, use it
         if col.endswith('_code') and len(col) > 5:
             return col
+        
+        # v5.3: For GENERIC columns, prefer category over entity_type
+        # This fixes cases where entity_type comes from Vision hallucination
+        GENERIC_COLUMNS = {'code', 'id', 'type', 'name', 'description', 'status'}
+        
+        if col in GENERIC_COLUMNS and category:
+            # Extract meaningful prefix from category (filename-based)
+            cat = category.lower().strip()
+            # Remove common prefixes/suffixes
+            for remove in ['team_', 'team ', '_codes', '_code', '_list', '_table', '.pdf', '.xlsx', '.csv']:
+                cat = cat.replace(remove, '')
+            cat = cat.strip('_').strip()
+            
+            if cat and len(cat) > 2:
+                # Singularize category
+                if cat.endswith('ies'):
+                    cat_singular = cat[:-3] + 'y'
+                elif cat.endswith('ses'):
+                    cat_singular = cat[:-2]
+                elif cat.endswith('s') and not cat.endswith('ss'):
+                    cat_singular = cat[:-1]
+                else:
+                    cat_singular = cat
+                
+                # Use category-derived semantic type
+                return f"{cat_singular}_code"
         
         if entity_type:
             # Singularize entity_type
