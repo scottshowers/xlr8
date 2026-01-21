@@ -321,10 +321,52 @@ async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 10
 # =============================================================================
 
 import uuid
+import re
 from datetime import datetime
 
 # In-memory job tracking (would use Redis in production)
 _sync_jobs: Dict[str, Dict] = {}
+
+
+def to_snake_case(name: str) -> str:
+    """
+    Convert API names to snake_case for consistency with schema.
+    
+    Handles:
+    - ALLCAPS: EMPLOYEETYPE → employee_type
+    - camelCase: employeeType → employee_type  
+    - PascalCase: EmployeeType → employee_type
+    - Already snake: employee_type → employee_type
+    - Kebab-case: employee-type → employee_type
+    """
+    if not name:
+        return name
+    
+    # Replace hyphens and spaces with underscores
+    name = name.replace('-', '_').replace(' ', '_')
+    
+    # Handle ALLCAPS: EMPLOYEETYPE → EMPLOYEE_TYPE first
+    # Insert underscore before each capital that follows a lowercase
+    # or before a capital that's followed by lowercase (for runs like "XMLParser")
+    if name.isupper():
+        # Pure ALLCAPS - need to detect word boundaries
+        # Common patterns: EMPLOYEETYPE, MARITALSTATUS, COBRATYPE
+        # Use a simple heuristic: known suffixes
+        suffixes = ['TYPE', 'STATUS', 'CODE', 'GROUP', 'LEVEL', 'RATE', 'PLAN', 
+                    'BRANCH', 'ERA', 'PREFIX', 'SUFFIX', 'SOURCE', 'REASON']
+        for suffix in suffixes:
+            if name.endswith(suffix) and len(name) > len(suffix):
+                name = name[:-len(suffix)] + '_' + suffix
+                break
+    
+    # Handle camelCase and PascalCase
+    # Insert underscore before uppercase letters that follow lowercase
+    name = re.sub(r'([a-z0-9])([A-Z])', r'\1_\2', name)
+    
+    # Handle sequences of caps followed by lowercase (e.g., XMLParser → XML_Parser)
+    name = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1_\2', name)
+    
+    return name.lower()
 
 
 def get_supabase():
@@ -422,8 +464,8 @@ async def save_to_duckdb(project_id: str, table_name: str, data: List[Dict]) -> 
         
         df = pd.DataFrame(flat_data)
         
-        # Sanitize table name
-        safe_table = table_name.replace('-', '_').replace(' ', '_').lower()
+        # Sanitize table name - convert to snake_case for schema consistency
+        safe_table = to_snake_case(table_name)
         full_table_name = f"{project_id}_api_{safe_table}"
         
         # Use the existing structured data handler
@@ -726,14 +768,17 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
             for table_info in results:
                 if not table_info.get('success') or table_info.get('rows', 0) == 0:
                     continue
-                    
-                table_name = f"{project_id}_api_{table_info['table'].replace('-', '_').replace(' ', '_').lower()}"
+                
+                # Convert API table name to snake_case for schema consistency
+                safe_name = to_snake_case(table_info['table'])
+                table_name = f"{project_id}_api_{safe_name}"
                 display_name = f"API: {table_info['table']}"
                 row_count = table_info.get('rows', 0)
                 truth_type = 'configuration' if table_info.get('type') == 'config' else 'reality'
                 
-                # Derive entity_type from API endpoint name (e.g., "jobs" → "jobs", "person_details" → "person_details")
-                entity_type = table_info['table'].replace('-', '_').replace(' ', '_').lower()
+                # entity_type matches hub names in schema (snake_case)
+                # EMPLOYEETYPE → employee_type, person_details → person_details
+                entity_type = safe_name
                 
                 try:
                     # Register in _schema_metadata (DELETE + INSERT since no unique constraint on table_name)
