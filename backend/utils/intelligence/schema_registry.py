@@ -162,7 +162,17 @@ class SchemaRegistry:
                 if column_name not in self._global_column_to_hub:
                     self._global_column_to_hub[column_name] = hub_name
         
-        logger.debug(f"[SCHEMA-REGISTRY] {system_name}: {len(hubs)} hubs indexed")
+        # Process table_aliases (API table name → schema hub name)
+        # e.g., "employeetype" → "employee_type"
+        table_aliases = schema.get("table_aliases", {})
+        for alias, hub_name in table_aliases.items():
+            # Add to entity → hub mapping (so entity_to_hub("employeetype") → "employee_type")
+            self._entity_to_hub[system_name][alias.lower()] = hub_name
+            # Also ensure the hub_name itself maps to itself
+            if hub_name not in self._entity_to_hub[system_name]:
+                self._entity_to_hub[system_name][hub_name] = hub_name
+        
+        logger.debug(f"[SCHEMA-REGISTRY] {system_name}: {len(hubs)} hubs, {len(table_aliases)} aliases indexed")
     
     def _add_column_variants(self, system: str, column: str, hub: str):
         """Add column name variants to the index."""
