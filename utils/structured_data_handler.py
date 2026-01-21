@@ -1,8 +1,16 @@
 """
-Structured Data Handler - DuckDB Storage for Excel/CSV v5.14
+Structured Data Handler - DuckDB Storage for Excel/CSV v6.0
 ============================================================
 
 Deploy to: utils/structured_data_handler.py
+
+v6.0 CHANGES (Schema-Driven Relationship Detection):
+- NEW: compute_context_graph() now uses SchemaRegistry + RelationshipDetector
+- NEW: Clean schema-driven approach replaces complex 1000-line function
+- NEW: Proper validation with 90%+ value overlap requirement
+- LEGACY: Old function preserved as _compute_context_graph_legacy() for fallback
+- REMOVED: All the BRIT pattern matching and value-based guessing
+- Files added: schema_registry.py, relationship_detector_v2.py, context_graph_builder.py
 
 v5.14 CHANGES (Simple Fast Processing - MAJOR REWRITE):
 - REMOVED: All chunked/streaming processing (was SLOWER than pandas!)
@@ -2242,21 +2250,37 @@ Use confidence 0.95+ for exact column name matches AND for "code" columns with c
         """
         Compute hub/spoke relationships for the context graph.
         
-        DATA-FIRST APPROACH (v5.0):
-        ===========================
-        v5.0 CHANGE: FK detection (data values) FIRST, schema matching SECOND.
+        v6.0: SCHEMA-DRIVEN APPROACH
+        ============================
+        Uses SchemaRegistry and RelationshipDetector for clean, maintainable detection.
         
         Algorithm:
-        1. Run FK detection using ACTUAL DATA VALUES (authoritative)
-        2. Build hubs from FK detection results
-        3. Run schema/name matching for ADDITIONAL relationships
-        4. Deduplicate, FK results take priority
-        5. Store results
+        1. Load system schema (UKG, Workday, etc.)
+        2. Find hubs based on schema key columns
+        3. Find relationships by matching spoke columns to hub key columns
+        4. Validate relationships with actual data values (90%+ coverage)
+        5. Store results to _column_mappings and _context_graph_* tables
         
         Returns:
             Dict with stats about the computed graph
         """
-        logger.warning(f"[CONTEXT-GRAPH] Computing hub/spoke relationships for {project} (DATA-FIRST v5.0)")
+        try:
+            from backend.utils.intelligence.context_graph_builder import build_context_graph
+            return build_context_graph(self.conn, project)
+        except ImportError as e:
+            logger.error(f"[CONTEXT-GRAPH] Failed to import new builder, falling back to legacy: {e}")
+            return self._compute_context_graph_legacy(project)
+        except Exception as e:
+            logger.error(f"[CONTEXT-GRAPH] New builder failed, falling back to legacy: {e}")
+            return self._compute_context_graph_legacy(project)
+    
+    def _compute_context_graph_legacy(self, project: str) -> Dict:
+        """
+        LEGACY: Compute hub/spoke relationships for the context graph.
+        
+        Kept for fallback if new schema-driven approach fails.
+        """
+        logger.warning(f"[CONTEXT-GRAPH-LEGACY] Computing hub/spoke relationships for {project}")
         
         # Configurable thresholds
         MIN_FK_COVERAGE_PCT = 50        # Minimum % coverage for FK detection
