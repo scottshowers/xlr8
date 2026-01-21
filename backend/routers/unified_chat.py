@@ -313,18 +313,13 @@ def _get_valid_files_from_registry(customer_id: str) -> set:
     
     REGISTRY IS SOURCE OF TRUTH - if a file isn't registered, 
     its data should not be visible to chat.
+    
+    v5.3: Fixed - was using undefined 'project' variable
     """
     try:
-        from utils.database.models import DocumentRegistryModel, ProjectModel
+        from utils.database.models import DocumentRegistryModel
         
-        # Get customer_id from project name
-        customer_id = None
-        if project:
-            proj_record = ProjectModel.get_by_name(project)
-            if proj_record:
-                customer_id = proj_record.get('id')
-        
-        # Get registered files for this project
+        # Get registered files for this customer
         if customer_id:
             entries = DocumentRegistryModel.get_by_project(customer_id, include_global=True)
         else:
@@ -336,7 +331,7 @@ def _get_valid_files_from_registry(customer_id: str) -> set:
             if filename:
                 valid_files.add(filename.lower())
         
-        logger.info(f"[SCHEMA] Registry has {len(valid_files)} valid files for project '{project}'")
+        logger.info(f"[SCHEMA] Registry has {len(valid_files)} valid files for customer '{customer_id}'")
         return valid_files
         
     except Exception as e:
@@ -827,8 +822,9 @@ async def unified_chat(request: UnifiedChatRequest):
             except Exception as e:
                 logger.warning(f"[UNIFIED] Could not get product_id: {e}")
         
-        # Use project_code for DuckDB operations if available, otherwise fall back to project name
-        project_for_duckdb = project_code or project
+        # Use customer_id (UUID) for DuckDB operations - term_index stores data by UUID
+        # v5.3: Fixed - was using project name but data indexed by UUID
+        project_for_duckdb = customer_id or project_code or project
         logger.warning(f"[UNIFIED] Using project_for_duckdb: {project_for_duckdb}")
         
         # Get or create intelligence engine (V2 ONLY)
