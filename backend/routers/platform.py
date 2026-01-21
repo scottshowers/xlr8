@@ -832,7 +832,8 @@ async def list_references():
             project = meta.get('customer_id') or meta.get('project')
             
             # Only include reference library docs (global/universal/standards)
-            if project not in ['Global/Universal', 'Reference Library', '__STANDARDS__', None, '']:
+            # v5.3: Added 'Global Knowledge' - used by GlobalKnowledgePage.jsx
+            if project not in ['Global/Universal', 'Reference Library', '__STANDARDS__', 'Global Knowledge', None, '']:
                 continue
                 
             if source:

@@ -275,7 +275,7 @@ def get_or_create_session(session_id: str, customer_id: str) -> Tuple[str, Dict]
     if session_id not in unified_sessions:
         unified_sessions[session_id] = {
             'engine': None,
-            'project': project,
+            'project': customer_id,  # v5.3: Fixed - was using undefined 'project'
             'created_at': time.time(),
             'last_sql': None,
             'last_result': None,
