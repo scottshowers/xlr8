@@ -113,6 +113,14 @@ class SchemaRegistry:
         # Process hub definitions
         hubs = schema.get("hubs", {})
         for hub_name, hub_def in hubs.items():
+            # Handle different schema formats:
+            # Format 1 (UKG Pro): {"hub_name": {"key_column": "code", "domain": "..."}}
+            # Format 2 (HubSpot): {"hub_name": "description string"}
+            if isinstance(hub_def, str):
+                # Simple string format - just register the hub name
+                self._entity_to_hub[system_name][hub_name.lower()] = hub_name
+                continue
+            
             key_column = hub_def.get("key_column", "")
             domain = hub_def.get("domain", "")
             entity_name = hub_def.get("entity_name", hub_name)
@@ -136,7 +144,17 @@ class SchemaRegistry:
             if not mappings:
                 continue
             # spoke_patterns format: {"columnname": [{"hub": "hub_name", "confidence": 0.95}]}
-            hub_name = mappings[0].get("hub") if isinstance(mappings, list) else mappings.get("hub")
+            # or simpler: {"columnname": "hub_name"}
+            if isinstance(mappings, str):
+                hub_name = mappings
+            elif isinstance(mappings, list) and len(mappings) > 0:
+                first = mappings[0]
+                hub_name = first.get("hub") if isinstance(first, dict) else str(first)
+            elif isinstance(mappings, dict):
+                hub_name = mappings.get("hub")
+            else:
+                continue
+            
             if hub_name:
                 # Add this FK column → hub mapping (column_name is already lowercase)
                 self._column_to_hub[system_name][column_name] = hub_name
