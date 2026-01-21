@@ -378,6 +378,9 @@ async def get_customer_files_endpoint(customer_id: str):
     """
     Get all files for a customer - THE canonical endpoint.
     
+    v5.3: Now includes chunk_count and type from DocumentRegistry
+    so Documents section in DataPage can show ChromaDB files.
+    
     Files are grouped by source (upload, api, pdf).
     """
     try:
@@ -386,8 +389,28 @@ async def get_customer_files_endpoint(customer_id: str):
         if not customer:
             raise HTTPException(status_code=404, detail=f"Customer not found: {customer_id}")
         
-        # Get tables and group by source
+        # Get tables from DuckDB and group by source
         tables = CustomerResolver.get_tables(customer['id'])
+        
+        # Get document registry entries for chunk info
+        from utils.database.models import DocumentRegistryModel
+        registry_entries = DocumentRegistryModel.get_by_project(
+            project_id=customer['id'],
+            include_global=False
+        )
+        
+        # Build lookup for chunk info by filename
+        chunk_lookup = {}
+        for entry in registry_entries:
+            filename = entry.get('filename', '')
+            if filename:
+                chunk_lookup[filename.lower()] = {
+                    'chunk_count': entry.get('chunk_count', 0) or 0,
+                    'storage_type': entry.get('storage_type', ''),
+                    'truth_type': entry.get('truth_type', ''),
+                    'uploaded_by': entry.get('uploaded_by_email', ''),
+                    'uploaded_at': entry.get('created_at', ''),
+                }
         
         files_by_source = {
             'upload': [],
@@ -395,23 +418,66 @@ async def get_customer_files_endpoint(customer_id: str):
             'pdf': []
         }
         
+        seen_files = set()
+        
         for table in tables:
             source = table.get('source', 'upload')
-            files_by_source.setdefault(source, []).append({
+            filename = table.get('filename', '')
+            chunk_info = chunk_lookup.get(filename.lower(), {})
+            chunk_count = chunk_info.get('chunk_count', 0)
+            
+            file_data = {
                 'table_name': table['table_name'],
                 'display_name': table['display_name'],
-                'filename': table.get('filename'),
+                'filename': filename,
                 'sheet_name': table.get('sheet_name'),
                 'row_count': table.get('row_count', 0),
-                'column_count': len(table.get('columns', []))
-            })
+                'column_count': len(table.get('columns', [])),
+                # v5.3: Add chunk info for Documents section
+                'chunks': chunk_count,
+                'type': 'hybrid' if chunk_count > 0 else 'structured',
+                'truth_type': chunk_info.get('truth_type', table.get('truth_type', '')),
+            }
+            
+            files_by_source.setdefault(source, []).append(file_data)
+            if filename:
+                seen_files.add(filename.lower())
+        
+        # v5.3: Add files that ONLY exist in ChromaDB (no DuckDB table)
+        # These are text documents that went purely to vector search
+        for entry in registry_entries:
+            filename = entry.get('filename', '')
+            if not filename or filename.lower() in seen_files:
+                continue
+            
+            chunk_count = entry.get('chunk_count', 0) or 0
+            if chunk_count > 0:  # Only include if has chunks
+                file_data = {
+                    'table_name': None,
+                    'display_name': filename,
+                    'filename': filename,
+                    'sheet_name': None,
+                    'row_count': 0,
+                    'column_count': 0,
+                    'chunks': chunk_count,
+                    'type': entry.get('storage_type', 'chromadb'),
+                    'truth_type': entry.get('truth_type', ''),
+                }
+                # Determine source from filename extension
+                ext = filename.split('.')[-1].lower() if '.' in filename else ''
+                if ext == 'pdf':
+                    files_by_source['pdf'].append(file_data)
+                else:
+                    files_by_source['upload'].append(file_data)
+        
+        total_files = sum(len(v) for v in files_by_source.values())
         
         return {
             "success": True,
             "customer_id": customer['id'],
             "customer_name": customer.get('name'),
             "files": files_by_source,
-            "total_files": len(tables),
+            "total_files": total_files,
             "by_source": {k: len(v) for k, v in files_by_source.items()}
         }
         
