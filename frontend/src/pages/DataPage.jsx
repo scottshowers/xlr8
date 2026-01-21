@@ -18,7 +18,7 @@ import {
   Upload as UploadIcon, FileText, Database, CheckCircle, XCircle, 
   Loader2, ChevronDown, ChevronRight, Trash2, RefreshCw, 
   HardDrive, User, Calendar, Sparkles, Clock, FileSpreadsheet, Search,
-  Settings, BookOpen, AlertCircle, Target, BarChart3, Server
+  Settings, BookOpen, AlertCircle, Target, BarChart3, Server, AlertTriangle
 } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 import { useProject } from '../context/ProjectContext';
@@ -106,14 +106,52 @@ function SyncFromUKGButton({ c, projectId }) {
   useEffect(() => {
     if (!jobId) return;
     
+    let consecutiveFailures = 0;
+    const MAX_FAILURES = 5;
+    
     const pollInterval = setInterval(async () => {
       try {
         const res = await fetch(`${API_BASE}/api/ukg/sync-status/${jobId}`);
+        
+        if (!res.ok) {
+          consecutiveFailures++;
+          console.warn(`Poll failed (${consecutiveFailures}/${MAX_FAILURES}): HTTP ${res.status}`);
+          
+          if (consecutiveFailures >= MAX_FAILURES) {
+            clearInterval(pollInterval);
+            setSyncing(false);
+            setStatus({ 
+              status: 'failed', 
+              errors: [`Lost connection to sync job. Server may have restarted. (HTTP ${res.status})`],
+              current_step: 'Connection lost'
+            });
+          }
+          return;
+        }
+        
+        consecutiveFailures = 0; // Reset on success
         const data = await res.json();
         setStatus(data);
         
+        // Check for stale heartbeat (no update in 2+ minutes)
+        if (data.last_heartbeat && data.status === 'running') {
+          const lastBeat = new Date(data.last_heartbeat);
+          const staleMs = Date.now() - lastBeat.getTime();
+          if (staleMs > 120000) { // 2 minutes
+            clearInterval(pollInterval);
+            setSyncing(false);
+            setStatus({
+              ...data,
+              status: 'failed',
+              errors: [...(data.errors || []), `Job appears stuck - no progress for ${Math.floor(staleMs/1000)}s`],
+              current_step: 'Job stalled'
+            });
+            return;
+          }
+        }
+        
         // Stop polling when complete or failed
-        if (data.status === 'completed' || data.status === 'failed') {
+        if (data.status === 'completed' || data.status === 'completed_with_errors' || data.status === 'failed') {
           clearInterval(pollInterval);
           setSyncing(false);
           
@@ -123,7 +161,18 @@ function SyncFromUKGButton({ c, projectId }) {
           }
         }
       } catch (err) {
-        console.error('Poll failed:', err);
+        consecutiveFailures++;
+        console.error(`Poll error (${consecutiveFailures}/${MAX_FAILURES}):`, err);
+        
+        if (consecutiveFailures >= MAX_FAILURES) {
+          clearInterval(pollInterval);
+          setSyncing(false);
+          setStatus({ 
+            status: 'failed', 
+            errors: [`Network error: ${err.message}. Sync may still be running on server.`],
+            current_step: 'Connection lost'
+          });
+        }
       }
     }, 2000); // Poll every 2 seconds
     
@@ -162,7 +211,9 @@ function SyncFromUKGButton({ c, projectId }) {
   if (!hasConnection) return null;
   
   const isComplete = status?.status === 'completed';
+  const isPartialSuccess = status?.status === 'completed_with_errors';
   const isFailed = status?.status === 'failed';
+  const isError = isFailed || isPartialSuccess;
   const progress = status?.total_tables > 0 
     ? Math.round((status.tables_processed / status.total_tables) * 100) 
     : 0;
@@ -201,8 +252,8 @@ function SyncFromUKGButton({ c, projectId }) {
           right: '20px',
           padding: '16px 20px',
           borderRadius: '8px',
-          background: isFailed ? '#fee2e2' : isComplete ? '#dcfce7' : '#f0f9ff',
-          border: `1px solid ${isFailed ? '#dc2626' : isComplete ? '#16a34a' : '#3b82f6'}`,
+          background: isError ? '#fee2e2' : isComplete ? '#dcfce7' : '#f0f9ff',
+          border: `1px solid ${isError ? '#dc2626' : isComplete ? '#16a34a' : '#3b82f6'}`,
           boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
           zIndex: 1000,
           minWidth: '320px',
@@ -210,10 +261,13 @@ function SyncFromUKGButton({ c, projectId }) {
         }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '12px' }}>
             {isComplete ? <CheckCircle size={18} color="#16a34a" /> : 
+             isPartialSuccess ? <AlertTriangle size={18} color="#f59e0b" /> :
              isFailed ? <XCircle size={18} color="#dc2626" /> :
              <Loader2 size={18} color="#3b82f6" className="spin" />}
-            <strong style={{ color: isFailed ? '#991b1b' : isComplete ? '#166534' : '#1e40af' }}>
-              {isComplete ? 'Sync Complete!' : isFailed ? 'Sync Failed' : 'Syncing from UKG Pro...'}
+            <strong style={{ color: isFailed ? '#991b1b' : isPartialSuccess ? '#92400e' : isComplete ? '#166534' : '#1e40af' }}>
+              {isComplete ? 'Sync Complete!' : 
+               isPartialSuccess ? 'Sync Completed with Errors' :
+               isFailed ? 'Sync Failed' : 'Syncing from UKG Pro...'}
             </strong>
             <button 
               onClick={() => { setShowStatus(false); if (!syncing) setJobId(null); }}
@@ -224,7 +278,7 @@ function SyncFromUKGButton({ c, projectId }) {
           </div>
           
           {/* Progress bar */}
-          {!isComplete && !isFailed && (
+          {!isComplete && !isError && (
             <div style={{ marginBottom: '12px' }}>
               <div style={{ 
                 height: '6px', 
@@ -243,7 +297,7 @@ function SyncFromUKGButton({ c, projectId }) {
           )}
           
           {/* Status details */}
-          <div style={{ fontSize: '13px', color: isFailed ? '#991b1b' : isComplete ? '#166534' : '#1e40af' }}>
+          <div style={{ fontSize: '13px', color: isError ? '#991b1b' : isComplete ? '#166534' : '#1e40af' }}>
             {status.current_step && <div style={{ marginBottom: '4px' }}>{status.current_step}</div>}
             {status.tables_synced !== undefined && (
               <div>
@@ -252,7 +306,12 @@ function SyncFromUKGButton({ c, projectId }) {
                 {status.tables_failed > 0 && ` (${status.tables_failed} failed)`}
               </div>
             )}
-            {isFailed && status.errors?.length > 0 && (
+            {status.last_heartbeat && !isComplete && !isError && (
+              <div style={{ marginTop: '4px', fontSize: '11px', opacity: 0.7 }}>
+                Last update: {new Date(status.last_heartbeat).toLocaleTimeString()}
+              </div>
+            )}
+            {isError && status.errors?.length > 0 && (
               <div style={{ marginTop: '8px', fontSize: '12px' }}>
                 {status.errors.slice(0, 3).join(', ')}
                 {status.errors.length > 3 && `... and ${status.errors.length - 3} more`}
