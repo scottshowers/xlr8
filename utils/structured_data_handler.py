@@ -4383,7 +4383,7 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
         file_path: str,
         project: str,
         file_name: str,
-        encrypt_pii: bool = False,  # Disabled - security at perimeter (Railway, API auth, HTTPS)
+        encrypt_pii: bool = True,  # v5.3: Enabled - defense in depth for PII (SSN, DOB, etc.)
         keep_previous_version: bool = True,
         progress_callback: Optional[Callable[[int, str], None]] = None,
         uploaded_by: str = None,
