@@ -194,10 +194,16 @@ def _store_context_graph_tables(conn, project: str, hubs: list, relationships: l
     Creates/updates _context_graph_hubs and _context_graph_relationships.
     """
     try:
-        # Ensure tables exist
+        # Clear existing data for this project (tables may have old schema)
+        try:
+            conn.execute("DROP TABLE IF EXISTS _context_graph_hubs")
+            conn.execute("DROP TABLE IF EXISTS _context_graph_relationships")
+        except:
+            pass
+        
+        # Ensure tables exist (no explicit id - DuckDB handles rowid internally)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS _context_graph_hubs (
-                id INTEGER PRIMARY KEY,
                 project VARCHAR,
                 table_name VARCHAR,
                 key_column VARCHAR,
@@ -211,7 +217,6 @@ def _store_context_graph_tables(conn, project: str, hubs: list, relationships: l
         
         conn.execute("""
             CREATE TABLE IF NOT EXISTS _context_graph_relationships (
-                id INTEGER PRIMARY KEY,
                 project VARCHAR,
                 spoke_table VARCHAR,
                 spoke_column VARCHAR,

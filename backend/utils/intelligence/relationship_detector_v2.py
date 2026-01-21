@@ -61,7 +61,7 @@ class RelationshipDetector:
     """
     
     # Minimum overlap for validation
-    MIN_VALIDATION_COVERAGE = 90.0
+    MIN_VALIDATION_COVERAGE = 50.0  # Lowered from 90% - real data has nulls/variations
     
     # Known suffixes that indicate a reference column
     REFERENCE_SUFFIXES = ['code', 'id', 'key', 'type', 'number', 'no', 'num']

@@ -2170,10 +2170,13 @@ DO NOT:
             # If no term matches and no aggregation matches, fall back to local LLM
             # This handles general questions that don't relate to loaded data
             # ALSO fall back if ALL matches are low-confidence "reasoned" matches (MetadataReasoner guesses)
+            # BUT: Trust reasoned matches with operator='GROUP BY' - those are column name matches
             all_reasoned_low_conf = (
                 term_matches and 
                 all(getattr(m, 'term_type', '') == 'reasoned' for m in term_matches) and
-                all(getattr(m, 'confidence', 1.0) < 0.8 for m in term_matches)
+                all(getattr(m, 'confidence', 1.0) < 0.8 for m in term_matches) and
+                # NEW: Trust column name matches (GROUP BY) even if low confidence
+                not any(getattr(m, 'operator', '') == 'GROUP BY' for m in term_matches)
             )
             
             if not term_matches and not agg_matches:
