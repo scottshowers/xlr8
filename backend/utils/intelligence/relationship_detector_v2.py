@@ -281,6 +281,15 @@ class RelationshipDetector:
                         hub_type = self._derive_hub_type_from_column(col)
                         break
             
+            # Method 4: Config tables with generic 'code' column - use entity_type as hub_type
+            if not key_column and truth_type == 'configuration' and entity_type:
+                for col in col_names:
+                    if col.lower() == 'code':
+                        key_column = col
+                        # Use entity_type as hub_type for generic code tables
+                        hub_type = entity_type
+                        break
+            
             if key_column and hub_type:
                 # Get values and cardinality
                 try:
