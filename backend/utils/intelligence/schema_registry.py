@@ -128,6 +128,22 @@ class SchemaRegistry:
                 # Build entity → hub mappings (with variants)
                 self._add_entity_variants(system_name, hub_name, entity_name)
         
+        # Process spoke_patterns (FK column → hub mappings)
+        # These are the actual FK columns that appear in reality tables
+        # e.g., "employeetypecode" → "employee_type"
+        spoke_patterns = schema.get("spoke_patterns", {})
+        for column_name, mappings in spoke_patterns.items():
+            if not mappings:
+                continue
+            # spoke_patterns format: {"columnname": [{"hub": "hub_name", "confidence": 0.95}]}
+            hub_name = mappings[0].get("hub") if isinstance(mappings, list) else mappings.get("hub")
+            if hub_name:
+                # Add this FK column → hub mapping (column_name is already lowercase)
+                self._column_to_hub[system_name][column_name] = hub_name
+                # Also add to global index
+                if column_name not in self._global_column_to_hub:
+                    self._global_column_to_hub[column_name] = hub_name
+        
         logger.debug(f"[SCHEMA-REGISTRY] {system_name}: {len(hubs)} hubs indexed")
     
     def _add_column_variants(self, system: str, column: str, hub: str):
