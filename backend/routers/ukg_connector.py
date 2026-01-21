@@ -732,6 +732,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 row_count = table_info.get('rows', 0)
                 truth_type = 'configuration' if table_info.get('type') == 'config' else 'reality'
                 
+                # Derive entity_type from API endpoint name (e.g., "jobs" → "jobs", "person_details" → "person_details")
+                entity_type = table_info['table'].replace('-', '_').replace(' ', '_').lower()
+                
                 try:
                     # Register in _schema_metadata (DELETE + INSERT since no unique constraint on table_name)
                     handler.conn.execute("""
@@ -740,9 +743,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                     
                     handler.conn.execute("""
                         INSERT INTO _schema_metadata 
-                        (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category, columns)
-                        VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, 'api', '[]')
-                    """, [project_id, display_name, table_name, row_count, display_name, truth_type])
+                        (project, file_name, sheet_name, table_name, row_count, is_current, display_name, truth_type, category, columns, entity_type)
+                        VALUES (?, ?, 'Sheet1', ?, ?, TRUE, ?, ?, 'api', '[]', ?)
+                    """, [project_id, display_name, table_name, row_count, display_name, truth_type, entity_type])
                     
                     # Profile columns
                     handler.profile_columns_fast(project_id, table_name)
