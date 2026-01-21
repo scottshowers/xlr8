@@ -35,18 +35,21 @@ except ImportError:
     PANDAS_AVAILABLE = False
 
 # PDF table extraction via Claude Vision (replaces gmft)
+# v5.3: DISABLED BY DEFAULT - pdfplumber + local LLM handles 90%+ of PDFs
+# Vision is expensive, slow, and can hallucinate table descriptions
+# Only re-enable for truly complex layouts (merged cells, borderless multi-column)
+VISION_AVAILABLE = False  # Disabled - use local LLM path instead
 try:
     from utils.pdf_vision_analyzer import extract_all_tables_with_vision
-    VISION_AVAILABLE = True
-    logger.info("[SMART-PDF] Vision analyzer available - Claude Vision enabled")
+    # VISION_AVAILABLE = True  # Uncomment to re-enable Vision
+    logger.info("[SMART-PDF] Vision analyzer available but DISABLED - using local LLM")
 except ImportError:
     try:
         from backend.utils.pdf_vision_analyzer import extract_all_tables_with_vision
-        VISION_AVAILABLE = True
-        logger.info("[SMART-PDF] Vision analyzer available (backend path)")
+        # VISION_AVAILABLE = True  # Uncomment to re-enable Vision
+        logger.info("[SMART-PDF] Vision analyzer available but DISABLED (backend path)")
     except ImportError:
-        VISION_AVAILABLE = False
-        logger.warning("[SMART-PDF] Vision analyzer not available - PDF table extraction disabled")
+        logger.info("[SMART-PDF] Vision analyzer not installed")
 
 # =============================================================================
 # SHARED UTILITIES - Import from pdf_utils for consistency
