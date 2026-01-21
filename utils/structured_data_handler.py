@@ -4279,12 +4279,30 @@ Use confidence 0.95+ ONLY for exact column name matches like "company_code"→co
     
     def _get_next_version(self, project: str, file_name: str) -> int:
         """Get next version number for a file"""
-        result = self.conn.execute("""
-            SELECT COALESCE(MAX(version), 0) + 1 
-            FROM _load_versions 
-            WHERE project = ? AND file_name = ?
-        """, [project, file_name]).fetchone()
-        return result[0] if result else 1
+        try:
+            result = self.conn.execute("""
+                SELECT COALESCE(MAX(version), 0) + 1 
+                FROM _load_versions 
+                WHERE project = ? AND file_name = ?
+            """, [project, file_name]).fetchone()
+            return result[0] if result else 1
+        except Exception as e:
+            # v5.3: Table might not exist after data clear - create it
+            if '_load_versions' in str(e):
+                logger.warning("[STORE_DF] _load_versions missing - creating...")
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS _load_versions (
+                        id INTEGER PRIMARY KEY,
+                        project VARCHAR NOT NULL,
+                        file_name VARCHAR NOT NULL,
+                        version INTEGER NOT NULL,
+                        checksum VARCHAR,
+                        row_counts JSON,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+                return 1
+            raise
     
     def _compute_checksum(self, df: pd.DataFrame) -> str:
         """Compute checksum of DataFrame for change detection"""
