@@ -61,11 +61,10 @@ export default function GlobalKnowledgePage() {
   const loadDocuments = useCallback(async () => {
     setLoading(true);
     try {
-      const response = await api.get('/files', {
-        params: { scope: 'global' }
-      });
+      // v5.3: Use /status/references which has global knowledge docs
+      const response = await api.get('/status/references');
       
-      const docs = response.data?.documents || response.data?.files || [];
+      const docs = response.data?.files || [];
       setDocuments(docs);
     } catch (err) {
       console.error('Failed to load documents:', err);
@@ -101,9 +100,8 @@ export default function GlobalKnowledgePage() {
     if (!window.confirm(`Delete "${doc.filename}"? This cannot be undone.`)) return;
     
     try {
-      await api.delete(`/files/${encodeURIComponent(doc.filename)}`, {
-        params: { scope: 'global' }
-      });
+      // v5.3: Use /status/references delete endpoint
+      await api.delete(`/status/references/${encodeURIComponent(doc.filename)}`);
       loadDocuments();
     } catch (err) {
       console.error('Delete failed:', err);
