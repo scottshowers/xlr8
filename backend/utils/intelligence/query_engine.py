@@ -721,18 +721,36 @@ SQL:"""
         """Clean LLM response to extract just the SQL."""
         sql = response.strip()
         
-        # Remove markdown code blocks
-        if sql.startswith('```'):
-            sql = re.sub(r'^```(?:sql)?\n?', '', sql)
-            sql = re.sub(r'\n?```$', '', sql)
+        logger.warning(f"[SQL_GEN] Cleaning SQL, input: {sql[:200]}...")
         
-        # Remove any explanation text before SELECT
-        if 'SELECT' in sql.upper():
-            idx = sql.upper().find('SELECT')
-            sql = sql[idx:]
+        # Remove ALL markdown code fences anywhere in the string
+        sql = re.sub(r'```sql', '', sql, flags=re.IGNORECASE)
+        sql = re.sub(r'```', '', sql)
+        
+        # Find the LAST occurrence of SELECT (the real query, not garbage prefix)
+        # Split by SELECT and take from the last complete statement
+        upper_sql = sql.upper()
+        
+        # Find all SELECT positions
+        select_positions = [m.start() for m in re.finditer(r'\bSELECT\b', upper_sql)]
+        
+        if select_positions:
+            # Take from the last SELECT that's followed by actual query content
+            # Usually the real query is the last one, or the one with FROM after it
+            for pos in reversed(select_positions):
+                candidate = sql[pos:].strip()
+                # Check if this looks like a real query (has FROM or is a simple aggregate)
+                if 'FROM' in candidate.upper() or 'COUNT' in candidate.upper():
+                    sql = candidate
+                    break
         
         # Remove trailing semicolon for DuckDB
         sql = sql.rstrip(';').strip()
+        
+        # Final cleanup - remove any remaining newlines at start
+        sql = sql.lstrip('\n').strip()
+        
+        logger.warning(f"[SQL_GEN] Cleaned SQL: {sql}")
         
         return sql
     
