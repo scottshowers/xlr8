@@ -584,6 +584,699 @@ class RulesEngine:
 
 
 # =============================================================================
+# 3B. TERM MAPPING ENGINE
+# =============================================================================
+
+# Term mapping storage paths
+TERM_MAPPING_DIR = DATA_DIR / "term_mappings"
+try:
+    TERM_MAPPING_DIR.mkdir(parents=True, exist_ok=True)
+except Exception as e:
+    logger.warning(f"[LEARNING] Could not create term mapping dir: {e}")
+
+# Universal patterns - learned across all vendors
+UNIVERSAL_COLUMN_PATTERNS = {
+    # Employment status
+    'active_employee': {
+        'column_patterns': ['employmentstatus', 'empstatus', 'status', 'employment_status', 'workerstatus'],
+        'value_patterns': ['A', 'Active', 'ACT', '1', 'ACTIVE'],
+        'mapping_type': 'filter_value',
+        'display_term': 'active'
+    },
+    'terminated_employee': {
+        'column_patterns': ['employmentstatus', 'empstatus', 'status', 'employment_status'],
+        'value_patterns': ['T', 'Terminated', 'TERM', 'TRM', 'Inactive'],
+        'mapping_type': 'filter_value',
+        'display_term': 'terminated'
+    },
+    'leave_employee': {
+        'column_patterns': ['employmentstatus', 'empstatus', 'status'],
+        'value_patterns': ['L', 'Leave', 'LOA', 'OnLeave'],
+        'mapping_type': 'filter_value',
+        'display_term': 'on leave'
+    },
+    
+    # Employment type
+    'full_time': {
+        'column_patterns': ['fulltimeorparttime', 'ftpt', 'employeetype', 'emptype', 'full_time_part_time'],
+        'value_patterns': ['F', 'FT', 'Full', 'Full-Time', 'FullTime'],
+        'mapping_type': 'filter_value',
+        'display_term': 'full time'
+    },
+    'part_time': {
+        'column_patterns': ['fulltimeorparttime', 'ftpt', 'employeetype', 'emptype'],
+        'value_patterns': ['P', 'PT', 'Part', 'Part-Time', 'PartTime'],
+        'mapping_type': 'filter_value',
+        'display_term': 'part time'
+    },
+    
+    # Dates
+    'hire_date': {
+        'column_patterns': ['hiredate', 'hire_date', 'dateofhire', 'startdate', 'employmentstartdate', 'originalhiredate'],
+        'mapping_type': 'date_column',
+        'display_term': 'hired'
+    },
+    'termination_date': {
+        'column_patterns': ['terminationdate', 'termdate', 'enddate', 'separationdate', 'lastdayworked'],
+        'mapping_type': 'date_column',
+        'display_term': 'terminated'
+    },
+    'birth_date': {
+        'column_patterns': ['birthdate', 'dateofbirth', 'dob'],
+        'mapping_type': 'date_column',
+        'display_term': 'born'
+    },
+    
+    # Names
+    'first_name': {
+        'column_patterns': ['firstname', 'first_name', 'givenname', 'fname'],
+        'mapping_type': 'display_column',
+        'display_term': 'first name'
+    },
+    'last_name': {
+        'column_patterns': ['lastname', 'last_name', 'surname', 'familyname', 'lname'],
+        'mapping_type': 'display_column',
+        'display_term': 'last name'
+    },
+    
+    # Compensation
+    'salary': {
+        'column_patterns': ['annualsalary', 'annual_salary', 'salary', 'basesalary', 'basecompensation', 'yearlysalary'],
+        'mapping_type': 'measure_column',
+        'display_term': 'salary'
+    },
+    'hourly_rate': {
+        'column_patterns': ['hourlypayrate', 'hourlyrate', 'payrate', 'hourly_rate'],
+        'mapping_type': 'measure_column',
+        'display_term': 'hourly rate'
+    },
+    
+    # Location
+    'state': {
+        'column_patterns': ['addressstate', 'state', 'statecode', 'workstate', 'work_state'],
+        'mapping_type': 'filter_column',
+        'display_term': 'state'
+    },
+    'city': {
+        'column_patterns': ['addresscity', 'city', 'workcity'],
+        'mapping_type': 'filter_column',
+        'display_term': 'city'
+    },
+    'country': {
+        'column_patterns': ['addresscountry', 'country', 'countrycode', 'workcountry'],
+        'mapping_type': 'filter_column',
+        'display_term': 'country'
+    }
+}
+
+# Lookup table patterns - tables that are code/description reference tables
+UNIVERSAL_LOOKUP_PATTERNS = {
+    'location': {
+        'table_patterns': ['location', 'locations', 'work_location', 'worklocation'],
+        'fk_patterns': ['locationcode', 'location_code', 'loccode', 'worklocationcode'],
+        'display_term': 'location'
+    },
+    'job': {
+        'table_patterns': ['job', 'jobs', 'position', 'positions', 'jobtitle'],
+        'fk_patterns': ['jobcode', 'job_code', 'jobid', 'positioncode', 'jobtitlecode'],
+        'display_term': 'job'
+    },
+    'department': {
+        'table_patterns': ['department', 'departments', 'dept', 'org_level', 'orglevel'],
+        'fk_patterns': ['departmentcode', 'deptcode', 'orglevel'],
+        'display_term': 'department'
+    },
+    'company': {
+        'table_patterns': ['company', 'companies', 'legal_entity', 'legalentity'],
+        'fk_patterns': ['companycode', 'companyid', 'legalentitycode'],
+        'display_term': 'company'
+    },
+    'pay_group': {
+        'table_patterns': ['paygroup', 'pay_group', 'paygroups'],
+        'fk_patterns': ['paygroupcode', 'pay_group_code', 'paygroup'],
+        'display_term': 'pay group'
+    }
+}
+
+
+class TermMappingEngine:
+    """
+    Discovers, stores, and manages term mappings for natural language queries.
+    
+    FLOW:
+    1. discover_mappings() - Auto-discovers from schema → pending
+    2. get_pending() - Review what was discovered
+    3. approve() / reject() - Human decision
+    4. Approved mappings → used by QueryEngine
+    5. Patterns learned → used for future vendors
+    
+    CROSS-VENDOR LEARNING:
+    - When you approve a mapping for UKG, we learn the pattern
+    - When we see similar schema in Workday, we propose the same mapping
+    - Confidence increases with each approval
+    """
+    
+    def __init__(self):
+        self.pending_file = TERM_MAPPING_DIR / "pending_mappings.json"
+        self.approved_file = TERM_MAPPING_DIR / "approved_mappings.json"
+        self.learned_file = TERM_MAPPING_DIR / "learned_patterns.json"
+        self._load_data()
+    
+    def _load_data(self):
+        """Load all term mapping data."""
+        # Pending mappings awaiting review
+        if self.pending_file.exists():
+            with open(self.pending_file, 'r') as f:
+                self.pending = json.load(f)
+        else:
+            self.pending = {}  # keyed by project_id
+        
+        # Approved mappings (used by QueryEngine)
+        if self.approved_file.exists():
+            with open(self.approved_file, 'r') as f:
+                self.approved = json.load(f)
+        else:
+            self.approved = {}  # keyed by project_id
+        
+        # Learned patterns (cross-vendor)
+        if self.learned_file.exists():
+            with open(self.learned_file, 'r') as f:
+                self.learned = json.load(f)
+        else:
+            self.learned = {
+                'column_patterns': dict(UNIVERSAL_COLUMN_PATTERNS),
+                'lookup_patterns': dict(UNIVERSAL_LOOKUP_PATTERNS),
+                'vendor_mappings': {},  # vendor -> product -> concept -> mapping
+                'approval_counts': {}   # concept -> count of approvals
+            }
+    
+    def _save_pending(self):
+        with open(self.pending_file, 'w') as f:
+            json.dump(self.pending, f, indent=2)
+    
+    def _save_approved(self):
+        with open(self.approved_file, 'w') as f:
+            json.dump(self.approved, f, indent=2)
+    
+    def _save_learned(self):
+        with open(self.learned_file, 'w') as f:
+            json.dump(self.learned, f, indent=2)
+    
+    def discover_mappings(self, conn, project_id: str, vendor: str = None, product: str = None) -> List[Dict]:
+        """
+        Auto-discover potential term mappings from database schema.
+        
+        Returns list of discovered mappings (stored as pending).
+        """
+        logger.warning(f"[TERM-DISCOVERY] Starting discovery for {project_id}")
+        
+        discovered = []
+        
+        # Get all tables for this project
+        tables = self._get_project_tables(conn, project_id)
+        logger.warning(f"[TERM-DISCOVERY] Found {len(tables)} tables")
+        
+        # Phase 1: Find lookup tables (code + description pattern)
+        lookup_tables = self._find_lookup_tables(conn, tables)
+        logger.warning(f"[TERM-DISCOVERY] Found {len(lookup_tables)} potential lookup tables")
+        
+        # Phase 2: Find filter columns (status, type, etc.)
+        filter_mappings = self._find_filter_columns(conn, tables, vendor, product)
+        discovered.extend(filter_mappings)
+        
+        # Phase 3: Find date columns
+        date_mappings = self._find_date_columns(tables)
+        discovered.extend(date_mappings)
+        
+        # Phase 4: Find display columns (names)
+        display_mappings = self._find_display_columns(tables)
+        discovered.extend(display_mappings)
+        
+        # Phase 5: Find measure columns (salary, etc.)
+        measure_mappings = self._find_measure_columns(tables)
+        discovered.extend(measure_mappings)
+        
+        # Phase 6: Find lookup relationships
+        lookup_mappings = self._find_lookup_relationships(conn, tables, lookup_tables)
+        discovered.extend(lookup_mappings)
+        
+        # Store as pending
+        self.pending[project_id] = {
+            'vendor': vendor,
+            'product': product,
+            'discovered_at': datetime.now().isoformat(),
+            'mappings': discovered
+        }
+        self._save_pending()
+        
+        logger.warning(f"[TERM-DISCOVERY] Complete: {len(discovered)} potential mappings found")
+        return discovered
+    
+    def _get_project_tables(self, conn, project_id: str) -> List[Dict]:
+        """Get all tables with their columns for this project."""
+        tables = []
+        
+        try:
+            all_tables = conn.execute("SHOW TABLES").fetchall()
+        except:
+            return tables
+        
+        for (table_name,) in all_tables:
+            if project_id not in table_name:
+                continue
+            
+            try:
+                cols = conn.execute(f'DESCRIBE "{table_name}"').fetchall()
+                columns = [{'name': c[0], 'type': c[1] if len(c) > 1 else 'VARCHAR'} for c in cols]
+                
+                count_result = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()
+                row_count = count_result[0] if count_result else 0
+                
+                tables.append({
+                    'name': table_name,
+                    'columns': columns,
+                    'row_count': row_count
+                })
+            except Exception as e:
+                logger.warning(f"[TERM-DISCOVERY] Could not describe {table_name}: {e}")
+        
+        return tables
+    
+    def _find_lookup_tables(self, conn, tables: List[Dict]) -> List[Dict]:
+        """Find tables that look like lookup/reference tables."""
+        lookup_tables = []
+        
+        for table in tables:
+            col_names_lower = [c['name'].lower() for c in table['columns']]
+            
+            has_code = any(c in col_names_lower for c in ['code', 'id', 'key'])
+            has_description = any(c in col_names_lower for c in ['description', 'name', 'desc', 'title'])
+            is_small = table['row_count'] < 1000
+            
+            if has_code and has_description and is_small:
+                code_col = next((c['name'] for c in table['columns'] 
+                               if c['name'].lower() in ['code', 'id', 'key']), None)
+                desc_col = next((c['name'] for c in table['columns'] 
+                               if c['name'].lower() in ['description', 'name', 'desc', 'title']), None)
+                
+                if code_col and desc_col:
+                    lookup_tables.append({
+                        'table': table['name'],
+                        'code_column': code_col,
+                        'description_column': desc_col,
+                        'row_count': table['row_count']
+                    })
+        
+        return lookup_tables
+    
+    def _find_filter_columns(self, conn, tables: List[Dict], vendor: str, product: str) -> List[Dict]:
+        """Find columns that can be used for filtering."""
+        mappings = []
+        patterns = self.learned['column_patterns']
+        
+        for table in tables:
+            if table['row_count'] < 100:
+                continue
+            
+            for col in table['columns']:
+                col_lower = col['name'].lower()
+                
+                for concept, pattern in patterns.items():
+                    if pattern.get('mapping_type') != 'filter_value':
+                        continue
+                    
+                    for p in pattern.get('column_patterns', []):
+                        if p in col_lower or col_lower == p:
+                            # Get distinct values
+                            try:
+                                values = conn.execute(f'''
+                                    SELECT DISTINCT "{col['name']}" 
+                                    FROM "{table['name']}" 
+                                    WHERE "{col['name']}" IS NOT NULL 
+                                    LIMIT 20
+                                ''').fetchall()
+                                distinct_values = [str(v[0]) for v in values if v[0]]
+                                
+                                # Match against expected values
+                                matching_value = None
+                                for expected in pattern.get('value_patterns', []):
+                                    if any(expected.lower() == v.lower() for v in distinct_values):
+                                        matching_value = next(v for v in distinct_values 
+                                                           if v.lower() == expected.lower())
+                                        break
+                                
+                                if matching_value:
+                                    # Check if we've seen this before (higher confidence)
+                                    confidence = 0.7
+                                    approval_count = self.learned['approval_counts'].get(concept, 0)
+                                    if approval_count > 0:
+                                        confidence = min(0.95, 0.7 + (approval_count * 0.05))
+                                    
+                                    mappings.append({
+                                        'concept': concept,
+                                        'display_term': pattern['display_term'],
+                                        'mapping_type': 'filter_value',
+                                        'source_table': table['name'],
+                                        'source_column': col['name'],
+                                        'filter_value': matching_value,
+                                        'all_values': distinct_values[:10],
+                                        'confidence': confidence
+                                    })
+                                    logger.warning(f"[TERM-DISCOVERY] Filter: '{pattern['display_term']}' -> {col['name']} = '{matching_value}'")
+                            except Exception as e:
+                                pass
+                            break
+        
+        return mappings
+    
+    def _find_date_columns(self, tables: List[Dict]) -> List[Dict]:
+        """Find date columns."""
+        mappings = []
+        patterns = self.learned['column_patterns']
+        
+        for table in tables:
+            if table['row_count'] < 100:
+                continue
+            
+            for col in table['columns']:
+                col_lower = col['name'].lower()
+                col_type = col['type'].upper()
+                is_date_type = any(t in col_type for t in ['DATE', 'TIME', 'TIMESTAMP'])
+                
+                for concept, pattern in patterns.items():
+                    if pattern.get('mapping_type') != 'date_column':
+                        continue
+                    
+                    for p in pattern.get('column_patterns', []):
+                        if p in col_lower or col_lower == p:
+                            confidence = 0.9 if is_date_type else 0.6
+                            mappings.append({
+                                'concept': concept,
+                                'display_term': pattern['display_term'],
+                                'mapping_type': 'date_column',
+                                'source_table': table['name'],
+                                'source_column': col['name'],
+                                'confidence': confidence
+                            })
+                            logger.warning(f"[TERM-DISCOVERY] Date: '{pattern['display_term']}' -> {col['name']}")
+                            break
+        
+        return mappings
+    
+    def _find_display_columns(self, tables: List[Dict]) -> List[Dict]:
+        """Find columns for displaying results (names)."""
+        mappings = []
+        patterns = self.learned['column_patterns']
+        
+        for table in tables:
+            if table['row_count'] < 100:
+                continue
+            
+            col_name_map = {c['name'].lower(): c['name'] for c in table['columns']}
+            
+            for concept, pattern in patterns.items():
+                if pattern.get('mapping_type') != 'display_column':
+                    continue
+                
+                for p in pattern.get('column_patterns', []):
+                    if p in col_name_map:
+                        mappings.append({
+                            'concept': concept,
+                            'display_term': pattern['display_term'],
+                            'mapping_type': 'display_column',
+                            'source_table': table['name'],
+                            'source_column': col_name_map[p],
+                            'confidence': 0.85
+                        })
+                        logger.warning(f"[TERM-DISCOVERY] Display: '{pattern['display_term']}' -> {col_name_map[p]}")
+                        break
+        
+        return mappings
+    
+    def _find_measure_columns(self, tables: List[Dict]) -> List[Dict]:
+        """Find numeric columns for aggregations."""
+        mappings = []
+        patterns = self.learned['column_patterns']
+        
+        for table in tables:
+            if table['row_count'] < 100:
+                continue
+            
+            for col in table['columns']:
+                col_lower = col['name'].lower()
+                col_type = col['type'].upper()
+                is_numeric = any(t in col_type for t in ['INT', 'DECIMAL', 'NUMERIC', 'FLOAT', 'DOUBLE'])
+                
+                for concept, pattern in patterns.items():
+                    if pattern.get('mapping_type') != 'measure_column':
+                        continue
+                    
+                    for p in pattern.get('column_patterns', []):
+                        if p in col_lower or col_lower == p:
+                            confidence = 0.85 if is_numeric else 0.5
+                            mappings.append({
+                                'concept': concept,
+                                'display_term': pattern['display_term'],
+                                'mapping_type': 'measure_column',
+                                'source_table': table['name'],
+                                'source_column': col['name'],
+                                'confidence': confidence
+                            })
+                            logger.warning(f"[TERM-DISCOVERY] Measure: '{pattern['display_term']}' -> {col['name']}")
+                            break
+        
+        return mappings
+    
+    def _find_lookup_relationships(self, conn, tables: List[Dict], lookup_tables: List[Dict]) -> List[Dict]:
+        """Find foreign key relationships to lookup tables."""
+        mappings = []
+        patterns = self.learned['lookup_patterns']
+        
+        for table in tables:
+            if table['row_count'] < 100:
+                continue
+            
+            for col in table['columns']:
+                col_lower = col['name'].lower()
+                
+                for concept, pattern in patterns.items():
+                    for fk_pattern in pattern.get('fk_patterns', []):
+                        if fk_pattern in col_lower or col_lower in fk_pattern:
+                            # Find matching lookup table
+                            for lookup in lookup_tables:
+                                lookup_name_lower = lookup['table'].lower()
+                                for table_pattern in pattern.get('table_patterns', []):
+                                    if table_pattern in lookup_name_lower:
+                                        mappings.append({
+                                            'concept': concept,
+                                            'display_term': pattern['display_term'],
+                                            'mapping_type': 'lookup',
+                                            'source_table': table['name'],
+                                            'source_column': col['name'],
+                                            'lookup_table': lookup['table'],
+                                            'lookup_key_column': lookup['code_column'],
+                                            'lookup_display_column': lookup['description_column'],
+                                            'confidence': 0.75
+                                        })
+                                        logger.warning(f"[TERM-DISCOVERY] Lookup: '{pattern['display_term']}' -> {col['name']} -> {lookup['table']}")
+        
+        return mappings
+    
+    def get_pending(self, project_id: str = None) -> Dict:
+        """Get pending mappings for review."""
+        if project_id:
+            return self.pending.get(project_id, {'mappings': []})
+        return self.pending
+    
+    def get_approved(self, project_id: str) -> List[Dict]:
+        """Get approved mappings for a project (used by QueryEngine)."""
+        return self.approved.get(project_id, [])
+    
+    def approve(self, project_id: str, mapping_index: int, approved_by: str = 'system') -> bool:
+        """
+        Approve a pending mapping.
+        
+        1. Move from pending to approved
+        2. Learn the pattern for future vendors
+        """
+        if project_id not in self.pending:
+            return False
+        
+        pending_data = self.pending[project_id]
+        mappings = pending_data.get('mappings', [])
+        
+        if mapping_index >= len(mappings):
+            return False
+        
+        mapping = mappings[mapping_index]
+        mapping['approved_at'] = datetime.now().isoformat()
+        mapping['approved_by'] = approved_by
+        
+        # Add to approved
+        if project_id not in self.approved:
+            self.approved[project_id] = []
+        self.approved[project_id].append(mapping)
+        
+        # Learn from this approval
+        self._learn_from_approval(mapping, pending_data.get('vendor'), pending_data.get('product'))
+        
+        # Remove from pending
+        mappings.pop(mapping_index)
+        
+        self._save_pending()
+        self._save_approved()
+        
+        logger.warning(f"[TERM-APPROVAL] Approved: {mapping.get('display_term')} for {project_id}")
+        return True
+    
+    def approve_all(self, project_id: str, min_confidence: float = 0.8, approved_by: str = 'system') -> int:
+        """Approve all pending mappings above confidence threshold."""
+        if project_id not in self.pending:
+            return 0
+        
+        approved_count = 0
+        pending_data = self.pending[project_id]
+        mappings = pending_data.get('mappings', [])
+        
+        # Work backwards to safely remove items
+        for i in range(len(mappings) - 1, -1, -1):
+            if mappings[i].get('confidence', 0) >= min_confidence:
+                if self.approve(project_id, i, approved_by):
+                    approved_count += 1
+        
+        return approved_count
+    
+    def reject(self, project_id: str, mapping_index: int, rejected_by: str = 'system') -> bool:
+        """Reject a pending mapping."""
+        if project_id not in self.pending:
+            return False
+        
+        mappings = self.pending[project_id].get('mappings', [])
+        if mapping_index >= len(mappings):
+            return False
+        
+        mapping = mappings.pop(mapping_index)
+        self._save_pending()
+        
+        logger.warning(f"[TERM-APPROVAL] Rejected: {mapping.get('display_term')} for {project_id}")
+        return True
+    
+    def _learn_from_approval(self, mapping: Dict, vendor: str, product: str):
+        """Learn from an approved mapping for cross-vendor reuse."""
+        concept = mapping.get('concept')
+        if not concept:
+            return
+        
+        # Update approval count
+        self.learned['approval_counts'][concept] = self.learned['approval_counts'].get(concept, 0) + 1
+        
+        # Add column pattern if new
+        if concept in self.learned['column_patterns']:
+            patterns = self.learned['column_patterns'][concept]
+            new_col = mapping.get('source_column', '').lower()
+            if new_col and new_col not in patterns.get('column_patterns', []):
+                patterns['column_patterns'].append(new_col)
+            
+            new_val = mapping.get('filter_value')
+            if new_val and new_val not in patterns.get('value_patterns', []):
+                patterns.setdefault('value_patterns', []).append(new_val)
+        
+        # Store vendor-specific mapping
+        if vendor and product:
+            if vendor not in self.learned['vendor_mappings']:
+                self.learned['vendor_mappings'][vendor] = {}
+            if product not in self.learned['vendor_mappings'][vendor]:
+                self.learned['vendor_mappings'][vendor][product] = {}
+            
+            self.learned['vendor_mappings'][vendor][product][concept] = {
+                'source_column': mapping.get('source_column'),
+                'filter_value': mapping.get('filter_value'),
+                'lookup_table': mapping.get('lookup_table')
+            }
+        
+        self._save_learned()
+        logger.warning(f"[TERM-LEARNING] Learned pattern for '{concept}' (approval #{self.learned['approval_counts'][concept]})")
+    
+    def get_stats(self) -> Dict:
+        """Get term mapping statistics."""
+        total_pending = sum(len(p.get('mappings', [])) for p in self.pending.values())
+        total_approved = sum(len(a) for a in self.approved.values())
+        
+        return {
+            'pending_projects': len(self.pending),
+            'pending_mappings': total_pending,
+            'approved_projects': len(self.approved),
+            'approved_mappings': total_approved,
+            'learned_concepts': len(self.learned.get('approval_counts', {})),
+            'vendor_mappings': len(self.learned.get('vendor_mappings', {}))
+        }
+    
+    def sync_to_duckdb(self, conn, project_id: str) -> int:
+        """
+        Sync approved mappings to DuckDB _term_mappings table.
+        
+        This makes them available to QueryEngine.
+        Returns count of mappings synced.
+        """
+        approved = self.get_approved(project_id)
+        if not approved:
+            return 0
+        
+        # Create table if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS _term_mappings (
+                id INTEGER PRIMARY KEY,
+                project VARCHAR,
+                term VARCHAR,
+                term_lower VARCHAR,
+                source_table VARCHAR,
+                employee_column VARCHAR,
+                lookup_table VARCHAR,
+                lookup_key_column VARCHAR,
+                lookup_display_column VARCHAR,
+                lookup_filter VARCHAR,
+                mapping_type VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Clear existing for this project
+        conn.execute("DELETE FROM _term_mappings WHERE project = ?", [project_id])
+        
+        synced = 0
+        for mapping in approved:
+            try:
+                term = mapping.get('display_term', '')
+                mapping_id = hash(f"{project_id}_{term}_{synced}") % 2147483647
+                
+                conn.execute("""
+                    INSERT INTO _term_mappings 
+                    (id, project, term, term_lower, source_table, employee_column,
+                     lookup_table, lookup_key_column, lookup_display_column, lookup_filter, mapping_type)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, [
+                    mapping_id,
+                    project_id,
+                    term,
+                    term.lower(),
+                    mapping.get('source_table'),
+                    mapping.get('source_column'),
+                    mapping.get('lookup_table'),
+                    mapping.get('lookup_key_column'),
+                    mapping.get('lookup_display_column'),
+                    None,  # lookup_filter
+                    mapping.get('mapping_type')
+                ])
+                synced += 1
+            except Exception as e:
+                logger.warning(f"[TERM-SYNC] Failed to sync mapping {term}: {e}")
+        
+        conn.execute("CHECKPOINT")
+        logger.warning(f"[TERM-SYNC] Synced {synced} mappings to DuckDB for {project_id}")
+        return synced
+
+
+# =============================================================================
 # 4. KNOWLEDGE CACHE
 # =============================================================================
 
@@ -719,6 +1412,7 @@ class LearningSystem:
         self.feedback = FeedbackLoop()
         self.rules = RulesEngine()
         self.cache = KnowledgeCache()
+        self.term_mappings = TermMappingEngine()
     
     def get_cached_analysis(self, text: str, action_id: str) -> Optional[Dict]:
         """Check if we have a cached analysis"""
@@ -799,6 +1493,41 @@ class LearningSystem:
         """Get examples for an action (alias for get_few_shot_examples)"""
         return self.collector.get_examples_for_action(action_id, limit)
     
+    # =========================================================================
+    # TERM MAPPING METHODS
+    # =========================================================================
+    
+    def discover_term_mappings(self, conn, project_id: str, vendor: str = None, product: str = None) -> List[Dict]:
+        """
+        Auto-discover term mappings from schema.
+        Returns list of pending mappings for review.
+        """
+        return self.term_mappings.discover_mappings(conn, project_id, vendor, product)
+    
+    def get_pending_term_mappings(self, project_id: str = None) -> Dict:
+        """Get pending term mappings for review."""
+        return self.term_mappings.get_pending(project_id)
+    
+    def get_approved_term_mappings(self, project_id: str) -> List[Dict]:
+        """Get approved term mappings (used by QueryEngine)."""
+        return self.term_mappings.get_approved(project_id)
+    
+    def approve_term_mapping(self, project_id: str, mapping_index: int, approved_by: str = 'system') -> bool:
+        """Approve a specific pending term mapping."""
+        return self.term_mappings.approve(project_id, mapping_index, approved_by)
+    
+    def approve_all_term_mappings(self, project_id: str, min_confidence: float = 0.8, approved_by: str = 'system') -> int:
+        """Approve all term mappings above confidence threshold."""
+        return self.term_mappings.approve_all(project_id, min_confidence, approved_by)
+    
+    def reject_term_mapping(self, project_id: str, mapping_index: int, rejected_by: str = 'system') -> bool:
+        """Reject a pending term mapping."""
+        return self.term_mappings.reject(project_id, mapping_index, rejected_by)
+    
+    def sync_term_mappings_to_duckdb(self, conn, project_id: str) -> int:
+        """Sync approved term mappings to DuckDB for QueryEngine to use."""
+        return self.term_mappings.sync_to_duckdb(conn, project_id)
+    
     def get_stats(self) -> Dict:
         """Get comprehensive learning statistics"""
         return {
@@ -810,7 +1539,8 @@ class LearningSystem:
                 'learned_rules': len(self.feedback.patterns.get('learned_rules', [])),
                 'discarded_findings': len(self.feedback.patterns.get('discarded_findings', [])),
                 'kept_findings': len(self.feedback.patterns.get('kept_findings', []))
-            }
+            },
+            'term_mappings': self.term_mappings.get_stats()
         }
     
     def export_for_finetuning(self) -> str:
