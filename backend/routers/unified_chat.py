@@ -101,7 +101,19 @@ router = APIRouter(tags=["unified-chat"])
 # The monolith (intelligence_engine.py) is deprecated and archived.
 import os
 
-# Modular engine (V2) - THE engine going forward
+# NEW: QueryEngine - simplified LLM-enabled SQL generation
+# Set USE_QUERY_ENGINE=true to enable
+USE_QUERY_ENGINE = os.getenv("USE_QUERY_ENGINE", "true").lower() == "true"
+
+try:
+    from backend.utils.intelligence import QueryEngine, create_query_engine
+    QUERY_ENGINE_AVAILABLE = True
+    logger.info("[UNIFIED] QueryEngine (new) available")
+except ImportError as e:
+    QUERY_ENGINE_AVAILABLE = False
+    logger.warning(f"[UNIFIED] QueryEngine not available: {e}")
+
+# Modular engine (V2) - Fallback if QueryEngine disabled
 from backend.utils.intelligence import IntelligenceEngineV2, IntelligenceMode
 ENGINE_V2_AVAILABLE = True
 logger.info("[UNIFIED] IntelligenceEngineV2 available")
@@ -827,15 +839,31 @@ async def unified_chat(request: UnifiedChatRequest):
         project_for_duckdb = customer_id or project_code or project
         logger.warning(f"[UNIFIED] Using project_for_duckdb: {project_for_duckdb}")
         
-        # Get or create intelligence engine (V2 ONLY)
+        # Get or create intelligence engine
+        # NEW: Use QueryEngine if enabled, fall back to V2
         if session['engine']:
             engine = session['engine']
             # Ensure customer_id is set on existing engines
             if customer_id and not getattr(engine, 'customer_id', None):
                 engine.customer_id = customer_id
-            # Phase 5F: Load product schema if changed
-            if product_id and getattr(engine, 'product_id', None) != product_id:
+            # Phase 5F: Load product schema if changed (V2 only)
+            if hasattr(engine, '_load_product_schema') and product_id and getattr(engine, 'product_id', None) != product_id:
                 engine._load_product_schema(product_id)
+        elif USE_QUERY_ENGINE and QUERY_ENGINE_AVAILABLE:
+            # NEW PATH: Use simplified QueryEngine
+            logger.warning("[UNIFIED] Creating QueryEngine (NEW - LLM-enabled SQL)")
+            
+            # Get LLM orchestrator if available
+            llm = None
+            if LLM_AVAILABLE:
+                try:
+                    llm = LLMOrchestrator()
+                except Exception as e:
+                    logger.warning(f"[UNIFIED] LLM orchestrator not available: {e}")
+            
+            engine = QueryEngine(project_for_duckdb or 'default', llm_orchestrator=llm)
+            session['engine'] = engine
+            session['engine_type'] = 'query_engine'
         elif ENGINE_V2_AVAILABLE:
             logger.warning("[UNIFIED] Creating IntelligenceEngineV2 (modular)")
             # Use project_code for the engine so term index lookups work
