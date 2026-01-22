@@ -232,6 +232,20 @@ from .gatherers import (
 # Modular engine (V2) - THE engine going forward
 from .engine import IntelligenceEngineV2
 
+# NEW: QueryEngine - Simple, LLM-enabled SQL generation
+# This is the REPLACEMENT for IntelligenceEngineV2's query handling
+from .query_engine import (
+    QueryEngine,
+    QueryContext,
+    QueryResult,
+    SynthesizedResponse,
+    ContextAssembler,
+    SQLGenerator,
+    QueryExecutor,
+    ResponseSynthesizer,
+    create_query_engine,
+)
+
 # Legacy alias - IntelligenceEngine now points to IntelligenceEngineV2
 IntelligenceEngine = IntelligenceEngineV2
 
@@ -390,4 +404,15 @@ __all__ = [
     # Main engine
     'IntelligenceEngine',
     'IntelligenceEngineV2',
+    
+    # NEW: QueryEngine (replacement for complex SQL generation)
+    'QueryEngine',
+    'QueryContext',
+    'QueryResult',
+    'SynthesizedResponse',
+    'ContextAssembler',
+    'SQLGenerator',
+    'QueryExecutor',
+    'ResponseSynthesizer',
+    'create_query_engine',
 ]
