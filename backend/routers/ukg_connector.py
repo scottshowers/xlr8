@@ -173,8 +173,9 @@ class SyncResult(BaseModel):
 
 def build_auth_headers(creds: UKGCredentials) -> Dict[str, str]:
     """Build the authentication headers for UKG Pro API"""
-    # Basic auth: base64(username:password)
-    basic_auth = base64.b64encode(f"{creds.username}:{creds.password}".encode()).decode()
+    # UKG Pro Basic auth format: base64(customer_api_key/username:password)
+    credentials = f"{creds.customer_api_key}/{creds.username}:{creds.password}"
+    basic_auth = base64.b64encode(credentials.encode()).decode()
     
     return {
         "Authorization": f"Basic {basic_auth}",
@@ -509,105 +510,116 @@ async def test_pagination(project_id: str, max_pages: int = 5):
         raise HTTPException(404, "No UKG connection found")
     
     hostname = conn_data.get('hostname')
-    creds_data = conn_data.get('credentials', {})
     
+    # Credentials are directly in conn_data, not nested
     creds = UKGCredentials(
         hostname=hostname,
-        customer_api_key=creds_data.get('customer_api_key', ''),
-        username=creds_data.get('username', ''),
-        password=creds_data.get('password', ''),
-        user_api_key=creds_data.get('user_api_key', '')
+        customer_api_key=conn_data.get('customer_api_key', ''),
+        username=conn_data.get('username', ''),
+        password=conn_data.get('password', ''),
+        user_api_key=conn_data.get('user_api_key', '')
     )
     
     headers = build_auth_headers(creds)
-    base_url = f"https://{hostname}/personnel/v1/employee-demographic-details"
     
-    results = {
-        "pages": [],
-        "total_rows": 0,
-        "pagination_method": None,
-        "stopped_reason": None
-    }
+    # Test multiple endpoint types
+    endpoints_to_test = [
+        {"name": "person_details", "path": "/personnel/v1/person-details"},
+        {"name": "employee_demographic", "path": "/personnel/v1/employee-demographic-details"},
+    ]
     
-    base_params = {"page": "1", "per_page": "500", "employmentStatus": "A,L,T"}
-    last_data_signature = None
+    all_results = {}
     
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        for page_num in range(1, max_pages + 1):
-            base_params["page"] = str(page_num)
-            param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
-            url = f"{base_url}?{param_str}"
-            
-            logger.warning(f"[TEST-PAGINATION] Fetching page {page_num}: {url}")
-            
-            try:
-                response = await client.get(url, headers=headers)
+    for endpoint in endpoints_to_test:
+        base_url = f"https://{hostname}{endpoint['path']}"
+        
+        results = {
+            "endpoint": endpoint["name"],
+            "path": endpoint["path"],
+            "pages": [],
+            "total_rows": 0,
+            "stopped_reason": None
+        }
+        
+        base_params = {"page": "1", "per_page": "500", "employmentStatus": "A,L,T"}
+        last_data_signature = None
+        
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            for page_num in range(1, max_pages + 1):
+                base_params["page"] = str(page_num)
+                param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+                url = f"{base_url}?{param_str}"
                 
-                page_result = {
-                    "page": page_num,
-                    "url": url,
-                    "status_code": response.status_code,
-                    "headers": dict(response.headers)
-                }
+                logger.warning(f"[TEST-PAGINATION] Fetching page {page_num}: {url}")
                 
-                if response.status_code != 200:
-                    page_result["error"] = response.text[:500]
-                    results["pages"].append(page_result)
-                    results["stopped_reason"] = f"HTTP {response.status_code}"
-                    break
-                
-                data = response.json()
-                page_size = len(data) if isinstance(data, list) else 0
-                page_result["row_count"] = page_size
-                
-                # Check for duplicates
-                if data and isinstance(data, list):
-                    first_item = str(data[0])[:100]
-                    last_item = str(data[-1])[:100]
-                    data_signature = f"{page_size}:{first_item}:{last_item}"
-                    page_result["signature"] = data_signature[:50] + "..."
+                try:
+                    response = await client.get(url, headers=headers)
                     
-                    if data_signature == last_data_signature:
-                        page_result["duplicate"] = True
+                    page_result = {
+                        "page": page_num,
+                        "url": url,
+                        "status_code": response.status_code,
+                        "headers": dict(response.headers)
+                    }
+                    
+                    if response.status_code != 200:
+                        page_result["error"] = response.text[:500]
                         results["pages"].append(page_result)
-                        results["stopped_reason"] = "Duplicate data detected"
+                        results["stopped_reason"] = f"HTTP {response.status_code}"
                         break
-                    last_data_signature = data_signature
-                
-                results["total_rows"] += page_size
-                
-                # Check for Link header
-                link_header = response.headers.get('Link', '')
-                page_result["link_header"] = link_header if link_header else None
-                
-                if link_header:
-                    results["pagination_method"] = "Link header"
-                else:
-                    results["pagination_method"] = "page parameter (no Link header)"
-                
-                results["pages"].append(page_result)
-                
-                # Stop conditions
-                if page_size < 500:
-                    results["stopped_reason"] = f"Partial page ({page_size} < 500)"
-                    break
-                
-                if page_size == 0:
-                    results["stopped_reason"] = "Empty page"
-                    break
                     
-                await asyncio.sleep(0.5)
-                
-            except Exception as e:
-                page_result["error"] = str(e)
-                results["pages"].append(page_result)
-                results["stopped_reason"] = f"Exception: {e}"
-                break
+                    data = response.json()
+                    page_size = len(data) if isinstance(data, list) else 0
+                    page_result["row_count"] = page_size
+                    
+                    # Check for duplicates
+                    if data and isinstance(data, list):
+                        first_item = str(data[0])[:100]
+                        last_item = str(data[-1])[:100]
+                        data_signature = f"{page_size}:{first_item}:{last_item}"
+                        page_result["signature"] = data_signature[:50] + "..."
+                        
+                        if data_signature == last_data_signature:
+                            page_result["duplicate"] = True
+                            results["pages"].append(page_result)
+                            results["stopped_reason"] = "Duplicate data detected"
+                            break
+                        last_data_signature = data_signature
+                    
+                    results["total_rows"] += page_size
+                    
+                    # Check for Link header
+                    link_header = response.headers.get('Link', '')
+                    page_result["link_header"] = link_header if link_header else None
+                    
+                    results["pages"].append(page_result)
+                    
+                    # Stop conditions
+                    if page_size < 500:
+                        results["stopped_reason"] = f"Partial page ({page_size} < 500)"
+                        break
+                    
+                    if page_size == 0:
+                        results["stopped_reason"] = "Empty page"
+                        break
+                        
+                    await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    page_result["error"] = str(e)
+                    results["pages"].append(page_result)
+                    results["stopped_reason"] = f"Exception: {e}"
+                    break
+        
+        if not results["stopped_reason"]:
+            results["stopped_reason"] = f"Reached max_pages limit ({max_pages})"
+        
+        all_results[endpoint["name"]] = results
+        
+        # Only test first endpoint for now to save time
+        break
     
-    if not results["stopped_reason"]:
-        results["stopped_reason"] = f"Reached max_pages limit ({max_pages})"
-    
-    return results
+    return all_results
 
 
 @router.post("/code-tables")
