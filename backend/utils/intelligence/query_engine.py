@@ -1103,9 +1103,20 @@ class ResponseSynthesizer:
     def _synthesize_count(self, context: QueryContext, result: QueryResult) -> SynthesizedResponse:
         """Synthesize a count response."""
         if result.data and len(result.data) > 0:
-            # Get the count value
+            # Check if this is a grouped result (multiple rows) vs single count
+            if len(result.data) > 1:
+                # This is a GROUP BY result - use comparison synthesis
+                return self._synthesize_comparison(context, result)
+            
+            # Single count result
             first_row = result.data[0]
-            count_val = first_row.get('count', first_row.get(result.columns[0], 0))
+            count_val = first_row.get('count', first_row.get('employee_count', first_row.get(result.columns[0], 0)))
+            
+            # Ensure it's an integer
+            try:
+                count_val = int(count_val)
+            except (ValueError, TypeError):
+                count_val = 0
             
             # Build natural answer
             filters_desc = ""
