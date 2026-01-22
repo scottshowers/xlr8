@@ -173,9 +173,9 @@ class SyncResult(BaseModel):
 
 def build_auth_headers(creds: UKGCredentials) -> Dict[str, str]:
     """Build the authentication headers for UKG Pro API"""
-    # UKG Pro Basic auth format: base64(customer_api_key/username:password)
-    credentials = f"{creds.customer_api_key}/{creds.username}:{creds.password}"
-    basic_auth = base64.b64encode(credentials.encode()).decode()
+    # Basic auth: base64(username:password)
+    # Note: customer_api_key goes in separate header, NOT in Basic auth
+    basic_auth = base64.b64encode(f"{creds.username}:{creds.password}".encode()).decode()
     
     return {
         "Authorization": f"Basic {basic_auth}",
