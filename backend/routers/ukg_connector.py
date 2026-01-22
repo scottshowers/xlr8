@@ -110,13 +110,60 @@ def extract_org_level_mappings(conn, project_id: str):
         
         logger.warning(f"[ORG-MAPPING] Found {len(mappings)} org level mappings: {mappings}")
         
-        # Create _term_mappings table if not exists
+        # CRITICAL: Find which table actually has the orgLevel columns
+        # It's NOT always employee_demographic_details - often it's employment_details or employee_job_history
+        source_table = None
+        source_table_priority = ['employment_details', 'employee_job_history', 'employee_demographic_details', 'person_details']
+        
+        # First try the priority tables
+        for table_suffix in source_table_priority:
+            candidate = f"{project_id}_api_{table_suffix}"
+            if candidate in table_names:
+                try:
+                    cols = conn.execute(f'DESCRIBE "{candidate}"').fetchall()
+                    col_names_lower = [c[0].lower() for c in cols]
+                    # Check if this table has orgLevel columns
+                    if any('orglevel' in cn for cn in col_names_lower):
+                        source_table = candidate
+                        # Get actual column names (preserve case)
+                        actual_cols = [c[0] for c in cols]
+                        logger.warning(f"[ORG-MAPPING] Found orgLevel columns in {candidate}")
+                        logger.warning(f"[ORG-MAPPING] OrgLevel columns: {[c for c in actual_cols if 'orgLevel' in c or 'orglevel' in c.lower()]}")
+                        break
+                except Exception as e:
+                    logger.warning(f"[ORG-MAPPING] Could not check {candidate}: {e}")
+        
+        # If not found in priority tables, scan all API tables
+        if not source_table:
+            logger.warning(f"[ORG-MAPPING] orgLevel not in priority tables, scanning all API tables...")
+            for table in api_tables:
+                if table == org_levels_table:
+                    continue
+                try:
+                    cols = conn.execute(f'DESCRIBE "{table}"').fetchall()
+                    col_names_lower = [c[0].lower() for c in cols]
+                    if any('orglevel' in cn for cn in col_names_lower):
+                        source_table = table
+                        logger.warning(f"[ORG-MAPPING] Found orgLevel columns in {table}")
+                        break
+                except:
+                    pass
+        
+        if not source_table:
+            logger.warning(f"[ORG-MAPPING] ERROR: Could not find any table with orgLevel columns!")
+            logger.warning(f"[ORG-MAPPING] Term mappings will not work correctly")
+            return
+        
+        logger.warning(f"[ORG-MAPPING] Using source table: {source_table}")
+        
+        # Create _term_mappings table if not exists (with source_table column)
         conn.execute("""
             CREATE TABLE IF NOT EXISTS _term_mappings (
                 id INTEGER PRIMARY KEY,
                 project VARCHAR,
                 term VARCHAR,
                 term_lower VARCHAR,
+                source_table VARCHAR,
                 employee_column VARCHAR,
                 lookup_table VARCHAR,
                 lookup_key_column VARCHAR,
@@ -146,14 +193,15 @@ def extract_org_level_mappings(conn, project_id: str):
             
             conn.execute("""
                 INSERT INTO _term_mappings 
-                (id, project, term, term_lower, employee_column, lookup_table, 
+                (id, project, term, term_lower, source_table, employee_column, lookup_table, 
                  lookup_key_column, lookup_display_column, lookup_filter, mapping_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
                 mapping_id,
                 project_id,
                 term,
                 term_lower,
+                source_table,
                 employee_column,
                 org_levels_table,
                 'code',
@@ -162,7 +210,7 @@ def extract_org_level_mappings(conn, project_id: str):
                 'org_level'
             ])
             mappings_created += 1
-            logger.warning(f"[ORG-MAPPING] Mapped '{term}' → {employee_column} (level={level})")
+            logger.warning(f"[ORG-MAPPING] Mapped '{term}' → {source_table}.{employee_column} (level={level})")
         
         # Persist with CHECKPOINT (DuckDB standard, not commit())
         conn.execute("CHECKPOINT")
