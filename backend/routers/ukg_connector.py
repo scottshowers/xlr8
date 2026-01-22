@@ -777,19 +777,22 @@ async def get_connection_creds(project_id: str) -> Optional[Dict]:
 
 
 def parse_link_header(link_header: str) -> Optional[str]:
-    """Parse RFC 5988 Link header to find 'next' URL."""
+    """Parse RFC 5988 Link header to find 'next' URL.
+    
+    Handles URLs that contain commas (like employmentStatus=A,L,T)
+    by using regex to properly parse the header format.
+    """
     if not link_header:
         return None
     
-    # Link header format: <url>; rel="next", <url>; rel="last"
-    for part in link_header.split(','):
-        part = part.strip()
-        if 'rel="next"' in part or "rel='next'" in part:
-            # Extract URL between < and >
-            start = part.find('<')
-            end = part.find('>')
-            if start != -1 and end != -1:
-                return part[start + 1:end]
+    # Find all <url>; rel="xxx" patterns
+    pattern = r'<([^>]+)>\s*;\s*rel="([^"]+)"'
+    matches = re.findall(pattern, link_header)
+    
+    for url, rel in matches:
+        if rel == 'next':
+            return url
+    
     return None
 
 
