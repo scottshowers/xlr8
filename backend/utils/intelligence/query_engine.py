@@ -226,6 +226,45 @@ class ContextAssembler:
         self.project = project
         self._table_cache: Dict[str, TableSchema] = {}
         self._join_cache: List[Dict] = []
+        self._term_mappings: Dict[str, Dict] = {}  # term_lower -> mapping info
+        self._load_term_mappings()
+    
+    def _load_term_mappings(self):
+        """Load term mappings from _term_mappings table."""
+        try:
+            # Check if table exists
+            tables = self.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_name = '_term_mappings'
+            """).fetchall()
+            
+            if not tables:
+                logger.info("[CONTEXT] No _term_mappings table found")
+                return
+            
+            mappings = self.conn.execute("""
+                SELECT term, term_lower, employee_column, lookup_table, 
+                       lookup_key_column, lookup_display_column, lookup_filter, mapping_type
+                FROM _term_mappings
+                WHERE project = ?
+            """, [self.project]).fetchall()
+            
+            for row in mappings:
+                term, term_lower, emp_col, lookup_tbl, lookup_key, lookup_disp, lookup_filter, map_type = row
+                self._term_mappings[term_lower] = {
+                    'term': term,
+                    'employee_column': emp_col,
+                    'lookup_table': lookup_tbl,
+                    'lookup_key_column': lookup_key,
+                    'lookup_display_column': lookup_disp,
+                    'lookup_filter': lookup_filter,
+                    'mapping_type': map_type
+                }
+            
+            if self._term_mappings:
+                logger.warning(f"[CONTEXT] Loaded {len(self._term_mappings)} term mappings: {list(self._term_mappings.keys())}")
+        except Exception as e:
+            logger.warning(f"[CONTEXT] Could not load term mappings: {e}")
         
     def assemble(self, question: str) -> QueryContext:
         """
@@ -252,8 +291,24 @@ class ContextAssembler:
         filters = self._detect_filters(question)
         logger.warning(f"[CONTEXT] Detected filters: {filters}")
         
+        # Step 3.5: Check for term mappings (e.g., "department" -> orgLevel2 with lookup)
+        term_mapping_info = self._find_term_mappings(question)
+        if term_mapping_info:
+            logger.warning(f"[CONTEXT] Found term mappings: {term_mapping_info}")
+        
         # Step 4: Find relevant tables
         tables = self._find_relevant_tables(entities, filters)
+        
+        # Step 4.5: Add lookup tables from term mappings
+        if term_mapping_info:
+            for mapping in term_mapping_info:
+                lookup_table = mapping.get('lookup_table')
+                if lookup_table and not any(t.table_name == lookup_table for t in tables):
+                    lookup_schema = self._get_table_schema(lookup_table, 0)
+                    if lookup_schema:
+                        tables.append(lookup_schema)
+                        logger.warning(f"[CONTEXT] Added lookup table: {lookup_table}")
+        
         logger.warning(f"[CONTEXT] Found {len(tables)} relevant tables: {[t.table_name for t in tables]}")
         
         # Log table details
@@ -265,8 +320,30 @@ class ContextAssembler:
         
         # Step 5: Get join paths between tables
         join_paths = self._find_join_paths([t.table_name for t in tables])
-        logger.warning(f"[CONTEXT] Found {len(join_paths)} join paths: {join_paths}")
         
+        # Step 5.5: Add join paths from term mappings
+        if term_mapping_info:
+            for mapping in term_mapping_info:
+                # Find the employee table
+                emp_table = None
+                for t in tables:
+                    if 'employee' in t.table_name.lower() or 'person' in t.table_name.lower():
+                        emp_table = t.table_name
+                        break
+                
+                if emp_table and mapping.get('lookup_table'):
+                    join_path = {
+                        'from': f"{emp_table}.{mapping['employee_column']}",
+                        'to': f"{mapping['lookup_table']}.{mapping['lookup_key_column']}",
+                        'type': 'term_mapping',
+                        'display_column': mapping.get('lookup_display_column'),
+                        'filter': mapping.get('lookup_filter'),
+                        'term': mapping.get('term')
+                    }
+                    join_paths.append(join_path)
+                    logger.warning(f"[CONTEXT] Added term mapping join: {join_path}")
+        
+        logger.warning(f"[CONTEXT] Found {len(join_paths)} join paths: {join_paths}")
         logger.warning(f"[CONTEXT] ========== CONTEXT COMPLETE ==========")
         
         return QueryContext(
@@ -277,6 +354,21 @@ class ContextAssembler:
             detected_entities=entities,
             detected_filters=filters
         )
+    
+    def _find_term_mappings(self, question: str) -> List[Dict]:
+        """Find any term mappings that apply to this question."""
+        if not self._term_mappings:
+            return []
+        
+        q_lower = question.lower()
+        found = []
+        
+        for term_lower, mapping in self._term_mappings.items():
+            if term_lower in q_lower:
+                found.append(mapping)
+                logger.warning(f"[CONTEXT] Matched term mapping: '{term_lower}' -> {mapping['employee_column']}")
+        
+        return found
     
     def _detect_intent(self, question: str) -> QueryIntent:
         """Detect what the user wants to do."""
@@ -686,12 +778,27 @@ class SQLGenerator:
                 
                 schema_text += f'  - "{col}" ({col_type}){filter_str}{sample_str}\n'
         
-        # Format join paths
+        # Format join paths - include term mapping details
         join_text = ""
+        term_mapping_text = ""
         if context.join_paths:
             join_text = "\n\nJoin Relationships:\n"
             for jp in context.join_paths:
                 join_text += f"  - {jp['from']} = {jp['to']}\n"
+                
+                # If this is a term mapping join, add special instructions
+                if jp.get('type') == 'term_mapping':
+                    term = jp.get('term', 'this term')
+                    display_col = jp.get('display_column', 'description')
+                    filter_clause = jp.get('filter', '')
+                    lookup_table = jp['to'].split('.')[0]
+                    
+                    term_mapping_text += f"\n\nIMPORTANT - '{term}' Mapping:\n"
+                    term_mapping_text += f"When grouping by '{term}', you MUST:\n"
+                    term_mapping_text += f"  1. JOIN the employee table to \"{lookup_table}\" using the join above\n"
+                    term_mapping_text += f"  2. Add WHERE {filter_clause} to filter to only '{term}' records\n"
+                    term_mapping_text += f"  3. GROUP BY \"{lookup_table}\".\"{display_col}\" (the human-readable name)\n"
+                    term_mapping_text += f"  4. SELECT \"{lookup_table}\".\"{display_col}\" AS \"{term}\"\n"
         
         # Format detected filters
         filter_text = ""
@@ -703,21 +810,21 @@ class SQLGenerator:
         prompt = f"""Given these database tables:
 {schema_text}
 {join_text}
+{term_mapping_text}
 {filter_text}
 
 User Question: {context.question}
 
 Write a DuckDB SQL query to answer this question.
 
-Rules:
-1. ONLY use tables and columns listed above
+CRITICAL RULES:
+1. You can ONLY use columns that are listed above. Do NOT invent column names.
 2. ALWAYS wrap table names in double quotes: "table_name"
 3. ALWAYS wrap column names in double quotes: "column_name"
-4. Use the join relationships provided for multi-table queries
-5. Apply the detected filters as WHERE conditions
-6. For "how many" questions, use COUNT(*) to count ALL rows, no LIMIT
-7. For "by X" questions, use GROUP BY
-8. Return ONLY the SQL, no explanations, no markdown
+4. For "how many" questions, use COUNT(*) to count ALL rows
+5. For "by X" questions, use GROUP BY with the appropriate column
+6. If there is a term mapping section above, FOLLOW IT EXACTLY for that term
+7. Return ONLY the SQL, no explanations, no markdown
 
 SQL:"""
         
