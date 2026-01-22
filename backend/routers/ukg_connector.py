@@ -278,6 +278,147 @@ async def quick_test_ukg_connection(
     return await test_ukg_connection(creds)
 
 
+@router.get("/test-pagination/{project_id}")
+async def test_pagination(project_id: str, endpoint: str = "person_details", max_pages: int = 5):
+    """
+    Quick pagination test - fetches a few pages from one endpoint.
+    
+    Usage: /api/ukg/test-pagination/{project_id}?endpoint=person_details&max_pages=5
+    
+    Returns page-by-page results without saving to DB.
+    """
+    # Get saved credentials
+    conn_data = await get_connection_creds(project_id)
+    if not conn_data:
+        raise HTTPException(404, "No UKG Pro connection found for this project")
+    
+    hostname = conn_data.get('hostname', '')
+    if not hostname:
+        raise HTTPException(400, "Connection missing hostname")
+    
+    # Build auth
+    customer_api_key = conn_data.get('customer_api_key', '')
+    username = conn_data.get('username', '')
+    password = conn_data.get('password', '')
+    user_api_key = conn_data.get('user_api_key', '')
+    
+    credentials = f"{customer_api_key}/{username}:{password}"
+    encoded_credentials = base64.b64encode(credentials.encode()).decode()
+    
+    headers = {
+        "Authorization": f"Basic {encoded_credentials}",
+        "US-Customer-Api-Key": customer_api_key,
+        "Api-Key": user_api_key,
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+    }
+    
+    # Map endpoint name to path
+    endpoint_paths = {
+        "person_details": "/personnel/v1/person-details",
+        "employee_demographic_details": "/personnel/v1/employee-demographic-details",
+        "employment_details": "/personnel/v1/employment-details",
+        "jobs": "/configuration/v1/jobs",
+        "org_levels": "/configuration/v1/org-levels",
+        "locations": "/configuration/v1/locations",
+    }
+    
+    path = endpoint_paths.get(endpoint)
+    if not path:
+        raise HTTPException(400, f"Unknown endpoint: {endpoint}. Available: {list(endpoint_paths.keys())}")
+    
+    # Test pagination
+    results = {
+        "endpoint": endpoint,
+        "path": path,
+        "pages": [],
+        "total_rows": 0,
+        "stopped_reason": None
+    }
+    
+    base_url = f"https://{hostname}{path}"
+    base_params = {"page": "1", "per_page": "500"}
+    
+    # Add status filter for personnel endpoints
+    if "personnel" in path:
+        base_params["employmentStatus"] = "A,L,T"
+    
+    last_data_signature = None
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for page_num in range(1, max_pages + 1):
+            base_params["page"] = str(page_num)
+            param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+            url = f"{base_url}?{param_str}"
+            
+            try:
+                response = await client.get(url, headers=headers)
+                
+                page_result = {
+                    "page": page_num,
+                    "url": url,
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers),
+                }
+                
+                if response.status_code != 200:
+                    page_result["error"] = response.text[:500]
+                    results["pages"].append(page_result)
+                    results["stopped_reason"] = f"HTTP {response.status_code}"
+                    break
+                
+                data = response.json()
+                
+                if not data or not isinstance(data, list):
+                    page_result["rows"] = 0
+                    results["pages"].append(page_result)
+                    results["stopped_reason"] = "Empty or non-list response"
+                    break
+                
+                page_size = len(data)
+                page_result["rows"] = page_size
+                page_result["first_record"] = data[0] if data else None
+                page_result["last_record"] = data[-1] if data else None
+                
+                # Check for duplicates
+                first_item = str(data[0])[:100] if data else ""
+                last_item = str(data[-1])[:100] if data else ""
+                data_signature = f"{page_size}:{first_item}:{last_item}"
+                
+                if data_signature == last_data_signature:
+                    page_result["duplicate"] = True
+                    results["pages"].append(page_result)
+                    results["stopped_reason"] = "Duplicate data detected"
+                    break
+                
+                last_data_signature = data_signature
+                results["total_rows"] += page_size
+                results["pages"].append(page_result)
+                
+                # Check if last page
+                if page_size < 500:
+                    results["stopped_reason"] = f"Partial page ({page_size} < 500)"
+                    break
+                
+                # Check for Link header
+                link_header = response.headers.get('Link', '')
+                if link_header:
+                    page_result["link_header"] = link_header
+                
+                await asyncio.sleep(0.3)
+                
+            except Exception as e:
+                page_result = {"page": page_num, "error": str(e)}
+                results["pages"].append(page_result)
+                results["stopped_reason"] = f"Exception: {e}"
+                break
+    
+    if not results["stopped_reason"]:
+        results["stopped_reason"] = f"Hit max_pages limit ({max_pages})"
+    
+    return results
+
+
 @router.post("/test-connection", response_model=UKGTestResult)
 async def test_ukg_connection(creds: UKGCredentials):
     """
@@ -353,6 +494,120 @@ async def test_ukg_connection(creds: UKGCredentials):
             message="Connection failed",
             error=str(e)
         )
+
+
+@router.get("/test-pagination/{project_id}")
+async def test_pagination(project_id: str, max_pages: int = 5):
+    """
+    Test pagination on employee-demographic-details endpoint.
+    
+    Fetches up to max_pages (default 5) to verify pagination is working.
+    Returns page-by-page stats without saving to DB.
+    """
+    conn_data = await get_connection_creds(project_id)
+    if not conn_data:
+        raise HTTPException(404, "No UKG connection found")
+    
+    hostname = conn_data.get('hostname')
+    creds_data = conn_data.get('credentials', {})
+    
+    creds = UKGCredentials(
+        hostname=hostname,
+        customer_api_key=creds_data.get('customer_api_key', ''),
+        username=creds_data.get('username', ''),
+        password=creds_data.get('password', ''),
+        user_api_key=creds_data.get('user_api_key', '')
+    )
+    
+    headers = build_auth_headers(creds)
+    base_url = f"https://{hostname}/personnel/v1/employee-demographic-details"
+    
+    results = {
+        "pages": [],
+        "total_rows": 0,
+        "pagination_method": None,
+        "stopped_reason": None
+    }
+    
+    base_params = {"page": "1", "per_page": "500", "employmentStatus": "A,L,T"}
+    last_data_signature = None
+    
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for page_num in range(1, max_pages + 1):
+            base_params["page"] = str(page_num)
+            param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+            url = f"{base_url}?{param_str}"
+            
+            logger.warning(f"[TEST-PAGINATION] Fetching page {page_num}: {url}")
+            
+            try:
+                response = await client.get(url, headers=headers)
+                
+                page_result = {
+                    "page": page_num,
+                    "url": url,
+                    "status_code": response.status_code,
+                    "headers": dict(response.headers)
+                }
+                
+                if response.status_code != 200:
+                    page_result["error"] = response.text[:500]
+                    results["pages"].append(page_result)
+                    results["stopped_reason"] = f"HTTP {response.status_code}"
+                    break
+                
+                data = response.json()
+                page_size = len(data) if isinstance(data, list) else 0
+                page_result["row_count"] = page_size
+                
+                # Check for duplicates
+                if data and isinstance(data, list):
+                    first_item = str(data[0])[:100]
+                    last_item = str(data[-1])[:100]
+                    data_signature = f"{page_size}:{first_item}:{last_item}"
+                    page_result["signature"] = data_signature[:50] + "..."
+                    
+                    if data_signature == last_data_signature:
+                        page_result["duplicate"] = True
+                        results["pages"].append(page_result)
+                        results["stopped_reason"] = "Duplicate data detected"
+                        break
+                    last_data_signature = data_signature
+                
+                results["total_rows"] += page_size
+                
+                # Check for Link header
+                link_header = response.headers.get('Link', '')
+                page_result["link_header"] = link_header if link_header else None
+                
+                if link_header:
+                    results["pagination_method"] = "Link header"
+                else:
+                    results["pagination_method"] = "page parameter (no Link header)"
+                
+                results["pages"].append(page_result)
+                
+                # Stop conditions
+                if page_size < 500:
+                    results["stopped_reason"] = f"Partial page ({page_size} < 500)"
+                    break
+                
+                if page_size == 0:
+                    results["stopped_reason"] = "Empty page"
+                    break
+                    
+                await asyncio.sleep(0.5)
+                
+            except Exception as e:
+                page_result["error"] = str(e)
+                results["pages"].append(page_result)
+                results["stopped_reason"] = f"Exception: {e}"
+                break
+    
+    if not results["stopped_reason"]:
+        results["stopped_reason"] = f"Reached max_pages limit ({max_pages})"
+    
+    return results
 
 
 @router.post("/code-tables")
