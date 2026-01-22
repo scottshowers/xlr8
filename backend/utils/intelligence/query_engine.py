@@ -154,6 +154,36 @@ class SynthesizedResponse:
     def insights(self) -> List:
         """Compatibility: old code expects .insights list."""
         return []
+    
+    @property
+    def from_reality(self) -> List:
+        """Compatibility: old code expects .from_reality list."""
+        return []
+    
+    @property
+    def from_intent(self) -> List:
+        """Compatibility: old code expects .from_intent list."""
+        return []
+    
+    @property
+    def from_configuration(self) -> List:
+        """Compatibility: old code expects .from_configuration list."""
+        return []
+    
+    @property
+    def from_reference(self) -> List:
+        """Compatibility: old code expects .from_reference list."""
+        return []
+    
+    @property
+    def from_regulatory(self) -> List:
+        """Compatibility: old code expects .from_regulatory list."""
+        return []
+    
+    @property
+    def from_compliance(self) -> List:
+        """Compatibility: old code expects .from_compliance list."""
+        return []
 
 
 # =============================================================================
@@ -597,30 +627,30 @@ class SQLGenerator:
         logger.warning(f"[SQL_GEN] ===== PROMPT END =====")
         
         try:
-            # Call LLM
-            response, success = self.llm.ask(
-                prompt=prompt,
-                system_prompt="You are a SQL expert. Generate only valid DuckDB SQL. Return ONLY the SQL query, nothing else. No explanations, no markdown, no code blocks.",
-                model="deepseek-r1:14b"
-            )
+            # Call LLM - use generate_sql which returns {'sql': ..., 'success': ...}
+            logger.warning(f"[SQL_GEN] Calling LLM.generate_sql()...")
+            result = self.llm.generate_sql(prompt)
             
-            logger.warning(f"[SQL_GEN] LLM success={success}")
-            logger.warning(f"[SQL_GEN] LLM raw response: {response[:500] if response else 'None'}...")
+            logger.warning(f"[SQL_GEN] LLM result: {result}")
+            
+            success = result.get('success', False)
+            sql_response = result.get('sql', '')
+            error_msg = result.get('error', '')
             
             if not success:
-                error = f"LLM call failed. Response: {response}"
-                logger.error(f"[SQL_GEN] FAILURE: {error}")
-                return "", error
-                
-            if not response:
-                error = "LLM returned empty response"
+                error = f"LLM generate_sql failed: {error_msg}"
                 logger.error(f"[SQL_GEN] FAILURE: {error}")
                 return "", error
             
-            sql = self._clean_sql(response)
+            if not sql_response:
+                error = "LLM returned empty SQL"
+                logger.error(f"[SQL_GEN] FAILURE: {error}")
+                return "", error
+            
+            sql = self._clean_sql(sql_response)
             
             if not sql:
-                error = f"Could not extract SQL from LLM response: {response[:200]}"
+                error = f"Could not extract SQL from LLM response: {sql_response[:200]}"
                 logger.error(f"[SQL_GEN] FAILURE: {error}")
                 return "", error
             
