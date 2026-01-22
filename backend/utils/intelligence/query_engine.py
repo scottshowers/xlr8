@@ -715,10 +715,9 @@ Rules:
 3. ALWAYS wrap column names in double quotes: "column_name"
 4. Use the join relationships provided for multi-table queries
 5. Apply the detected filters as WHERE conditions
-6. For counts, use COUNT(*)
+6. For "how many" questions, use COUNT(*) to count ALL rows, no LIMIT
 7. For "by X" questions, use GROUP BY
-8. Limit results to 100 rows unless asked for more
-9. Return ONLY the SQL, no explanations
+8. Return ONLY the SQL, no explanations, no markdown
 
 SQL:"""
         
