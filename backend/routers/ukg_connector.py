@@ -40,19 +40,37 @@ def extract_org_level_mappings(conn, project_id: str):
     This creates a _term_mappings table that QueryEngine uses to understand
     questions like "how many employees by department".
     """
+    # Entry logging BEFORE try block to confirm function is called
+    logger.info(f"[ORG-MAPPING] === STARTING org level extraction for project {project_id} ===")
+    
     try:
         # Find the org_levels table for this project
         org_levels_table = f"{project_id}_api_org_levels"
+        logger.info(f"[ORG-MAPPING] Looking for table: {org_levels_table}")
         
-        # Check if table exists
-        tables = conn.execute("""
-            SELECT table_name FROM information_schema.tables 
-            WHERE table_name = ?
-        """, [org_levels_table]).fetchall()
+        # Check if table exists using SHOW TABLES (more reliable in DuckDB)
+        all_tables = conn.execute("SHOW TABLES").fetchall()
+        table_names = [t[0] for t in all_tables]
+        logger.info(f"[ORG-MAPPING] Found {len(table_names)} tables total")
         
-        if not tables:
+        # Log API tables for debugging
+        api_tables = [t for t in table_names if '_api_' in t and project_id in t]
+        logger.info(f"[ORG-MAPPING] API tables for project: {api_tables}")
+        
+        if org_levels_table not in table_names:
             logger.warning(f"[ORG-MAPPING] No org_levels table found for {project_id}")
+            logger.warning(f"[ORG-MAPPING] Available API tables: {api_tables}")
             return
+        
+        logger.info(f"[ORG-MAPPING] Found org_levels table: {org_levels_table}")
+        
+        # Get columns to understand structure
+        try:
+            cols = conn.execute(f'DESCRIBE "{org_levels_table}"').fetchall()
+            col_names = [c[0] for c in cols]
+            logger.info(f"[ORG-MAPPING] Columns in org_levels: {col_names}")
+        except Exception as desc_err:
+            logger.warning(f"[ORG-MAPPING] Could not describe table: {desc_err}")
         
         # Get distinct level mappings
         try:
@@ -62,25 +80,35 @@ def extract_org_level_mappings(conn, project_id: str):
                 WHERE level IS NOT NULL AND levelDescription IS NOT NULL
                 ORDER BY level
             """).fetchall()
+            logger.info(f"[ORG-MAPPING] Query returned {len(mappings)} mappings")
         except Exception as e:
-            # Try alternate column names
-            logger.warning(f"[ORG-MAPPING] Standard columns not found, trying alternates: {e}")
+            # Try alternate column names (case sensitivity)
+            logger.warning(f"[ORG-MAPPING] Standard columns failed: {e}")
+            logger.info(f"[ORG-MAPPING] Trying case-insensitive column match...")
             try:
+                # Try lowercase
                 mappings = conn.execute(f"""
-                    SELECT DISTINCT level, "levelDescription"
+                    SELECT DISTINCT level, leveldescription
                     FROM "{org_levels_table}"
                     WHERE level IS NOT NULL
                     ORDER BY level
                 """).fetchall()
-            except:
-                logger.warning(f"[ORG-MAPPING] Could not read org_levels structure")
+                logger.info(f"[ORG-MAPPING] Lowercase query returned {len(mappings)} mappings")
+            except Exception as e2:
+                logger.warning(f"[ORG-MAPPING] Lowercase also failed: {e2}")
+                # Sample the data to see what we have
+                try:
+                    sample = conn.execute(f'SELECT * FROM "{org_levels_table}" LIMIT 3').fetchall()
+                    logger.info(f"[ORG-MAPPING] Sample data: {sample}")
+                except:
+                    pass
                 return
         
         if not mappings:
             logger.warning(f"[ORG-MAPPING] No level mappings found in {org_levels_table}")
             return
         
-        logger.info(f"[ORG-MAPPING] Found {len(mappings)} org level mappings")
+        logger.info(f"[ORG-MAPPING] Found {len(mappings)} org level mappings: {mappings}")
         
         # Create _term_mappings table if not exists
         conn.execute("""
@@ -98,11 +126,13 @@ def extract_org_level_mappings(conn, project_id: str):
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        logger.info(f"[ORG-MAPPING] _term_mappings table ready")
         
         # Clear old mappings for this project
         conn.execute("DELETE FROM _term_mappings WHERE project = ?", [project_id])
         
         # Insert mappings
+        mappings_created = 0
         for level, level_desc in mappings:
             if not level_desc:
                 continue
@@ -131,14 +161,15 @@ def extract_org_level_mappings(conn, project_id: str):
                 f'level = {level}',
                 'org_level'
             ])
-            
+            mappings_created += 1
             logger.info(f"[ORG-MAPPING] Mapped '{term}' → {employee_column} (level={level})")
         
-        conn.commit()
-        logger.info(f"[ORG-MAPPING] Successfully created {len(mappings)} term mappings for {project_id}")
+        # Persist with CHECKPOINT (DuckDB standard, not commit())
+        conn.execute("CHECKPOINT")
+        logger.info(f"[ORG-MAPPING] === SUCCESS: Created {mappings_created} term mappings for {project_id} ===")
         
     except Exception as e:
-        logger.error(f"[ORG-MAPPING] Failed to extract org level mappings: {e}")
+        logger.error(f"[ORG-MAPPING] === FAILED to extract org level mappings: {e} ===")
         import traceback
         logger.error(traceback.format_exc())
 
@@ -1346,7 +1377,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
             
             # Recalc term index
             try:
-                from backend.utils.intelligence.term_index import recalc_term_index
+                from utils.intelligence.term_index import recalc_term_index
                 recalc_term_index(handler.conn, project_id)
                 logger.info(f"[UKG-SYNC] [{job_id}] Term index recalculated")
             except Exception as term_err:
