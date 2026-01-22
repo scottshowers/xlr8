@@ -338,7 +338,7 @@ async def test_pagination(project_id: str, endpoint: str = "person_details", max
     }
     
     base_url = f"https://{hostname}{path}"
-    base_params = {"page": "1", "per_Page": "500"}
+    base_params = {"page": "1", "per_Page": "10000"}
     
     # Add status filter for personnel endpoints
     if "personnel" in path:
@@ -541,7 +541,7 @@ async def test_pagination(project_id: str, max_pages: int = 5):
             "stopped_reason": None
         }
         
-        base_params = {"page": "1", "per_Page": "500", "employmentStatus": "A,L,T"}
+        base_params = {"page": "1", "per_Page": "10000", "employmentStatus": "A,L,T"}
         last_data_signature = None
         
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -1075,9 +1075,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 
                 # Use the provided URL if available, otherwise construct it
                 if table_url:
-                    url = table_url if '?' in table_url else f"{table_url}?page=1&per_Page=500"
+                    url = table_url if '?' in table_url else f"{table_url}?page=1&per_Page=10000"
                 else:
-                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?page=1&per_Page=500"
+                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?page=1&per_Page=10000"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1144,7 +1144,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
                 
-                url = f"https://{hostname}{endpoint['path']}?page=1&per_Page=500"
+                url = f"https://{hostname}{endpoint['path']}?page=1&per_Page=10000"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1229,8 +1229,8 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                     logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with params: {filter_params}")
                 else:
                     # Even with no filters, add page and per_Page for efficiency
-                    url = f"{base_url}?page=1&per_Page=500"
-                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default page=1&per_Page=500")
+                    url = f"{base_url}?page=1&per_Page=10000"
+                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default page=1&per_Page=10000")
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1585,7 +1585,7 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     # Always request max page size for efficiency (except for endpoints that don't support it)
     if endpoint_name not in ['employee_changes']:
         params['page'] = '1'  # Start at page 1
-        params['per_Page'] = '500'  # UKG default is 100, max varies by endpoint
+        params['per_Page'] = '10000'  # UKG max is 10000 per page
     
     statuses = endpoint_config.get('statuses', [])
     term_cutoff = endpoint_config.get('term_cutoff_date')
