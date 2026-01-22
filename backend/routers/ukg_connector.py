@@ -28,6 +28,117 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/ukg", tags=["ukg-connector"])
 
 
+def extract_org_level_mappings(conn, project_id: str):
+    """
+    Extract org level mappings from the org_levels configuration table.
+    
+    UKG Pro stores organization hierarchy levels (District, Department, etc.) 
+    in a config table with (level, levelDescription) pairs. We need to know:
+    - level=1, levelDescription="District" → employee column "orgLevel1"
+    - level=2, levelDescription="Department" → employee column "orgLevel2"
+    
+    This creates a _term_mappings table that QueryEngine uses to understand
+    questions like "how many employees by department".
+    """
+    try:
+        # Find the org_levels table for this project
+        org_levels_table = f"{project_id}_api_org_levels"
+        
+        # Check if table exists
+        tables = conn.execute("""
+            SELECT table_name FROM information_schema.tables 
+            WHERE table_name = ?
+        """, [org_levels_table]).fetchall()
+        
+        if not tables:
+            logger.warning(f"[ORG-MAPPING] No org_levels table found for {project_id}")
+            return
+        
+        # Get distinct level mappings
+        try:
+            mappings = conn.execute(f"""
+                SELECT DISTINCT level, levelDescription
+                FROM "{org_levels_table}"
+                WHERE level IS NOT NULL AND levelDescription IS NOT NULL
+                ORDER BY level
+            """).fetchall()
+        except Exception as e:
+            # Try alternate column names
+            logger.warning(f"[ORG-MAPPING] Standard columns not found, trying alternates: {e}")
+            try:
+                mappings = conn.execute(f"""
+                    SELECT DISTINCT level, "levelDescription"
+                    FROM "{org_levels_table}"
+                    WHERE level IS NOT NULL
+                    ORDER BY level
+                """).fetchall()
+            except:
+                logger.warning(f"[ORG-MAPPING] Could not read org_levels structure")
+                return
+        
+        if not mappings:
+            logger.warning(f"[ORG-MAPPING] No level mappings found in {org_levels_table}")
+            return
+        
+        logger.info(f"[ORG-MAPPING] Found {len(mappings)} org level mappings")
+        
+        # Create _term_mappings table if not exists
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS _term_mappings (
+                id INTEGER PRIMARY KEY,
+                project VARCHAR,
+                term VARCHAR,
+                term_lower VARCHAR,
+                employee_column VARCHAR,
+                lookup_table VARCHAR,
+                lookup_key_column VARCHAR,
+                lookup_display_column VARCHAR,
+                lookup_filter VARCHAR,
+                mapping_type VARCHAR,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Clear old mappings for this project
+        conn.execute("DELETE FROM _term_mappings WHERE project = ?", [project_id])
+        
+        # Insert mappings
+        for level, level_desc in mappings:
+            if not level_desc:
+                continue
+                
+            term = level_desc.strip()
+            term_lower = term.lower()
+            employee_column = f"orgLevel{level}"
+            
+            conn.execute("""
+                INSERT INTO _term_mappings 
+                (project, term, term_lower, employee_column, lookup_table, 
+                 lookup_key_column, lookup_display_column, lookup_filter, mapping_type)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, [
+                project_id,
+                term,
+                term_lower,
+                employee_column,
+                org_levels_table,
+                'code',
+                'description',
+                f'level = {level}',
+                'org_level'
+            ])
+            
+            logger.info(f"[ORG-MAPPING] Mapped '{term}' → {employee_column} (level={level})")
+        
+        conn.commit()
+        logger.info(f"[ORG-MAPPING] Successfully created {len(mappings)} term mappings for {project_id}")
+        
+    except Exception as e:
+        logger.error(f"[ORG-MAPPING] Failed to extract org level mappings: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
+
+
 class UKGCredentials(BaseModel):
     """Credentials for connecting to UKG Pro API"""
     hostname: str  # e.g., "service5.ultipro.com"
@@ -425,7 +536,7 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
         
         while retry_count <= max_retries:
             try:
-                logger.debug(f"[UKG-SYNC] Fetching page {page_count}: {current_url[:100]}...")
+                logger.warning(f"[UKG-SYNC] Fetching page {page_count}: {current_url}")
                 response = await client.get(current_url, headers=headers)
                 
                 if response.status_code == 429:
@@ -443,23 +554,28 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                 data = response.json()
                 
                 if not data:
+                    logger.warning(f"[UKG-SYNC] Page {page_count}: No data returned, stopping")
                     return all_data
                     
                 if isinstance(data, list):
                     all_data.extend(data)
-                    logger.debug(f"[UKG-SYNC] Page {page_count}: {len(data)} rows (total: {len(all_data)})")
+                    logger.warning(f"[UKG-SYNC] Page {page_count}: {len(data)} rows (total: {len(all_data)})")
                 else:
                     # Single object response
+                    logger.warning(f"[UKG-SYNC] Got single object response, not a list")
                     return [data] if data else []
                 
                 # Check for next page via Link header
                 link_header = response.headers.get('Link', '')
+                logger.warning(f"[UKG-SYNC] Page {page_count} Link header: '{link_header}'")
                 next_url = parse_link_header(link_header)
                 
                 if next_url:
+                    logger.warning(f"[UKG-SYNC] Found next URL: {next_url[:100]}...")
                     current_url = next_url
                 else:
                     # No next link - we're done
+                    logger.warning(f"[UKG-SYNC] No next link found, stopping pagination after {len(all_data)} total rows")
                     return all_data
                     
                 # Polite delay - don't hammer UKG
@@ -616,9 +732,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 
                 # Use the provided URL if available, otherwise construct it
                 if table_url:
-                    url = table_url
+                    url = table_url if '?' in table_url else f"{table_url}?per_page=500"
                 else:
-                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}"
+                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?per_page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -685,7 +801,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
                 
-                url = f"https://{hostname}{endpoint['path']}"
+                url = f"https://{hostname}{endpoint['path']}?per_page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -763,13 +879,15 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                     logger.info(f"[UKG-SYNC] [{job_id}] Skipping disabled endpoint: {endpoint_name}")
                     continue
                 
-                # Add filter params to URL
+                # Add filter params to URL (always include per_page)
                 if filter_params:
                     param_str = '&'.join(f"{k}={v}" for k, v in filter_params.items())
                     url = f"{base_url}?{param_str}"
-                    logger.info(f"[UKG-SYNC] [{job_id}] Fetching with filters: {filter_params}")
+                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with params: {filter_params}")
                 else:
-                    url = base_url
+                    # Even with no filters, add per_page for efficiency
+                    url = f"{base_url}?per_page=500"
+                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default per_page=500")
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -887,6 +1005,14 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 logger.info(f"[UKG-SYNC] [{job_id}] Term index recalculated")
             except Exception as term_err:
                 logger.warning(f"[UKG-SYNC] Could not recalc term index: {term_err}")
+            
+            # v5.3: Extract org level mappings from config tables
+            try:
+                job['current_step'] = 'Extracting org level mappings...'
+                extract_org_level_mappings(handler.conn, project_id)
+                logger.info(f"[UKG-SYNC] [{job_id}] Org level mappings extracted")
+            except Exception as org_err:
+                logger.warning(f"[UKG-SYNC] Could not extract org level mappings: {org_err}")
             
             # v5.2: Auto-compute context graph after sync
             try:
@@ -1112,6 +1238,9 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     
     if not endpoint_config.get('enabled', True):
         return None  # Signal to skip this endpoint
+    
+    # Always request max page size for efficiency
+    params['per_page'] = '500'  # UKG default is 100, max varies by endpoint
     
     statuses = endpoint_config.get('statuses', [])
     term_cutoff = endpoint_config.get('term_cutoff_date')
