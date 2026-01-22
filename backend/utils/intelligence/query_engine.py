@@ -654,6 +654,10 @@ class SQLGenerator:
                 logger.error(f"[SQL_GEN] FAILURE: {error}")
                 return "", error
             
+            # Ensure table names are properly quoted (safety net)
+            table_names = [t.table_name for t in context.tables]
+            sql = self._ensure_quoted_identifiers(sql, table_names)
+            
             logger.warning(f"[SQL_GEN] SUCCESS: {sql}")
             return sql, None
             
@@ -666,10 +670,11 @@ class SQLGenerator:
     def _build_prompt(self, context: QueryContext) -> str:
         """Build the prompt for SQL generation."""
         
-        # Format table schemas
+        # Format table schemas - show quoted names so LLM uses them
         schema_text = ""
         for table in context.tables:
-            schema_text += f"\n\nTable: {table.table_name} ({table.row_count:,} rows)\n"
+            # Show the table name in quotes so LLM knows to use quotes
+            schema_text += f'\n\nTable: "{table.table_name}" ({table.row_count:,} rows)\n'
             schema_text += "Columns:\n"
             for col in table.columns:
                 col_type = table.column_types.get(col, 'VARCHAR')
@@ -679,7 +684,7 @@ class SQLGenerator:
                 sample_str = f" -- Examples: {samples[:3]}" if samples else ""
                 filter_str = f" [FILTER: {filter_cat}]" if filter_cat else ""
                 
-                schema_text += f"  - {col} ({col_type}){filter_str}{sample_str}\n"
+                schema_text += f'  - "{col}" ({col_type}){filter_str}{sample_str}\n'
         
         # Format join paths
         join_text = ""
@@ -706,16 +711,29 @@ Write a DuckDB SQL query to answer this question.
 
 Rules:
 1. ONLY use tables and columns listed above
-2. Use the join relationships provided for multi-table queries
-3. Apply the detected filters as WHERE conditions
-4. For counts, use COUNT(*)
-5. For "by X" questions, use GROUP BY
-6. Limit results to 100 rows unless asked for more
-7. Return ONLY the SQL, no explanations
+2. ALWAYS wrap table names in double quotes: "table_name"
+3. ALWAYS wrap column names in double quotes: "column_name"
+4. Use the join relationships provided for multi-table queries
+5. Apply the detected filters as WHERE conditions
+6. For counts, use COUNT(*)
+7. For "by X" questions, use GROUP BY
+8. Limit results to 100 rows unless asked for more
+9. Return ONLY the SQL, no explanations
 
 SQL:"""
         
         return prompt
+    
+    def _ensure_quoted_identifiers(self, sql: str, table_names: List[str]) -> str:
+        """Ensure table names are quoted in the SQL."""
+        for table_name in table_names:
+            # If table name appears unquoted, quote it
+            # Match table name that's not already in quotes
+            # This handles FROM table, JOIN table, etc.
+            pattern = rf'(?<!")\b{re.escape(table_name)}\b(?!")'
+            replacement = f'"{table_name}"'
+            sql = re.sub(pattern, replacement, sql)
+        return sql
     
     def _clean_sql(self, response: str) -> str:
         """Clean LLM response to extract just the SQL."""
