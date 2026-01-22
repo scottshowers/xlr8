@@ -111,12 +111,16 @@ def extract_org_level_mappings(conn, project_id: str):
             term_lower = term.lower()
             employee_column = f"orgLevel{level}"
             
+            # Generate a unique ID
+            mapping_id = hash(f"{project_id}_{term_lower}_{level}") % 2147483647
+            
             conn.execute("""
                 INSERT INTO _term_mappings 
-                (project, term, term_lower, employee_column, lookup_table, 
+                (id, project, term, term_lower, employee_column, lookup_table, 
                  lookup_key_column, lookup_display_column, lookup_filter, mapping_type)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, [
+                mapping_id,
                 project_id,
                 term,
                 term_lower,
@@ -523,12 +527,28 @@ def parse_link_header(link_header: str) -> Optional[str]:
 
 
 async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, job_id: str = None) -> List[Dict]:
-    """Fetch all pages from a paginated endpoint using Link headers (RFC 5988)."""
+    """Fetch all pages from a paginated endpoint.
+    
+    Tries two pagination strategies:
+    1. RFC 5988 Link headers (preferred)
+    2. Page parameter increment (fallback for UKG)
+    """
     all_data = []
     current_url = url
     page_count = 0
     max_pages = 200  # Safety limit
     max_retries = 2
+    
+    # Track if we need to use page-based pagination
+    use_page_param = False
+    base_url = url.split('?')[0]
+    base_params = {}
+    if '?' in url:
+        param_str = url.split('?')[1]
+        for p in param_str.split('&'):
+            if '=' in p:
+                k, v = p.split('=', 1)
+                base_params[k] = v
     
     while current_url and page_count < max_pages:
         retry_count = 0
@@ -547,9 +567,22 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     retry_count += 1
                     continue
                 
+                if response.status_code == 400:
+                    # Bad request - might be invalid parameter
+                    logger.warning(f"[UKG-SYNC] 400 error: {response.text[:200]}")
+                    # If it's complaining about per_page, try without it
+                    if 'per_page' in response.text.lower() or 'per_Page' in response.text:
+                        if 'per_page' in base_params:
+                            del base_params['per_page']
+                            param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+                            current_url = f"{base_url}?{param_str}" if param_str else base_url
+                            logger.warning(f"[UKG-SYNC] Retrying without per_page: {current_url}")
+                            continue
+                    return all_data
+                
                 if response.status_code != 200:
                     logger.warning(f"[UKG-SYNC] {current_url[:80]} returned {response.status_code}: {response.text[:200]}")
-                    return all_data  # Return what we have
+                    return all_data
                 
                 data = response.json()
                 
@@ -559,24 +592,42 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     
                 if isinstance(data, list):
                     all_data.extend(data)
-                    logger.warning(f"[UKG-SYNC] Page {page_count}: {len(data)} rows (total: {len(all_data)})")
+                    page_size = len(data)
+                    logger.warning(f"[UKG-SYNC] Page {page_count}: {page_size} rows (total: {len(all_data)})")
+                    
+                    # If we got less than expected page size, we're probably done
+                    expected_size = int(base_params.get('per_page', 100))
+                    if page_size < expected_size:
+                        logger.warning(f"[UKG-SYNC] Got {page_size} rows (less than {expected_size}), assuming last page")
+                        return all_data
                 else:
                     # Single object response
                     logger.warning(f"[UKG-SYNC] Got single object response, not a list")
                     return [data] if data else []
                 
-                # Check for next page via Link header
+                # Check for next page via Link header first
                 link_header = response.headers.get('Link', '')
-                logger.warning(f"[UKG-SYNC] Page {page_count} Link header: '{link_header}'")
-                next_url = parse_link_header(link_header)
-                
-                if next_url:
-                    logger.warning(f"[UKG-SYNC] Found next URL: {next_url[:100]}...")
-                    current_url = next_url
+                if link_header:
+                    logger.warning(f"[UKG-SYNC] Page {page_count} Link header: '{link_header}'")
+                    next_url = parse_link_header(link_header)
+                    
+                    if next_url:
+                        logger.warning(f"[UKG-SYNC] Found next URL from Link header")
+                        current_url = next_url
+                    else:
+                        logger.warning(f"[UKG-SYNC] No 'next' in Link header, stopping")
+                        return all_data
                 else:
-                    # No next link - we're done
-                    logger.warning(f"[UKG-SYNC] No next link found, stopping pagination after {len(all_data)} total rows")
-                    return all_data
+                    # No Link header - use page parameter pagination
+                    if not use_page_param:
+                        logger.warning(f"[UKG-SYNC] No Link header, switching to page parameter pagination")
+                        use_page_param = True
+                    
+                    # Build next page URL
+                    base_params['page'] = str(page_count + 1)
+                    param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+                    current_url = f"{base_url}?{param_str}"
+                    logger.warning(f"[UKG-SYNC] Next page URL: {current_url}")
                     
                 # Polite delay - don't hammer UKG
                 await asyncio.sleep(0.5)
@@ -1239,8 +1290,9 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     if not endpoint_config.get('enabled', True):
         return None  # Signal to skip this endpoint
     
-    # Always request max page size for efficiency
-    params['per_page'] = '500'  # UKG default is 100, max varies by endpoint
+    # Always request max page size for efficiency (except for endpoints that don't support it)
+    if endpoint_name not in ['employee_changes']:
+        params['per_page'] = '500'  # UKG default is 100, max varies by endpoint
     
     statuses = endpoint_config.get('statuses', [])
     term_cutoff = endpoint_config.get('term_cutoff_date')
