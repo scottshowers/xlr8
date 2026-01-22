@@ -326,17 +326,33 @@ class ContextAssembler:
         # Step 4: Find relevant tables
         tables = self._find_relevant_tables(entities, filters)
         
-        # Step 4.5: Add lookup tables from term mappings
+        # Step 4.5: If term mappings exist, FILTER to only source + lookup tables
+        # This dramatically reduces noise for the LLM
         if term_mapping_info:
+            term_mapping_tables = []
             for mapping in term_mapping_info:
+                # Add source table
+                source_table = mapping.get('source_table')
+                if source_table and not any(t.table_name == source_table for t in term_mapping_tables):
+                    source_schema = self._get_table_schema(source_table, 0)
+                    if source_schema:
+                        term_mapping_tables.append(source_schema)
+                        logger.warning(f"[CONTEXT] Term mapping source table: {source_table}")
+                
+                # Add lookup table
                 lookup_table = mapping.get('lookup_table')
-                if lookup_table and not any(t.table_name == lookup_table for t in tables):
+                if lookup_table and not any(t.table_name == lookup_table for t in term_mapping_tables):
                     lookup_schema = self._get_table_schema(lookup_table, 0)
                     if lookup_schema:
-                        tables.append(lookup_schema)
-                        logger.warning(f"[CONTEXT] Added lookup table: {lookup_table}")
+                        term_mapping_tables.append(lookup_schema)
+                        logger.warning(f"[CONTEXT] Term mapping lookup table: {lookup_table}")
+            
+            # Replace full table list with just term mapping tables
+            if term_mapping_tables:
+                logger.warning(f"[CONTEXT] Using ONLY term mapping tables (was {len(tables)} tables, now {len(term_mapping_tables)})")
+                tables = term_mapping_tables
         
-        logger.warning(f"[CONTEXT] Found {len(tables)} relevant tables: {[t.table_name for t in tables]}")
+        logger.warning(f"[CONTEXT] Final table list ({len(tables)} tables): {[t.table_name for t in tables]}")
         
         # Log table details
         for t in tables:
@@ -351,7 +367,6 @@ class ContextAssembler:
         # Step 5.5: Add join paths from term mappings
         if term_mapping_info:
             for mapping in term_mapping_info:
-                # Use source_table from mapping if available, otherwise guess
                 source_table = mapping.get('source_table')
                 
                 if not source_table:
@@ -361,13 +376,6 @@ class ContextAssembler:
                             source_table = t.table_name
                             break
                     logger.warning(f"[CONTEXT] No source_table in mapping, guessed: {source_table}")
-                
-                # Ensure source table is in our table list
-                if source_table and not any(t.table_name == source_table for t in tables):
-                    source_schema = self._get_table_schema(source_table, 0)
-                    if source_schema:
-                        tables.append(source_schema)
-                        logger.warning(f"[CONTEXT] Added source table from term mapping: {source_table}")
                 
                 if source_table and mapping.get('lookup_table'):
                     join_path = {
@@ -824,19 +832,17 @@ class SQLGenerator:
             for jp in context.join_paths:
                 join_text += f"  - {jp['from']} = {jp['to']}\n"
                 
-                # If this is a term mapping join, add special instructions
+                # If this is a term mapping join, add clear instructions
                 if jp.get('type') == 'term_mapping':
                     term = jp.get('term', 'this term')
                     display_col = jp.get('display_column', 'description')
                     filter_clause = jp.get('filter', '')
                     lookup_table = jp['to'].split('.')[0]
                     
-                    term_mapping_text += f"\n\nIMPORTANT - '{term}' Mapping:\n"
-                    term_mapping_text += f"When grouping by '{term}', you MUST:\n"
-                    term_mapping_text += f"  1. JOIN the employee table to \"{lookup_table}\" using the join above\n"
-                    term_mapping_text += f"  2. Add WHERE {filter_clause} to filter to only '{term}' records\n"
-                    term_mapping_text += f"  3. GROUP BY \"{lookup_table}\".\"{display_col}\" (the human-readable name)\n"
-                    term_mapping_text += f"  4. SELECT \"{lookup_table}\".\"{display_col}\" AS \"{term}\"\n"
+                    term_mapping_text += f"\n\nFor '{term}' queries:\n"
+                    term_mapping_text += f"  - Use the join relationship above\n"
+                    term_mapping_text += f"  - Add WHERE {filter_clause}\n"
+                    term_mapping_text += f"  - GROUP BY and SELECT the \"{display_col}\" column from the lookup table\n"
         
         # Format detected filters
         filter_text = ""
@@ -861,8 +867,8 @@ CRITICAL RULES:
 3. ALWAYS wrap column names in double quotes: "column_name"
 4. For "how many" questions, use COUNT(*) to count ALL rows
 5. For "by X" questions, use GROUP BY with the appropriate column
-6. If there is a term mapping section above, FOLLOW IT EXACTLY for that term
-7. Return ONLY the SQL, no explanations, no markdown
+6. Use the join relationships provided above
+7. Return ONLY the SQL, no explanations, no markdown, no code fences
 
 SQL:"""
         
