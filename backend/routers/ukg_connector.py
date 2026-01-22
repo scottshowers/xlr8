@@ -394,31 +394,50 @@ async def get_connection_creds(project_id: str) -> Optional[Dict]:
         return None
 
 
+def parse_link_header(link_header: str) -> Optional[str]:
+    """Parse RFC 5988 Link header to find 'next' URL."""
+    if not link_header:
+        return None
+    
+    # Link header format: <url>; rel="next", <url>; rel="last"
+    for part in link_header.split(','):
+        part = part.strip()
+        if 'rel="next"' in part or "rel='next'" in part:
+            # Extract URL between < and >
+            start = part.find('<')
+            end = part.find('>')
+            if start != -1 and end != -1:
+                return part[start + 1:end]
+    return None
+
+
 async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, job_id: str = None) -> List[Dict]:
-    """Fetch all pages from a paginated endpoint."""
+    """Fetch all pages from a paginated endpoint using Link headers (RFC 5988)."""
     all_data = []
-    page = 1
-    per_page = 100
+    current_url = url
+    page_count = 0
+    max_pages = 200  # Safety limit
     max_retries = 2
     
-    while True:
+    while current_url and page_count < max_pages:
         retry_count = 0
+        page_count += 1
+        
         while retry_count <= max_retries:
             try:
-                params = {"page": page, "per_page": per_page}
-                logger.debug(f"[UKG-SYNC] Fetching {url} page {page}...")
-                response = await client.get(url, headers=headers, params=params)
+                logger.debug(f"[UKG-SYNC] Fetching page {page_count}: {current_url[:100]}...")
+                response = await client.get(current_url, headers=headers)
                 
                 if response.status_code == 429:
                     # Rate limited - wait and retry
                     retry_after = int(response.headers.get('Retry-After', 30))
-                    logger.warning(f"[UKG-SYNC] Rate limited on {url}, waiting {retry_after}s...")
+                    logger.warning(f"[UKG-SYNC] Rate limited, waiting {retry_after}s...")
                     await asyncio.sleep(retry_after)
                     retry_count += 1
                     continue
                 
                 if response.status_code != 200:
-                    logger.warning(f"[UKG-SYNC] {url} returned {response.status_code}: {response.text[:200]}")
+                    logger.warning(f"[UKG-SYNC] {current_url[:80]} returned {response.status_code}: {response.text[:200]}")
                     return all_data  # Return what we have
                 
                 data = response.json()
@@ -428,17 +447,19 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     
                 if isinstance(data, list):
                     all_data.extend(data)
-                    logger.debug(f"[UKG-SYNC] {url} page {page}: {len(data)} rows (total: {len(all_data)})")
-                    if len(data) < per_page:
-                        return all_data
-                    page += 1
+                    logger.debug(f"[UKG-SYNC] Page {page_count}: {len(data)} rows (total: {len(all_data)})")
                 else:
                     # Single object response
                     return [data] if data else []
-                    
-                # Safety limit
-                if page > 100:
-                    logger.warning(f"[UKG-SYNC] {url} hit page limit (100)")
+                
+                # Check for next page via Link header
+                link_header = response.headers.get('Link', '')
+                next_url = parse_link_header(link_header)
+                
+                if next_url:
+                    current_url = next_url
+                else:
+                    # No next link - we're done
                     return all_data
                     
                 # Polite delay - don't hammer UKG
@@ -447,19 +468,22 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                 
             except httpx.TimeoutException as e:
                 retry_count += 1
-                logger.warning(f"[UKG-SYNC] Timeout fetching {url} page {page} (attempt {retry_count}/{max_retries+1}): {e}")
+                logger.warning(f"[UKG-SYNC] Timeout on page {page_count} (attempt {retry_count}/{max_retries+1}): {e}")
                 if retry_count > max_retries:
-                    logger.error(f"[UKG-SYNC] Giving up on {url} after {max_retries+1} attempts")
+                    logger.error(f"[UKG-SYNC] Giving up after {max_retries+1} attempts")
                     return all_data
                 await asyncio.sleep(5)  # Wait before retry
                 
             except Exception as e:
-                logger.error(f"[UKG-SYNC] Error fetching {url} page {page}: {e}")
+                logger.error(f"[UKG-SYNC] Error on page {page_count}: {e}")
                 return all_data
         
         # If we exhausted retries, exit
         if retry_count > max_retries:
             break
+    
+    if page_count >= max_pages:
+        logger.warning(f"[UKG-SYNC] Hit max page limit ({max_pages})")
     
     return all_data
 
