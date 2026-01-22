@@ -35,6 +35,7 @@
         "waive_reason",
         "company",
         "earning",
+        "deduction",
         "insurance_rate",
         "job_group",
         "job",
@@ -415,6 +416,13 @@
       "entity_name": "Earning",
       "api_endpoint": "/configuration/v1/earnings",
       "key_column": "earningCode",
+      "description_column": "description"
+    },
+    "deduction": {
+      "domain": "Configuration",
+      "entity_name": "Deduction",
+      "api_endpoint": "/configuration/v1/deductions",
+      "key_column": "deductionCode",
       "description_column": "description"
     },
     "insurance_rate": {
@@ -2025,7 +2033,7 @@
         "supervisorid": "person_details",
         "termreason": "term_type",
         "termtype": "term_type",
-        "deductiongroupcode": "earning",
+        "deductiongroupcode": "deduction",
         "earninggroupcode": "earning"
       }
     },
@@ -2075,7 +2083,7 @@
       ],
       "fk_columns": {
         "companyid": "company",
-        "deductioncode": "earning"
+        "deductioncode": "deduction"
       }
     },
     "pto_plans": {
@@ -2167,12 +2175,19 @@
     "waivereason": "waive_reason",
     "insurancerate": "insurance_rate",
     "jobgroup": "job_group",
+    "jobs": "job",
+    "earnings": "earning",
+    "deductions": "deduction",
     "optionrate": "option_rate",
     "orglevel": "org_level",
+    "orglevels": "org_level",
+    "org_levels": "org_level",
     "orgreportingcategory": "org_reporting_category",
     "positionreport": "position_report",
+    "positions": "position",
     "shiftcode": "shift_code",
     "taxgroup": "tax_group",
+    "locations": "location",
     "persondetails": "person_details",
     "employmentdetails": "employment_details",
     "compensationdetails": "compensation_details",
