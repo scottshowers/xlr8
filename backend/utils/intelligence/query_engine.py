@@ -242,27 +242,54 @@ class ContextAssembler:
                 logger.info("[CONTEXT] No _term_mappings table found")
                 return
             
-            mappings = self.conn.execute("""
-                SELECT term, term_lower, employee_column, lookup_table, 
-                       lookup_key_column, lookup_display_column, lookup_filter, mapping_type
-                FROM _term_mappings
-                WHERE project = ?
-            """, [self.project]).fetchall()
-            
-            for row in mappings:
-                term, term_lower, emp_col, lookup_tbl, lookup_key, lookup_disp, lookup_filter, map_type = row
-                self._term_mappings[term_lower] = {
-                    'term': term,
-                    'employee_column': emp_col,
-                    'lookup_table': lookup_tbl,
-                    'lookup_key_column': lookup_key,
-                    'lookup_display_column': lookup_disp,
-                    'lookup_filter': lookup_filter,
-                    'mapping_type': map_type
-                }
+            # Try to load with source_table column (new schema)
+            try:
+                mappings = self.conn.execute("""
+                    SELECT term, term_lower, source_table, employee_column, lookup_table, 
+                           lookup_key_column, lookup_display_column, lookup_filter, mapping_type
+                    FROM _term_mappings
+                    WHERE project = ?
+                """, [self.project]).fetchall()
+                
+                for row in mappings:
+                    term, term_lower, source_tbl, emp_col, lookup_tbl, lookup_key, lookup_disp, lookup_filter, map_type = row
+                    self._term_mappings[term_lower] = {
+                        'term': term,
+                        'source_table': source_tbl,
+                        'employee_column': emp_col,
+                        'lookup_table': lookup_tbl,
+                        'lookup_key_column': lookup_key,
+                        'lookup_display_column': lookup_disp,
+                        'lookup_filter': lookup_filter,
+                        'mapping_type': map_type
+                    }
+            except Exception as schema_err:
+                # Fallback to old schema without source_table
+                logger.warning(f"[CONTEXT] Using legacy schema (no source_table): {schema_err}")
+                mappings = self.conn.execute("""
+                    SELECT term, term_lower, employee_column, lookup_table, 
+                           lookup_key_column, lookup_display_column, lookup_filter, mapping_type
+                    FROM _term_mappings
+                    WHERE project = ?
+                """, [self.project]).fetchall()
+                
+                for row in mappings:
+                    term, term_lower, emp_col, lookup_tbl, lookup_key, lookup_disp, lookup_filter, map_type = row
+                    self._term_mappings[term_lower] = {
+                        'term': term,
+                        'source_table': None,  # Will be guessed later
+                        'employee_column': emp_col,
+                        'lookup_table': lookup_tbl,
+                        'lookup_key_column': lookup_key,
+                        'lookup_display_column': lookup_disp,
+                        'lookup_filter': lookup_filter,
+                        'mapping_type': map_type
+                    }
             
             if self._term_mappings:
                 logger.warning(f"[CONTEXT] Loaded {len(self._term_mappings)} term mappings: {list(self._term_mappings.keys())}")
+                for term, mapping in self._term_mappings.items():
+                    logger.warning(f"[CONTEXT]   '{term}' -> {mapping.get('source_table', 'UNKNOWN')}.{mapping['employee_column']}")
         except Exception as e:
             logger.warning(f"[CONTEXT] Could not load term mappings: {e}")
         
@@ -324,16 +351,27 @@ class ContextAssembler:
         # Step 5.5: Add join paths from term mappings
         if term_mapping_info:
             for mapping in term_mapping_info:
-                # Find the employee table
-                emp_table = None
-                for t in tables:
-                    if 'employee' in t.table_name.lower() or 'person' in t.table_name.lower():
-                        emp_table = t.table_name
-                        break
+                # Use source_table from mapping if available, otherwise guess
+                source_table = mapping.get('source_table')
                 
-                if emp_table and mapping.get('lookup_table'):
+                if not source_table:
+                    # Legacy fallback: guess the employee table
+                    for t in tables:
+                        if 'employee' in t.table_name.lower() or 'person' in t.table_name.lower():
+                            source_table = t.table_name
+                            break
+                    logger.warning(f"[CONTEXT] No source_table in mapping, guessed: {source_table}")
+                
+                # Ensure source table is in our table list
+                if source_table and not any(t.table_name == source_table for t in tables):
+                    source_schema = self._get_table_schema(source_table, 0)
+                    if source_schema:
+                        tables.append(source_schema)
+                        logger.warning(f"[CONTEXT] Added source table from term mapping: {source_table}")
+                
+                if source_table and mapping.get('lookup_table'):
                     join_path = {
-                        'from': f"{emp_table}.{mapping['employee_column']}",
+                        'from': f"{source_table}.{mapping['employee_column']}",
                         'to': f"{mapping['lookup_table']}.{mapping['lookup_key_column']}",
                         'type': 'term_mapping',
                         'display_column': mapping.get('lookup_display_column'),
