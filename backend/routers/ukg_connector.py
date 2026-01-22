@@ -639,10 +639,20 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                         logger.warning(f"[UKG-SYNC] No 'next' in Link header, stopping")
                         return all_data
                 else:
-                    # No Link header - this endpoint doesn't support pagination
-                    # or we got all data in one page
-                    logger.warning(f"[UKG-SYNC] No Link header - assuming single page endpoint")
-                    return all_data
+                    # No Link header - try page parameter pagination
+                    # Only continue if we got a full page (might be more data)
+                    expected_size = int(base_params.get('per_page', 100))
+                    if page_size >= expected_size:
+                        # Got full page, try next page
+                        next_page = page_count + 1
+                        base_params['page'] = str(next_page)
+                        param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
+                        current_url = f"{base_url}?{param_str}"
+                        logger.warning(f"[UKG-SYNC] No Link header, trying page {next_page}: {current_url}")
+                    else:
+                        # Got partial page, we're done
+                        logger.warning(f"[UKG-SYNC] No Link header and partial page ({page_size} < {expected_size}), stopping")
+                        return all_data
                     
                 # Polite delay - don't hammer UKG
                 await asyncio.sleep(0.5)
@@ -798,9 +808,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 
                 # Use the provided URL if available, otherwise construct it
                 if table_url:
-                    url = table_url if '?' in table_url else f"{table_url}?per_page=500"
+                    url = table_url if '?' in table_url else f"{table_url}?page=1&per_page=500"
                 else:
-                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?per_page=500"
+                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?page=1&per_page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -867,7 +877,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
                 
-                url = f"https://{hostname}{endpoint['path']}?per_page=500"
+                url = f"https://{hostname}{endpoint['path']}?page=1&per_page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -951,9 +961,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                     url = f"{base_url}?{param_str}"
                     logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with params: {filter_params}")
                 else:
-                    # Even with no filters, add per_page for efficiency
-                    url = f"{base_url}?per_page=500"
-                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default per_page=500")
+                    # Even with no filters, add page and per_page for efficiency
+                    url = f"{base_url}?page=1&per_page=500"
+                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default page=1&per_page=500")
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1307,6 +1317,7 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     
     # Always request max page size for efficiency (except for endpoints that don't support it)
     if endpoint_name not in ['employee_changes']:
+        params['page'] = '1'  # Start at page 1
         params['per_page'] = '500'  # UKG default is 100, max varies by endpoint
     
     statuses = endpoint_config.get('statuses', [])
