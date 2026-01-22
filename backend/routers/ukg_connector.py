@@ -338,7 +338,7 @@ async def test_pagination(project_id: str, endpoint: str = "person_details", max
     }
     
     base_url = f"https://{hostname}{path}"
-    base_params = {"page": "1", "per_page": "500"}
+    base_params = {"page": "1", "per_Page": "500"}
     
     # Add status filter for personnel endpoints
     if "personnel" in path:
@@ -541,7 +541,7 @@ async def test_pagination(project_id: str, max_pages: int = 5):
             "stopped_reason": None
         }
         
-        base_params = {"page": "1", "per_page": "500", "employmentStatus": "A,L,T"}
+        base_params = {"page": "1", "per_Page": "500", "employmentStatus": "A,L,T"}
         last_data_signature = None
         
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -669,7 +669,7 @@ async def get_code_table_data(table_name: str, creds: UKGCredentials):
 
 
 @router.post("/employees")
-async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 100):
+async def get_employees(creds: UKGCredentials, page: int = 1, per_Page: int = 100):
     """
     Get employee person details.
     
@@ -677,7 +677,7 @@ async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 10
     """
     url = f"https://{creds.hostname}/personnel/v1/person-details"
     headers = build_auth_headers(creds)
-    params = {"page": page, "per_page": per_page}
+    params = {"page": page, "per_Page": per_Page}
     
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
@@ -688,7 +688,7 @@ async def get_employees(creds: UKGCredentials, page: int = 1, per_page: int = 10
                 return {
                     "success": True,
                     "page": page,
-                    "per_page": per_page,
+                    "per_Page": per_Page,
                     "count": len(data) if isinstance(data, list) else "unknown",
                     "data": data
                 }
@@ -841,13 +841,13 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                 if response.status_code == 400:
                     # Bad request - might be invalid parameter
                     logger.warning(f"[UKG-SYNC] 400 error: {response.text[:200]}")
-                    # If it's complaining about per_page, try without it
-                    if 'per_page' in response.text.lower() or 'per_Page' in response.text:
-                        if 'per_page' in base_params:
-                            del base_params['per_page']
+                    # If it's complaining about per_Page, try without it
+                    if 'per_page' in response.text.lower():
+                        if 'per_Page' in base_params:
+                            del base_params['per_Page']
                             param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
                             current_url = f"{base_url}?{param_str}" if param_str else base_url
-                            logger.warning(f"[UKG-SYNC] Retrying without per_page: {current_url}")
+                            logger.warning(f"[UKG-SYNC] Retrying without per_Page: {current_url}")
                             continue
                     return all_data
                 
@@ -884,7 +884,7 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     logger.warning(f"[UKG-SYNC] Page {page_count}: {page_size} rows (total: {len(all_data)})")
                     
                     # If we got less than expected page size, we're probably done
-                    expected_size = int(base_params.get('per_page', 100))
+                    expected_size = int(base_params.get('per_Page', 100))
                     if page_size < expected_size:
                         logger.warning(f"[UKG-SYNC] Got {page_size} rows (less than {expected_size}), assuming last page")
                         return all_data
@@ -908,7 +908,7 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                 else:
                     # No Link header - try page parameter pagination
                     # Only continue if we got a full page (might be more data)
-                    expected_size = int(base_params.get('per_page', 100))
+                    expected_size = int(base_params.get('per_Page', 100))
                     if page_size >= expected_size:
                         # Got full page, try next page
                         next_page = page_count + 1
@@ -1075,9 +1075,9 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 
                 # Use the provided URL if available, otherwise construct it
                 if table_url:
-                    url = table_url if '?' in table_url else f"{table_url}?page=1&per_page=500"
+                    url = table_url if '?' in table_url else f"{table_url}?page=1&per_Page=500"
                 else:
-                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?page=1&per_page=500"
+                    url = f"https://{hostname}/configuration/v1/code-tables/{table_name}?page=1&per_Page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1144,7 +1144,7 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 job['last_heartbeat'] = datetime.now().isoformat()
                 logger.info(f"[UKG-SYNC] [{job_id}] Pulling config: {endpoint['name']}...")
                 
-                url = f"https://{hostname}{endpoint['path']}?page=1&per_page=500"
+                url = f"https://{hostname}{endpoint['path']}?page=1&per_Page=500"
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1222,15 +1222,15 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                     logger.info(f"[UKG-SYNC] [{job_id}] Skipping disabled endpoint: {endpoint_name}")
                     continue
                 
-                # Add filter params to URL (always include per_page)
+                # Add filter params to URL (always include per_Page)
                 if filter_params:
                     param_str = '&'.join(f"{k}={v}" for k, v in filter_params.items())
                     url = f"{base_url}?{param_str}"
                     logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with params: {filter_params}")
                 else:
-                    # Even with no filters, add page and per_page for efficiency
-                    url = f"{base_url}?page=1&per_page=500"
-                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default page=1&per_page=500")
+                    # Even with no filters, add page and per_Page for efficiency
+                    url = f"{base_url}?page=1&per_Page=500"
+                    logger.warning(f"[UKG-SYNC] [{job_id}] Fetching with default page=1&per_Page=500")
                 
                 try:
                     data = await fetch_all_pages(client, url, headers, job_id)
@@ -1585,7 +1585,7 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     # Always request max page size for efficiency (except for endpoints that don't support it)
     if endpoint_name not in ['employee_changes']:
         params['page'] = '1'  # Start at page 1
-        params['per_page'] = '500'  # UKG default is 100, max varies by endpoint
+        params['per_Page'] = '500'  # UKG default is 100, max varies by endpoint
     
     statuses = endpoint_config.get('statuses', [])
     term_cutoff = endpoint_config.get('term_cutoff_date')
