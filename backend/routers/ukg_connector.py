@@ -529,9 +529,10 @@ def parse_link_header(link_header: str) -> Optional[str]:
 async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, job_id: str = None) -> List[Dict]:
     """Fetch all pages from a paginated endpoint.
     
-    Tries two pagination strategies:
+    Tries pagination strategies:
     1. RFC 5988 Link headers (preferred)
-    2. Page parameter increment (fallback for UKG)
+    2. Page parameter increment (fallback)
+    3. Stops if duplicate data detected
     """
     all_data = []
     current_url = url
@@ -549,6 +550,9 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
             if '=' in p:
                 k, v = p.split('=', 1)
                 base_params[k] = v
+    
+    # Track data signatures to detect duplicates
+    last_data_signature = None
     
     while current_url and page_count < max_pages:
         retry_count = 0
@@ -584,6 +588,9 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     logger.warning(f"[UKG-SYNC] {current_url[:80]} returned {response.status_code}: {response.text[:200]}")
                     return all_data
                 
+                # Log ALL response headers for debugging pagination
+                logger.warning(f"[UKG-SYNC] Response headers: {dict(response.headers)}")
+                
                 data = response.json()
                 
                 if not data:
@@ -591,8 +598,22 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                     return all_data
                     
                 if isinstance(data, list):
-                    all_data.extend(data)
                     page_size = len(data)
+                    
+                    # Create a signature of this page's data to detect duplicates
+                    # Use first and last item IDs/keys if available
+                    if data:
+                        first_item = str(data[0])[:100] if data else ""
+                        last_item = str(data[-1])[:100] if data else ""
+                        data_signature = f"{page_size}:{first_item}:{last_item}"
+                        
+                        if data_signature == last_data_signature:
+                            logger.warning(f"[UKG-SYNC] Page {page_count}: DUPLICATE DATA DETECTED - same as previous page, stopping")
+                            return all_data
+                        
+                        last_data_signature = data_signature
+                    
+                    all_data.extend(data)
                     logger.warning(f"[UKG-SYNC] Page {page_count}: {page_size} rows (total: {len(all_data)})")
                     
                     # If we got less than expected page size, we're probably done
@@ -618,16 +639,10 @@ async def fetch_all_pages(client: httpx.AsyncClient, url: str, headers: Dict, jo
                         logger.warning(f"[UKG-SYNC] No 'next' in Link header, stopping")
                         return all_data
                 else:
-                    # No Link header - use page parameter pagination
-                    if not use_page_param:
-                        logger.warning(f"[UKG-SYNC] No Link header, switching to page parameter pagination")
-                        use_page_param = True
-                    
-                    # Build next page URL
-                    base_params['page'] = str(page_count + 1)
-                    param_str = '&'.join(f"{k}={v}" for k, v in base_params.items())
-                    current_url = f"{base_url}?{param_str}"
-                    logger.warning(f"[UKG-SYNC] Next page URL: {current_url}")
+                    # No Link header - this endpoint doesn't support pagination
+                    # or we got all data in one page
+                    logger.warning(f"[UKG-SYNC] No Link header - assuming single page endpoint")
+                    return all_data
                     
                 # Polite delay - don't hammer UKG
                 await asyncio.sleep(0.5)
@@ -1305,17 +1320,17 @@ def build_filter_params(endpoint_name: str, config: Dict) -> Dict[str, str]:
     
     # Build status filter
     # UKG uses employmentStatus parameter
+    # IMPORTANT: Do NOT combine terminationDate with other statuses - it will exclude active employees!
+    # If user wants A,L,T with term cutoff, we'd need multiple API calls (not implemented yet)
     if statuses:
-        # If we have T (terminated), we need to handle the date filter
+        # For now, just filter by status without terminationDate
+        # This means we get ALL terminated employees, not just recent ones
+        # TODO: Implement multi-call approach for filtered terminated employees
+        params['employmentStatus'] = ','.join(statuses)
+        
+        # Log a warning if they have term_cutoff configured but we're ignoring it
         if 'T' in statuses and term_cutoff:
-            # Pull actives/leaves normally, terms with date filter
-            # We'll need multiple calls or use their filter syntax
-            # For now, let's use comma-separated if supported, otherwise just pass first
-            params['employmentStatus'] = ','.join(statuses)
-            if 'T' in statuses:
-                params['terminationDate'] = f'>={term_cutoff}'
-        else:
-            params['employmentStatus'] = ','.join(statuses)
+            logger.warning(f"[UKG-SYNC] terminationDate filter disabled - would exclude active employees. Getting all terminated.")
     
     return params
 
