@@ -1162,3 +1162,143 @@ async def sync_registry_tables():
     except Exception as e:
         logger.error(f"[ADMIN] Registry sync failed: {e}")
         raise HTTPException(500, str(e))
+
+
+# =============================================================================
+# TERM MAPPINGS (Natural Language Query Configuration)
+# =============================================================================
+
+@router.get("/learning/term-mappings/pending")
+async def get_pending_term_mappings(project_id: str = None, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Get pending term mappings awaiting review."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    pending = learning.get_pending_term_mappings(project_id)
+    
+    if project_id:
+        return pending
+    else:
+        # Return all projects' pending mappings
+        return pending
+
+
+@router.get("/learning/term-mappings/approved")
+async def get_approved_term_mappings(project_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Get approved term mappings for a project."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    return learning.get_approved_term_mappings(project_id)
+
+
+@router.post("/learning/term-mappings/approve/{project_id}/{mapping_index}")
+async def approve_term_mapping(project_id: str, mapping_index: int, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Approve a specific pending term mapping."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    success = learning.approve_term_mapping(project_id, mapping_index, approved_by=user.email if hasattr(user, 'email') else 'admin')
+    
+    if success:
+        # Sync to DuckDB
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        learning.sync_term_mappings_to_duckdb(handler.conn, project_id)
+        
+        return {"success": True, "message": "Mapping approved and synced"}
+    else:
+        raise HTTPException(400, "Failed to approve mapping")
+
+
+@router.post("/learning/term-mappings/approve-all/{project_id}")
+async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Approve all pending term mappings above confidence threshold."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    count = learning.approve_all_term_mappings(project_id, min_confidence, approved_by=user.email if hasattr(user, 'email') else 'admin')
+    
+    if count > 0:
+        # Sync to DuckDB
+        try:
+            from utils.structured_data_handler import get_structured_handler
+        except ImportError:
+            from backend.utils.structured_data_handler import get_structured_handler
+        
+        handler = get_structured_handler()
+        learning.sync_term_mappings_to_duckdb(handler.conn, project_id)
+    
+    return {"success": True, "approved_count": count}
+
+
+@router.post("/learning/term-mappings/reject/{project_id}/{mapping_index}")
+async def reject_term_mapping(project_id: str, mapping_index: int, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Reject a pending term mapping."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    success = learning.reject_term_mapping(project_id, mapping_index, rejected_by=user.email if hasattr(user, 'email') else 'admin')
+    
+    if success:
+        return {"success": True, "message": "Mapping rejected"}
+    else:
+        raise HTTPException(400, "Failed to reject mapping")
+
+
+@router.post("/learning/term-mappings/discover/{project_id}")
+async def discover_term_mappings(project_id: str, vendor: str = "UKG", product: str = "Pro", user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Manually trigger term mapping discovery for a project."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        from backend.utils.structured_data_handler import get_structured_handler
+    
+    learning = get_learning_system()
+    handler = get_structured_handler()
+    
+    discovered = learning.discover_term_mappings(handler.conn, project_id, vendor, product)
+    
+    return {
+        "success": True,
+        "discovered_count": len(discovered),
+        "mappings": discovered
+    }
+
+
+@router.get("/learning/term-mappings/stats")
+async def get_term_mapping_stats(user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+    """Get term mapping statistics."""
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    learning = get_learning_system()
+    stats = learning.get_stats()
+    
+    return stats.get('term_mappings', {})
