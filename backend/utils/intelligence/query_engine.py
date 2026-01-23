@@ -76,6 +76,7 @@ class QueryContext:
     detected_intent: QueryIntent
     detected_entities: List[str]  # ["employee", "deduction", etc]
     detected_filters: Dict[str, str]  # {"state": "Texas", "status": "active"}
+    business_rules: List['BusinessRule'] = field(default_factory=list)  # From BusinessRuleInterpreter
 
 
 @dataclass
@@ -88,6 +89,385 @@ class QueryResult:
     columns: List[str] = field(default_factory=list)
     error: Optional[str] = None
     error_type: Optional[str] = None  # "no_table", "bad_column", "syntax", "empty"
+
+
+# =============================================================================
+# BUSINESS RULE INTERPRETER (Learning-based)
+# =============================================================================
+
+@dataclass
+class BusinessRule:
+    """A business rule - either learned or pending confirmation."""
+    pattern: str           # Pattern key (e.g., "by_date", "as_of")
+    description: str       # Human-readable explanation
+    sql_template: str      # SQL fragment to apply
+    parameters: Dict[str, str]  # e.g., {"column": "lastHireDate", "grouping": "year"}
+    source: str = "learned"  # "learned", "pending", "default"
+
+
+@dataclass
+class ClarificationRequest:
+    """A request for user clarification."""
+    pattern: str
+    question: str
+    options: List[Dict[str, str]]  # [{display, value, description}, ...]
+    context: str  # Additional context for the user
+
+
+class BusinessRuleInterpreter:
+    """
+    Learns business rules through clarification questions.
+    
+    Empty on day 1, smart by day 30.
+    """
+    
+    # Patterns we can detect and need rules for
+    DETECTABLE_PATTERNS = {
+        'by_date': {
+            'regex': r'\bby\s+date\b',
+            'question': "Which date field do you want to use?",
+            'options_query': "date",  # Search for date columns
+        },
+        'as_of': {
+            'regex': r'\bas\s+of\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})',
+            'question': "How should I interpret 'as of {date}'?",
+            'options': [
+                {'display': 'Hired on/before that date AND not terminated before it', 'value': 'point_in_time_hire_term'},
+                {'display': 'Status was Active on that date', 'value': 'status_on_date'},
+                {'display': 'Let me explain...', 'value': 'custom'},
+            ]
+        },
+        'active': {
+            'regex': r'\bactive\b',
+            'question': "How do you define 'active' employees?",
+            'options_query': "status",  # Search for status columns and values
+        },
+        'terminated': {
+            'regex': r'\bterminated\b',
+            'question': "How do you define 'terminated' employees?",
+            'options_query': "status",
+        },
+        'headcount': {
+            'regex': r'\bheadcount\b',
+            'question': "What should headcount include?",
+            'options': [
+                {'display': 'Active employees only (status A or L)', 'value': 'active_only'},
+                {'display': 'All employees regardless of status', 'value': 'all'},
+                {'display': 'Let me explain...', 'value': 'custom'},
+            ]
+        },
+        'by_company': {
+            'regex': r'\bby\s+company\b',
+            'question': "How should I display company?",
+            'options_query': "company",  # Search for company columns
+        },
+        'by_department': {
+            'regex': r'\bby\s+(?:department|dept)\b',
+            'question': "How should I display department?",
+            'options_query': "department",
+        },
+    }
+    
+    def __init__(self, conn=None, project: str = None, vendor: str = None, product: str = None):
+        self.conn = conn
+        self.project = project
+        self.vendor = vendor
+        self.product = product
+        self._rules_cache = {}
+        self._column_cache = {}
+        if conn and project:
+            self._load_learned_rules()
+            self._load_schema_info()
+    
+    def _load_learned_rules(self):
+        """Load previously learned business rules from database.
+        
+        Cascades: customer-specific → product-level → vendor-level
+        """
+        try:
+            # Check if table exists
+            tables = self.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_name = '_business_rules'
+            """).fetchall()
+            
+            if not tables:
+                # Create the table with vendor/product columns
+                self.conn.execute("""
+                    CREATE TABLE IF NOT EXISTS _business_rules (
+                        id INTEGER PRIMARY KEY,
+                        project VARCHAR,
+                        vendor VARCHAR,
+                        product VARCHAR,
+                        pattern VARCHAR,
+                        description VARCHAR,
+                        sql_template VARCHAR,
+                        parameters VARCHAR,
+                        source_level VARCHAR DEFAULT 'customer',
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        UNIQUE(project, vendor, product, pattern)
+                    )
+                """)
+                logger.info("[BUSINESS_RULES] Created _business_rules table")
+                return
+            
+            # Check if vendor/product columns exist, add if missing
+            try:
+                self.conn.execute("SELECT vendor FROM _business_rules LIMIT 1")
+            except:
+                logger.info("[BUSINESS_RULES] Adding vendor/product columns to _business_rules")
+                self.conn.execute("ALTER TABLE _business_rules ADD COLUMN vendor VARCHAR")
+                self.conn.execute("ALTER TABLE _business_rules ADD COLUMN product VARCHAR")
+                self.conn.execute("ALTER TABLE _business_rules ADD COLUMN source_level VARCHAR DEFAULT 'customer'")
+            
+            # Load rules with cascade priority: customer > product > vendor
+            # We query all applicable rules and take the most specific one per pattern
+            results = self.conn.execute("""
+                SELECT pattern, description, sql_template, parameters, 
+                       CASE 
+                           WHEN project = ? THEN 3  -- Customer-specific (highest priority)
+                           WHEN project IS NULL AND product = ? THEN 2  -- Product-level
+                           WHEN project IS NULL AND product IS NULL AND vendor = ? THEN 1  -- Vendor-level
+                           ELSE 0
+                       END as priority
+                FROM _business_rules
+                WHERE (project = ? OR project IS NULL)
+                  AND (product = ? OR product IS NULL)
+                  AND (vendor = ? OR vendor IS NULL)
+                ORDER BY pattern, priority DESC
+            """, [self.project, self.product, self.vendor, 
+                  self.project, self.product, self.vendor]).fetchall()
+            
+            # Take highest priority rule per pattern
+            seen_patterns = set()
+            for pattern, description, sql_template, parameters, priority in results:
+                if pattern not in seen_patterns:
+                    self._rules_cache[pattern] = BusinessRule(
+                        pattern=pattern,
+                        description=description,
+                        sql_template=sql_template,
+                        parameters=json.loads(parameters) if parameters else {},
+                        source="learned"
+                    )
+                    seen_patterns.add(pattern)
+            
+            logger.warning(f"[BUSINESS_RULES] Loaded {len(self._rules_cache)} rules for project={self.project}, vendor={self.vendor}, product={self.product}")
+            
+        except Exception as e:
+            logger.warning(f"[BUSINESS_RULES] Could not load rules: {e}")
+    
+    def _load_schema_info(self):
+        """Load column info for building dynamic options."""
+        try:
+            results = self.conn.execute("""
+                SELECT table_name, column_name, data_type
+                FROM _column_profiles
+                WHERE project = ?
+            """, [self.project]).fetchall()
+            
+            for table, column, dtype in results:
+                col_lower = column.lower()
+                # Categorize columns
+                if 'date' in col_lower or dtype in ('DATE', 'TIMESTAMP'):
+                    self._column_cache.setdefault('date', []).append((table, column))
+                if 'status' in col_lower:
+                    self._column_cache.setdefault('status', []).append((table, column))
+                if 'company' in col_lower:
+                    self._column_cache.setdefault('company', []).append((table, column))
+                if 'department' in col_lower or 'dept' in col_lower:
+                    self._column_cache.setdefault('department', []).append((table, column))
+            
+            logger.warning(f"[BUSINESS_RULES] Schema cache: {list(self._column_cache.keys())}")
+            
+        except Exception as e:
+            logger.warning(f"[BUSINESS_RULES] Could not load schema: {e}")
+    
+    def interpret(self, question: str) -> Tuple[List[BusinessRule], Optional[ClarificationRequest]]:
+        """
+        Interpret a question using learned rules.
+        
+        Returns:
+            Tuple of (rules_to_apply, clarification_needed)
+            - If clarification_needed is not None, ask the user first
+            - If rules_to_apply has items, apply them to SQL generation
+        """
+        q_lower = question.lower()
+        rules_to_apply = []
+        
+        # Detect all patterns in the question
+        detected_patterns = []
+        for pattern_key, pattern_info in self.DETECTABLE_PATTERNS.items():
+            match = re.search(pattern_info['regex'], q_lower)
+            if match:
+                detected_patterns.append({
+                    'key': pattern_key,
+                    'match': match,
+                    'info': pattern_info
+                })
+        
+        logger.warning(f"[BUSINESS_RULES] Detected patterns: {[p['key'] for p in detected_patterns]}")
+        
+        # For each detected pattern, check if we have a learned rule
+        for detected in detected_patterns:
+            pattern_key = detected['key']
+            
+            if pattern_key in self._rules_cache:
+                # We have a learned rule - add it for confirmation
+                rule = self._rules_cache[pattern_key]
+                rules_to_apply.append(rule)
+                logger.warning(f"[BUSINESS_RULES] Found learned rule for '{pattern_key}': {rule.description}")
+            else:
+                # No rule yet - need to ask
+                clarification = self._build_clarification(detected)
+                if clarification:
+                    logger.warning(f"[BUSINESS_RULES] Need clarification for '{pattern_key}'")
+                    return ([], clarification)
+        
+        return (rules_to_apply, None)
+    
+    def _build_clarification(self, detected: Dict) -> Optional[ClarificationRequest]:
+        """Build a clarification request for an unlearned pattern."""
+        pattern_key = detected['key']
+        pattern_info = detected['info']
+        match = detected['match']
+        
+        question = pattern_info['question']
+        
+        # Handle date extraction for as_of pattern
+        if pattern_key == 'as_of' and match.groups():
+            date_str = match.group(1)
+            question = question.format(date=date_str)
+        
+        # Build options - either static or dynamic from schema
+        options = []
+        if 'options' in pattern_info:
+            options = pattern_info['options']
+        elif 'options_query' in pattern_info:
+            # Dynamic options from schema
+            category = pattern_info['options_query']
+            columns = self._column_cache.get(category, [])
+            
+            for table, column in columns[:5]:  # Max 5 options
+                # Make human-readable
+                display = self._humanize_column(column)
+                options.append({
+                    'display': f"{display} (from {table})",
+                    'value': f"{table}.{column}",
+                    'description': f"Use {column} column"
+                })
+            
+            if not options:
+                # No columns found - offer generic options
+                options = [
+                    {'display': 'Let me explain what I need...', 'value': 'custom'}
+                ]
+        
+        return ClarificationRequest(
+            pattern=pattern_key,
+            question=question,
+            options=options,
+            context=f"Pattern: {pattern_key}"
+        )
+    
+    def _humanize_column(self, column: str) -> str:
+        """Convert column name to human-readable."""
+        # Handle camelCase
+        s = re.sub('(.)([A-Z][a-z]+)', r'\1 \2', column)
+        s = re.sub('([a-z0-9])([A-Z])', r'\1 \2', s)
+        # Handle snake_case
+        s = s.replace('_', ' ')
+        return s.title()
+    
+    def save_rule(self, pattern: str, description: str, sql_template: str, parameters: Dict, 
+                  level: str = 'customer') -> bool:
+        """Save a learned business rule.
+        
+        Args:
+            pattern: Rule pattern key (e.g., 'by_date')
+            description: Human-readable description
+            sql_template: SQL fragment to apply
+            parameters: Parameters dict
+            level: Where to save - 'customer', 'product', or 'vendor'
+        """
+        try:
+            # Determine project/vendor/product based on level
+            if level == 'customer':
+                project_val = self.project
+                vendor_val = self.vendor
+                product_val = self.product
+            elif level == 'product':
+                project_val = None  # Applies to all customers with this product
+                vendor_val = self.vendor
+                product_val = self.product
+            elif level == 'vendor':
+                project_val = None  # Applies to all customers with this vendor
+                vendor_val = self.vendor
+                product_val = None
+            else:
+                project_val = self.project
+                vendor_val = self.vendor
+                product_val = self.product
+            
+            self.conn.execute("""
+                INSERT INTO _business_rules (project, vendor, product, pattern, description, sql_template, parameters, source_level, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ON CONFLICT (project, vendor, product, pattern) DO UPDATE SET
+                    description = EXCLUDED.description,
+                    sql_template = EXCLUDED.sql_template,
+                    parameters = EXCLUDED.parameters,
+                    source_level = EXCLUDED.source_level,
+                    updated_at = CURRENT_TIMESTAMP
+            """, [project_val, vendor_val, product_val, pattern, description, sql_template, json.dumps(parameters), level])
+            
+            # Update cache
+            self._rules_cache[pattern] = BusinessRule(
+                pattern=pattern,
+                description=description,
+                sql_template=sql_template,
+                parameters=parameters,
+                source="learned"
+            )
+            
+            logger.warning(f"[BUSINESS_RULES] Saved rule at {level} level: {pattern} = {description}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"[BUSINESS_RULES] Failed to save rule: {e}")
+            return False
+    
+    def format_interpretation(self, rules: List[BusinessRule], for_confirmation: bool = True) -> str:
+        """Format rules as human-readable interpretation."""
+        if not rules:
+            return ""
+        
+        if for_confirmation:
+            lines = ["Here's how I'll interpret your question:", ""]
+        else:
+            lines = ["Based on these interpretations:", ""]
+        
+        for rule in rules:
+            lines.append(f"• **{rule.pattern}**: {rule.description}")
+        
+        if for_confirmation:
+            lines.append("")
+            lines.append("Should I proceed?")
+        
+        return "\n".join(lines)
+    
+    def build_sql_conditions(self, rules: List[BusinessRule], question: str) -> List[str]:
+        """Build SQL WHERE conditions from rules."""
+        conditions = []
+        
+        for rule in rules:
+            if rule.sql_template:
+                # Substitute parameters
+                sql = rule.sql_template
+                for key, value in rule.parameters.items():
+                    sql = sql.replace(f"{{{key}}}", value)
+                conditions.append(sql)
+        
+        return conditions
 
 
 @dataclass 
@@ -870,11 +1250,31 @@ class SQLGenerator:
             for key, value in context.detected_filters.items():
                 filter_text += f"  - {key}: {value}\n"
         
+        # Format business rules - these are explicit SQL conditions to apply
+        business_rules_text = ""
+        if hasattr(context, 'business_rules') and context.business_rules:
+            business_rules_text = "\n\n=== BUSINESS RULES (MUST APPLY) ===\n"
+            business_rules_text += "The following interpretations MUST be used:\n"
+            for rule in context.business_rules:
+                business_rules_text += f"\n**{rule.pattern}**: {rule.description}\n"
+                if rule.sql_template:
+                    # Substitute parameters into template
+                    sql_condition = rule.sql_template
+                    for key, value in rule.parameters.items():
+                        sql_condition = sql_condition.replace(f"{{{key}}}", value)
+                    business_rules_text += f"  SQL: {sql_condition}\n"
+                elif hasattr(rule, 'sql_conditions') and rule.sql_conditions:
+                    # Legacy format
+                    for condition in rule.sql_conditions:
+                        business_rules_text += f"  SQL: {condition}\n"
+            business_rules_text += "\nThese conditions are NON-NEGOTIABLE - they define the correct business logic.\n"
+        
         prompt = f"""Given these database tables:
 {schema_text}
 {join_text}
 {term_mapping_text}
 {filter_text}
+{business_rules_text}
 
 User Question: {context.question}
 
@@ -890,6 +1290,7 @@ CRITICAL RULES:
 7. Return ONLY the SQL, no explanations, no markdown, no code fences
 8. WHEN JOINING TABLES: Always qualify column names with table alias (e.g., cd."companyName" not just "companyName")
 9. Use short aliases like ed, cd, pd for tables
+10. APPLY ALL BUSINESS RULES from the section above - these define correct HCM logic
 
 EXAMPLE with JOIN:
 SELECT cd."companyName", COUNT(*) AS count
@@ -1101,13 +1502,22 @@ class ResponseSynthesizer:
         
         # Generate response based on intent
         if context.detected_intent == QueryIntent.COUNT:
-            return self._synthesize_count(context, result)
+            response = self._synthesize_count(context, result)
         elif context.detected_intent == QueryIntent.AGGREGATE:
-            return self._synthesize_aggregate(context, result)
+            response = self._synthesize_aggregate(context, result)
         elif context.detected_intent == QueryIntent.COMPARE:
-            return self._synthesize_comparison(context, result)
+            response = self._synthesize_comparison(context, result)
         else:
-            return self._synthesize_list(context, result)
+            response = self._synthesize_list(context, result)
+        
+        # Add business rules interpretation to the answer (if any were applied)
+        if hasattr(context, 'business_rules') and context.business_rules:
+            rules_note = "\n\n_Based on these interpretations:_\n"
+            for rule in context.business_rules:
+                rules_note += f"• _{rule.description}_\n"
+            response.answer = response.answer + rules_note
+        
+        return response
     
     def _handle_error(self, context: QueryContext, result: QueryResult) -> SynthesizedResponse:
         """Handle query errors with helpful messages."""
@@ -1299,22 +1709,27 @@ class QueryEngine:
         response = engine.ask("how many employees in Texas?")
     """
     
-    def __init__(self, project: str, conn=None, llm_orchestrator=None):
+    def __init__(self, project: str, conn=None, llm_orchestrator=None, vendor: str = None, product: str = None):
         """
         Args:
             project: Project ID/name
             conn: DuckDB connection (optional, will try to get from handler)
             llm_orchestrator: LLM caller (optional)
+            vendor: Vendor name (e.g., 'ukg') for rule inheritance
+            product: Product name (e.g., 'pro') for rule inheritance
         """
         self.project = project
         self.conn = conn
         self.llm = llm_orchestrator
+        self.vendor = vendor
+        self.product = product
         
         # Components
         self.assembler: Optional[ContextAssembler] = None
         self.generator: Optional[SQLGenerator] = None
         self.executor: Optional[QueryExecutor] = None
         self.synthesizer: Optional[ResponseSynthesizer] = None
+        self.rule_interpreter: Optional[BusinessRuleInterpreter] = None
         
         # Initialize if we have a connection
         if conn:
@@ -1326,7 +1741,29 @@ class QueryEngine:
         self.generator = SQLGenerator(self.llm)
         self.executor = QueryExecutor(self.conn)
         self.synthesizer = ResponseSynthesizer(self.llm)
-        logger.info(f"[ENGINE] Initialized for project: {self.project}")
+        self.rule_interpreter = BusinessRuleInterpreter(
+            self.conn, 
+            self.project,
+            vendor=self.vendor,
+            product=self.product
+        )
+        logger.info(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
+    
+    def set_vendor_product(self, vendor: str = None, product: str = None):
+        """Set vendor/product after initialization (for dynamic loading)."""
+        if vendor:
+            self.vendor = vendor
+        if product:
+            self.product = product
+        # Reinitialize rule interpreter with new values
+        if self.conn and (vendor or product):
+            self.rule_interpreter = BusinessRuleInterpreter(
+                self.conn,
+                self.project,
+                vendor=self.vendor,
+                product=self.product
+            )
+            logger.info(f"[ENGINE] Updated vendor/product: {self.vendor}/{self.product}")
     
     def load_context(self, structured_handler=None, **kwargs):
         """
@@ -1339,7 +1776,7 @@ class QueryEngine:
             self._init_components()
             logger.info("[ENGINE] Loaded context from structured handler")
     
-    def ask(self, question: str, mode=None, context: Dict = None) -> SynthesizedResponse:
+    def ask(self, question: str, mode=None, context: Dict = None, skip_confirmation: bool = False) -> SynthesizedResponse:
         """
         Answer a question.
         
@@ -1349,6 +1786,7 @@ class QueryEngine:
             question: Natural language question
             mode: Ignored (for compatibility)
             context: Additional context (for compatibility)
+            skip_confirmation: If True, skip rule confirmation step (user already confirmed)
             
         Returns:
             SynthesizedResponse (compatible with old SynthesizedAnswer)
@@ -1388,6 +1826,61 @@ class QueryEngine:
             
             logger.warning(f"[ENGINE] STEP 1 COMPLETE: Found {len(query_context.tables)} tables: {[t.table_name for t in query_context.tables]}")
             
+            # Step 1.5: Apply Business Rules (Learning-based)
+            logger.warning(f"[ENGINE] STEP 1.5: Interpreting business rules...")
+            learned_rules = []
+            if self.rule_interpreter:
+                rules, clarification = self.rule_interpreter.interpret(question)
+                
+                # Check if clarification needed (pattern detected but no learned rule)
+                if clarification:
+                    logger.warning(f"[ENGINE] BUSINESS RULE CLARIFICATION NEEDED: {clarification.question}")
+                    response = SynthesizedResponse(
+                        answer=None,
+                        sql="",
+                        confidence=0.0,
+                        needs_clarification=True,
+                        clarification_question=clarification.question,
+                        clarification_options=clarification.options,
+                        clarification_key=clarification.pattern  # Use pattern as key for storage
+                    )
+                    response._question = question
+                    return response
+                
+                # We have learned rules - present for confirmation (unless skipped)
+                if rules:
+                    learned_rules = rules
+                    query_context.business_rules = rules
+                    
+                    if skip_confirmation:
+                        # User already confirmed - skip to execution
+                        logger.warning(f"[ENGINE] STEP 1.5: {len(rules)} rules confirmed, skipping to execution")
+                    else:
+                        # Need confirmation first
+                        interpretation = self.rule_interpreter.format_interpretation(rules, for_confirmation=True)
+                        logger.warning(f"[ENGINE] STEP 1.5: Found {len(rules)} learned rules, presenting for confirmation")
+                        
+                        # Build SQL with rules to show what we'll execute
+                        preview_sql, _ = self.generator.generate(query_context)
+                        
+                        response = SynthesizedResponse(
+                            answer=None,
+                            sql=preview_sql or "",
+                            confidence=0.0,
+                            needs_clarification=True,
+                            clarification_question=interpretation,
+                            clarification_options=[
+                                {'display': 'Yes, proceed', 'value': 'confirm'},
+                                {'display': 'No, let me clarify', 'value': 'reject'}
+                            ],
+                            clarification_key='rule_confirmation'
+                        )
+                        response._interpretation = [r.description for r in rules]
+                        response._question = question
+                        return response
+                
+                logger.warning(f"[ENGINE] STEP 1.5 COMPLETE: {'Rules applied' if learned_rules else 'No business rules needed'}")
+            
             # Step 2: Generate SQL (NO FALLBACK)
             logger.warning(f"[ENGINE] STEP 2: Generating SQL...")
             sql, sql_error = self.generator.generate(query_context)
@@ -1416,25 +1909,9 @@ class QueryEngine:
             
             logger.warning(f"[ENGINE] STEP 2 COMPLETE: SQL generated")
             
-            # Step 2.5: Check if we should confirm interpretation (complex queries)
-            intent_check = self._check_intent_confirmation(question, query_context, sql)
-            if intent_check:
-                logger.warning(f"[ENGINE] INTENT CONFIRMATION: {intent_check['type']}")
-                # For now, show interpretation but also execute
-                # Future: could make this blocking with user confirmation
-                response = SynthesizedResponse(
-                    answer=None,  # Will be filled after execution
-                    sql=sql,
-                    confidence=0.0,
-                    needs_clarification=True,
-                    clarification_question=intent_check['message'],
-                    clarification_options=[],  # Not options, just confirmation
-                    clarification_key='intent_confirmation'
-                )
-                # Store interpretation for later use
-                response._interpretation = intent_check['interpretation']
-                response._question = question
-                return response
+            # Step 2.5: Intent confirmation disabled - business rules handle clarification earlier
+            # The BusinessRuleInterpreter in Step 1.5 now handles ambiguous queries
+            # and provides explicit SQL conditions for known patterns
             
             # Step 3: Execute SQL
             logger.warning(f"[ENGINE] STEP 3: Executing SQL...")
