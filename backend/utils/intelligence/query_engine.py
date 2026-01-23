@@ -104,6 +104,12 @@ class SynthesizedResponse:
     suggestions: List[str] = field(default_factory=list)
     citations: List[str] = field(default_factory=list)
     
+    # Clarification fields
+    needs_clarification: bool = False
+    clarification_question: Optional[str] = None
+    clarification_options: List[Dict] = field(default_factory=list)
+    clarification_key: Optional[str] = None  # For storing preference after answer
+    
     # =========================================================================
     # COMPATIBILITY PROPERTIES (for old code expecting SynthesizedAnswer)
     # =========================================================================
@@ -130,8 +136,18 @@ class SynthesizedResponse:
     @property
     def structured_output(self) -> Optional[Dict]:
         """Compatibility: old code checks structured_output for clarification."""
-        # We don't use clarification in QueryEngine, so return None
-        # unless we have suggestions (which could be exposed as follow-ups)
+        # Handle clarification responses
+        if self.needs_clarification:
+            return {
+                'type': 'clarification_needed',
+                'questions': [{
+                    'question': self.clarification_question,
+                    'options': self.clarification_options,
+                    'learning_key': self.clarification_key
+                }],
+                'detected_domains': ['data']
+            }
+        # Regular data response
         if self.suggestions:
             return {
                 'type': 'data_response',
@@ -1400,6 +1416,26 @@ class QueryEngine:
             
             logger.warning(f"[ENGINE] STEP 2 COMPLETE: SQL generated")
             
+            # Step 2.5: Check if we should confirm interpretation (complex queries)
+            intent_check = self._check_intent_confirmation(question, query_context, sql)
+            if intent_check:
+                logger.warning(f"[ENGINE] INTENT CONFIRMATION: {intent_check['type']}")
+                # For now, show interpretation but also execute
+                # Future: could make this blocking with user confirmation
+                response = SynthesizedResponse(
+                    answer=None,  # Will be filled after execution
+                    sql=sql,
+                    confidence=0.0,
+                    needs_clarification=True,
+                    clarification_question=intent_check['message'],
+                    clarification_options=[],  # Not options, just confirmation
+                    clarification_key='intent_confirmation'
+                )
+                # Store interpretation for later use
+                response._interpretation = intent_check['interpretation']
+                response._question = question
+                return response
+            
             # Step 3: Execute SQL
             logger.warning(f"[ENGINE] STEP 3: Executing SQL...")
             result = self.executor.execute(sql)
@@ -1434,6 +1470,145 @@ class QueryEngine:
             )
             response._question = question
             return response
+    
+    def _check_intent_confirmation(self, question: str, context: QueryContext, sql: str) -> Optional[Dict]:
+        """
+        Check if we should confirm our interpretation before executing.
+        
+        For complex queries, we explain what we're about to do in plain English
+        and ask for confirmation. This builds trust and captures business rules.
+        
+        Returns:
+            Dict with confirmation message and interpreted logic, or None if no confirmation needed
+        """
+        try:
+            q_lower = question.lower()
+            
+            # Skip confirmation for simple queries or explicit "just do it" phrases
+            skip_phrases = ['just', 'simply', 'quick', 'exactly']
+            if any(phrase in q_lower for phrase in skip_phrases):
+                return None
+            
+            # Detect queries that warrant confirmation
+            needs_confirmation = False
+            interpretation_parts = []
+            
+            # 1. "As of" date queries - complex business logic
+            if 'as of' in q_lower:
+                needs_confirmation = True
+                # Extract the date
+                import re
+                date_match = re.search(r'as of\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}[/-]\d{1,2}[/-]\d{1,2})', q_lower)
+                if date_match:
+                    date_str = date_match.group(1)
+                    interpretation_parts.append(f"Point-in-time as of {date_str}")
+                    interpretation_parts.append("Including employees with status Active (A) or Leave (L)")
+                    interpretation_parts.append(f"With hire date on or before {date_str}")
+            
+            # 2. Status terms that have implicit meaning
+            status_terms = {
+                'active': "status = 'A' (Active)",
+                'terminated': "status = 'T' (Terminated)",
+                'on leave': "status = 'L' (Leave)",
+                'inactive': "status NOT IN ('A', 'L')"
+            }
+            for term, meaning in status_terms.items():
+                if term in q_lower and 'as of' not in q_lower:  # as of handles its own status
+                    interpretation_parts.append(f"Filtering to {meaning}")
+            
+            # 3. Aggregations with groupings
+            if any(word in q_lower for word in ['average', 'total', 'sum', 'by']):
+                # Extract what we're aggregating
+                if 'salary' in q_lower:
+                    interpretation_parts.append("Calculating salary figures")
+                if 'count' in q_lower or 'how many' in q_lower:
+                    interpretation_parts.append("Counting employees")
+                
+                # Extract grouping
+                by_match = re.search(r'\bby\s+(\w+)', q_lower)
+                if by_match:
+                    dimension = by_match.group(1)
+                    interpretation_parts.append(f"Grouped by {dimension}")
+            
+            # 4. Time-based comparisons
+            if any(word in q_lower for word in ['last year', 'this year', 'ytd', 'year to date', 'previous']):
+                needs_confirmation = True
+                interpretation_parts.append("Using time-based comparison logic")
+            
+            # Only confirm if we have complex interpretation to share
+            if needs_confirmation or len(interpretation_parts) >= 2:
+                # Build the confirmation message
+                interpretation = "\n".join(f"• {part}" for part in interpretation_parts)
+                
+                # Add SQL summary (simplified)
+                sql_summary = self._summarize_sql_logic(sql)
+                if sql_summary:
+                    interpretation += f"\n\nSQL approach: {sql_summary}"
+                
+                return {
+                    'type': 'intent_confirmation',
+                    'message': f"Here's how I'm interpreting your question:\n\n{interpretation}\n\nShould I proceed with this?",
+                    'interpretation': interpretation_parts,
+                    'sql_preview': sql[:200] + '...' if len(sql) > 200 else sql,
+                    'original_question': question
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"[ENGINE] Intent confirmation check failed: {e}")
+            return None
+    
+    def _summarize_sql_logic(self, sql: str) -> str:
+        """Convert SQL to a brief plain-English summary."""
+        try:
+            sql_upper = sql.upper()
+            parts = []
+            
+            # Detect aggregation
+            if 'COUNT(*)' in sql_upper:
+                parts.append("counting records")
+            elif 'AVG(' in sql_upper:
+                parts.append("calculating average")
+            elif 'SUM(' in sql_upper:
+                parts.append("calculating total")
+            
+            # Detect grouping
+            if 'GROUP BY' in sql_upper:
+                parts.append("grouped by dimension")
+            
+            # Detect filtering
+            if 'WHERE' in sql_upper:
+                parts.append("with filters applied")
+            
+            # Detect joins
+            if 'JOIN' in sql_upper:
+                parts.append("joining related tables")
+            
+            return ", ".join(parts) if parts else None
+            
+        except:
+            return None
+    
+    def _load_preferences(self) -> Dict[str, str]:
+        """Load stored user preferences from _term_mappings."""
+        preferences = {}
+        try:
+            results = self.conn.execute("""
+                SELECT term, employee_column 
+                FROM _term_mappings 
+                WHERE project = ? AND mapping_type = 'user_preference'
+            """, [self.project]).fetchall()
+            
+            for term, value in results:
+                preferences[term] = value
+            
+            if preferences:
+                logger.warning(f"[ENGINE] Loaded {len(preferences)} user preferences")
+        except Exception as e:
+            logger.debug(f"[ENGINE] Could not load preferences: {e}")
+        
+        return preferences
     
     # =========================================================================
     # COMPATIBILITY PROPERTIES (for old code that accesses engine properties)
