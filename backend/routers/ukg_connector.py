@@ -25,6 +25,16 @@ from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+# Import learning system for term mapping discovery
+try:
+    from utils.learning_engine import get_learning_system
+except ImportError:
+    try:
+        from backend.utils.learning_engine import get_learning_system
+    except ImportError:
+        get_learning_system = None
+        logger.warning("[UKG] Learning system not available")
+
 router = APIRouter(prefix="/ukg", tags=["ukg-connector"])
 
 
@@ -1474,6 +1484,22 @@ async def run_sync_job(job_id: str, project_id: str, conn_data: Dict):
                 logger.info(f"[UKG-SYNC] [{job_id}] Org level mappings extracted")
             except Exception as org_err:
                 logger.warning(f"[UKG-SYNC] Could not extract org level mappings: {org_err}")
+            
+            # v5.4: Auto-discover term mappings for natural language queries
+            try:
+                if get_learning_system:
+                    job['current_step'] = 'Discovering term mappings...'
+                    learning = get_learning_system()
+                    discovered = learning.discover_term_mappings(handler.conn, project_id, 'UKG', 'Pro')
+                    logger.info(f"[UKG-SYNC] [{job_id}] Discovered {len(discovered)} potential term mappings for review")
+                    
+                    # Auto-approve high-confidence mappings (>= 0.85)
+                    auto_approved = learning.approve_all_term_mappings(project_id, min_confidence=0.85)
+                    if auto_approved > 0:
+                        learning.sync_term_mappings_to_duckdb(handler.conn, project_id)
+                        logger.info(f"[UKG-SYNC] [{job_id}] Auto-approved and synced {auto_approved} high-confidence mappings")
+            except Exception as term_err:
+                logger.warning(f"[UKG-SYNC] Could not discover term mappings: {term_err}")
             
             # v5.2: Auto-compute context graph after sync
             try:
