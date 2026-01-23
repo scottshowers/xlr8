@@ -707,7 +707,7 @@ UNIVERSAL_LOOKUP_PATTERNS = {
         'display_term': 'department'
     },
     'company': {
-        'table_patterns': ['company', 'companies', 'legal_entity', 'legalentity'],
+        'table_patterns': ['company', 'companies', 'company_details', 'companydetails', 'legal_entity', 'legalentity'],
         'fk_patterns': ['companycode', 'companyid', 'legalentitycode'],
         'display_term': 'company'
     },
@@ -869,15 +869,37 @@ class TermMappingEngine:
         for table in tables:
             col_names_lower = [c['name'].lower() for c in table['columns']]
             
-            has_code = any(c in col_names_lower for c in ['code', 'id', 'key'])
-            has_description = any(c in col_names_lower for c in ['description', 'name', 'desc', 'title'])
+            # Check for code-like columns (exact or ends with code/id)
+            has_code = any(c in ['code', 'id', 'key'] or c.endswith('code') or c.endswith('id') 
+                         for c in col_names_lower)
+            # Check for description-like columns (exact or ends with name/description)
+            has_description = any(c in ['description', 'name', 'desc', 'title'] or 
+                                 c.endswith('name') or c.endswith('description')
+                                 for c in col_names_lower)
             is_small = table['row_count'] < 1000
             
             if has_code and has_description and is_small:
-                code_col = next((c['name'] for c in table['columns'] 
-                               if c['name'].lower() in ['code', 'id', 'key']), None)
-                desc_col = next((c['name'] for c in table['columns'] 
-                               if c['name'].lower() in ['description', 'name', 'desc', 'title']), None)
+                # Find the best code column
+                code_col = None
+                for c in table['columns']:
+                    cl = c['name'].lower()
+                    if cl in ['code', 'id', 'key']:
+                        code_col = c['name']
+                        break
+                    elif cl.endswith('code') or cl.endswith('id'):
+                        code_col = c['name']
+                        # Keep looking for better match
+                
+                # Find the best description column
+                desc_col = None
+                for c in table['columns']:
+                    cl = c['name'].lower()
+                    if cl in ['description', 'name', 'desc', 'title']:
+                        desc_col = c['name']
+                        break
+                    elif cl.endswith('name') or cl.endswith('description'):
+                        desc_col = c['name']
+                        # Keep looking for better match
                 
                 if code_col and desc_col:
                     lookup_tables.append({
@@ -886,6 +908,7 @@ class TermMappingEngine:
                         'description_column': desc_col,
                         'row_count': table['row_count']
                     })
+                    logger.warning(f"[TERM-DISCOVERY] Found lookup table: {table['name']} ({code_col} -> {desc_col})")
         
         return lookup_tables
     
