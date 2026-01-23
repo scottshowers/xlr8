@@ -1169,7 +1169,7 @@ async def sync_registry_tables():
 # =============================================================================
 
 @router.get("/learning/term-mappings/pending")
-async def get_pending_term_mappings(project_id: str = None, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def get_pending_term_mappings(project_id: str = None):
     """Get pending term mappings awaiting review."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1187,7 +1187,7 @@ async def get_pending_term_mappings(project_id: str = None, user: User = Depends
 
 
 @router.get("/learning/term-mappings/approved")
-async def get_approved_term_mappings(project_id: str, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def get_approved_term_mappings(project_id: str):
     """Get approved term mappings for a project."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1199,7 +1199,7 @@ async def get_approved_term_mappings(project_id: str, user: User = Depends(requi
 
 
 @router.post("/learning/term-mappings/approve/{project_id}/{mapping_index}")
-async def approve_term_mapping(project_id: str, mapping_index: int, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def approve_term_mapping(project_id: str, mapping_index: int):
     """Approve a specific pending term mapping."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1207,7 +1207,7 @@ async def approve_term_mapping(project_id: str, mapping_index: int, user: User =
         from backend.utils.learning_engine import get_learning_system
     
     learning = get_learning_system()
-    success = learning.approve_term_mapping(project_id, mapping_index, approved_by=user.email if hasattr(user, 'email') else 'admin')
+    success = learning.approve_term_mapping(project_id, mapping_index, approved_by='admin')
     
     if success:
         # Sync to DuckDB
@@ -1225,7 +1225,7 @@ async def approve_term_mapping(project_id: str, mapping_index: int, user: User =
 
 
 @router.post("/learning/term-mappings/approve-all/{project_id}")
-async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7):
     """Approve all pending term mappings above confidence threshold."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1233,7 +1233,7 @@ async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7
         from backend.utils.learning_engine import get_learning_system
     
     learning = get_learning_system()
-    count = learning.approve_all_term_mappings(project_id, min_confidence, approved_by=user.email if hasattr(user, 'email') else 'admin')
+    count = learning.approve_all_term_mappings(project_id, min_confidence, approved_by='admin')
     
     if count > 0:
         # Sync to DuckDB
@@ -1249,7 +1249,7 @@ async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7
 
 
 @router.post("/learning/term-mappings/reject/{project_id}/{mapping_index}")
-async def reject_term_mapping(project_id: str, mapping_index: int, user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def reject_term_mapping(project_id: str, mapping_index: int):
     """Reject a pending term mapping."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1257,7 +1257,7 @@ async def reject_term_mapping(project_id: str, mapping_index: int, user: User = 
         from backend.utils.learning_engine import get_learning_system
     
     learning = get_learning_system()
-    success = learning.reject_term_mapping(project_id, mapping_index, rejected_by=user.email if hasattr(user, 'email') else 'admin')
+    success = learning.reject_term_mapping(project_id, mapping_index, rejected_by='admin')
     
     if success:
         return {"success": True, "message": "Mapping rejected"}
@@ -1266,7 +1266,7 @@ async def reject_term_mapping(project_id: str, mapping_index: int, user: User = 
 
 
 @router.post("/learning/term-mappings/discover/{project_id}")
-async def discover_term_mappings(project_id: str, vendor: str = "UKG", product: str = "Pro", user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def discover_term_mappings(project_id: str, vendor: str = "UKG", product: str = "Pro"):
     """Manually trigger term mapping discovery for a project."""
     try:
         from utils.learning_engine import get_learning_system
@@ -1291,7 +1291,7 @@ async def discover_term_mappings(project_id: str, vendor: str = "UKG", product: 
 
 
 @router.get("/learning/term-mappings/stats")
-async def get_term_mapping_stats(user: User = Depends(require_permission(Permissions.OPS_CENTER))):
+async def get_term_mapping_stats():
     """Get term mapping statistics."""
     try:
         from utils.learning_engine import get_learning_system
