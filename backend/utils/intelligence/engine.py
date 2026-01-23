@@ -2389,122 +2389,158 @@ DO NOT:
                 
                 # Fallback to hardcoded synonyms for common cases
                 elif not group_by_column:
-                    dimension_synonyms = {
-                        'state': 'stateprovince',
-                        'states': 'stateprovince',
-                        'province': 'stateprovince',
-                        'department': 'department',
-                        'dept': 'department',
-                        'location': 'location_code',
-                        'status': 'employee_status',
-                        'type': 'employee_type',
-                        'company': 'company_code',
-                        'job': 'job_code',
-                        'job code': 'job_code',  # EVOLUTION 10: Multi-word
-                        'pay': 'pay_group',
-                        'pay group': 'pay_group',  # EVOLUTION 10: Multi-word
-                        'pay period': 'pay_period',  # EVOLUTION 10: Multi-word
-                        'gender': 'gender',
-                        'city': 'city',
-                        'country': 'country_code',
-                        'employee type': 'employee_type',  # EVOLUTION 10: Multi-word
-                        'employment status': 'employment_status_code',  # EVOLUTION 10: Multi-word
-                        'term reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
-                        'termination reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
-                    }
+                    # EVOLUTION 11: Check _term_mappings for lookup mappings first
+                    try:
+                        lookup_mapping = term_index.conn.execute("""
+                            SELECT lookup_table, lookup_display_column
+                            FROM _term_mappings
+                            WHERE project = ?
+                            AND mapping_type = 'lookup'
+                            AND LOWER(term) = LOWER(?)
+                            LIMIT 1
+                        """, [term_index.project, group_by_dimension]).fetchone()
+                        
+                        if lookup_mapping:
+                            lookup_table, lookup_display = lookup_mapping
+                            group_by_column = f"{lookup_table}.{lookup_display}"
+                            logger.warning(f"[DETERMINISTIC] GROUP BY from lookup mapping: '{group_by_dimension}' → {group_by_column}")
+                            
+                            # Add synthetic match to ensure the lookup table is joined
+                            from backend.utils.intelligence.term_index import TermMatch
+                            synthetic_match = TermMatch(
+                                term=group_by_dimension,
+                                table_name=lookup_table,
+                                column_name=lookup_display,
+                                operator='GROUP BY',
+                                match_value='',
+                                domain=parsed.domain.value,
+                                entity='lookup',
+                                confidence=0.95,
+                                term_type='lookup_groupby',
+                                source='term_mapping_lookup'
+                            )
+                            term_matches = [synthetic_match] + term_matches
+                    except Exception as lookup_err:
+                        logger.warning(f"[DETERMINISTIC] Lookup mapping check failed: {lookup_err}")
                     
-                    if group_by_dimension in dimension_synonyms:
-                        column_name = dimension_synonyms[group_by_dimension]
-                        logger.warning(f"[DETERMINISTIC] GROUP BY synonym: '{group_by_dimension}' → {column_name}")
-                        
-                        # EVOLUTION 10: Find a table with this column, prioritized by domain
-                        # Use domain to determine table preference patterns
-                        domain_table_patterns = {
-                            'demographics': ['employee', 'personal', '_us_1_'],
-                            'earnings': ['earning', 'pay', 'wage'],
-                            'deductions': ['deduction', 'benefit'],
-                            'taxes': ['tax', 'fit', 'sit', 'withhold'],
-                            'time': ['time', 'attendance', 'schedule'],
+                    # Fall through to hardcoded synonyms if no lookup mapping found
+                    if not group_by_column:
+                        dimension_synonyms = {
+                            'state': 'stateprovince',
+                            'states': 'stateprovince',
+                            'province': 'stateprovince',
+                            'department': 'department',
+                            'dept': 'department',
+                            'location': 'location_code',
+                            'status': 'employee_status',
+                            'type': 'employee_type',
+                            'company': 'company_code',
+                            'job': 'job_code',
+                            'job code': 'job_code',  # EVOLUTION 10: Multi-word
+                            'pay': 'pay_group',
+                            'pay group': 'pay_group',  # EVOLUTION 10: Multi-word
+                            'pay period': 'pay_period',  # EVOLUTION 10: Multi-word
+                            'gender': 'gender',
+                            'city': 'city',
+                            'country': 'country_code',
+                            'employee type': 'employee_type',  # EVOLUTION 10: Multi-word
+                            'employment status': 'employment_status_code',  # EVOLUTION 10: Multi-word
+                            'term reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
+                            'termination reason': 'termination_reason_code',  # EVOLUTION 10: Multi-word
                         }
-                        
-                        preferred_patterns = domain_table_patterns.get(parsed.domain.value, ['employee'])
-                        
-                        try:
-                            # First try: Find table matching domain patterns (exclude config)
-                            found_table = None
-                            logger.warning(f"[DETERMINISTIC] Looking for column '{column_name}' in domain '{parsed.domain.value}' with patterns: {preferred_patterns}")
+                    
+                        if group_by_dimension in dimension_synonyms:
+                            column_name = dimension_synonyms[group_by_dimension]
+                            logger.warning(f"[DETERMINISTIC] GROUP BY synonym: '{group_by_dimension}' → {column_name}")
                             
-                            # Debug: Show ALL tables that have this column
-                            all_tables = term_index.conn.execute("""
-                                SELECT table_name, column_name FROM _column_profiles
-                                WHERE project = ? AND LOWER(column_name) = LOWER(?)
-                                LIMIT 10
-                            """, [term_index.project, column_name]).fetchall()
-                            if all_tables:
-                                logger.warning(f"[DETERMINISTIC] Tables with column '{column_name}': {[t[0][-30:] for t in all_tables]}")
-                            else:
-                                logger.warning(f"[DETERMINISTIC] No tables found with column '{column_name}' in _column_profiles")
+                            # EVOLUTION 10: Find a table with this column, prioritized by domain
+                            # Use domain to determine table preference patterns
+                            domain_table_patterns = {
+                                'demographics': ['employee', 'personal', '_us_1_'],
+                                'earnings': ['earning', 'pay', 'wage'],
+                                'deductions': ['deduction', 'benefit'],
+                                'taxes': ['tax', 'fit', 'sit', 'withhold'],
+                                'time': ['time', 'attendance', 'schedule'],
+                            }
                             
-                            for pattern in preferred_patterns:
-                                result = term_index.conn.execute("""
-                                    SELECT DISTINCT table_name FROM _column_profiles
-                                    WHERE project = ? 
-                                    AND LOWER(column_name) = LOWER(?)
-                                    AND LOWER(table_name) LIKE ?
-                                    AND LOWER(table_name) NOT LIKE '%config%'
-                                    AND LOWER(table_name) NOT LIKE '%validation%'
-                                    ORDER BY table_name
-                                    LIMIT 1
-                                """, [term_index.project, column_name, f'%{pattern}%']).fetchone()
-                                if result:
-                                    found_table = result[0]
-                                    logger.warning(f"[DETERMINISTIC] Found {parsed.domain.value} table with {column_name}: {found_table}")
-                                    break
+                            preferred_patterns = domain_table_patterns.get(parsed.domain.value, ['employee'])
                             
-                            # Fallback: Any non-config table with this column
-                            if not found_table:
-                                result = term_index.conn.execute("""
-                                    SELECT DISTINCT table_name FROM _column_profiles
-                                    WHERE project = ? 
-                                    AND LOWER(column_name) = LOWER(?)
-                                    AND LOWER(table_name) NOT LIKE '%config%'
-                                    AND LOWER(table_name) NOT LIKE '%validation%'
-                                    ORDER BY table_name
-                                    LIMIT 1
-                                """, [term_index.project, column_name]).fetchone()
-                                if result:
-                                    found_table = result[0]
-                                    logger.warning(f"[DETERMINISTIC] Found fallback table with {column_name}: {found_table}")
-                            
-                            if found_table:
-                                group_by_column = f"{found_table}.{column_name}"
+                            try:
+                                # First try: Find table matching domain patterns (exclude config)
+                                found_table = None
+                                logger.warning(f"[DETERMINISTIC] Looking for column '{column_name}' in domain '{parsed.domain.value}' with patterns: {preferred_patterns}")
                                 
-                                # Add synthetic match to term_matches
-                                from backend.utils.intelligence.term_index import TermMatch
-                                synthetic_match = TermMatch(
-                                    term=column_name,
-                                    table_name=found_table,
-                                    column_name=column_name,
-                                    operator='GROUP BY',
-                                    match_value='',
-                                    domain=parsed.domain.value,
-                                    entity='employee' if parsed.domain.value == 'demographics' else 'unknown',
-                                    confidence=0.85,
-                                    term_type='synonym_lookup',
-                                    source='synonym_table_lookup'
-                                )
-                                term_matches = [synthetic_match] + term_matches
-                                logger.warning(f"[DETERMINISTIC] Added synonym lookup table to term_matches: {found_table}")
-                            else:
+                                # Debug: Show ALL tables that have this column
+                                all_tables = term_index.conn.execute("""
+                                    SELECT table_name, column_name FROM _column_profiles
+                                    WHERE project = ? AND LOWER(column_name) = LOWER(?)
+                                    LIMIT 10
+                                """, [term_index.project, column_name]).fetchall()
+                                if all_tables:
+                                    logger.warning(f"[DETERMINISTIC] Tables with column '{column_name}': {[t[0][-30:] for t in all_tables]}")
+                                else:
+                                    logger.warning(f"[DETERMINISTIC] No tables found with column '{column_name}' in _column_profiles")
+                                
+                                for pattern in preferred_patterns:
+                                    result = term_index.conn.execute("""
+                                        SELECT DISTINCT table_name FROM _column_profiles
+                                        WHERE project = ? 
+                                        AND LOWER(column_name) = LOWER(?)
+                                        AND LOWER(table_name) LIKE ?
+                                        AND LOWER(table_name) NOT LIKE '%config%'
+                                        AND LOWER(table_name) NOT LIKE '%validation%'
+                                        ORDER BY table_name
+                                        LIMIT 1
+                                    """, [term_index.project, column_name, f'%{pattern}%']).fetchone()
+                                    if result:
+                                        found_table = result[0]
+                                        logger.warning(f"[DETERMINISTIC] Found {parsed.domain.value} table with {column_name}: {found_table}")
+                                        break
+                                
+                                # Fallback: Any non-config table with this column
+                                if not found_table:
+                                    result = term_index.conn.execute("""
+                                        SELECT DISTINCT table_name FROM _column_profiles
+                                        WHERE project = ? 
+                                        AND LOWER(column_name) = LOWER(?)
+                                        AND LOWER(table_name) NOT LIKE '%config%'
+                                        AND LOWER(table_name) NOT LIKE '%validation%'
+                                        ORDER BY table_name
+                                        LIMIT 1
+                                    """, [term_index.project, column_name]).fetchone()
+                                    if result:
+                                        found_table = result[0]
+                                        logger.warning(f"[DETERMINISTIC] Found fallback table with {column_name}: {found_table}")
+                                
+                                if found_table:
+                                    group_by_column = f"{found_table}.{column_name}"
+                                    
+                                    # Add synthetic match to term_matches
+                                    from backend.utils.intelligence.term_index import TermMatch
+                                    synthetic_match = TermMatch(
+                                        term=column_name,
+                                        table_name=found_table,
+                                        column_name=column_name,
+                                        operator='GROUP BY',
+                                        match_value='',
+                                        domain=parsed.domain.value,
+                                        entity='employee' if parsed.domain.value == 'demographics' else 'unknown',
+                                        confidence=0.85,
+                                        term_type='synonym_lookup',
+                                        source='synonym_table_lookup'
+                                    )
+                                    term_matches = [synthetic_match] + term_matches
+                                    logger.warning(f"[DETERMINISTIC] Added synonym lookup table to term_matches: {found_table}")
+                                else:
+                                    group_by_column = column_name
+                                    logger.warning(f"[DETERMINISTIC] No table found with column {column_name}, using column name only")
+                            except Exception as e:
+                                logger.warning(f"[DETERMINISTIC] Synonym table lookup failed: {e}")
                                 group_by_column = column_name
-                                logger.warning(f"[DETERMINISTIC] No table found with column {column_name}, using column name only")
-                        except Exception as e:
-                            logger.warning(f"[DETERMINISTIC] Synonym table lookup failed: {e}")
-                            group_by_column = column_name
-                    else:
-                        # Last resort: use the word as-is (might be a column name)
-                        group_by_column = group_by_dimension
-                        logger.warning(f"[DETERMINISTIC] GROUP BY using raw: '{group_by_dimension}'")
+                        else:
+                            # Last resort: use the word as-is (might be a column name)
+                            group_by_column = group_by_dimension
+                            logger.warning(f"[DETERMINISTIC] GROUP BY using raw: '{group_by_dimension}'")
             
             # Step 5: Assemble SQL
             # EVOLUTION 8: Filter out concept matches - they're handled via group_by_column, not WHERE
