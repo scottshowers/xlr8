@@ -820,6 +820,10 @@ async def unified_chat(request: UnifiedChatRequest):
     redactor = ReversibleRedactor()
     citation_builder = CitationBuilder()
     
+    # Initialize answer (may be set by intent confirmation before engine.ask)
+    answer = None
+    auto_applied_facts = {}
+    
     try:
         # Phase 5F: Multi-product support - get product_id from customer metadata
         product_id = None
@@ -946,6 +950,92 @@ async def unified_chat(request: UnifiedChatRequest):
             
             # Record to learning module
         
+        # v5.0: Detect intent confirmation responses (yes, proceed, correct, etc.)
+        elif session.get('pending_sql') and session.get('pending_clarification_question'):
+            msg_lower = message.lower().strip()
+            confirmation_phrases = ['yes', 'proceed', 'correct', 'looks good', 'go ahead', 'do it', 'run it', 'execute', 'that\'s right', 'perfect', 'exactly', 'yep', 'yeah', 'sure', 'ok', 'okay']
+            rejection_phrases = ['no', 'wrong', 'incorrect', 'not quite', 'actually', 'wait', 'stop', 'cancel']
+            
+            is_confirmation = any(phrase in msg_lower for phrase in confirmation_phrases)
+            is_rejection = any(phrase in msg_lower for phrase in rejection_phrases)
+            
+            if is_confirmation and not is_rejection:
+                # User confirmed - execute the stored SQL
+                pending_sql = session.pop('pending_sql')
+                original_question = session.pop('pending_clarification_question')
+                session.pop('pending_interpretation', None)
+                
+                logger.warning(f"[UNIFIED] Intent CONFIRMED - executing pending SQL: {pending_sql[:100]}...")
+                
+                # Execute directly
+                try:
+                    if engine and hasattr(engine, 'executor') and engine.executor:
+                        result = engine.executor.execute(pending_sql)
+                        
+                        if result.success:
+                            # Synthesize response
+                            if hasattr(engine, 'synthesizer') and engine.synthesizer:
+                                # Create minimal context for synthesis
+                                from backend.utils.intelligence.query_engine import QueryContext, QueryIntent
+                                minimal_context = QueryContext(
+                                    question=original_question,
+                                    tables=[],
+                                    join_paths=[],
+                                    detected_intent=QueryIntent.GENERAL,
+                                    detected_entities=[],
+                                    detected_filters={}
+                                )
+                                response = engine.synthesizer.synthesize(minimal_context, result)
+                                answer = response
+                                logger.warning(f"[UNIFIED] Confirmed query executed successfully: {result.row_count} rows")
+                            else:
+                                # Simple answer if no synthesizer
+                                answer = type('Answer', (), {
+                                    'answer': f"Query executed successfully. {result.row_count} rows returned.",
+                                    'confidence': 0.9,
+                                    'sql': pending_sql,
+                                    'structured_output': {'type': 'data_response', 'sql': pending_sql},
+                                    'question': original_question,
+                                    'from_reality': [], 'from_intent': [], 'from_configuration': [],
+                                    'from_reference': [], 'from_regulatory': [], 'from_compliance': [],
+                                    'conflicts': [], 'insights': [], 'truths': [], 'reasoning': []
+                                })()
+                        else:
+                            # Execution failed
+                            answer = type('Answer', (), {
+                                'answer': f"I tried to execute the query but got an error: {result.error}",
+                                'confidence': 0.0,
+                                'sql': pending_sql,
+                                'structured_output': {'type': 'error'},
+                                'question': original_question,
+                                'from_reality': [], 'from_intent': [], 'from_configuration': [],
+                                'from_reference': [], 'from_regulatory': [], 'from_compliance': [],
+                                'conflicts': [], 'insights': [], 'truths': [], 'reasoning': []
+                            })()
+                except Exception as e:
+                    logger.error(f"[UNIFIED] Error executing confirmed SQL: {e}")
+                    # Fall through to normal processing
+            
+            elif is_rejection:
+                # User rejected - ask what was wrong
+                session.pop('pending_sql', None)
+                original_question = session.pop('pending_clarification_question', '')
+                session.pop('pending_interpretation', None)
+                
+                logger.warning(f"[UNIFIED] Intent REJECTED by user")
+                
+                # Ask for correction
+                answer = type('Answer', (), {
+                    'answer': f"Got it. What should I change about my interpretation? You can tell me the correct logic, and I'll adjust.",
+                    'confidence': 0.5,
+                    'sql': '',
+                    'structured_output': {'type': 'learning'},
+                    'question': message,
+                    'from_reality': [], 'from_intent': [], 'from_configuration': [],
+                    'from_reference': [], 'from_regulatory': [], 'from_compliance': [],
+                    'conflicts': [], 'insights': [], 'truths': [], 'reasoning': []
+                })()
+        
         # v4.0: Auto-detect scope clarification responses
         # If we have a pending question and the message looks like a scope value, auto-apply it
         elif session.get('pending_clarification_question'):
@@ -1015,8 +1105,9 @@ async def unified_chat(request: UnifiedChatRequest):
             except Exception as e:
                 logger.warning(f"[UNIFIED] Learning check error: {e}")
         
-        # ASK THE INTELLIGENCE ENGINE
-        answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
+        # ASK THE INTELLIGENCE ENGINE (only if not already answered by intent confirmation)
+        if answer is None:
+            answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
         
         # Check if we can skip clarification using learning
         # BUT only after the first interaction in a session (let users see clarification first)
@@ -1600,6 +1691,13 @@ async def unified_chat(request: UnifiedChatRequest):
             
             # v4.0: Store the original question so we can use it after clarification
             session['pending_clarification_question'] = message
+            
+            # v5.0: Store pending SQL for intent confirmation
+            if hasattr(answer, 'sql') and answer.sql:
+                session['pending_sql'] = answer.sql
+                session['pending_interpretation'] = getattr(answer, '_interpretation', [])
+                logger.warning(f"[UNIFIED] Stored pending SQL for confirmation: {answer.sql[:100]}...")
+            
             logger.warning(f"[UNIFIED] Stored pending question for clarification: {message[:50]}...")
         
         # Update session
@@ -1921,8 +2019,47 @@ async def submit_clarification(request: ClarificationAnswer):
     if not engine:
         raise HTTPException(400, "Session has no active engine")
     
-    # Store confirmed facts
+    # Store confirmed facts (works for old engine)
     engine.confirmed_facts.update(request.answers)
+    
+    # Store preference for future sessions (learning)
+    try:
+        # Extract learning_key and selected value from answers
+        for key, value in request.answers.items():
+            if key.endswith('_preference') or key.endswith('_column_preference'):
+                # This is a preference we should learn
+                logger.info(f"[UNIFIED] Storing clarification preference: {key} = {value}")
+                
+                # Store to session preferences
+                if 'preferences' not in session:
+                    session['preferences'] = {}
+                session['preferences'][key] = value
+                
+                # Also store to term_mappings for cross-session learning
+                project = session.get('project') or getattr(engine, 'project', None)
+                if project and STRUCTURED_AVAILABLE:
+                    try:
+                        handler = get_structured_handler()
+                        if handler and handler.conn:
+                            # Store as a user preference mapping
+                            handler.conn.execute("""
+                                INSERT INTO _term_mappings 
+                                (id, project, term, term_lower, employee_column, mapping_type)
+                                VALUES (?, ?, ?, ?, ?, 'user_preference')
+                                ON CONFLICT DO UPDATE SET employee_column = EXCLUDED.employee_column
+                            """, [
+                                hash(f"{project}_{key}") % 2147483647,
+                                project,
+                                key,
+                                key.lower(),
+                                str(value)  # The selected column/value
+                            ])
+                            handler.conn.execute("CHECKPOINT")
+                            logger.info(f"[UNIFIED] Stored preference to _term_mappings: {key} = {value}")
+                    except Exception as e:
+                        logger.warning(f"[UNIFIED] Could not persist preference: {e}")
+    except Exception as e:
+        logger.warning(f"[UNIFIED] Error processing clarification answers: {e}")
     
     # Re-ask the original question
     answer = engine.ask(request.original_question)
