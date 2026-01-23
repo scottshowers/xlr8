@@ -1198,6 +1198,7 @@ async def get_approved_term_mappings(project_id: str):
     return learning.get_approved_term_mappings(project_id)
 
 
+@router.get("/learning/term-mappings/approve/{project_id}/{mapping_index}")
 @router.post("/learning/term-mappings/approve/{project_id}/{mapping_index}")
 async def approve_term_mapping(project_id: str, mapping_index: int):
     """Approve a specific pending term mapping."""
@@ -1224,6 +1225,7 @@ async def approve_term_mapping(project_id: str, mapping_index: int):
         raise HTTPException(400, "Failed to approve mapping")
 
 
+@router.get("/learning/term-mappings/approve-all/{project_id}")
 @router.post("/learning/term-mappings/approve-all/{project_id}")
 async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7):
     """Approve all pending term mappings above confidence threshold."""
@@ -1248,6 +1250,7 @@ async def approve_all_term_mappings(project_id: str, min_confidence: float = 0.7
     return {"success": True, "approved_count": count}
 
 
+@router.get("/learning/term-mappings/reject/{project_id}/{mapping_index}")
 @router.post("/learning/term-mappings/reject/{project_id}/{mapping_index}")
 async def reject_term_mapping(project_id: str, mapping_index: int):
     """Reject a pending term mapping."""
@@ -1265,6 +1268,7 @@ async def reject_term_mapping(project_id: str, mapping_index: int):
         raise HTTPException(400, "Failed to reject mapping")
 
 
+@router.get("/learning/term-mappings/discover/{project_id}")
 @router.post("/learning/term-mappings/discover/{project_id}")
 async def discover_term_mappings(project_id: str, vendor: str = "UKG", product: str = "Pro"):
     """Manually trigger term mapping discovery for a project."""
