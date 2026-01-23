@@ -978,7 +978,7 @@ async def unified_chat(request: UnifiedChatRequest):
             logger.warning(f"[UNIFIED] No clarifications in request (clarifications={request.clarifications})")
         
         # v5.0: Detect intent confirmation responses (yes, proceed, correct, etc.)
-        elif session.get('pending_sql') and session.get('pending_clarification_question'):
+        if not request.clarifications and session.get('pending_sql') and session.get('pending_clarification_question'):
             msg_lower = message.lower().strip()
             confirmation_phrases = ['yes', 'proceed', 'correct', 'looks good', 'go ahead', 'do it', 'run it', 'execute', 'that\'s right', 'perfect', 'exactly', 'yep', 'yeah', 'sure', 'ok', 'okay']
             rejection_phrases = ['no', 'wrong', 'incorrect', 'not quite', 'actually', 'wait', 'stop', 'cancel']
