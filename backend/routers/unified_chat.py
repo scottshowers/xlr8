@@ -825,8 +825,9 @@ async def unified_chat(request: UnifiedChatRequest):
     auto_applied_facts = {}
     
     try:
-        # Phase 5F: Multi-product support - get product_id from customer metadata
+        # Phase 5F: Multi-product support - get product_id and vendor from customer metadata
         product_id = None
+        vendor_id = None
         if customer_id and SUPABASE_AVAILABLE:
             try:
                 supabase = get_supabase()
@@ -834,9 +835,10 @@ async def unified_chat(request: UnifiedChatRequest):
                 if result.data:
                     metadata = result.data[0].get('metadata', {}) or {}
                     product_id = metadata.get('product')
-                    logger.info(f"[UNIFIED] Product ID: {product_id}")
+                    vendor_id = metadata.get('vendor')
+                    logger.info(f"[UNIFIED] Product ID: {product_id}, Vendor: {vendor_id}")
             except Exception as e:
-                logger.warning(f"[UNIFIED] Could not get product_id: {e}")
+                logger.warning(f"[UNIFIED] Could not get product/vendor: {e}")
         
         # Use customer_id (UUID) for DuckDB operations - term_index stores data by UUID
         # v5.3: Fixed - was using project name but data indexed by UUID
@@ -853,6 +855,9 @@ async def unified_chat(request: UnifiedChatRequest):
             # Phase 5F: Load product schema if changed (V2 only)
             if hasattr(engine, '_load_product_schema') and product_id and getattr(engine, 'product_id', None) != product_id:
                 engine._load_product_schema(product_id)
+            # Set vendor/product on existing QueryEngine
+            if hasattr(engine, 'set_vendor_product') and (vendor_id or product_id):
+                engine.set_vendor_product(vendor=vendor_id, product=product_id)
         elif USE_QUERY_ENGINE and QUERY_ENGINE_AVAILABLE:
             # NEW PATH: Use simplified QueryEngine
             logger.warning("[UNIFIED] Creating QueryEngine (NEW - LLM-enabled SQL)")
@@ -865,7 +870,12 @@ async def unified_chat(request: UnifiedChatRequest):
                 except Exception as e:
                     logger.warning(f"[UNIFIED] LLM orchestrator not available: {e}")
             
-            engine = QueryEngine(project_for_duckdb or 'default', llm_orchestrator=llm)
+            engine = QueryEngine(
+                project_for_duckdb or 'default', 
+                llm_orchestrator=llm,
+                vendor=vendor_id,
+                product=product_id
+            )
             session['engine'] = engine
             session['engine_type'] = 'query_engine'
         elif ENGINE_V2_AVAILABLE:
@@ -2022,14 +2032,71 @@ async def submit_clarification(request: ClarificationAnswer):
     # Store confirmed facts (works for old engine)
     engine.confirmed_facts.update(request.answers)
     
-    # Store preference for future sessions (learning)
+    # Handle different types of clarifications
     try:
-        # Extract learning_key and selected value from answers
         for key, value in request.answers.items():
-            if key.endswith('_preference') or key.endswith('_column_preference'):
-                # This is a preference we should learn
-                logger.info(f"[UNIFIED] Storing clarification preference: {key} = {value}")
+            logger.info(f"[UNIFIED] Processing clarification: {key} = {value}")
+            
+            # Handle rule confirmation (user said yes/no to proceed)
+            if key == 'rule_confirmation':
+                if value == 'confirm':
+                    # User confirmed - execute the pending SQL
+                    pending_sql = session.get('pending_sql')
+                    if pending_sql:
+                        logger.info(f"[UNIFIED] Rule confirmed - executing pending SQL")
+                        # Execute will happen via normal re-ask below
+                        # But skip the confirmation step this time
+                        session['skip_rule_confirmation'] = True
+                elif value == 'reject':
+                    # User rejected - clear pending and ask for clarification
+                    session.pop('pending_sql', None)
+                    session.pop('pending_interpretation', None)
+                    logger.info(f"[UNIFIED] Rule rejected by user")
+                    return {
+                        "session_id": request.session_id,
+                        "question": request.original_question,
+                        "confidence": 0.0,
+                        "answer": "Got it. What should I change about my interpretation? Tell me the correct logic and I'll remember it.",
+                        "needs_clarification": False
+                    }
+            
+            # Handle business rule pattern answers (e.g., "by_date" -> user selected a column)
+            elif key in ['by_date', 'as_of', 'active', 'terminated', 'headcount', 'by_company', 'by_department']:
+                # User answered a pattern clarification - save as business rule
+                project = session.get('project') or getattr(engine, 'project', None)
                 
+                if project and STRUCTURED_AVAILABLE and hasattr(engine, 'rule_interpreter'):
+                    try:
+                        # Parse the value to build the rule
+                        # Value format: "table.column" for column selections
+                        # or predefined values like "point_in_time_hire_term"
+                        
+                        if '.' in str(value):
+                            # Column selection (e.g., "employment_details.lastHireDate")
+                            table, column = value.split('.', 1)
+                            description = f"Group by {column} from {table}"
+                            sql_template = f'"{column}"'  # Will be used in GROUP BY
+                            parameters = {'table': table, 'column': column}
+                        else:
+                            # Predefined option
+                            description = f"Using interpretation: {value}"
+                            sql_template = ""  # Will be built based on value
+                            parameters = {'interpretation': value}
+                        
+                        # Save the rule
+                        engine.rule_interpreter.save_rule(
+                            pattern=key,
+                            description=description,
+                            sql_template=sql_template,
+                            parameters=parameters
+                        )
+                        logger.info(f"[UNIFIED] Saved business rule: {key} = {description}")
+                        
+                    except Exception as e:
+                        logger.warning(f"[UNIFIED] Could not save business rule: {e}")
+            
+            # Handle legacy preference storage
+            elif key.endswith('_preference') or key.endswith('_column_preference'):
                 # Store to session preferences
                 if 'preferences' not in session:
                     session['preferences'] = {}
@@ -2041,7 +2108,6 @@ async def submit_clarification(request: ClarificationAnswer):
                     try:
                         handler = get_structured_handler()
                         if handler and handler.conn:
-                            # Store as a user preference mapping
                             handler.conn.execute("""
                                 INSERT INTO _term_mappings 
                                 (id, project, term, term_lower, employee_column, mapping_type)
@@ -2052,17 +2118,23 @@ async def submit_clarification(request: ClarificationAnswer):
                                 project,
                                 key,
                                 key.lower(),
-                                str(value)  # The selected column/value
+                                str(value)
                             ])
                             handler.conn.execute("CHECKPOINT")
                             logger.info(f"[UNIFIED] Stored preference to _term_mappings: {key} = {value}")
                     except Exception as e:
                         logger.warning(f"[UNIFIED] Could not persist preference: {e}")
+                        
     except Exception as e:
         logger.warning(f"[UNIFIED] Error processing clarification answers: {e}")
     
-    # Re-ask the original question
-    answer = engine.ask(request.original_question)
+    # Re-ask the original question (with rules now applied)
+    # Pass skip_confirmation if user confirmed a rule
+    skip_confirm = session.pop('skip_rule_confirmation', False)
+    answer = engine.ask(request.original_question, skip_confirmation=skip_confirm)
+    
+    # Clear skip flag
+    session.pop('skip_rule_confirmation', None)
     
     return {
         "session_id": request.session_id,
