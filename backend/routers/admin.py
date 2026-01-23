@@ -1306,3 +1306,58 @@ async def get_term_mapping_stats():
     stats = learning.get_stats()
     
     return stats.get('term_mappings', {})
+
+
+@router.get("/learning/term-mappings/add-lookup/{project_id}")
+async def add_lookup_mapping(
+    project_id: str,
+    term: str,
+    source_table: str,
+    source_column: str,
+    lookup_table: str,
+    lookup_key: str,
+    lookup_display: str
+):
+    """
+    Manually add a lookup term mapping.
+    
+    Example:
+    /add-lookup/PROJECT_ID?term=company&source_table=employment_details&source_column=companyId&lookup_table=company_details&lookup_key=companyId&lookup_display=companyName
+    """
+    try:
+        from utils.learning_engine import get_learning_system
+    except ImportError:
+        from backend.utils.learning_engine import get_learning_system
+    
+    try:
+        from utils.structured_data_handler import get_structured_handler
+    except ImportError:
+        from backend.utils.structured_data_handler import get_structured_handler
+    
+    learning = get_learning_system()
+    
+    # Add directly to approved
+    mapping = {
+        'concept': term.lower().replace(' ', '_'),
+        'display_term': term,
+        'mapping_type': 'lookup',
+        'source_table': f"{project_id}_api_{source_table}" if not source_table.startswith(project_id) else source_table,
+        'source_column': source_column,
+        'lookup_table': f"{project_id}_api_{lookup_table}" if not lookup_table.startswith(project_id) else lookup_table,
+        'lookup_key_column': lookup_key,
+        'lookup_display_column': lookup_display,
+        'confidence': 1.0,
+        'approved_at': __import__('datetime').datetime.now().isoformat(),
+        'approved_by': 'manual'
+    }
+    
+    if project_id not in learning.term_mappings.approved:
+        learning.term_mappings.approved[project_id] = []
+    learning.term_mappings.approved[project_id].append(mapping)
+    learning.term_mappings._save_approved()
+    
+    # Sync to DuckDB
+    handler = get_structured_handler()
+    learning.sync_term_mappings_to_duckdb(handler.conn, project_id)
+    
+    return {"success": True, "mapping": mapping}
