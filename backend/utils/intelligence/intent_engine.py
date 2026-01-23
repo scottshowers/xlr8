@@ -133,31 +133,31 @@ INTENT_PATTERNS = {
         "question": "What are you trying to understand?",
         "options": [
             {
-                "display": "Headcount trend over time",
+                "display": "Headcount trend - how employee count changes over time",
                 "value": "headcount_trend",
                 "description": "How employee count changes month over month",
                 "intent_params": {"analysis_type": "headcount", "time_dimension": "period"}
             },
             {
-                "display": "Hiring velocity",
+                "display": "Hiring velocity - rate of new hires over time",
                 "value": "hiring_velocity",
                 "description": "Rate of new hires over time",
                 "intent_params": {"analysis_type": "hires", "time_dimension": "hire_date"}
             },
             {
-                "display": "Turnover patterns",
+                "display": "Turnover patterns - when employees leave",
                 "value": "turnover_patterns",
                 "description": "When employees leave",
                 "intent_params": {"analysis_type": "terminations", "time_dimension": "term_date"}
             },
             {
-                "display": "Tenure distribution",
+                "display": "Tenure distribution - how long employees have been here",
                 "value": "tenure_distribution",
                 "description": "How long employees have been here",
                 "intent_params": {"analysis_type": "tenure", "time_dimension": "hire_date"}
             },
             {
-                "display": "Something else - let me explain",
+                "display": "Something else - let me explain what I need",
                 "value": "custom",
                 "description": "I'll describe what I need",
                 "intent_params": {"analysis_type": "custom"}
@@ -180,19 +180,19 @@ INTENT_PATTERNS = {
         "question": "What should 'as of' that date mean?",
         "options": [
             {
-                "display": "Active headcount on that date",
+                "display": "Active headcount on that date - employees who were active (not terminated) as of that date",
                 "value": "active_headcount",
                 "description": "Employees who were active (not terminated) as of that date",
                 "intent_params": {"pit_logic": "active_on_date", "include_statuses": ["A", "L"]}
             },
             {
-                "display": "Everyone employed by that date",
+                "display": "Everyone employed by that date - anyone hired on or before, regardless of current status",
                 "value": "employed_by",
                 "description": "Anyone hired on or before that date, regardless of current status",
                 "intent_params": {"pit_logic": "hired_by_date", "include_statuses": "all"}
             },
             {
-                "display": "Snapshot of data as it was",
+                "display": "Data snapshot - the exact state of records on that date",
                 "value": "data_snapshot",
                 "description": "The exact state of records on that date",
                 "intent_params": {"pit_logic": "snapshot", "include_statuses": "all"}
@@ -213,19 +213,19 @@ INTENT_PATTERNS = {
         "question": "How do you define 'active' for this analysis?",
         "options": [
             {
-                "display": "Active employees only (status A)",
+                "display": "Active employees only (status A) - just those currently working",
                 "value": "active_only",
                 "description": "Just those with Active status",
                 "intent_params": {"status_filter": ["A"]}
             },
             {
-                "display": "Active and on leave (status A or L)",
+                "display": "Active + on leave (status A or L) - typical for headcount reporting",
                 "value": "active_and_leave",
                 "description": "Include those on leave as part of headcount",
                 "intent_params": {"status_filter": ["A", "L"]}
             },
             {
-                "display": "All non-terminated",
+                "display": "All non-terminated - everyone except terms",
                 "value": "all_non_termed",
                 "description": "Everyone except terminated employees",
                 "intent_params": {"status_filter": ["A", "L", "P", "S"]}
@@ -318,19 +318,19 @@ INTENT_PATTERNS = {
         "question": "What kind of comparison do you need?",
         "options": [
             {
-                "display": "Find all differences",
+                "display": "Find all differences - show me everything that doesn't match",
                 "value": "all_differences",
                 "description": "Show me everything that doesn't match",
                 "intent_params": {"comparison_type": "full_diff", "tolerance": "exact"}
             },
             {
-                "display": "Find significant variances only",
+                "display": "Significant variances only - ignore small differences, show material issues",
                 "value": "significant_only",
                 "description": "Ignore small differences, show material issues",
                 "intent_params": {"comparison_type": "material_diff", "tolerance": "threshold"}
             },
             {
-                "display": "Categorize differences by type",
+                "display": "Categorize differences - group discrepancies by root cause type",
                 "value": "categorized",
                 "description": "Group discrepancies by root cause category",
                 "intent_params": {"comparison_type": "categorized", "auto_categorize": True}
