@@ -1777,22 +1777,23 @@ class QueryEngine:
         self.executor = QueryExecutor(self.conn)
         self.synthesizer = ResponseSynthesizer(self.llm)
         
-        # NEW: Only create IntentEngine if it doesn't exist or connection changed
-        # This preserves session memory (_confirmed_intents) across requests
-        if self.intent_engine is None or getattr(self.intent_engine, 'conn', None) != self.conn:
+        # Preserve IntentEngine across requests - don't recreate
+        # This keeps session memory (_confirmed_intents) intact
+        if self.intent_engine is None:
             self.intent_engine = IntentEngine(
                 conn=self.conn, 
                 project=self.project,
                 vendor=self.vendor,
                 product=self.product
             )
-            # Backward compatibility
             self.rule_interpreter = self.intent_engine
-            logger.info(f"[ENGINE] Created new IntentEngine for project: {self.project}")
+            logger.warning(f"[ENGINE] Created NEW IntentEngine for project: {self.project}")
         else:
-            logger.info(f"[ENGINE] Reusing existing IntentEngine for project: {self.project}")
+            # Update connection on existing engine but preserve memory
+            self.intent_engine.conn = self.conn
+            logger.warning(f"[ENGINE] REUSING IntentEngine (confirmed intents: {list(self.intent_engine._confirmed_intents.keys())})")
         
-        logger.info(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
+        logger.warning(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
     
     def set_vendor_product(self, vendor: str = None, product: str = None):
         """Set vendor/product after initialization (for dynamic loading)."""
