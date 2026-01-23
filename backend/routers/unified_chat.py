@@ -948,7 +948,22 @@ async def unified_chat(request: UnifiedChatRequest):
         
         # Apply clarifications if provided
         if request.clarifications:
-            logger.info(f"[UNIFIED] Applying clarifications: {request.clarifications}")
+            logger.warning(f"[UNIFIED] *** CLARIFICATIONS RECEIVED: {request.clarifications}")
+            
+            # NEW: Apply to IntentEngine
+            if hasattr(engine, 'intent_engine') and engine.intent_engine:
+                for pattern_key, value in request.clarifications.items():
+                    if not pattern_key.startswith('_'):
+                        result = engine.intent_engine.apply_clarification(
+                            pattern_key=pattern_key,
+                            value=value,
+                            save_to_project=True
+                        )
+                        logger.warning(f"[UNIFIED] Applied intent clarification: {pattern_key} = {value}, result: {result}")
+            else:
+                logger.warning(f"[UNIFIED] No intent_engine on engine! hasattr={hasattr(engine, 'intent_engine')}")
+            
+            # Legacy: Also update confirmed_facts for backward compatibility
             engine.confirmed_facts.update(request.clarifications)
             session['skip_learning'] = False
             
@@ -959,6 +974,8 @@ async def unified_chat(request: UnifiedChatRequest):
                 message = original_question  # Use original question, not the clarification answer
             
             # Record to learning module
+        else:
+            logger.warning(f"[UNIFIED] No clarifications in request (clarifications={request.clarifications})")
         
         # v5.0: Detect intent confirmation responses (yes, proceed, correct, etc.)
         elif session.get('pending_sql') and session.get('pending_clarification_question'):
