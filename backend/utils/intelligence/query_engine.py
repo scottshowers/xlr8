@@ -1777,15 +1777,20 @@ class QueryEngine:
         self.executor = QueryExecutor(self.conn)
         self.synthesizer = ResponseSynthesizer(self.llm)
         
-        # NEW: Use IntentEngine instead of BusinessRuleInterpreter
-        self.intent_engine = IntentEngine(
-            conn=self.conn, 
-            project=self.project,
-            vendor=self.vendor,
-            product=self.product
-        )
-        # Backward compatibility
-        self.rule_interpreter = self.intent_engine
+        # NEW: Only create IntentEngine if it doesn't exist or connection changed
+        # This preserves session memory (_confirmed_intents) across requests
+        if self.intent_engine is None or getattr(self.intent_engine, 'conn', None) != self.conn:
+            self.intent_engine = IntentEngine(
+                conn=self.conn, 
+                project=self.project,
+                vendor=self.vendor,
+                product=self.product
+            )
+            # Backward compatibility
+            self.rule_interpreter = self.intent_engine
+            logger.info(f"[ENGINE] Created new IntentEngine for project: {self.project}")
+        else:
+            logger.info(f"[ENGINE] Reusing existing IntentEngine for project: {self.project}")
         
         logger.info(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
     
