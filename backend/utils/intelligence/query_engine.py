@@ -518,12 +518,23 @@ class SynthesizedResponse:
         """Compatibility: old code checks structured_output for clarification."""
         # Handle clarification responses
         if self.needs_clarification:
+            # Transform options to frontend format: {display, value} -> {id, label}
+            frontend_options = []
+            for opt in (self.clarification_options or []):
+                frontend_options.append({
+                    'id': opt.get('value', ''),
+                    'label': opt.get('display', ''),
+                    'description': opt.get('description', '')
+                })
+            
             return {
                 'type': 'clarification_needed',
                 'questions': [{
+                    'id': self.clarification_key,  # Frontend uses this as question ID
                     'question': self.clarification_question,
-                    'options': self.clarification_options,
-                    'learning_key': self.clarification_key
+                    'type': 'radio',  # Default to radio buttons
+                    'options': frontend_options,
+                    'learning_key': self.clarification_key  # Keep for backward compat
                 }],
                 'detected_domains': ['data']
             }
@@ -1124,7 +1135,7 @@ class SQLGenerator:
         """
         self.llm = llm_orchestrator
         
-    def generate(self, context: QueryContext) -> Tuple[str, Optional[str]]:
+    def generate(self, context: QueryContext, intent_context: str = "") -> Tuple[str, Optional[str]]:
         """
         Generate SQL for the given context.
         
@@ -1132,6 +1143,7 @@ class SQLGenerator:
         
         Args:
             context: QueryContext with tables, schemas, joins
+            intent_context: Optional resolved intent context from IntentEngine
             
         Returns:
             Tuple of (sql_string, error_message)
@@ -1143,13 +1155,15 @@ class SQLGenerator:
         logger.warning(f"[SQL_GEN] Tables: {[t.table_name for t in context.tables]}")
         logger.warning(f"[SQL_GEN] Filters: {context.detected_filters}")
         logger.warning(f"[SQL_GEN] Joins: {context.join_paths}")
+        if intent_context:
+            logger.warning(f"[SQL_GEN] Intent context provided: {len(intent_context)} chars")
         
         if not self.llm:
             error = "NO LLM CONFIGURED. Cannot generate SQL without LLM."
             logger.error(f"[SQL_GEN] FAILURE: {error}")
             return "", error
         
-        prompt = self._build_prompt(context)
+        prompt = self._build_prompt(context, intent_context=intent_context)
         logger.warning(f"[SQL_GEN] Prompt length: {len(prompt)} chars")
         
         # Log the actual prompt for debugging
@@ -1201,7 +1215,7 @@ class SQLGenerator:
             logger.error(traceback.format_exc())
             return "", error
     
-    def _build_prompt(self, context: QueryContext) -> str:
+    def _build_prompt(self, context: QueryContext, intent_context: str = "") -> str:
         """Build the prompt for SQL generation."""
         
         # Format table schemas - show quoted names so LLM uses them
@@ -1250,7 +1264,12 @@ class SQLGenerator:
             for key, value in context.detected_filters.items():
                 filter_text += f"  - {key}: {value}\n"
         
-        # Format business rules - these are explicit SQL conditions to apply
+        # NEW: Format intent context (from IntentEngine)
+        intent_text = ""
+        if intent_context:
+            intent_text = f"\n\n{intent_context}\n"
+        
+        # Format business rules (legacy - will be deprecated)
         business_rules_text = ""
         if hasattr(context, 'business_rules') and context.business_rules:
             business_rules_text = "\n\n=== BUSINESS RULES (MUST APPLY) ===\n"
@@ -1274,6 +1293,7 @@ class SQLGenerator:
 {join_text}
 {term_mapping_text}
 {filter_text}
+{intent_text}
 {business_rules_text}
 
 User Question: {context.question}
@@ -1290,7 +1310,7 @@ CRITICAL RULES:
 7. Return ONLY the SQL, no explanations, no markdown, no code fences
 8. WHEN JOINING TABLES: Always qualify column names with table alias (e.g., cd."companyName" not just "companyName")
 9. Use short aliases like ed, cd, pd for tables
-10. APPLY ALL BUSINESS RULES from the section above - these define correct HCM logic
+10. If USER INTENT is provided above, use it to guide your SQL logic (e.g., status filters, time dimensions)
 
 EXAMPLE with JOIN:
 SELECT cd."companyName", COUNT(*) AS count
@@ -1473,13 +1493,14 @@ class ResponseSynthesizer:
         """
         self.llm = llm_orchestrator
         
-    def synthesize(self, context: QueryContext, result: QueryResult) -> SynthesizedResponse:
+    def synthesize(self, context: QueryContext, result: QueryResult, intent: 'ResolvedIntent' = None) -> SynthesizedResponse:
         """
         Create a natural language response from query results.
         
         Args:
             context: Original query context
             result: Query execution result
+            intent: Optional resolved intent from IntentEngine
             
         Returns:
             SynthesizedResponse with answer and metadata
@@ -1510,8 +1531,17 @@ class ResponseSynthesizer:
         else:
             response = self._synthesize_list(context, result)
         
-        # Add business rules interpretation to the answer (if any were applied)
-        if hasattr(context, 'business_rules') and context.business_rules:
+        # Add intent interpretation to the answer (if resolved)
+        if intent and intent.description and intent.confidence > 0.5:
+            intent_note = f"\n\n_Analysis based on: {intent.description}_"
+            if intent.parameters:
+                param_parts = [f"{k}={v}" for k, v in intent.parameters.items() if v]
+                if param_parts:
+                    intent_note += f"\n_Parameters: {', '.join(param_parts)}_"
+            response.answer = response.answer + intent_note
+        
+        # Legacy: Add business rules interpretation (will be deprecated)
+        elif hasattr(context, 'business_rules') and context.business_rules:
             rules_note = "\n\n_Based on these interpretations:_\n"
             for rule in context.business_rules:
                 rules_note += f"• _{rule.description}_\n"
@@ -1729,7 +1759,10 @@ class QueryEngine:
         self.generator: Optional[SQLGenerator] = None
         self.executor: Optional[QueryExecutor] = None
         self.synthesizer: Optional[ResponseSynthesizer] = None
-        self.rule_interpreter: Optional[BusinessRuleInterpreter] = None
+        self.intent_engine: Optional['IntentEngine'] = None  # NEW: Replaces rule_interpreter
+        
+        # Backward compatibility alias
+        self.rule_interpreter = None  # Will point to intent_engine
         
         # Initialize if we have a connection
         if conn:
@@ -1737,32 +1770,42 @@ class QueryEngine:
     
     def _init_components(self):
         """Initialize all components."""
+        from backend.utils.intelligence.intent_engine import IntentEngine
+        
         self.assembler = ContextAssembler(self.conn, self.project)
         self.generator = SQLGenerator(self.llm)
         self.executor = QueryExecutor(self.conn)
         self.synthesizer = ResponseSynthesizer(self.llm)
-        self.rule_interpreter = BusinessRuleInterpreter(
-            self.conn, 
-            self.project,
+        
+        # NEW: Use IntentEngine instead of BusinessRuleInterpreter
+        self.intent_engine = IntentEngine(
+            conn=self.conn, 
+            project=self.project,
             vendor=self.vendor,
             product=self.product
         )
+        # Backward compatibility
+        self.rule_interpreter = self.intent_engine
+        
         logger.info(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
     
     def set_vendor_product(self, vendor: str = None, product: str = None):
         """Set vendor/product after initialization (for dynamic loading)."""
+        from backend.utils.intelligence.intent_engine import IntentEngine
+        
         if vendor:
             self.vendor = vendor
         if product:
             self.product = product
-        # Reinitialize rule interpreter with new values
+        # Reinitialize intent engine with new values
         if self.conn and (vendor or product):
-            self.rule_interpreter = BusinessRuleInterpreter(
-                self.conn,
-                self.project,
+            self.intent_engine = IntentEngine(
+                conn=self.conn,
+                project=self.project,
                 vendor=self.vendor,
                 product=self.product
             )
+            self.rule_interpreter = self.intent_engine  # Backward compatibility
             logger.info(f"[ENGINE] Updated vendor/product: {self.vendor}/{self.product}")
     
     def load_context(self, structured_handler=None, **kwargs):
@@ -1776,7 +1819,7 @@ class QueryEngine:
             self._init_components()
             logger.info("[ENGINE] Loaded context from structured handler")
     
-    def ask(self, question: str, mode=None, context: Dict = None, skip_confirmation: bool = False) -> SynthesizedResponse:
+    def ask(self, question: str, mode=None, context: Dict = None, skip_confirmation: bool = False, session_id: str = None) -> SynthesizedResponse:
         """
         Answer a question.
         
@@ -1786,7 +1829,8 @@ class QueryEngine:
             question: Natural language question
             mode: Ignored (for compatibility)
             context: Additional context (for compatibility)
-            skip_confirmation: If True, skip rule confirmation step (user already confirmed)
+            skip_confirmation: If True, skip confirmation step (user already confirmed)
+            session_id: Session ID for workflow capture
             
         Returns:
             SynthesizedResponse (compatible with old SynthesizedAnswer)
@@ -1826,15 +1870,16 @@ class QueryEngine:
             
             logger.warning(f"[ENGINE] STEP 1 COMPLETE: Found {len(query_context.tables)} tables: {[t.table_name for t in query_context.tables]}")
             
-            # Step 1.5: Apply Business Rules (Learning-based)
-            logger.warning(f"[ENGINE] STEP 1.5: Interpreting business rules...")
-            learned_rules = []
-            if self.rule_interpreter:
-                rules, clarification = self.rule_interpreter.interpret(question)
+            # Step 1.5: Analyze Intent (NEW - Consultative Clarification)
+            logger.warning(f"[ENGINE] STEP 1.5: Analyzing user intent...")
+            resolved_intent = None
+            
+            if self.intent_engine:
+                resolved_intent, clarification = self.intent_engine.analyze(question)
                 
-                # Check if clarification needed (pattern detected but no learned rule)
+                # Check if clarification needed
                 if clarification:
-                    logger.warning(f"[ENGINE] BUSINESS RULE CLARIFICATION NEEDED: {clarification.question}")
+                    logger.warning(f"[ENGINE] CLARIFICATION NEEDED: {clarification.question}")
                     response = SynthesizedResponse(
                         answer=None,
                         sql="",
@@ -1842,48 +1887,33 @@ class QueryEngine:
                         needs_clarification=True,
                         clarification_question=clarification.question,
                         clarification_options=clarification.options,
-                        clarification_key=clarification.pattern  # Use pattern as key for storage
+                        clarification_key=clarification.key
                     )
                     response._question = question
                     return response
                 
-                # We have learned rules - present for confirmation (unless skipped)
-                if rules:
-                    learned_rules = rules
-                    query_context.business_rules = rules
+                # We have resolved intent
+                if resolved_intent:
+                    logger.warning(f"[ENGINE] STEP 1.5 COMPLETE: Intent resolved - {resolved_intent.description}")
+                    logger.warning(f"[ENGINE]   Category: {resolved_intent.category.value}")
+                    logger.warning(f"[ENGINE]   Parameters: {resolved_intent.parameters}")
+                    logger.warning(f"[ENGINE]   Confidence: {resolved_intent.confidence}")
                     
-                    if skip_confirmation:
-                        # User already confirmed - skip to execution
-                        logger.warning(f"[ENGINE] STEP 1.5: {len(rules)} rules confirmed, skipping to execution")
-                    else:
-                        # Need confirmation first
-                        interpretation = self.rule_interpreter.format_interpretation(rules, for_confirmation=True)
-                        logger.warning(f"[ENGINE] STEP 1.5: Found {len(rules)} learned rules, presenting for confirmation")
-                        
-                        # Build SQL with rules to show what we'll execute
-                        preview_sql, _ = self.generator.generate(query_context)
-                        
-                        response = SynthesizedResponse(
-                            answer=None,
-                            sql=preview_sql or "",
-                            confidence=0.0,
-                            needs_clarification=True,
-                            clarification_question=interpretation,
-                            clarification_options=[
-                                {'display': 'Yes, proceed', 'value': 'confirm'},
-                                {'display': 'No, let me clarify', 'value': 'reject'}
-                            ],
-                            clarification_key='rule_confirmation'
-                        )
-                        response._interpretation = [r.description for r in rules]
-                        response._question = question
-                        return response
-                
-                logger.warning(f"[ENGINE] STEP 1.5 COMPLETE: {'Rules applied' if learned_rules else 'No business rules needed'}")
+                    # Record step for workflow capture
+                    if session_id:
+                        self.intent_engine.record_step(session_id, resolved_intent, question)
+                else:
+                    logger.warning(f"[ENGINE] STEP 1.5 COMPLETE: No specific intent patterns detected")
             
-            # Step 2: Generate SQL (NO FALLBACK)
+            # Step 2: Generate SQL with intent context
             logger.warning(f"[ENGINE] STEP 2: Generating SQL...")
-            sql, sql_error = self.generator.generate(query_context)
+            
+            # Build intent context for LLM
+            intent_context = ""
+            if resolved_intent and self.intent_engine:
+                intent_context = self.intent_engine.format_for_llm(resolved_intent)
+            
+            sql, sql_error = self.generator.generate(query_context, intent_context=intent_context)
             
             if sql_error:
                 error_msg = f"SQL generation failed: {sql_error}"
@@ -1909,10 +1939,6 @@ class QueryEngine:
             
             logger.warning(f"[ENGINE] STEP 2 COMPLETE: SQL generated")
             
-            # Step 2.5: Intent confirmation disabled - business rules handle clarification earlier
-            # The BusinessRuleInterpreter in Step 1.5 now handles ambiguous queries
-            # and provides explicit SQL conditions for known patterns
-            
             # Step 3: Execute SQL
             logger.warning(f"[ENGINE] STEP 3: Executing SQL...")
             result = self.executor.execute(sql)
@@ -1924,14 +1950,18 @@ class QueryEngine:
             
             # Step 4: Synthesize response
             logger.warning(f"[ENGINE] STEP 4: Synthesizing response...")
-            response = self.synthesizer.synthesize(query_context, result)
+            response = self.synthesizer.synthesize(query_context, result, intent=resolved_intent)
             
             # Set question for compatibility with old interface
             response._question = question
             
+            # Add intent metadata to response
+            if resolved_intent:
+                response._intent = resolved_intent
+            
             logger.warning(f"[ENGINE] STEP 4 COMPLETE: Confidence {response.confidence}")
             logger.warning(f"[ENGINE] ==========================================")
-            logger.warning(f"[ENGINE] FINAL ANSWER: {response.answer[:200]}...")
+            logger.warning(f"[ENGINE] FINAL ANSWER: {response.answer[:200] if response.answer else 'None'}...")
             logger.warning(f"[ENGINE] ==========================================")
             
             return response
