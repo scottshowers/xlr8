@@ -53,6 +53,10 @@ export default function IntelligenceTestPage() {
   const [engineTestResult, setEngineTestResult] = useState({ loading: false, result: null, error: null });
   const [diagnoseStatus, setDiagnoseStatus] = useState({ loading: false, result: null, error: null });
 
+  // Term mapping state
+  const [termMappingStatus, setTermMappingStatus] = useState({ loading: false, pending: null, approved: null, error: null });
+  const [termMappingAction, setTermMappingAction] = useState({ loading: false, message: null, error: null });
+
   // Helper to copy text
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -113,6 +117,96 @@ export default function IntelligenceTestPage() {
       setDiagnoseStatus({ loading: false, result: data, error: null });
     } catch (err) {
       setDiagnoseStatus({ loading: false, result: null, error: err.message });
+    }
+  };
+
+  // Term Mapping Functions
+  const fetchTermMappings = async () => {
+    setTermMappingStatus({ loading: true, pending: null, approved: null, error: null });
+    try {
+      // Use activeProject UUID if available, otherwise use projectId
+      const pid = activeProject?.id || projectId;
+      
+      const [pendingRes, approvedRes] = await Promise.all([
+        fetch(`${API_BASE}/api/admin/learning/term-mappings/pending?project_id=${pid}`, { credentials: 'include' }),
+        fetch(`${API_BASE}/api/admin/learning/term-mappings/approved?project_id=${pid}`, { credentials: 'include' })
+      ]);
+      
+      const pending = await pendingRes.json();
+      const approved = await approvedRes.json();
+      
+      setTermMappingStatus({ 
+        loading: false, 
+        pending: pending?.mappings || pending || [], 
+        approved: approved || [],
+        error: null 
+      });
+    } catch (err) {
+      setTermMappingStatus({ loading: false, pending: null, approved: null, error: err.message });
+    }
+  };
+
+  const discoverTermMappings = async () => {
+    setTermMappingAction({ loading: true, message: null, error: null });
+    try {
+      const pid = activeProject?.id || projectId;
+      const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/discover/${pid}?vendor=UKG&product=Pro`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await response.json();
+      setTermMappingAction({ loading: false, message: `Discovered ${data.discovered_count} mappings`, error: null });
+      fetchTermMappings(); // Refresh
+    } catch (err) {
+      setTermMappingAction({ loading: false, message: null, error: err.message });
+    }
+  };
+
+  const approveTermMapping = async (index) => {
+    setTermMappingAction({ loading: true, message: null, error: null });
+    try {
+      const pid = activeProject?.id || projectId;
+      const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/approve/${pid}/${index}`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await response.json();
+      setTermMappingAction({ loading: false, message: data.message || 'Approved!', error: null });
+      fetchTermMappings(); // Refresh
+    } catch (err) {
+      setTermMappingAction({ loading: false, message: null, error: err.message });
+    }
+  };
+
+  const rejectTermMapping = async (index) => {
+    setTermMappingAction({ loading: true, message: null, error: null });
+    try {
+      const pid = activeProject?.id || projectId;
+      const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/reject/${pid}/${index}`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await response.json();
+      setTermMappingAction({ loading: false, message: data.message || 'Rejected', error: null });
+      fetchTermMappings(); // Refresh
+    } catch (err) {
+      setTermMappingAction({ loading: false, message: null, error: err.message });
+    }
+  };
+
+  const approveAllTermMappings = async (minConfidence = 0.7) => {
+    setTermMappingAction({ loading: true, message: null, error: null });
+    try {
+      const pid = activeProject?.id || projectId;
+      const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/approve-all/${pid}?min_confidence=${minConfidence}`, {
+        method: 'POST',
+        credentials: 'include'
+      });
+      const data = await response.json();
+      setTermMappingAction({ loading: false, message: `Approved ${data.approved_count} mappings`, error: null });
+      fetchTermMappings(); // Refresh
+    } catch (err) {
+      setTermMappingAction({ loading: false, message: null, error: err.message });
     }
   };
 
@@ -657,6 +751,119 @@ export default function IntelligenceTestPage() {
         </div>
       </div>
 
+      {/* Step 5: Term Mappings */}
+      <div className="itp-card" style={{ marginTop: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">5</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">Term Mappings</div>
+            <div className="itp-step-desc">Review and approve discovered schema mappings for natural language queries</div>
+          </div>
+          <button onClick={fetchTermMappings} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
+            {termMappingStatus.loading ? <Loader2 size={14} className="itp-spin" /> : <RefreshCw size={14} />}
+            Load Mappings
+          </button>
+        </div>
+
+        {termMappingAction.message && (
+          <div className="itp-alert" style={{ background: 'rgba(131, 177, 109, 0.1)', border: '1px solid rgba(131, 177, 109, 0.3)', marginBottom: 16 }}>
+            <CheckCircle size={16} style={{ color: 'var(--grass-green)' }} />
+            {termMappingAction.message}
+          </div>
+        )}
+
+        {termMappingAction.error && (
+          <div className="itp-alert itp-alert--error" style={{ marginBottom: 16 }}>
+            <XCircle size={16} />
+            {termMappingAction.error}
+          </div>
+        )}
+
+        {termMappingStatus.error && (
+          <div className="itp-alert itp-alert--error" style={{ marginBottom: 16 }}>
+            {termMappingStatus.error}
+          </div>
+        )}
+
+        {/* Action buttons */}
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+          <button onClick={discoverTermMappings} disabled={termMappingAction.loading} className="btn" style={{ padding: '6px 12px', fontSize: 13 }}>
+            {termMappingAction.loading ? <Loader2 size={14} className="itp-spin" /> : <Search size={14} />}
+            Run Discovery
+          </button>
+          <button onClick={() => approveAllTermMappings(0.7)} disabled={termMappingAction.loading || !termMappingStatus.pending?.length} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
+            {termMappingAction.loading ? <Loader2 size={14} className="itp-spin" /> : <CheckCircle size={14} />}
+            Approve All (≥70%)
+          </button>
+        </div>
+
+        {/* Pending Mappings */}
+        {termMappingStatus.pending && termMappingStatus.pending.length > 0 && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--warning)' }}>
+              Pending Review ({termMappingStatus.pending.length})
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {termMappingStatus.pending.map((mapping, idx) => (
+                <div key={idx} className="itp-term-mapping">
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 600, color: 'var(--grass-green)' }}>"{mapping.display_term}"</span>
+                      <span style={{ fontSize: 11, padding: '2px 6px', background: 'var(--bg-primary)', borderRadius: 4 }}>{mapping.mapping_type}</span>
+                      <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                        {Math.round((mapping.confidence || 0) * 100)}% confidence
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                      {mapping.source_column && <span>{mapping.source_table?.split('_').pop()}.{mapping.source_column}</span>}
+                      {mapping.filter_value && <span> = "{mapping.filter_value}"</span>}
+                      {mapping.lookup_table && <span> → {mapping.lookup_table?.split('_').pop()}</span>}
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 4 }}>
+                    <button onClick={() => approveTermMapping(idx)} disabled={termMappingAction.loading} className="btn btn-primary" style={{ padding: '4px 8px', fontSize: 11 }}>
+                      <CheckCircle size={12} /> Approve
+                    </button>
+                    <button onClick={() => rejectTermMapping(idx)} disabled={termMappingAction.loading} className="btn" style={{ padding: '4px 8px', fontSize: 11, color: 'var(--error)' }}>
+                      <XCircle size={12} /> Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Approved Mappings */}
+        {termMappingStatus.approved && termMappingStatus.approved.length > 0 && (
+          <div>
+            <div style={{ fontWeight: 600, marginBottom: 8, color: 'var(--grass-green)' }}>
+              Approved ({termMappingStatus.approved.length})
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {termMappingStatus.approved.map((mapping, idx) => (
+                <div key={idx} style={{ 
+                  padding: '6px 10px', 
+                  background: 'rgba(131, 177, 109, 0.1)', 
+                  border: '1px solid rgba(131, 177, 109, 0.3)', 
+                  borderRadius: 6,
+                  fontSize: 12
+                }}>
+                  <span style={{ fontWeight: 600 }}>"{mapping.display_term}"</span>
+                  <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>→ {mapping.source_column}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {!termMappingStatus.loading && !termMappingStatus.pending?.length && !termMappingStatus.approved?.length && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            Click "Load Mappings" to see pending and approved term mappings for this project.
+          </div>
+        )}
+      </div>
+
       {/* Scoped styles */}
       <style>{`
         .itp-spin { animation: itp-spin 1s linear infinite; }
@@ -720,6 +927,9 @@ export default function IntelligenceTestPage() {
         .itp-finding { padding: 8px; border-radius: 4px; margin-bottom: 4px; }
         .itp-finding--error { background: rgba(239, 68, 68, 0.1); }
         .itp-finding--warning { background: rgba(245, 158, 11, 0.1); }
+        
+        .itp-term-mapping { display: flex; align-items: center; gap: 12px; padding: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; }
+        .itp-term-mapping:hover { border-color: var(--grass-green); }
       `}</style>
     </div>
   );
