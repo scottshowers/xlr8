@@ -840,9 +840,12 @@ class SQLGenerator:
                     lookup_table = jp['to'].split('.')[0]
                     
                     term_mapping_text += f"\n\nFor '{term}' queries:\n"
-                    term_mapping_text += f"  - Use the join relationship above\n"
-                    term_mapping_text += f"  - Add WHERE {filter_clause}\n"
-                    term_mapping_text += f"  - GROUP BY and SELECT the \"{display_col}\" column from the lookup table\n"
+                    term_mapping_text += f"  - JOIN to lookup table: {lookup_table}\n"
+                    term_mapping_text += f"  - Use alias like 'cd' for the lookup table\n"
+                    if filter_clause:
+                        term_mapping_text += f"  - Add WHERE {filter_clause}\n"
+                    term_mapping_text += f"  - GROUP BY cd.\"{display_col}\" (use the lookup table alias)\n"
+                    term_mapping_text += f"  - SELECT cd.\"{display_col}\" (qualified with alias)\n"
         
         # Format detected filters
         filter_text = ""
@@ -869,6 +872,15 @@ CRITICAL RULES:
 5. For "by X" questions, use GROUP BY with the appropriate column
 6. Use the join relationships provided above
 7. Return ONLY the SQL, no explanations, no markdown, no code fences
+8. WHEN JOINING TABLES: Always qualify column names with table alias (e.g., cd."companyName" not just "companyName")
+9. Use short aliases like ed, cd, pd for tables
+
+EXAMPLE with JOIN:
+SELECT cd."companyName", COUNT(*) AS count
+FROM "employment_table" AS ed
+JOIN "company_table" AS cd ON ed."companyId" = cd."companyId"
+WHERE ed."status" = 'A'
+GROUP BY cd."companyName"
 
 SQL:"""
         
