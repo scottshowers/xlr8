@@ -733,31 +733,53 @@ class ContextAssembler:
         # Step 4: Find relevant tables
         tables = self._find_relevant_tables(entities, filters, question)
         
-        # Step 4.5: If term mappings exist, FILTER to only source + lookup tables
-        # This dramatically reduces noise for the LLM
+        # Step 4.5: Handle term mappings
+        # For filter_value mappings (like 'active' -> status column), DON'T replace tables
+        # For lookup mappings (like 'department' -> org_levels), add the lookup table
         if term_mapping_info:
-            term_mapping_tables = []
-            for mapping in term_mapping_info:
-                # Add source table
-                source_table = mapping.get('source_table')
-                if source_table and not any(t.table_name == source_table for t in term_mapping_tables):
-                    source_schema = self._get_table_schema(source_table, 0)
-                    if source_schema:
-                        term_mapping_tables.append(source_schema)
-                        logger.warning(f"[CONTEXT] Term mapping source table: {source_table}")
-                
-                # Add lookup table
-                lookup_table = mapping.get('lookup_table')
-                if lookup_table and not any(t.table_name == lookup_table for t in term_mapping_tables):
-                    lookup_schema = self._get_table_schema(lookup_table, 0)
-                    if lookup_schema:
-                        term_mapping_tables.append(lookup_schema)
-                        logger.warning(f"[CONTEXT] Term mapping lookup table: {lookup_table}")
+            lookup_tables_to_add = []
+            filter_column_hints = []  # For LLM context
             
-            # Replace full table list with just term mapping tables
-            if term_mapping_tables:
-                logger.warning(f"[CONTEXT] Using ONLY term mapping tables (was {len(tables)} tables, now {len(term_mapping_tables)})")
-                tables = term_mapping_tables
+            for mapping in term_mapping_info:
+                mapping_type = mapping.get('mapping_type', 'unknown')
+                source_table = mapping.get('source_table')
+                
+                if mapping_type == 'filter_value':
+                    # Don't replace tables - just note which column has the filter
+                    # The LLM will use the status column from whatever table has it
+                    filter_column_hints.append({
+                        'term': mapping.get('term'),
+                        'column': mapping.get('employee_column'),
+                        'table': source_table
+                    })
+                    logger.warning(f"[CONTEXT] Filter hint: '{mapping.get('term')}' -> {source_table}.{mapping.get('employee_column')}")
+                    
+                    # If the source table isn't already selected, add it BUT don't remove others
+                    if source_table and not any(t.table_name == source_table for t in tables):
+                        source_schema = self._get_table_schema(source_table, 0)
+                        if source_schema:
+                            tables.append(source_schema)
+                            logger.warning(f"[CONTEXT] Added filter source table: {source_table}")
+                else:
+                    # For lookup mappings, add both source and lookup tables
+                    if source_table and not any(t.table_name == source_table for t in lookup_tables_to_add):
+                        source_schema = self._get_table_schema(source_table, 0)
+                        if source_schema:
+                            lookup_tables_to_add.append(source_schema)
+                            logger.warning(f"[CONTEXT] Term mapping source table: {source_table}")
+                    
+                    lookup_table = mapping.get('lookup_table')
+                    if lookup_table and not any(t.table_name == lookup_table for t in lookup_tables_to_add):
+                        lookup_schema = self._get_table_schema(lookup_table, 0)
+                        if lookup_schema:
+                            lookup_tables_to_add.append(lookup_schema)
+                            logger.warning(f"[CONTEXT] Term mapping lookup table: {lookup_table}")
+            
+            # For lookup mappings, replace tables (focused context for "by department" queries)
+            # But ONLY if there are actual lookup tables (not just filter_value mappings)
+            if lookup_tables_to_add:
+                logger.warning(f"[CONTEXT] Using term mapping tables for lookup query (was {len(tables)} tables, now {len(lookup_tables_to_add)})")
+                tables = lookup_tables_to_add
         
         logger.warning(f"[CONTEXT] Final table list ({len(tables)} tables): {[t.table_name for t in tables]}")
         
@@ -894,8 +916,8 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
-        # VERSION MARKER: v2024.01.24.2 - PIT table selection fix
-        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.2 - question='{question[:50]}...'")
+        # VERSION MARKER: v2024.01.24.3 - Fixed term mapping table replacement bug
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.3 - question='{question[:50]}...'")
         
         try:
             # Get all tables for this project
