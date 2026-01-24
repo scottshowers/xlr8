@@ -406,10 +406,14 @@ class IntentEngine:
         self._project_memory: Dict[str, Any] = {}         # Loaded from DB
         self._confirmed_intents: Dict[str, str] = {}      # Confirmed this session
         
+        # Schema cache for column clarifications
+        self._schema_columns: Dict[str, List[str]] = {}   # table -> columns
+        
         # Initialize project memory
         if conn and project:
             self._init_memory_tables()
             self._load_project_memory()
+            self._load_schema_columns()
     
     # =========================================================================
     # MEMORY INITIALIZATION
@@ -485,6 +489,159 @@ class IntentEngine:
         except Exception as e:
             logger.warning(f"[INTENT] Could not load project memory: {e}")
     
+    def _load_schema_columns(self):
+        """Load column names from schema for dynamic clarifications."""
+        try:
+            if not self.conn or not self.project:
+                return
+            
+            # Get all tables for this project
+            tables = self.conn.execute("""
+                SELECT table_name FROM information_schema.tables 
+                WHERE table_name LIKE ? AND table_schema = 'main'
+            """, [f"{self.project}%"]).fetchall()
+            
+            for (table_name,) in tables:
+                if table_name.startswith('_'):
+                    continue
+                try:
+                    cols = self.conn.execute(f'PRAGMA table_info("{table_name}")').fetchall()
+                    self._schema_columns[table_name] = [row[1] for row in cols]
+                except Exception:
+                    pass
+            
+            if self._schema_columns:
+                total_cols = sum(len(cols) for cols in self._schema_columns.values())
+                logger.info(f"[INTENT] Loaded schema: {len(self._schema_columns)} tables, {total_cols} columns")
+                
+        except Exception as e:
+            logger.warning(f"[INTENT] Could not load schema columns: {e}")
+    
+    def _find_matching_columns(self, keywords: List[str]) -> List[Dict[str, str]]:
+        """Find columns matching any of the keywords."""
+        matches = []
+        for table_name, columns in self._schema_columns.items():
+            for col in columns:
+                col_lower = col.lower()
+                if all(kw in col_lower for kw in keywords):
+                    # Get short table name for display
+                    short_table = table_name.split('_')[-2:] if '_' in table_name else [table_name]
+                    short_table = '_'.join(short_table)
+                    matches.append({
+                        "table": table_name,
+                        "column": col,
+                        "display": f"{col} (from {short_table})",
+                        "value": f"{table_name}.{col}"
+                    })
+        return matches
+    
+    def _check_column_clarification_needed(self, resolved_params: Dict) -> Optional[ClarificationNeeded]:
+        """
+        Check if we need to clarify which column to use based on resolved intent.
+        
+        This is called AFTER the main intent is resolved but BEFORE SQL generation.
+        """
+        time_dimension = resolved_params.get("time_dimension")
+        
+        if not time_dimension:
+            return None
+        
+        # Already have a specific column resolved?
+        if "hire_date_column" in self._confirmed_intents:
+            return None
+        if "term_date_column" in self._confirmed_intents:
+            return None
+        
+        # Check project memory for column preference
+        if "hire_date_column" in self._project_memory:
+            self._confirmed_intents["hire_date_column"] = self._project_memory["hire_date_column"]["value"]
+            return None
+        if "term_date_column" in self._project_memory:
+            self._confirmed_intents["term_date_column"] = self._project_memory["term_date_column"]["value"]
+            return None
+        
+        # Find matching columns based on time_dimension
+        if time_dimension == "hire_date":
+            matches = self._find_matching_columns(["hire"])
+            # Filter to date-like columns
+            date_matches = [m for m in matches if any(d in m["column"].lower() for d in ["date", "dt"])]
+            if not date_matches:
+                date_matches = matches  # Fall back to any hire column
+            
+            if len(date_matches) > 1:
+                # Multiple hire date columns - need clarification
+                options = []
+                for m in date_matches:
+                    # Build business-friendly labels
+                    col_lower = m["column"].lower()
+                    if "last" in col_lower or "recent" in col_lower:
+                        desc = "Most recent hire date (captures rehires)"
+                    elif "original" in col_lower or "first" in col_lower:
+                        desc = "Original hire date (first time employed)"
+                    elif "adjusted" in col_lower:
+                        desc = "Adjusted hire date (may reflect seniority adjustments)"
+                    else:
+                        desc = f"Hire date field"
+                    
+                    options.append({
+                        "display": f"{m['column']} - {desc}",
+                        "value": m["value"],
+                        "description": desc,
+                        "intent_params": {"hire_date_column": m["value"]}
+                    })
+                
+                return ClarificationNeeded(
+                    key="hire_date_column",
+                    question="Which hire date should I use for this analysis?",
+                    options=options,
+                    context="Multiple hire date fields found in your data",
+                    resolves_category=IntentCategory.TREND,
+                    required=True
+                )
+            elif len(date_matches) == 1:
+                # Only one option - auto-apply
+                self._confirmed_intents["hire_date_column"] = date_matches[0]["value"]
+        
+        elif time_dimension == "term_date":
+            matches = self._find_matching_columns(["term"])
+            if not matches:
+                matches = self._find_matching_columns(["separation"])
+            
+            date_matches = [m for m in matches if any(d in m["column"].lower() for d in ["date", "dt"])]
+            if not date_matches:
+                date_matches = matches
+            
+            if len(date_matches) > 1:
+                options = []
+                for m in date_matches:
+                    col_lower = m["column"].lower()
+                    if "last" in col_lower:
+                        desc = "Last/most recent termination date"
+                    elif "original" in col_lower:
+                        desc = "Original termination date"
+                    else:
+                        desc = "Termination date field"
+                    
+                    options.append({
+                        "display": f"{m['column']} - {desc}",
+                        "value": m["value"],
+                        "description": desc,
+                        "intent_params": {"term_date_column": m["value"]}
+                    })
+                
+                return ClarificationNeeded(
+                    key="term_date_column",
+                    question="Which termination date should I use for this analysis?",
+                    options=options,
+                    context="Multiple termination date fields found in your data",
+                    resolves_category=IntentCategory.TREND,
+                    required=True
+                )
+            elif len(date_matches) == 1:
+                self._confirmed_intents["term_date_column"] = date_matches[0]["value"]
+        
+        return None
+    
     # =========================================================================
     # MAIN INTERFACE
     # =========================================================================
@@ -538,6 +695,14 @@ class IntentEngine:
         
         # All patterns resolved - build full intent
         resolved = self._build_resolved_intent(question, detected_patterns)
+        
+        # NEW: Check if we need column-level clarification based on resolved intent
+        if resolved and resolved.parameters:
+            column_clarification = self._check_column_clarification_needed(resolved.parameters)
+            if column_clarification:
+                logger.warning(f"[INTENT] Column clarification needed: {column_clarification.question}")
+                return None, column_clarification
+        
         return resolved, None
     
     def apply_clarification(self, pattern_key: str, value: str, save_to_project: bool = True) -> Optional[Dict]:
@@ -552,7 +717,26 @@ class IntentEngine:
         Returns:
             The intent parameters to apply, or None if invalid
         """
-        # Find the pattern
+        # Handle dynamic column clarifications (not in static INTENT_PATTERNS)
+        if pattern_key in ["hire_date_column", "term_date_column"]:
+            # Store in session
+            self._confirmed_intents[pattern_key] = value
+            
+            # Save to project memory
+            if save_to_project and self.conn and self.project:
+                # Extract column name for description
+                col_name = value.split('.')[-1] if '.' in value else value
+                self._save_to_project_memory(
+                    pattern_key=pattern_key,
+                    value=value,
+                    description=f"Use {col_name} for {pattern_key.replace('_column', '')}",
+                    params={pattern_key: value}
+                )
+            
+            logger.warning(f"[INTENT] Applied column clarification: {pattern_key} = {value}")
+            return {pattern_key: value}
+        
+        # Find the pattern in static patterns
         if pattern_key not in INTENT_PATTERNS:
             logger.warning(f"[INTENT] Unknown pattern key: {pattern_key}")
             return None
@@ -725,6 +909,22 @@ class IntentEngine:
             lines.append("Parameters:")
             for key, value in intent.parameters.items():
                 lines.append(f"  - {key}: {value}")
+        
+        # Add specific column selections from clarifications
+        if self._confirmed_intents:
+            column_selections = []
+            for key, value in self._confirmed_intents.items():
+                if key.endswith("_column"):
+                    # This is a specific column selection - extract table and column
+                    if '.' in value:
+                        table_name, col_name = value.rsplit('.', 1)
+                        column_selections.append(f"  - {key}: Use column \"{col_name}\" from table \"{table_name}\"")
+                    else:
+                        column_selections.append(f"  - {key}: {value}")
+            
+            if column_selections:
+                lines.append("Specific columns to use:")
+                lines.extend(column_selections)
         
         if intent.clarifications_used:
             lines.append(f"Clarifications applied: {', '.join(intent.clarifications_used)}")
