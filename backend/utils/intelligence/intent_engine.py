@@ -132,12 +132,8 @@ INTENT_PATTERNS = {
         ],
         "question": "What are you trying to understand?",
         "options": [
-            {
-                "display": "Headcount trend - how employee count changes over time",
-                "value": "headcount_trend",
-                "description": "How employee count changes month over month",
-                "intent_params": {"analysis_type": "headcount", "time_dimension": "period"}
-            },
+            # NOTE: "Headcount trend" removed - requires complex hire/term/transfer calculation
+            # that isn't implemented yet. Added to roadmap. - Jan 24, 2026
             {
                 "display": "Hiring velocity - rate of new hires over time",
                 "value": "hiring_velocity",
