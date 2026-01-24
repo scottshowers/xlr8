@@ -1158,6 +1158,13 @@ class SQLGenerator:
         if intent_context:
             logger.warning(f"[SQL_GEN] Intent context provided: {len(intent_context)} chars")
         
+        # NEW: Check for deterministic SQL template first
+        deterministic_sql = self._get_deterministic_sql(context, intent_context)
+        if deterministic_sql:
+            logger.warning(f"[SQL_GEN] USING DETERMINISTIC SQL (bypassing LLM)")
+            logger.warning(f"[SQL_GEN] SQL: {deterministic_sql}")
+            return deterministic_sql, None
+        
         if not self.llm:
             error = "NO LLM CONFIGURED. Cannot generate SQL without LLM."
             logger.error(f"[SQL_GEN] FAILURE: {error}")
@@ -1214,6 +1221,115 @@ class SQLGenerator:
             logger.error(f"[SQL_GEN] FAILURE: {error}")
             logger.error(traceback.format_exc())
             return "", error
+    
+    def _get_deterministic_sql(self, context: QueryContext, intent_context: str) -> Optional[str]:
+        """
+        Generate deterministic SQL for well-defined query patterns.
+        
+        Returns SQL string if pattern is recognized, None otherwise (will fall back to LLM).
+        """
+        if not intent_context:
+            logger.warning(f"[SQL_GEN] DETERMINISTIC: No intent_context, skipping")
+            return None
+        
+        # Collect all columns across tables
+        all_columns = {}
+        for table in context.tables:
+            for col in table.columns:
+                col_lower = col.lower()
+                all_columns[col_lower] = (table.table_name, col)
+        
+        logger.warning(f"[SQL_GEN] DETERMINISTIC: Checking patterns in intent_context")
+        logger.warning(f"[SQL_GEN] DETERMINISTIC: pit_logic={('pit_logic' in intent_context)}, active_on_date={('active_on_date' in intent_context)}")
+        
+        # Point-in-time headcount query
+        if "pit_logic" in intent_context and "active_on_date" in intent_context:
+            import re
+            date_match = re.search(r'as_of_date[\'"]?\s*[:=]\s*[\'"]?(\d{4}-\d{2}-\d{2})', intent_context)
+            as_of_date = date_match.group(1) if date_match else None
+            
+            if not as_of_date:
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', intent_context)
+                as_of_date = date_match.group(1) if date_match else None
+            
+            logger.warning(f"[SQL_GEN] DETERMINISTIC: Extracted as_of_date={as_of_date}")
+            
+            if as_of_date:
+                # Find columns
+                hire_cols = [c for c in all_columns.keys() if 'hire' in c and ('date' in c or 'dt' in c)]
+                term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and ('date' in c or 'dt' in c)]
+                status_cols = [c for c in all_columns.keys() if 'status' in c and 'empl' in c]
+                if not status_cols:
+                    status_cols = [c for c in all_columns.keys() if 'employeestatus' in c]
+                
+                logger.warning(f"[SQL_GEN] DETERMINISTIC: hire_cols={hire_cols[:3] if hire_cols else 'NONE'}")
+                logger.warning(f"[SQL_GEN] DETERMINISTIC: term_cols={term_cols[:3] if term_cols else 'NONE'}")
+                logger.warning(f"[SQL_GEN] DETERMINISTIC: status_cols={status_cols[:3] if status_cols else 'NONE'}")
+                
+                hire_table = hire_col = term_table = term_col = status_table = status_col = None
+                
+                if hire_cols:
+                    hire_table, hire_col = all_columns[hire_cols[0]]
+                    logger.warning(f"[SQL_GEN] DETERMINISTIC: hire_col={hire_col} in table={hire_table}")
+                if term_cols:
+                    term_table, term_col = all_columns[term_cols[0]]
+                    logger.warning(f"[SQL_GEN] DETERMINISTIC: term_col={term_col} in table={term_table}")
+                if status_cols:
+                    status_table, status_col = all_columns[status_cols[0]]
+                    logger.warning(f"[SQL_GEN] DETERMINISTIC: status_col={status_col} in table={status_table}")
+                
+                # Build SQL based on available columns
+                if hire_table:
+                    # Case 1: Same table has hire and term (or status)
+                    if term_table == hire_table:
+                        return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
+FROM "{hire_table}"
+WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}'
+  AND ("{term_col}" IS NULL OR CAST("{term_col}" AS DATE) > '{as_of_date}')'''
+                    
+                    elif status_table == hire_table:
+                        return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
+FROM "{hire_table}"
+WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}'
+  AND "{status_col}" IN ('A', 'L')'''
+                    
+                    # Case 2: Need JOIN for term date
+                    elif term_table:
+                        return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
+FROM "{hire_table}" AS h
+JOIN "{term_table}" AS t ON h."employeeId" = t."employeeId"
+WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+  AND (t."{term_col}" IS NULL OR CAST(t."{term_col}" AS DATE) > '{as_of_date}')'''
+                    
+                    # Case 3: Need JOIN for status
+                    elif status_table:
+                        return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
+FROM "{hire_table}" AS h
+JOIN "{status_table}" AS s ON h."employeeId" = s."employeeId"
+WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+  AND s."{status_col}" IN ('A', 'L')'''
+                    
+                    # Case 4: Just hire date, no term/status filter
+                    else:
+                        return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
+FROM "{hire_table}"
+WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}\''''
+        
+        # Hired by date query
+        if "pit_logic" in intent_context and "hired_by_date" in intent_context:
+            import re
+            date_match = re.search(r'as_of_date[\'"]?\s*[:=]\s*[\'"]?(\d{4}-\d{2}-\d{2})', intent_context)
+            as_of_date = date_match.group(1) if date_match else None
+            
+            if as_of_date:
+                hire_cols = [c for c in all_columns.keys() if 'hire' in c and ('date' in c or 'dt' in c)]
+                if hire_cols:
+                    hire_table, hire_col = all_columns[hire_cols[0]]
+                    return f'''SELECT COUNT(DISTINCT "employeeId") AS count
+FROM "{hire_table}"
+WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}\''''
+        
+        return None
     
     def _map_intent_to_columns(self, intent_context: str, tables: List[TableSchema]) -> str:
         """
@@ -1380,56 +1496,89 @@ class SQLGenerator:
             hire_cols = [c for c in all_columns.keys() if 'hire' in c and ('date' in c or 'dt' in c)]
             if not hire_cols:
                 hire_cols = [c for c in all_columns.keys() if 'hire' in c]
-            if not hire_cols:
-                # Try alternate names
-                hire_cols = [c for c in all_columns.keys() if 'start' in c and 'date' in c and 'empl' in c]
             
             # Find termination date columns
             term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and ('date' in c or 'dt' in c)]
-            if not term_cols:
-                term_cols = [c for c in all_columns.keys() if 'term' in c and 'date' not in c]  # Maybe just 'terminationDate'
             
             # Find status column for fallback
             status_cols = [c for c in all_columns.keys() if 'status' in c and 'empl' in c]
             if not status_cols:
-                status_cols = [c for c in all_columns.keys() if c in ['status', 'emplstatus', 'employeestatus']]
+                status_cols = [c for c in all_columns.keys() if 'employeestatus' in c]
             
             if "active_on_date" in intent_context and as_of_date:
-                instructions.append(f'POINT-IN-TIME QUERY: Find employees active as of {as_of_date}')
+                instructions.append(f'=== POINT-IN-TIME HEADCOUNT AS OF {as_of_date} ===')
                 
-                # Only add hire date instruction if we found the column
+                hire_table = hire_col = term_table = term_col = status_table = status_col = None
+                
                 if hire_cols:
-                    table_name, col_name = all_columns[hire_cols[0]]
-                    short_name = get_short_name(table_name)
-                    instructions.append(f'HIRE DATE FILTER: CAST("{col_name}" AS DATE) <= \'{as_of_date}\' (column is in {short_name})')
-                else:
-                    instructions.append(f'WARNING: No hire date column found - cannot filter by hire date')
+                    hire_table, hire_col = all_columns[hire_cols[0]]
+                    instructions.append(f'HIRE DATE: "{hire_col}" in table "{hire_table}"')
                 
-                # Only add term date instruction if we found the column
                 if term_cols:
-                    table_name, col_name = all_columns[term_cols[0]]
-                    short_name = get_short_name(table_name)
-                    instructions.append(f'TERM DATE FILTER: ("{col_name}" IS NULL OR CAST("{col_name}" AS DATE) > \'{as_of_date}\') (column is in {short_name})')
+                    term_table, term_col = all_columns[term_cols[0]]
+                    instructions.append(f'TERM DATE: "{term_col}" in table "{term_table}"')
                 elif status_cols:
-                    # Fall back to status-based filtering
-                    table_name, col_name = all_columns[status_cols[0]]
-                    short_name = get_short_name(table_name)
-                    instructions.append(f'NO TERM DATE FOUND - Use status instead: "{col_name}" IN (\'A\', \'L\') (column is in {short_name})')
+                    status_table, status_col = all_columns[status_cols[0]]
+                    instructions.append(f'STATUS (no term date found): "{status_col}" in table "{status_table}"')
                 
-                instructions.append(f'CRITICAL: Only use columns that exist in the schema above - do NOT invent column names')
+                # Build SQL based on where columns are
+                if hire_table and (term_table == hire_table or status_table == hire_table or (not term_table and not status_table)):
+                    # All needed columns are in the same table - simple query
+                    from_table = hire_table
+                    where_parts = [f'CAST("{hire_col}" AS DATE) <= \'{as_of_date}\'']
+                    if term_col and term_table == hire_table:
+                        where_parts.append(f'("{term_col}" IS NULL OR CAST("{term_col}" AS DATE) > \'{as_of_date}\')')
+                    elif status_col and status_table == hire_table:
+                        where_parts.append(f'"{status_col}" IN (\'A\', \'L\')')
+                    
+                    complete_sql = f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
+FROM "{from_table}"
+WHERE {" AND ".join(where_parts)}'''
+                    
+                    instructions.append(f'\n*** COMPLETE SQL - USE EXACTLY AS SHOWN: ***')
+                    instructions.append(complete_sql)
+                    instructions.append(f'*** END SQL ***\n')
+                    
+                elif hire_table and term_table and term_table != hire_table:
+                    # Columns in different tables - need JOIN
+                    complete_sql = f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
+FROM "{hire_table}" AS h
+JOIN "{term_table}" AS t ON h."employeeId" = t."employeeId"
+WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+  AND (t."{term_col}" IS NULL OR CAST(t."{term_col}" AS DATE) > '{as_of_date}')'''
+                    
+                    instructions.append(f'\n*** COMPLETE SQL (with JOIN) - USE EXACTLY AS SHOWN: ***')
+                    instructions.append(complete_sql)
+                    instructions.append(f'*** END SQL ***\n')
+                    
+                elif hire_table and status_table and status_table != hire_table:
+                    # Hire + status in different tables
+                    complete_sql = f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
+FROM "{hire_table}" AS h
+JOIN "{status_table}" AS s ON h."employeeId" = s."employeeId"
+WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+  AND s."{status_col}" IN ('A', 'L')'''
+                    
+                    instructions.append(f'\n*** COMPLETE SQL (with JOIN) - USE EXACTLY AS SHOWN: ***')
+                    instructions.append(complete_sql)
+                    instructions.append(f'*** END SQL ***\n')
+                else:
+                    instructions.append('WARNING: Could not build complete SQL template - use columns listed above carefully')
             
             elif "hired_by_date" in intent_context and as_of_date:
-                instructions.append(f'POINT-IN-TIME: Find everyone hired by {as_of_date}')
+                instructions.append(f'=== EMPLOYEES HIRED BY {as_of_date} ===')
                 if hire_cols:
-                    table_name, col_name = all_columns[hire_cols[0]]
-                    instructions.append(f'Hired on or before: CAST("{col_name}" AS DATE) <= \'{as_of_date}\'')
-                else:
-                    instructions.append(f'WARNING: No hire date column found in schema')
-                instructions.append(f'CRITICAL: Only use columns that exist in the schema above - do NOT invent column names')
+                    hire_table, hire_col = all_columns[hire_cols[0]]
+                    complete_sql = f'''SELECT COUNT(DISTINCT "employeeId") AS count
+FROM "{hire_table}"
+WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}\''''
+                    instructions.append(f'*** USE THIS EXACT SQL: ***')
+                    instructions.append(complete_sql)
+                    instructions.append(f'*** END SQL ***')
         
-        # General reminder about not inventing columns
+        # General reminder
         if instructions:
-            instructions.append('REMINDER: If a column is not listed in the schema, do NOT use it')
+            instructions.append('CRITICAL: Use the SQL template exactly as provided above. Do not modify table or column names.')
         
         if instructions:
             return "\n\n=== EXPLICIT COLUMN INSTRUCTIONS (MUST FOLLOW) ===\n" + "\n".join(f"- {i}" for i in instructions) + "\n"
