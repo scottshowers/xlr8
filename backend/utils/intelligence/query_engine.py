@@ -1220,6 +1220,10 @@ class SQLGenerator:
         Map abstract intent parameters to actual column names in schema.
         
         Returns explicit SQL instructions based on intent + available columns.
+        
+        Priority:
+        1. Use specific column if already clarified (hire_date_column, term_date_column)
+        2. Fall back to searching schema for matching columns
         """
         if not intent_context:
             return ""
@@ -1233,27 +1237,82 @@ class SQLGenerator:
                 col_lower = col.lower()
                 all_columns[col_lower] = (table.table_name, col)
         
+        # Helper to get short table alias
+        def get_short_name(table_name: str) -> str:
+            # Extract meaningful part after UUID prefix
+            parts = table_name.split('_')
+            if len(parts) > 2:
+                return '_'.join(parts[-3:])  # e.g., "api_employee_job_history"
+            return table_name
+        
+        # Helper to extract specific column from intent context
+        def extract_specific_column(column_key: str) -> Optional[Tuple[str, str]]:
+            """Extract table.column from intent context if specified."""
+            import re
+            # Look for pattern like: hire_date_column: Use column "hireDate" from table "..."
+            pattern = rf'{column_key}:.*?"([^"]+)".*?table\s+"([^"]+)"'
+            match = re.search(pattern, intent_context)
+            if match:
+                col_name, table_name = match.group(1), match.group(2)
+                return (table_name, col_name)
+            
+            # Also try simpler format: hire_date_column: table.column
+            pattern2 = rf'{column_key}:\s*([^\s,\n]+\.[^\s,\n]+)'
+            match2 = re.search(pattern2, intent_context)
+            if match2:
+                full_ref = match2.group(1)
+                if '.' in full_ref:
+                    parts = full_ref.rsplit('.', 1)
+                    return (parts[0], parts[1])
+            
+            return None
+        
+        # Check for specific hire date column from clarification
+        specific_hire = extract_specific_column("hire_date_column")
+        specific_term = extract_specific_column("term_date_column")
+        
         # Map time_dimension to actual date columns
         if "time_dimension: hire_date" in intent_context or "time_dimension: hire" in intent_context:
-            # Look for hire date columns
-            hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
-            if not hire_cols:
-                hire_cols = [c for c in all_columns.keys() if 'hire' in c]
-            if hire_cols:
-                table_name, col_name = all_columns[hire_cols[0]]
-                instructions.append(f'USE "{col_name}" as the date column for grouping (this is the hire date)')
-                instructions.append(f'GROUP BY the year/month extracted from "{col_name}"')
+            if specific_hire:
+                # Use the clarified column
+                table_name, col_name = specific_hire
+                short_name = get_short_name(table_name)
+                instructions.append(f'SPECIFIC COLUMN SELECTED: Use "{col_name}" from table "{table_name}" ({short_name})')
+                instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias for {short_name})')
+                instructions.append(f'DO NOT look for hire date in other tables - user specified {short_name}."{col_name}"')
+            else:
+                # Fall back to searching
+                hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
+                if not hire_cols:
+                    hire_cols = [c for c in all_columns.keys() if 'hire' in c]
+                if hire_cols:
+                    table_name, col_name = all_columns[hire_cols[0]]
+                    short_name = get_short_name(table_name)
+                    instructions.append(f'The hire date column is "{col_name}" in table "{table_name}" ({short_name})')
+                    instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias)')
+                    instructions.append(f'DO NOT look for "{col_name}" in other tables - it is ONLY in {short_name}')
         
         elif "time_dimension: term_date" in intent_context or "time_dimension: term" in intent_context:
-            # Look for termination date columns
-            term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and 'date' in c]
-            if not term_cols:
-                term_cols = [c for c in all_columns.keys() if 'term' in c or 'separation' in c]
-            if term_cols:
-                table_name, col_name = all_columns[term_cols[0]]
-                instructions.append(f'USE "{col_name}" as the date column for grouping (this is the termination date)')
-                instructions.append(f'GROUP BY the year/month extracted from "{col_name}"')
+            if specific_term:
+                # Use the clarified column
+                table_name, col_name = specific_term
+                short_name = get_short_name(table_name)
+                instructions.append(f'SPECIFIC COLUMN SELECTED: Use "{col_name}" from table "{table_name}" ({short_name})')
+                instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias for {short_name})')
+                instructions.append(f'DO NOT look for termination date in other tables - user specified {short_name}."{col_name}"')
                 instructions.append(f'Only include rows WHERE "{col_name}" IS NOT NULL')
+            else:
+                # Fall back to searching
+                term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and 'date' in c]
+                if not term_cols:
+                    term_cols = [c for c in all_columns.keys() if 'term' in c or 'separation' in c]
+                if term_cols:
+                    table_name, col_name = all_columns[term_cols[0]]
+                    short_name = get_short_name(table_name)
+                    instructions.append(f'The termination date column is "{col_name}" in table "{table_name}" ({short_name})')
+                    instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias)')
+                    instructions.append(f'DO NOT look for "{col_name}" in other tables - it is ONLY in {short_name}')
+                    instructions.append(f'Only include rows WHERE "{col_name}" IS NOT NULL')
         
         # Map status filters to actual column
         if "status_filter" in intent_context:
@@ -1262,6 +1321,7 @@ class SQLGenerator:
                 status_cols = [c for c in all_columns.keys() if 'status' in c]
             if status_cols:
                 table_name, col_name = all_columns[status_cols[0]]
+                short_name = get_short_name(table_name)
                 # Extract the filter values from intent
                 import re
                 match = re.search(r"status_filter['\"]?\s*[:=]\s*\[([^\]]+)\]", intent_context)
@@ -1269,10 +1329,10 @@ class SQLGenerator:
                     values = match.group(1).replace("'", "").replace('"', '').split(',')
                     values = [v.strip() for v in values]
                     if len(values) == 1:
-                        instructions.append(f'Filter WHERE "{col_name}" = \'{values[0]}\'')
+                        instructions.append(f'Filter WHERE "{table_name}"."{col_name}" = \'{values[0]}\' (column is in {short_name})')
                     else:
                         vals_str = ", ".join(f"'{v}'" for v in values)
-                        instructions.append(f'Filter WHERE "{col_name}" IN ({vals_str})')
+                        instructions.append(f'Filter WHERE "{table_name}"."{col_name}" IN ({vals_str}) (column is in {short_name})')
         
         if instructions:
             return "\n\n=== EXPLICIT COLUMN INSTRUCTIONS (MUST FOLLOW) ===\n" + "\n".join(f"- {i}" for i in instructions) + "\n"
