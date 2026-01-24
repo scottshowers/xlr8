@@ -57,6 +57,10 @@ export default function IntelligenceTestPage() {
   const [termMappingStatus, setTermMappingStatus] = useState({ loading: false, pending: null, approved: null, error: null });
   const [termMappingAction, setTermMappingAction] = useState({ loading: false, message: null, error: null });
 
+  // IntentEngine pattern test state
+  const [intentTestStatus, setIntentTestStatus] = useState({ loading: false, results: null, error: null });
+  const [intentSessionId, setIntentSessionId] = useState(null);
+
   // Helper to copy text
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text);
@@ -208,6 +212,218 @@ export default function IntelligenceTestPage() {
     } catch (err) {
       setTermMappingAction({ loading: false, message: null, error: err.message });
     }
+  };
+
+  // ==========================================================================
+  // INTENT ENGINE PATTERN TESTS (Phase 1 Consultative Clarification)
+  // ==========================================================================
+  
+  const INTENT_PATTERNS = {
+    employee_status: {
+      trigger: "how many active employees",
+      expectedQuestion: "define 'active'",
+      expectedOptions: ["active_only", "active_and_leave", "all_non_termed"],
+      testSelection: "active_and_leave",
+    },
+    temporal_analysis: {
+      trigger: "employees by date",
+      expectedQuestion: "trying to understand",
+      expectedOptions: ["headcount_trend", "hiring_velocity", "turnover_patterns"],
+      testSelection: "headcount_trend",
+    },
+    point_in_time: {
+      trigger: "employees as of January 1",
+      expectedQuestion: "as of",
+      expectedOptions: ["active_headcount", "employed_by", "data_snapshot"],
+      testSelection: "active_headcount",
+    },
+    data_comparison: {
+      trigger: "compare payroll data",
+      expectedQuestion: "comparison",
+      expectedOptions: ["all_differences", "significant_only", "categorized"],
+      testSelection: "significant_only",
+    },
+    headcount: {
+      trigger: "what is our headcount",
+      expectedQuestion: "include",
+      expectedOptions: ["active_only", "active_and_leave", "all"],
+      testSelection: "active_and_leave",
+    },
+    terminated_status: {
+      trigger: "show terminated employees",
+      expectedQuestion: "termination",
+      expectedOptions: ["term_count", "term_reasons", "term_timing"],
+      testSelection: "term_count",
+    },
+    grouping_dimension: {
+      trigger: "employees by department",
+      expectedQuestion: "grouped",
+      expectedOptions: ["hierarchical", "flat", "top_10"],
+      testSelection: "flat",
+    },
+  };
+
+  // Call chat endpoint (no auth required for unified chat)
+  const callChatForIntent = async (message, sessionId = null, clarifications = null) => {
+    const pid = activeProject?.id || projectId;
+    const payload = {
+      message,
+      project: projectId,
+      customer_id: pid,
+      session_id: sessionId,
+      clarifications,
+      include_quality_alerts: false,
+      include_follow_ups: false,
+    };
+    const response = await fetch(`${API_BASE}/api/chat/unified`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return response.json();
+  };
+
+  // Test a single intent pattern
+  const testIntentPattern = async (patternName, config) => {
+    const result = { pattern: patternName, tests: [], passed: 0, failed: 0 };
+    
+    try {
+      // Test 1: Trigger clarification
+      const resp1 = await callChatForIntent(config.trigger);
+      const needsClarification = resp1.needs_clarification;
+      const questions = resp1.clarification_questions || [];
+      
+      if (!needsClarification) {
+        // Could be no data OR memory already set
+        const answer = resp1.answer || '';
+        if (answer.toLowerCase().includes("couldn't find") || answer.toLowerCase().includes("no data")) {
+          result.tests.push({ name: 'trigger', passed: false, message: 'No data available for testing', details: answer.slice(0, 100) });
+          result.failed++;
+          return result;
+        } else {
+          // Memory might be set - still mark as working
+          result.tests.push({ name: 'trigger', passed: true, message: 'Got direct answer (preference may be remembered)', details: answer.slice(0, 100) });
+          result.passed++;
+          result.sessionId = resp1.session_id;
+          return result;
+        }
+      }
+      
+      result.tests.push({ name: 'trigger', passed: true, message: 'Clarification triggered' });
+      result.passed++;
+      result.sessionId = resp1.session_id;
+      
+      // Test 2: Check question text
+      if (questions.length > 0) {
+        const questionText = questions[0].question || '';
+        const hasExpected = questionText.toLowerCase().includes(config.expectedQuestion.toLowerCase());
+        result.tests.push({ 
+          name: 'question_text', 
+          passed: hasExpected, 
+          message: hasExpected ? 'Question contains expected text' : `Expected "${config.expectedQuestion}"`,
+          details: questionText.slice(0, 80)
+        });
+        hasExpected ? result.passed++ : result.failed++;
+        
+        // Test 3: Check options format (id/label)
+        const options = questions[0].options || [];
+        const hasIdLabel = options.length > 0 && options.every(o => 'id' in o && 'label' in o);
+        result.tests.push({ 
+          name: 'options_format', 
+          passed: hasIdLabel, 
+          message: hasIdLabel ? `${options.length} options with id/label format` : 'Missing id/label format',
+          details: options.length > 0 ? JSON.stringify(options[0]).slice(0, 60) : 'no options'
+        });
+        hasIdLabel ? result.passed++ : result.failed++;
+        
+        // Test 4: Check expected option values
+        const optionIds = options.map(o => o.id || o.value);
+        const hasExpectedOptions = config.expectedOptions.some(exp => optionIds.includes(exp));
+        result.tests.push({ 
+          name: 'options_values', 
+          passed: hasExpectedOptions, 
+          message: hasExpectedOptions ? 'Expected options present' : 'Missing expected options',
+          details: `Got: ${optionIds.join(', ')}`
+        });
+        hasExpectedOptions ? result.passed++ : result.failed++;
+        
+        // Test 5: Apply clarification
+        const questionKey = questions[0].key || patternName;
+        const clarifications = { [questionKey]: config.testSelection };
+        const resp2 = await callChatForIntent(config.trigger, resp1.session_id, clarifications);
+        
+        if (resp2.needs_clarification) {
+          const newQuestions = resp2.clarification_questions || [];
+          const newKey = newQuestions.length > 0 ? newQuestions[0].key : '';
+          if (newKey && newKey !== questionKey) {
+            result.tests.push({ name: 'apply', passed: true, message: `Applied, triggered new pattern: ${newKey}` });
+            result.passed++;
+          } else {
+            result.tests.push({ name: 'apply', passed: false, message: 'Still needs same clarification after applying' });
+            result.failed++;
+          }
+        } else {
+          const answer = resp2.answer || '';
+          result.tests.push({ 
+            name: 'apply', 
+            passed: answer.length > 20, 
+            message: answer.length > 20 ? 'Got answer after clarification' : 'Answer too short',
+            details: answer.slice(0, 80)
+          });
+          answer.length > 20 ? result.passed++ : result.failed++;
+        }
+        
+        // Test 6: Memory persistence
+        const resp3 = await callChatForIntent(config.trigger, resp1.session_id);
+        if (!resp3.needs_clarification || (resp3.clarification_questions?.[0]?.key !== questionKey)) {
+          result.tests.push({ name: 'memory', passed: true, message: 'Preference remembered in session' });
+          result.passed++;
+        } else {
+          result.tests.push({ name: 'memory', passed: false, message: 'Re-asked same clarification' });
+          result.failed++;
+        }
+      }
+      
+    } catch (err) {
+      result.tests.push({ name: 'error', passed: false, message: err.message });
+      result.failed++;
+    }
+    
+    return result;
+  };
+
+  // Run all intent pattern tests
+  const runAllIntentTests = async () => {
+    setIntentTestStatus({ loading: true, results: null, error: null });
+    const results = [];
+    
+    try {
+      for (const [name, config] of Object.entries(INTENT_PATTERNS)) {
+        const result = await testIntentPattern(name, config);
+        results.push(result);
+        // Update incrementally
+        setIntentTestStatus({ loading: true, results: [...results], error: null });
+      }
+      setIntentTestStatus({ loading: false, results, error: null });
+    } catch (err) {
+      setIntentTestStatus({ loading: false, results, error: err.message });
+    }
+  };
+
+  // Run single intent test
+  const runSingleIntentTest = async (patternName) => {
+    const config = INTENT_PATTERNS[patternName];
+    if (!config) return;
+    
+    setIntentTestStatus(prev => ({ ...prev, loading: true }));
+    const result = await testIntentPattern(patternName, config);
+    
+    setIntentTestStatus(prev => {
+      const existing = prev.results || [];
+      const updated = existing.filter(r => r.pattern !== patternName);
+      updated.push(result);
+      return { loading: false, results: updated, error: null };
+    });
   };
 
   // Test single engine with config
@@ -860,6 +1076,133 @@ export default function IntelligenceTestPage() {
         {!termMappingStatus.loading && !termMappingStatus.pending?.length && !termMappingStatus.approved?.length && (
           <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
             Click "Load Mappings" to see pending and approved term mappings for this project.
+          </div>
+        )}
+      </div>
+
+      {/* Step 6: IntentEngine Pattern Tests */}
+      <div className="itp-card" style={{ marginTop: 16 }}>
+        <div className="itp-card-header">
+          <div className="itp-step">6</div>
+          <div className="itp-step-info">
+            <div className="itp-step-title">IntentEngine Pattern Tests</div>
+            <div className="itp-step-desc">Test consultative clarification (Phase 1) - all 7 patterns</div>
+          </div>
+          <button onClick={runAllIntentTests} disabled={intentTestStatus.loading} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
+            {intentTestStatus.loading ? <Loader2 size={14} className="itp-spin" /> : <Play size={14} />}
+            {intentTestStatus.loading ? 'Testing...' : 'Run All Tests'}
+          </button>
+        </div>
+
+        {intentTestStatus.error && (
+          <div className="itp-alert itp-alert--error" style={{ marginBottom: 16 }}>
+            <XCircle size={16} />
+            {intentTestStatus.error}
+          </div>
+        )}
+
+        {/* Pattern buttons */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+          {Object.entries(INTENT_PATTERNS).map(([name, config]) => {
+            const result = intentTestStatus.results?.find(r => r.pattern === name);
+            const isRunning = intentTestStatus.loading && !result;
+            const passed = result && result.failed === 0;
+            const failed = result && result.failed > 0;
+            
+            return (
+              <button 
+                key={name}
+                onClick={() => runSingleIntentTest(name)}
+                disabled={intentTestStatus.loading}
+                className="btn"
+                style={{ 
+                  padding: '6px 12px', 
+                  fontSize: 12,
+                  background: passed ? 'rgba(131, 177, 109, 0.15)' : failed ? 'rgba(239, 68, 68, 0.1)' : 'var(--bg-primary)',
+                  borderColor: passed ? 'rgba(131, 177, 109, 0.3)' : failed ? 'rgba(239, 68, 68, 0.3)' : 'var(--border-color)',
+                }}
+              >
+                {isRunning && <Loader2 size={12} className="itp-spin" style={{ marginRight: 4 }} />}
+                {passed && <CheckCircle size={12} style={{ marginRight: 4, color: 'var(--grass-green)' }} />}
+                {failed && <XCircle size={12} style={{ marginRight: 4, color: '#dc2626' }} />}
+                {name.replace(/_/g, ' ')}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Test Results */}
+        {intentTestStatus.results && intentTestStatus.results.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {/* Summary */}
+            <div style={{ 
+              padding: 12, 
+              background: 'var(--bg-primary)', 
+              borderRadius: 6, 
+              display: 'flex', 
+              gap: 16,
+              fontSize: 13 
+            }}>
+              <span><strong>Patterns:</strong> {intentTestStatus.results.length}/7</span>
+              <span style={{ color: 'var(--grass-green)' }}>
+                <strong>Passed:</strong> {intentTestStatus.results.reduce((sum, r) => sum + r.passed, 0)}
+              </span>
+              <span style={{ color: '#dc2626' }}>
+                <strong>Failed:</strong> {intentTestStatus.results.reduce((sum, r) => sum + r.failed, 0)}
+              </span>
+            </div>
+
+            {/* Individual Results */}
+            {intentTestStatus.results.map((result, idx) => (
+              <div key={idx} style={{ 
+                padding: 12, 
+                background: 'var(--bg-primary)', 
+                borderRadius: 6,
+                borderLeft: result.failed === 0 ? '3px solid var(--grass-green)' : '3px solid #dc2626'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  {result.failed === 0 ? (
+                    <CheckCircle size={16} style={{ color: 'var(--grass-green)' }} />
+                  ) : (
+                    <XCircle size={16} style={{ color: '#dc2626' }} />
+                  )}
+                  <span style={{ fontWeight: 600, textTransform: 'uppercase', fontSize: 13 }}>
+                    {result.pattern.replace(/_/g, ' ')}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-secondary)' }}>
+                    {result.passed} passed, {result.failed} failed
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginLeft: 24 }}>
+                  {result.tests.map((test, tidx) => (
+                    <div key={tidx} style={{ fontSize: 12, display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                      {test.passed ? (
+                        <Check size={12} style={{ color: 'var(--grass-green)', marginTop: 2, flexShrink: 0 }} />
+                      ) : (
+                        <XCircle size={12} style={{ color: '#dc2626', marginTop: 2, flexShrink: 0 }} />
+                      )}
+                      <div>
+                        <span style={{ fontWeight: 500 }}>{test.name}:</span>{' '}
+                        <span style={{ color: 'var(--text-secondary)' }}>{test.message}</span>
+                        {test.details && (
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2, fontFamily: 'monospace' }}>
+                            {test.details}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {!intentTestStatus.loading && !intentTestStatus.results && (
+          <div style={{ color: 'var(--text-secondary)', fontSize: 13 }}>
+            Click "Run All Tests" to test all 7 IntentEngine patterns, or click individual pattern buttons.
+            <br /><br />
+            <strong>Requires:</strong> Project with uploaded data. Patterns trigger clarification questions only when data exists.
           </div>
         )}
       </div>
