@@ -916,8 +916,8 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
-        # VERSION MARKER: v2024.01.24.3 - Fixed term mapping table replacement bug
-        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.3 - question='{question[:50]}...'")
+        # VERSION MARKER: v2024.01.24.4 - Fixed term mapping + date extraction
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.4 - question='{question[:50]}...'")
         
         try:
             # Get all tables for this project
@@ -1376,13 +1376,13 @@ class SQLGenerator:
                     if term_table == hire_table:
                         return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
 FROM "{hire_table}"
-WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}'
-  AND ("{term_col}" IS NULL OR CAST("{term_col}" AS DATE) > '{as_of_date}')'''
+WHERE TRY_CAST("{hire_col}" AS DATE) <= '{as_of_date}'
+  AND ("{term_col}" IS NULL OR TRIM("{term_col}") = '' OR TRY_CAST("{term_col}" AS DATE) > '{as_of_date}')'''
                     
                     elif status_table == hire_table:
                         return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
 FROM "{hire_table}"
-WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}'
+WHERE TRY_CAST("{hire_col}" AS DATE) <= '{as_of_date}'
   AND "{status_col}" IN ('A', 'L')'''
                     
                     # Case 2: Need JOIN for term date
@@ -1390,15 +1390,15 @@ WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}'
                         return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
 FROM "{hire_table}" AS h
 JOIN "{term_table}" AS t ON h."employeeId" = t."employeeId"
-WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
-  AND (t."{term_col}" IS NULL OR CAST(t."{term_col}" AS DATE) > '{as_of_date}')'''
+WHERE TRY_CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+  AND (t."{term_col}" IS NULL OR TRIM(t."{term_col}") = '' OR TRY_CAST(t."{term_col}" AS DATE) > '{as_of_date}')'''
                     
                     # Case 3: Need JOIN for status
                     elif status_table:
                         return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
 FROM "{hire_table}" AS h
 JOIN "{status_table}" AS s ON h."employeeId" = s."employeeId"
-WHERE CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+WHERE TRY_CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
   AND s."{status_col}" IN ('A', 'L')'''
                     
                     # Case 4: Just hire date, no term/status filter
