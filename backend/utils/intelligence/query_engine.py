@@ -916,8 +916,8 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
-        # VERSION MARKER: v2024.01.24.4 - Fixed term mapping + date extraction
-        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.4 - question='{question[:50]}...'")
+        # VERSION MARKER: v2024.01.24.5 - STRPTIME for date parsing
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.5 - question='{question[:50]}...'")
         
         try:
             # Get all tables for this project
@@ -1371,18 +1371,19 @@ class SQLGenerator:
                     logger.warning(f"[SQL_GEN] DETERMINISTIC: status_col={status_col} in table={status_table}")
                 
                 # Build SQL based on available columns
+                # Use TRY_STRPTIME for flexible date parsing (handles M/D/YYYY H:MM:SS AM format)
                 if hire_table:
                     # Case 1: Same table has hire and term (or status)
                     if term_table == hire_table:
                         return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
 FROM "{hire_table}"
-WHERE TRY_CAST("{hire_col}" AS DATE) <= '{as_of_date}'
-  AND ("{term_col}" IS NULL OR TRIM("{term_col}") = '' OR TRY_CAST("{term_col}" AS DATE) > '{as_of_date}')'''
+WHERE COALESCE(TRY_STRPTIME("{hire_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST("{hire_col}" AS DATE)) <= '{as_of_date}'
+  AND ("{term_col}" IS NULL OR TRIM("{term_col}") = '' OR COALESCE(TRY_STRPTIME("{term_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST("{term_col}" AS DATE)) > '{as_of_date}')'''
                     
                     elif status_table == hire_table:
                         return f'''SELECT COUNT(DISTINCT "employeeId") AS headcount
 FROM "{hire_table}"
-WHERE TRY_CAST("{hire_col}" AS DATE) <= '{as_of_date}'
+WHERE COALESCE(TRY_STRPTIME("{hire_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST("{hire_col}" AS DATE)) <= '{as_of_date}'
   AND "{status_col}" IN ('A', 'L')'''
                     
                     # Case 2: Need JOIN for term date
@@ -1390,15 +1391,15 @@ WHERE TRY_CAST("{hire_col}" AS DATE) <= '{as_of_date}'
                         return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
 FROM "{hire_table}" AS h
 JOIN "{term_table}" AS t ON h."employeeId" = t."employeeId"
-WHERE TRY_CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
-  AND (t."{term_col}" IS NULL OR TRIM(t."{term_col}") = '' OR TRY_CAST(t."{term_col}" AS DATE) > '{as_of_date}')'''
+WHERE COALESCE(TRY_STRPTIME(h."{hire_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST(h."{hire_col}" AS DATE)) <= '{as_of_date}'
+  AND (t."{term_col}" IS NULL OR TRIM(t."{term_col}") = '' OR COALESCE(TRY_STRPTIME(t."{term_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST(t."{term_col}" AS DATE)) > '{as_of_date}')'''
                     
                     # Case 3: Need JOIN for status
                     elif status_table:
                         return f'''SELECT COUNT(DISTINCT h."employeeId") AS headcount
 FROM "{hire_table}" AS h
 JOIN "{status_table}" AS s ON h."employeeId" = s."employeeId"
-WHERE TRY_CAST(h."{hire_col}" AS DATE) <= '{as_of_date}'
+WHERE COALESCE(TRY_STRPTIME(h."{hire_col}", '%m/%d/%Y %I:%M:%S %p')::DATE, TRY_CAST(h."{hire_col}" AS DATE)) <= '{as_of_date}'
   AND s."{status_col}" IN ('A', 'L')'''
                     
                     # Case 4: Just hire date, no term/status filter
