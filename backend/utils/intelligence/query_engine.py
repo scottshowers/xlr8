@@ -936,14 +936,19 @@ class ContextAssembler:
                         if filter_key in [fc.lower() for fc in filter_cols]:
                             score += 3
                 
-                # TEMPORAL BOOST: If query has year filter or temporal keywords, boost tables with date columns
-                # This ensures tables with hireDate, terminationDate etc. are included in PIT queries
-                temporal_indicators = filters.get('year') or any(kw in table_lower for kw in ['hire', 'term', 'job_history', 'employment'])
-                if temporal_indicators or any(e in ['hired', 'terminated', 'tenure', 'headcount'] for e in entities):
-                    date_cols = self._get_date_columns(table_name)
-                    if date_cols:
-                        score += 7  # Strong boost for tables with date columns
-                        logger.warning(f"[CONTEXT]   TEMPORAL BOOST for '{table_name}': has date columns {date_cols[:3]}")
+                # TEMPORAL BOOST: For PIT/headcount queries, strongly prefer tables with hire/term dates
+                # This ensures employment_details/employee_changes are selected over compensation_details
+                is_temporal_query = filters.get('year') or any(e in ['hired', 'terminated', 'tenure', 'headcount', 'active'] for e in entities)
+                if is_temporal_query or 'active' in question.lower() or 'hired' in question.lower() or 'terminated' in question.lower():
+                    # Check for HIRE/TERM specific date columns (strong boost)
+                    hire_term_cols = self._get_hire_term_columns(table_name)
+                    if hire_term_cols:
+                        score += 15  # Very strong boost for tables with hire/term dates
+                        logger.warning(f"[CONTEXT]   HIRE/TERM BOOST for '{table_name}': {hire_term_cols[:3]}")
+                    # Also check for employment/job_history in table name (strong indicator)
+                    elif any(kw in table_lower for kw in ['employment', 'employee_change', 'job_history']):
+                        score += 10
+                        logger.warning(f"[CONTEXT]   TABLE NAME BOOST for '{table_name}'")
                 
                 if score > 0:
                     scored_tables.append((table_name, score, info['row_count']))
@@ -1002,6 +1007,27 @@ class ContextAssembler:
                     OR LOWER(column_name) LIKE '%effective%'
                     OR LOWER(column_name) LIKE '%start%'
                     OR LOWER(column_name) LIKE '%end%'
+                  )
+            """, [self.project, table_name]).fetchall()
+            return [row[0] for row in result]
+        except:
+            return []
+    
+    def _get_hire_term_columns(self, table_name: str) -> List[str]:
+        """Get columns specifically for hire/termination dates (for PIT queries)."""
+        try:
+            result = self.conn.execute("""
+                SELECT column_name
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                  AND table_name = ?
+                  AND (
+                    LOWER(column_name) LIKE '%hire%date%'
+                    OR LOWER(column_name) LIKE '%hiredate%'
+                    OR LOWER(column_name) LIKE '%term%date%'
+                    OR LOWER(column_name) LIKE '%terminationdate%'
+                    OR LOWER(column_name) LIKE '%dateofterm%'
+                    OR LOWER(column_name) LIKE '%separation%date%'
                   )
             """, [self.project, table_name]).fetchall()
             return [row[0] for row in result]
