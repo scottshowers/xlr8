@@ -138,19 +138,19 @@ INTENT_PATTERNS = {
                 "display": "Hiring velocity - rate of new hires over time",
                 "value": "hiring_velocity",
                 "description": "Rate of new hires over time",
-                "intent_params": {"analysis_type": "hires", "time_dimension": "hire_date"}
+                "intent_params": {"analysis_type": "hires", "time_dimension": "hire_date", "time_grouping": "year"}
             },
             {
                 "display": "Turnover patterns - when employees leave",
                 "value": "turnover_patterns",
                 "description": "When employees leave",
-                "intent_params": {"analysis_type": "terminations", "time_dimension": "term_date"}
+                "intent_params": {"analysis_type": "terminations", "time_dimension": "term_date", "time_grouping": "year"}
             },
             {
                 "display": "Tenure distribution - how long employees have been here",
                 "value": "tenure_distribution",
                 "description": "How long employees have been here",
-                "intent_params": {"analysis_type": "tenure", "time_dimension": "hire_date"}
+                "intent_params": {"analysis_type": "tenure", "time_dimension": "hire_date", "time_grouping": "year"}
             },
             {
                 "display": "Something else - let me explain what I need",
@@ -520,10 +520,18 @@ class IntentEngine:
     def _find_matching_columns(self, keywords: List[str]) -> List[Dict[str, str]]:
         """Find columns matching any of the keywords."""
         matches = []
+        seen_lowercase = set()  # Dedupe by lowercase to avoid case variations
+        
         for table_name, columns in self._schema_columns.items():
             for col in columns:
                 col_lower = col.lower()
+                
+                # Skip if we've already seen this column name (case-insensitive)
+                if col_lower in seen_lowercase:
+                    continue
+                
                 if all(kw in col_lower for kw in keywords):
+                    seen_lowercase.add(col_lower)
                     # Get short table name for display
                     short_table = table_name.split('_')[-2:] if '_' in table_name else [table_name]
                     short_table = '_'.join(short_table)
@@ -849,6 +857,27 @@ class IntentEngine:
                         descriptions.append(option["display"])
                         break
         
+        # Extract dates from question for point-in-time queries
+        q_lower = question.lower()
+        date_patterns = [
+            r'as\s+of\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',  # as of 12/31/2025
+            r'as\s+of\s+(\d{4}[/-]\d{1,2}[/-]\d{1,2})',    # as of 2025-12-31
+            r'on\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',       # on 12/31/2025
+        ]
+        for date_pattern in date_patterns:
+            match = re.search(date_pattern, q_lower)
+            if match:
+                date_str = match.group(1)
+                # Normalize date format to YYYY-MM-DD for SQL
+                merged_params['as_of_date'] = self._normalize_date(date_str)
+                logger.warning(f"[INTENT] Extracted date from question: {merged_params['as_of_date']}")
+                break
+        
+        # Add any column selections from clarifications
+        for key, value in self._confirmed_intents.items():
+            if key.endswith('_column'):
+                merged_params[key] = value
+        
         # Use the first pattern's category as primary
         primary_pattern = patterns[0]["config"]
         
@@ -861,6 +890,33 @@ class IntentEngine:
             confidence=0.9,  # High confidence with clarification
             original_question=question
         )
+    
+    def _normalize_date(self, date_str: str) -> str:
+        """Normalize date string to YYYY-MM-DD format."""
+        import re
+        
+        # Try MM/DD/YYYY or MM-DD-YYYY
+        match = re.match(r'(\d{1,2})[/-](\d{1,2})[/-](\d{4})', date_str)
+        if match:
+            month, day, year = match.groups()
+            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # Try YYYY-MM-DD or YYYY/MM/DD
+        match = re.match(r'(\d{4})[/-](\d{1,2})[/-](\d{1,2})', date_str)
+        if match:
+            year, month, day = match.groups()
+            return f"{year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # Try MM/DD/YY
+        match = re.match(r'(\d{1,2})[/-](\d{1,2})[/-](\d{2})', date_str)
+        if match:
+            month, day, year = match.groups()
+            # Assume 20xx for 2-digit years
+            full_year = f"20{year}" if int(year) < 50 else f"19{year}"
+            return f"{full_year}-{month.zfill(2)}-{day.zfill(2)}"
+        
+        # Return as-is if can't parse
+        return date_str
     
     def _save_to_project_memory(self, pattern_key: str, value: str, description: str, params: Dict):
         """Save a resolved intent to project memory."""
