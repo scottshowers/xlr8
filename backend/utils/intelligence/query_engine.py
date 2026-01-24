@@ -731,7 +731,7 @@ class ContextAssembler:
             logger.warning(f"[CONTEXT] Found term mappings: {term_mapping_info}")
         
         # Step 4: Find relevant tables
-        tables = self._find_relevant_tables(entities, filters)
+        tables = self._find_relevant_tables(entities, filters, question)
         
         # Step 4.5: If term mappings exist, FILTER to only source + lookup tables
         # This dramatically reduces noise for the LLM
@@ -890,7 +890,7 @@ class ContextAssembler:
             
         return filters
     
-    def _find_relevant_tables(self, entities: List[str], filters: Dict[str, str]) -> List[TableSchema]:
+    def _find_relevant_tables(self, entities: List[str], filters: Dict[str, str], question: str = "") -> List[TableSchema]:
         """Find tables that match the detected entities and filters."""
         tables = []
         
