@@ -916,8 +916,8 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
-        # VERSION MARKER: v2024.01.24.5 - STRPTIME for date parsing
-        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.5 - question='{question[:50]}...'")
+        # VERSION MARKER: v2024.01.24.6 - Fixed _clean_sql + status column detection
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.6 - question='{question[:50]}...'")
         
         try:
             # Get all tables for this project
@@ -1350,9 +1350,14 @@ class SQLGenerator:
                 # Find columns
                 hire_cols = [c for c in all_columns.keys() if 'hire' in c and ('date' in c or 'dt' in c)]
                 term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and ('date' in c or 'dt' in c)]
-                status_cols = [c for c in all_columns.keys() if 'status' in c and 'empl' in c]
+                # Status columns - exclude date columns!
+                status_cols = [c for c in all_columns.keys() 
+                              if 'status' in c 
+                              and ('empl' in c or 'employee' in c)
+                              and 'date' not in c 
+                              and 'start' not in c]
                 if not status_cols:
-                    status_cols = [c for c in all_columns.keys() if 'employeestatus' in c]
+                    status_cols = [c for c in all_columns.keys() if c in ('emplstatus', 'employeestatus')]
                 
                 logger.warning(f"[SQL_GEN] DETERMINISTIC: hire_cols={hire_cols[:3] if hire_cols else 'NONE'}")
                 logger.warning(f"[SQL_GEN] DETERMINISTIC: term_cols={term_cols[:3] if term_cols else 'NONE'}")
@@ -1555,9 +1560,15 @@ WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}\''''
         
         # Map status filters to actual column
         if "status_filter" in intent_context:
-            status_cols = [c for c in all_columns.keys() if 'status' in c and 'employee' not in c]
+            # Find status columns - exclude date columns!
+            status_cols = [c for c in all_columns.keys() 
+                          if 'status' in c 
+                          and 'date' not in c 
+                          and 'start' not in c 
+                          and 'end' not in c]
             if not status_cols:
-                status_cols = [c for c in all_columns.keys() if 'status' in c]
+                # Fallback: look for emplStatus specifically
+                status_cols = [c for c in all_columns.keys() if c in ('emplstatus', 'employeestatus')]
             if status_cols:
                 table_name, col_name = all_columns[status_cols[0]]
                 short_name = get_short_name(table_name)
@@ -1593,10 +1604,14 @@ WHERE CAST("{hire_col}" AS DATE) <= '{as_of_date}\''''
             # Find termination date columns
             term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and ('date' in c or 'dt' in c)]
             
-            # Find status column for fallback
-            status_cols = [c for c in all_columns.keys() if 'status' in c and 'empl' in c]
+            # Find status column for fallback - exclude date columns!
+            status_cols = [c for c in all_columns.keys() 
+                          if 'status' in c 
+                          and ('empl' in c or 'employee' in c)
+                          and 'date' not in c 
+                          and 'start' not in c]
             if not status_cols:
-                status_cols = [c for c in all_columns.keys() if 'employeestatus' in c]
+                status_cols = [c for c in all_columns.keys() if c in ('emplstatus', 'employeestatus')]
             
             if "active_on_date" in intent_context and as_of_date:
                 instructions.append(f'=== POINT-IN-TIME HEADCOUNT AS OF {as_of_date} ===')
@@ -1818,22 +1833,18 @@ SQL:"""
         sql = re.sub(r'```sql', '', sql, flags=re.IGNORECASE)
         sql = re.sub(r'```', '', sql)
         
-        # Find the LAST occurrence of SELECT (the real query, not garbage prefix)
-        # Split by SELECT and take from the last complete statement
+        # Find the FIRST occurrence of SELECT or WITH (for CTEs)
         upper_sql = sql.upper()
         
-        # Find all SELECT positions
-        select_positions = [m.start() for m in re.finditer(r'\bSELECT\b', upper_sql)]
-        
-        if select_positions:
-            # Take from the last SELECT that's followed by actual query content
-            # Usually the real query is the last one, or the one with FROM after it
-            for pos in reversed(select_positions):
-                candidate = sql[pos:].strip()
-                # Check if this looks like a real query (has FROM or is a simple aggregate)
-                if 'FROM' in candidate.upper() or 'COUNT' in candidate.upper():
-                    sql = candidate
-                    break
+        # Check for WITH (CTE) first
+        with_pos = upper_sql.find('WITH ')
+        if with_pos != -1 and with_pos < upper_sql.find('SELECT'):
+            sql = sql[with_pos:].strip()
+        else:
+            # Find first SELECT
+            select_pos = upper_sql.find('SELECT')
+            if select_pos != -1:
+                sql = sql[select_pos:].strip()
         
         # Remove trailing semicolon for DuckDB
         sql = sql.rstrip(';').strip()
