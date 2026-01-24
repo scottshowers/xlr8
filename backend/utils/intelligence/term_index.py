@@ -2000,6 +2000,94 @@ def recalc_term_index(conn: duckdb.DuckDBPyConnection, project: str) -> Dict:
         logger.debug(f"State column fallback query failed: {e}")
     
     # ==========================================================================
+    # STEP 1B: BUILD DATE CONCEPT TERMS
+    # Maps natural language date concepts to actual date columns
+    # e.g., "hired" → hireDate, "terminated" → terminationDate
+    # ==========================================================================
+    stats['date_concepts'] = 0
+    
+    # Date column patterns → concept terms
+    # Format: (column_pattern, [concept_terms], operator)
+    DATE_CONCEPT_PATTERNS = [
+        # Hire date patterns
+        (['hiredate', 'hire_date', 'dateofhire', 'date_of_hire'], 
+         ['hired', 'hire date', 'hire', 'start date', 'started'], 'TEMPORAL'),
+        (['originalhiredate', 'original_hire_date', 'orig_hire'], 
+         ['original hire', 'original hire date', 'first hired'], 'TEMPORAL'),
+        (['lasthiredate', 'last_hire_date', 'rehiredate', 'rehire_date', 'dateoflasthire'],
+         ['last hire', 'last hire date', 'rehire', 'rehired', 'most recent hire'], 'TEMPORAL'),
+        
+        # Termination date patterns  
+        (['terminationdate', 'termination_date', 'termdate', 'term_date', 'dateoftermination'],
+         ['terminated', 'termination', 'termination date', 'term date', 'end date', 'left'], 'TEMPORAL'),
+        
+        # Effective date patterns
+        (['effectivedate', 'effective_date', 'eff_date', 'effdate'],
+         ['effective', 'effective date', 'as of'], 'TEMPORAL'),
+        (['effectivestartdate', 'effective_start_date'],
+         ['effective start', 'start effective'], 'TEMPORAL'),
+        (['effectiveenddate', 'effective_end_date'],
+         ['effective end', 'end effective'], 'TEMPORAL'),
+        
+        # Status date patterns
+        (['statusstartdate', 'status_start_date', 'emplstatusstart', 'emplstatusstartdate'],
+         ['status start', 'status effective', 'status date'], 'TEMPORAL'),
+        
+        # Birth date
+        (['birthdate', 'birth_date', 'dateofbirth', 'dob'],
+         ['birth', 'birthday', 'born', 'date of birth'], 'TEMPORAL'),
+        
+        # Seniority date
+        (['senioritydate', 'seniority_date', 'service_date'],
+         ['seniority', 'seniority date', 'service date', 'tenure'], 'TEMPORAL'),
+    ]
+    
+    try:
+        # Get all columns from this project
+        all_columns = conn.execute("""
+            SELECT DISTINCT table_name, column_name
+            FROM _column_profiles
+            WHERE project = ?
+        """, [project]).fetchall()
+        
+        logger.info(f"[TERM_INDEX] Scanning {len(all_columns)} columns for date concepts")
+        
+        for table_name, column_name in all_columns:
+            col_lower = column_name.lower().replace('_', '').replace('-', '')
+            
+            for col_patterns, concept_terms, operator in DATE_CONCEPT_PATTERNS:
+                # Check if column matches any pattern
+                matched = any(pat.replace('_', '') in col_lower for pat in col_patterns)
+                if not matched:
+                    continue
+                
+                # Add each concept term
+                for concept in concept_terms:
+                    if index.add_term(
+                        term=concept,
+                        term_type='concept',
+                        table_name=table_name,
+                        column_name=column_name,
+                        operator=operator,
+                        match_value=None,
+                        domain='employee',  # Most date columns are employee-related
+                        entity='employee',
+                        confidence=0.90,
+                        source='date_pattern'
+                    ):
+                        stats['date_concepts'] += 1
+                
+                logger.debug(f"[TERM_INDEX] Date concept: {column_name} → {concept_terms}")
+                break  # Only match first pattern per column
+        
+        if stats['date_concepts'] > 0:
+            logger.warning(f"[TERM_INDEX] Built {stats['date_concepts']} date concept terms")
+            
+    except Exception as e:
+        logger.error(f"[TERM_INDEX] Date concept building failed: {e}")
+        stats['date_concept_error'] = str(e)
+    
+    # ==========================================================================
     # STEP 2: Rebuild from lookups
     # ==========================================================================
     try:
