@@ -13,7 +13,7 @@
  * Updated: January 17, 2026 - Matching platform UX
  */
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useProject } from '../context/ProjectContext';
 import { 
@@ -35,8 +35,43 @@ const SAMPLE_QUESTIONS = [
 
 export default function IntelligenceTestPage() {
   const { activeProject } = useProject();
-  // Always use TEA1000 for testing - this is a test page
-  const projectId = 'TEA1000';
+  
+  // Customer selection state
+  const [customers, setCustomers] = useState([]);
+  const [selectedCustomer, setSelectedCustomer] = useState(null);
+  const [customersLoading, setCustomersLoading] = useState(true);
+  
+  // Derived values for API calls
+  const customerId = selectedCustomer?.id || activeProject?.id;
+  const customerName = selectedCustomer?.name || selectedCustomer?.customer || activeProject?.name || 'No customer selected';
+  
+  // Load customers on mount
+  useEffect(() => {
+    const fetchCustomers = async () => {
+      try {
+        const res = await fetch(`${API_BASE}/api/customers/list`);
+        if (!res.ok) throw new Error('Failed to fetch customers');
+        const data = await res.json();
+        setCustomers(data);
+        
+        // Auto-select activeProject if available, or first customer with data
+        if (activeProject?.id) {
+          const match = data.find(c => c.id === activeProject.id);
+          if (match) setSelectedCustomer(match);
+        }
+        if (!selectedCustomer && data.length > 0) {
+          // Prefer customer with metadata (has data)
+          const withData = data.find(c => c.metadata?.detected_domains?.tables_analyzed > 0);
+          setSelectedCustomer(withData || data[0]);
+        }
+      } catch (err) {
+        console.error('Failed to load customers:', err);
+      } finally {
+        setCustomersLoading(false);
+      }
+    };
+    fetchCustomers();
+  }, [activeProject]);
   
   // State for each operation
   const [analyzeStatus, setAnalyzeStatus] = useState({ loading: false, result: null, error: null });
@@ -72,7 +107,7 @@ export default function IntelligenceTestPage() {
   const runAnalyze = async () => {
     setAnalyzeStatus({ loading: true, result: null, error: null });
     try {
-      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/analyze`, {
+      const response = await fetch(`${API_BASE}/api/intelligence/${customerId}/analyze`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({})
@@ -88,7 +123,7 @@ export default function IntelligenceTestPage() {
   const runRecalc = async () => {
     setRecalcStatus({ loading: true, result: null, error: null });
     try {
-      const response = await fetch(`${API_BASE}/api/customers/${projectId}/recalc`, {
+      const response = await fetch(`${API_BASE}/api/customers/${customerId}/recalc`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ what: ['terms', 'entities', 'joins'] })
@@ -104,7 +139,7 @@ export default function IntelligenceTestPage() {
   const runEnginesQuickTest = async () => {
     setEnginesStatus({ loading: true, result: null, error: null });
     try {
-      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/test-engines-quick`);
+      const response = await fetch(`${API_BASE}/api/intelligence/${customerId}/test-engines-quick`);
       const data = await response.json();
       setEnginesStatus({ loading: false, result: data, error: null });
     } catch (err) {
@@ -116,7 +151,7 @@ export default function IntelligenceTestPage() {
   const runDiagnose = async () => {
     setDiagnoseStatus({ loading: true, result: null, error: null });
     try {
-      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/diagnose`);
+      const response = await fetch(`${API_BASE}/api/intelligence/${customerId}/diagnose`);
       const data = await response.json();
       setDiagnoseStatus({ loading: false, result: data, error: null });
     } catch (err) {
@@ -128,8 +163,7 @@ export default function IntelligenceTestPage() {
   const fetchTermMappings = async () => {
     setTermMappingStatus({ loading: true, pending: null, approved: null, error: null });
     try {
-      // Use activeProject UUID if available, otherwise use projectId
-      const pid = activeProject?.id || projectId;
+      const pid = customerId;
       
       const [pendingRes, approvedRes] = await Promise.all([
         fetch(`${API_BASE}/api/admin/learning/term-mappings/pending?project_id=${pid}`, { credentials: 'include' }),
@@ -153,7 +187,7 @@ export default function IntelligenceTestPage() {
   const discoverTermMappings = async () => {
     setTermMappingAction({ loading: true, message: null, error: null });
     try {
-      const pid = activeProject?.id || projectId;
+      const pid = customerId;
       const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/discover/${pid}?vendor=UKG&product=Pro`, {
         method: 'POST',
         credentials: 'include'
@@ -169,7 +203,7 @@ export default function IntelligenceTestPage() {
   const approveTermMapping = async (index) => {
     setTermMappingAction({ loading: true, message: null, error: null });
     try {
-      const pid = activeProject?.id || projectId;
+      const pid = customerId;
       const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/approve/${pid}/${index}`, {
         method: 'POST',
         credentials: 'include'
@@ -185,7 +219,7 @@ export default function IntelligenceTestPage() {
   const rejectTermMapping = async (index) => {
     setTermMappingAction({ loading: true, message: null, error: null });
     try {
-      const pid = activeProject?.id || projectId;
+      const pid = customerId;
       const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/reject/${pid}/${index}`, {
         method: 'POST',
         credentials: 'include'
@@ -201,7 +235,7 @@ export default function IntelligenceTestPage() {
   const approveAllTermMappings = async (minConfidence = 0.7) => {
     setTermMappingAction({ loading: true, message: null, error: null });
     try {
-      const pid = activeProject?.id || projectId;
+      const pid = customerId;
       const response = await fetch(`${API_BASE}/api/admin/learning/term-mappings/approve-all/${pid}?min_confidence=${minConfidence}`, {
         method: 'POST',
         credentials: 'include'
@@ -265,10 +299,10 @@ export default function IntelligenceTestPage() {
 
   // Call chat endpoint (no auth required for unified chat)
   const callChatForIntent = async (message, sessionId = null, clarifications = null) => {
-    const pid = activeProject?.id || projectId;
+    const pid = customerId;
     const payload = {
       message,
-      project: projectId,
+      project: customerName,
       customer_id: pid,
       session_id: sessionId,
       clarifications,
@@ -438,7 +472,7 @@ export default function IntelligenceTestPage() {
         return;
       }
       
-      const response = await fetch(`${API_BASE}/api/intelligence/${projectId}/test-engine`, {
+      const response = await fetch(`${API_BASE}/api/intelligence/${customerId}/test-engine`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ engine: selectedEngine, config })
@@ -496,7 +530,7 @@ export default function IntelligenceTestPage() {
     }));
     try {
       const response = await fetch(
-        `${API_BASE}/api/customers/${projectId}/resolve-terms?question=${encodeURIComponent(question)}`,
+        `${API_BASE}/api/customers/${customerId}/resolve-terms?question=${encodeURIComponent(question)}`,
         { method: 'POST' }
       );
       const data = await response.json();
@@ -564,20 +598,54 @@ export default function IntelligenceTestPage() {
           Intelligence Pipeline Test
         </h1>
         <p style={{ margin: '8px 0 0', color: 'var(--text-secondary)' }}>
-          Test MetadataReasoner and term resolution for project: <strong style={{ color: 'var(--grass-green)' }}>{projectId}</strong>
-          {activeProject?.id && activeProject.id !== projectId && (
-            <span style={{ marginLeft: 8, fontSize: 12 }}>
-              (UUID: <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 3 }}>{activeProject.id}</code>)
-            </span>
-          )}
+          Test MetadataReasoner, term resolution, and IntentEngine patterns
         </p>
       </div>
 
-      {/* Warning if no project */}
-      {!activeProject && (
+      {/* Customer Selector */}
+      <div style={{ marginBottom: 24, display: 'flex', alignItems: 'center', gap: 16 }}>
+        <label style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Customer:</label>
+        {customersLoading ? (
+          <span style={{ color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Loader2 size={16} className="itp-spin" /> Loading...
+          </span>
+        ) : (
+          <select
+            value={selectedCustomer?.id || ''}
+            onChange={(e) => {
+              const customer = customers.find(c => c.id === e.target.value);
+              setSelectedCustomer(customer);
+            }}
+            style={{
+              padding: '8px 12px',
+              fontSize: 14,
+              borderRadius: 6,
+              border: '1px solid var(--border-color)',
+              background: 'var(--bg-primary)',
+              color: 'var(--text-primary)',
+              minWidth: 250,
+            }}
+          >
+            <option value="">-- Select Customer --</option>
+            {customers.map(c => (
+              <option key={c.id} value={c.id}>
+                {c.name || c.customer} {c.metadata?.detected_domains?.tables_analyzed > 0 ? `(${c.metadata.detected_domains.tables_analyzed} tables)` : '(no data)'}
+              </option>
+            ))}
+          </select>
+        )}
+        {selectedCustomer && (
+          <span style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+            ID: <code style={{ background: 'var(--bg-primary)', padding: '2px 6px', borderRadius: 3 }}>{selectedCustomer.id}</code>
+          </span>
+        )}
+      </div>
+
+      {/* Warning if no customer selected */}
+      {!selectedCustomer && !customersLoading && (
         <div className="itp-alert itp-alert--warning" style={{ marginBottom: 24 }}>
           <AlertTriangle size={20} />
-          <span>No project selected. Using default: <strong>TEA1000</strong>. Select a project from Projects page for different data.</span>
+          <span>No customer selected. Select a customer with uploaded data to run tests.</span>
         </div>
       )}
 
@@ -591,7 +659,7 @@ export default function IntelligenceTestPage() {
           </div>
           <StatusBadge status={diagnoseStatus} />
         </div>
-        <button onClick={runDiagnose} disabled={diagnoseStatus.loading} className="btn btn-primary">
+        <button onClick={runDiagnose} disabled={diagnoseStatus.loading || !customerId} className="btn btn-primary">
           {diagnoseStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Search size={16} />}
           {diagnoseStatus.loading ? 'Checking...' : 'Diagnose'}
         </button>
@@ -672,7 +740,7 @@ export default function IntelligenceTestPage() {
           </div>
           <StatusBadge status={analyzeStatus} />
         </div>
-        <button onClick={runAnalyze} disabled={analyzeStatus.loading} className="btn btn-primary">
+        <button onClick={runAnalyze} disabled={analyzeStatus.loading || !customerId} className="btn btn-primary">
           {analyzeStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Database size={16} />}
           {analyzeStatus.loading ? 'Analyzing...' : 'Run Analyze'}
         </button>
@@ -694,7 +762,7 @@ export default function IntelligenceTestPage() {
           </div>
           <StatusBadge status={recalcStatus} />
         </div>
-        <button onClick={runRecalc} disabled={recalcStatus.loading} className="btn btn-primary">
+        <button onClick={runRecalc} disabled={recalcStatus.loading || !customerId} className="btn btn-primary">
           {recalcStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <RefreshCw size={16} />}
           {recalcStatus.loading ? 'Recalculating...' : 'Run Recalc'}
         </button>
@@ -717,7 +785,7 @@ export default function IntelligenceTestPage() {
           <StatusBadge status={enginesStatus} />
         </div>
         
-        <button onClick={runEnginesQuickTest} disabled={enginesStatus.loading} className="btn btn-primary" style={{ marginBottom: 16 }}>
+        <button onClick={runEnginesQuickTest} disabled={enginesStatus.loading || !customerId} className="btn btn-primary" style={{ marginBottom: 16 }}>
           {enginesStatus.loading ? <Loader2 size={16} className="itp-spin" /> : <Zap size={16} />}
           {enginesStatus.loading ? 'Testing...' : 'Quick Test All Engines'}
         </button>
@@ -1088,7 +1156,7 @@ export default function IntelligenceTestPage() {
             <div className="itp-step-title">IntentEngine Pattern Tests</div>
             <div className="itp-step-desc">Test consultative clarification (Phase 1) - all 7 patterns</div>
           </div>
-          <button onClick={runAllIntentTests} disabled={intentTestStatus.loading} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
+          <button onClick={runAllIntentTests} disabled={intentTestStatus.loading || !customerId} className="btn btn-primary" style={{ padding: '6px 12px', fontSize: 13 }}>
             {intentTestStatus.loading ? <Loader2 size={14} className="itp-spin" /> : <Play size={14} />}
             {intentTestStatus.loading ? 'Testing...' : 'Run All Tests'}
           </button>
@@ -1113,7 +1181,7 @@ export default function IntelligenceTestPage() {
               <button 
                 key={name}
                 onClick={() => runSingleIntentTest(name)}
-                disabled={intentTestStatus.loading}
+                disabled={intentTestStatus.loading || !customerId}
                 className="btn"
                 style={{ 
                   padding: '6px 12px', 
