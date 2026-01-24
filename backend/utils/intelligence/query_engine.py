@@ -916,8 +916,8 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
-        # VERSION MARKER: v2024.01.24.6 - Fixed _clean_sql + status column detection
-        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.6 - question='{question[:50]}...'")
+        # VERSION MARKER: v2024.01.24.7 - Fixed double SELECT cleaning
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.7 - question='{question[:50]}...'")
         
         try:
             # Get all tables for this project
@@ -1833,18 +1833,21 @@ SQL:"""
         sql = re.sub(r'```sql', '', sql, flags=re.IGNORECASE)
         sql = re.sub(r'```', '', sql)
         
+        # Remove garbage prefix like "SELECT \n" before the real query
+        # Pattern: "SELECT" followed by only whitespace then another "SELECT"
+        sql = re.sub(r'^SELECT\s*\n\s*(?=SELECT)', '', sql, flags=re.IGNORECASE)
+        
         # Find the FIRST occurrence of SELECT or WITH (for CTEs)
         upper_sql = sql.upper()
         
         # Check for WITH (CTE) first
-        with_pos = upper_sql.find('WITH ')
-        if with_pos != -1 and with_pos < upper_sql.find('SELECT'):
-            sql = sql[with_pos:].strip()
-        else:
-            # Find first SELECT
-            select_pos = upper_sql.find('SELECT')
-            if select_pos != -1:
-                sql = sql[select_pos:].strip()
+        with_match = re.search(r'\bWITH\b', upper_sql)
+        select_match = re.search(r'\bSELECT\b', upper_sql)
+        
+        if with_match and (not select_match or with_match.start() < select_match.start()):
+            sql = sql[with_match.start():].strip()
+        elif select_match:
+            sql = sql[select_match.start():].strip()
         
         # Remove trailing semicolon for DuckDB
         sql = sql.rstrip(';').strip()
