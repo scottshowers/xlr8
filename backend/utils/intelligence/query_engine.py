@@ -1215,8 +1215,75 @@ class SQLGenerator:
             logger.error(traceback.format_exc())
             return "", error
     
+    def _map_intent_to_columns(self, intent_context: str, tables: List[TableSchema]) -> str:
+        """
+        Map abstract intent parameters to actual column names in schema.
+        
+        Returns explicit SQL instructions based on intent + available columns.
+        """
+        if not intent_context:
+            return ""
+        
+        instructions = []
+        
+        # Collect all columns across tables
+        all_columns = {}
+        for table in tables:
+            for col in table.columns:
+                col_lower = col.lower()
+                all_columns[col_lower] = (table.table_name, col)
+        
+        # Map time_dimension to actual date columns
+        if "time_dimension: hire_date" in intent_context or "time_dimension: hire" in intent_context:
+            # Look for hire date columns
+            hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
+            if not hire_cols:
+                hire_cols = [c for c in all_columns.keys() if 'hire' in c]
+            if hire_cols:
+                table_name, col_name = all_columns[hire_cols[0]]
+                instructions.append(f'USE "{col_name}" as the date column for grouping (this is the hire date)')
+                instructions.append(f'GROUP BY the year/month extracted from "{col_name}"')
+        
+        elif "time_dimension: term_date" in intent_context or "time_dimension: term" in intent_context:
+            # Look for termination date columns
+            term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and 'date' in c]
+            if not term_cols:
+                term_cols = [c for c in all_columns.keys() if 'term' in c or 'separation' in c]
+            if term_cols:
+                table_name, col_name = all_columns[term_cols[0]]
+                instructions.append(f'USE "{col_name}" as the date column for grouping (this is the termination date)')
+                instructions.append(f'GROUP BY the year/month extracted from "{col_name}"')
+                instructions.append(f'Only include rows WHERE "{col_name}" IS NOT NULL')
+        
+        # Map status filters to actual column
+        if "status_filter" in intent_context:
+            status_cols = [c for c in all_columns.keys() if 'status' in c and 'employee' not in c]
+            if not status_cols:
+                status_cols = [c for c in all_columns.keys() if 'status' in c]
+            if status_cols:
+                table_name, col_name = all_columns[status_cols[0]]
+                # Extract the filter values from intent
+                import re
+                match = re.search(r"status_filter['\"]?\s*[:=]\s*\[([^\]]+)\]", intent_context)
+                if match:
+                    values = match.group(1).replace("'", "").replace('"', '').split(',')
+                    values = [v.strip() for v in values]
+                    if len(values) == 1:
+                        instructions.append(f'Filter WHERE "{col_name}" = \'{values[0]}\'')
+                    else:
+                        vals_str = ", ".join(f"'{v}'" for v in values)
+                        instructions.append(f'Filter WHERE "{col_name}" IN ({vals_str})')
+        
+        if instructions:
+            return "\n\n=== EXPLICIT COLUMN INSTRUCTIONS (MUST FOLLOW) ===\n" + "\n".join(f"- {i}" for i in instructions) + "\n"
+        
+        return ""
+    
     def _build_prompt(self, context: QueryContext, intent_context: str = "") -> str:
         """Build the prompt for SQL generation."""
+        
+        # NEW: Map intent parameters to actual columns
+        column_instructions = self._map_intent_to_columns(intent_context, context.tables)
         
         # Format table schemas - show quoted names so LLM uses them
         schema_text = ""
@@ -1294,6 +1361,7 @@ class SQLGenerator:
 {term_mapping_text}
 {filter_text}
 {intent_text}
+{column_instructions}
 {business_rules_text}
 
 User Question: {context.question}
@@ -1310,7 +1378,7 @@ CRITICAL RULES:
 7. Return ONLY the SQL, no explanations, no markdown, no code fences
 8. WHEN JOINING TABLES: Always qualify column names with table alias (e.g., cd."companyName" not just "companyName")
 9. Use short aliases like ed, cd, pd for tables
-10. If USER INTENT is provided above, use it to guide your SQL logic (e.g., status filters, time dimensions)
+10. If EXPLICIT COLUMN INSTRUCTIONS are provided above, you MUST follow them exactly
 
 EXAMPLE with JOIN:
 SELECT cd."companyName", COUNT(*) AS count
