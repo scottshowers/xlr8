@@ -936,6 +936,15 @@ class ContextAssembler:
                         if filter_key in [fc.lower() for fc in filter_cols]:
                             score += 3
                 
+                # TEMPORAL BOOST: If query has year filter or temporal keywords, boost tables with date columns
+                # This ensures tables with hireDate, terminationDate etc. are included in PIT queries
+                temporal_indicators = filters.get('year') or any(kw in table_lower for kw in ['hire', 'term', 'job_history', 'employment'])
+                if temporal_indicators or any(e in ['hired', 'terminated', 'tenure', 'headcount'] for e in entities):
+                    date_cols = self._get_date_columns(table_name)
+                    if date_cols:
+                        score += 7  # Strong boost for tables with date columns
+                        logger.warning(f"[CONTEXT]   TEMPORAL BOOST for '{table_name}': has date columns {date_cols[:3]}")
+                
                 if score > 0:
                     scored_tables.append((table_name, score, info['row_count']))
                     logger.warning(f"[CONTEXT]   Scored '{table_name}': {score} points")
@@ -973,6 +982,27 @@ class ContextAssembler:
                 WHERE LOWER(project) = LOWER(?)
                   AND table_name = ?
                   AND filter_category IS NOT NULL
+            """, [self.project, table_name]).fetchall()
+            return [row[0] for row in result]
+        except:
+            return []
+    
+    def _get_date_columns(self, table_name: str) -> List[str]:
+        """Get columns that look like date columns by name pattern."""
+        try:
+            result = self.conn.execute("""
+                SELECT column_name
+                FROM _column_profiles
+                WHERE LOWER(project) = LOWER(?)
+                  AND table_name = ?
+                  AND (
+                    LOWER(column_name) LIKE '%date%'
+                    OR LOWER(column_name) LIKE '%hire%'
+                    OR LOWER(column_name) LIKE '%term%'
+                    OR LOWER(column_name) LIKE '%effective%'
+                    OR LOWER(column_name) LIKE '%start%'
+                    OR LOWER(column_name) LIKE '%end%'
+                  )
             """, [self.project, table_name]).fetchall()
             return [row[0] for row in result]
         except:
