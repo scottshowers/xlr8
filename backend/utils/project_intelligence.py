@@ -2664,13 +2664,19 @@ class ProjectIntelligenceService:
         
         try:
             all_tables = self.handler.conn.execute("SHOW TABLES").fetchall()
-            project_prefix = (self.project or '').lower().replace(' ', '_').replace('-', '_')
+            # FIX: Don't replace dashes with underscores - table names preserve the original project ID format
+            project_prefix = (self.project or '').lower()
+            # Also try with underscores for legacy compatibility
+            project_prefix_underscore = project_prefix.replace('-', '_')
             
             for (table_name,) in all_tables:
                 if table_name.startswith('_'):
                     continue
                 
-                if project_prefix and not table_name.lower().startswith(project_prefix.lower()):
+                table_lower = table_name.lower()
+                # Match either dash or underscore version of project ID
+                if project_prefix and not (table_lower.startswith(project_prefix) or 
+                                          table_lower.startswith(project_prefix_underscore)):
                     continue
                 
                 # Get columns
