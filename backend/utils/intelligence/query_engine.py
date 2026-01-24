@@ -1364,38 +1364,72 @@ class SQLGenerator:
                         vals_str = ", ".join(f"'{v}'" for v in values)
                         instructions.append(f'Filter WHERE "{table_name}"."{col_name}" IN ({vals_str}) (column is in {short_name})')
         
-        # Handle point-in-time logic
+        # Handle point-in-time logic - ONLY if we find actual columns
         if "pit_logic" in intent_context:
-            # Extract the date from the original question if present
+            # Extract the date from intent params
             import re
-            date_match = re.search(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', intent_context)
+            date_match = re.search(r'as_of_date[\'"]?\s*[:=]\s*[\'"]?(\d{4}-\d{2}-\d{2})', intent_context)
             as_of_date = date_match.group(1) if date_match else None
             
-            # Find hire date and term date columns for PIT logic
-            hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
-            term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and 'date' in c]
+            if not as_of_date:
+                # Try alternate formats
+                date_match = re.search(r'(\d{4}-\d{2}-\d{2})', intent_context)
+                as_of_date = date_match.group(1) if date_match else None
+            
+            # Find hire date columns - be flexible about naming
+            hire_cols = [c for c in all_columns.keys() if 'hire' in c and ('date' in c or 'dt' in c)]
+            if not hire_cols:
+                hire_cols = [c for c in all_columns.keys() if 'hire' in c]
+            if not hire_cols:
+                # Try alternate names
+                hire_cols = [c for c in all_columns.keys() if 'start' in c and 'date' in c and 'empl' in c]
+            
+            # Find termination date columns
+            term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and ('date' in c or 'dt' in c)]
+            if not term_cols:
+                term_cols = [c for c in all_columns.keys() if 'term' in c and 'date' not in c]  # Maybe just 'terminationDate'
+            
+            # Find status column for fallback
+            status_cols = [c for c in all_columns.keys() if 'status' in c and 'empl' in c]
+            if not status_cols:
+                status_cols = [c for c in all_columns.keys() if c in ['status', 'emplstatus', 'employeestatus']]
             
             if "active_on_date" in intent_context and as_of_date:
-                instructions.append(f'POINT-IN-TIME: Find employees active as of {as_of_date}')
+                instructions.append(f'POINT-IN-TIME QUERY: Find employees active as of {as_of_date}')
+                
+                # Only add hire date instruction if we found the column
                 if hire_cols:
                     table_name, col_name = all_columns[hire_cols[0]]
-                    instructions.append(f'Hired on or before: CAST("{col_name}" AS DATE) <= \'{as_of_date}\'')
+                    short_name = get_short_name(table_name)
+                    instructions.append(f'HIRE DATE FILTER: CAST("{col_name}" AS DATE) <= \'{as_of_date}\' (column is in {short_name})')
+                else:
+                    instructions.append(f'WARNING: No hire date column found - cannot filter by hire date')
+                
+                # Only add term date instruction if we found the column
                 if term_cols:
                     table_name, col_name = all_columns[term_cols[0]]
-                    instructions.append(f'Not terminated before: ("{col_name}" IS NULL OR CAST("{col_name}" AS DATE) > \'{as_of_date}\')')
-                instructions.append(f'IMPORTANT: Always CAST date columns to DATE - they may be stored as VARCHAR')
+                    short_name = get_short_name(table_name)
+                    instructions.append(f'TERM DATE FILTER: ("{col_name}" IS NULL OR CAST("{col_name}" AS DATE) > \'{as_of_date}\') (column is in {short_name})')
+                elif status_cols:
+                    # Fall back to status-based filtering
+                    table_name, col_name = all_columns[status_cols[0]]
+                    short_name = get_short_name(table_name)
+                    instructions.append(f'NO TERM DATE FOUND - Use status instead: "{col_name}" IN (\'A\', \'L\') (column is in {short_name})')
+                
+                instructions.append(f'CRITICAL: Only use columns that exist in the schema above - do NOT invent column names')
             
             elif "hired_by_date" in intent_context and as_of_date:
                 instructions.append(f'POINT-IN-TIME: Find everyone hired by {as_of_date}')
                 if hire_cols:
                     table_name, col_name = all_columns[hire_cols[0]]
                     instructions.append(f'Hired on or before: CAST("{col_name}" AS DATE) <= \'{as_of_date}\'')
-                instructions.append(f'IMPORTANT: Always CAST date columns to DATE - they may be stored as VARCHAR')
+                else:
+                    instructions.append(f'WARNING: No hire date column found in schema')
+                instructions.append(f'CRITICAL: Only use columns that exist in the schema above - do NOT invent column names')
         
-        # General date handling reminder
-        if any(kw in intent_context.lower() for kw in ['date', 'time_dimension', 'pit_logic']):
-            if not any('CAST' in i for i in instructions):
-                instructions.append('IMPORTANT: Date columns may be stored as VARCHAR - use CAST(column AS DATE) for date comparisons and EXTRACT functions')
+        # General reminder about not inventing columns
+        if instructions:
+            instructions.append('REMINDER: If a column is not listed in the schema, do NOT use it')
         
         if instructions:
             return "\n\n=== EXPLICIT COLUMN INSTRUCTIONS (MUST FOLLOW) ===\n" + "\n".join(f"- {i}" for i in instructions) + "\n"
