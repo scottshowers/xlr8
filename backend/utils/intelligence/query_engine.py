@@ -1267,6 +1267,36 @@ class SQLGenerator:
             
             return None
         
+        # Detect time_grouping from intent
+        time_grouping = "year"  # default
+        if "time_grouping: month" in intent_context:
+            time_grouping = "month"
+        elif "time_grouping: quarter" in intent_context:
+            time_grouping = "quarter"
+        elif "time_grouping: year" in intent_context:
+            time_grouping = "year"
+        
+        # Helper to build grouping instructions
+        def build_time_grouping_instructions(table_name: str, col_name: str, short_name: str) -> List[str]:
+            """Build SQL instructions for time-based grouping."""
+            instr = []
+            # Note: Cast to DATE in case column is stored as VARCHAR
+            if time_grouping == "year":
+                instr.append(f'EXTRACT YEAR from the date: SELECT EXTRACT(YEAR FROM CAST("{col_name}" AS DATE)) AS year')
+                instr.append(f'GROUP BY EXTRACT(YEAR FROM CAST("{col_name}" AS DATE))')
+                instr.append(f'ORDER BY year')
+            elif time_grouping == "month":
+                instr.append(f'EXTRACT YEAR and MONTH: SELECT EXTRACT(YEAR FROM CAST("{col_name}" AS DATE)) AS year, EXTRACT(MONTH FROM CAST("{col_name}" AS DATE)) AS month')
+                instr.append(f'GROUP BY EXTRACT(YEAR FROM CAST("{col_name}" AS DATE)), EXTRACT(MONTH FROM CAST("{col_name}" AS DATE))')
+                instr.append(f'ORDER BY year, month')
+            elif time_grouping == "quarter":
+                instr.append(f'EXTRACT YEAR and QUARTER: SELECT EXTRACT(YEAR FROM CAST("{col_name}" AS DATE)) AS year, EXTRACT(QUARTER FROM CAST("{col_name}" AS DATE)) AS quarter')
+                instr.append(f'GROUP BY EXTRACT(YEAR FROM CAST("{col_name}" AS DATE)), EXTRACT(QUARTER FROM CAST("{col_name}" AS DATE))')
+                instr.append(f'ORDER BY year, quarter')
+            instr.append(f'IMPORTANT: Always CAST date columns to DATE type - they may be stored as VARCHAR')
+            instr.append(f'DO NOT group by the raw date - that creates thousands of useless groups')
+            return instr
+        
         # Check for specific hire date column from clarification
         specific_hire = extract_specific_column("hire_date_column")
         specific_term = extract_specific_column("term_date_column")
@@ -1278,8 +1308,8 @@ class SQLGenerator:
                 table_name, col_name = specific_hire
                 short_name = get_short_name(table_name)
                 instructions.append(f'SPECIFIC COLUMN SELECTED: Use "{col_name}" from table "{table_name}" ({short_name})')
-                instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias for {short_name})')
-                instructions.append(f'DO NOT look for hire date in other tables - user specified {short_name}."{col_name}"')
+                instructions.extend(build_time_grouping_instructions(table_name, col_name, short_name))
+                instructions.append(f'The column "{col_name}" is ONLY in {short_name} - use proper table alias')
             else:
                 # Fall back to searching
                 hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
@@ -1289,8 +1319,8 @@ class SQLGenerator:
                     table_name, col_name = all_columns[hire_cols[0]]
                     short_name = get_short_name(table_name)
                     instructions.append(f'The hire date column is "{col_name}" in table "{table_name}" ({short_name})')
-                    instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias)')
-                    instructions.append(f'DO NOT look for "{col_name}" in other tables - it is ONLY in {short_name}')
+                    instructions.extend(build_time_grouping_instructions(table_name, col_name, short_name))
+                    instructions.append(f'The column "{col_name}" is ONLY in {short_name} - use proper table alias')
         
         elif "time_dimension: term_date" in intent_context or "time_dimension: term" in intent_context:
             if specific_term:
@@ -1298,8 +1328,8 @@ class SQLGenerator:
                 table_name, col_name = specific_term
                 short_name = get_short_name(table_name)
                 instructions.append(f'SPECIFIC COLUMN SELECTED: Use "{col_name}" from table "{table_name}" ({short_name})')
-                instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias for {short_name})')
-                instructions.append(f'DO NOT look for termination date in other tables - user specified {short_name}."{col_name}"')
+                instructions.extend(build_time_grouping_instructions(table_name, col_name, short_name))
+                instructions.append(f'The column "{col_name}" is ONLY in {short_name} - use proper table alias')
                 instructions.append(f'Only include rows WHERE "{col_name}" IS NOT NULL')
             else:
                 # Fall back to searching
@@ -1310,8 +1340,8 @@ class SQLGenerator:
                     table_name, col_name = all_columns[term_cols[0]]
                     short_name = get_short_name(table_name)
                     instructions.append(f'The termination date column is "{col_name}" in table "{table_name}" ({short_name})')
-                    instructions.append(f'SELECT and GROUP BY "{table_name}"."{col_name}" (or use table alias)')
-                    instructions.append(f'DO NOT look for "{col_name}" in other tables - it is ONLY in {short_name}')
+                    instructions.extend(build_time_grouping_instructions(table_name, col_name, short_name))
+                    instructions.append(f'The column "{col_name}" is ONLY in {short_name} - use proper table alias')
                     instructions.append(f'Only include rows WHERE "{col_name}" IS NOT NULL')
         
         # Map status filters to actual column
@@ -1333,6 +1363,39 @@ class SQLGenerator:
                     else:
                         vals_str = ", ".join(f"'{v}'" for v in values)
                         instructions.append(f'Filter WHERE "{table_name}"."{col_name}" IN ({vals_str}) (column is in {short_name})')
+        
+        # Handle point-in-time logic
+        if "pit_logic" in intent_context:
+            # Extract the date from the original question if present
+            import re
+            date_match = re.search(r'(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})', intent_context)
+            as_of_date = date_match.group(1) if date_match else None
+            
+            # Find hire date and term date columns for PIT logic
+            hire_cols = [c for c in all_columns.keys() if 'hire' in c and 'date' in c]
+            term_cols = [c for c in all_columns.keys() if ('term' in c or 'separation' in c) and 'date' in c]
+            
+            if "active_on_date" in intent_context and as_of_date:
+                instructions.append(f'POINT-IN-TIME: Find employees active as of {as_of_date}')
+                if hire_cols:
+                    table_name, col_name = all_columns[hire_cols[0]]
+                    instructions.append(f'Hired on or before: CAST("{col_name}" AS DATE) <= \'{as_of_date}\'')
+                if term_cols:
+                    table_name, col_name = all_columns[term_cols[0]]
+                    instructions.append(f'Not terminated before: ("{col_name}" IS NULL OR CAST("{col_name}" AS DATE) > \'{as_of_date}\')')
+                instructions.append(f'IMPORTANT: Always CAST date columns to DATE - they may be stored as VARCHAR')
+            
+            elif "hired_by_date" in intent_context and as_of_date:
+                instructions.append(f'POINT-IN-TIME: Find everyone hired by {as_of_date}')
+                if hire_cols:
+                    table_name, col_name = all_columns[hire_cols[0]]
+                    instructions.append(f'Hired on or before: CAST("{col_name}" AS DATE) <= \'{as_of_date}\'')
+                instructions.append(f'IMPORTANT: Always CAST date columns to DATE - they may be stored as VARCHAR')
+        
+        # General date handling reminder
+        if any(kw in intent_context.lower() for kw in ['date', 'time_dimension', 'pit_logic']):
+            if not any('CAST' in i for i in instructions):
+                instructions.append('IMPORTANT: Date columns may be stored as VARCHAR - use CAST(column AS DATE) for date comparisons and EXTRACT functions')
         
         if instructions:
             return "\n\n=== EXPLICIT COLUMN INSTRUCTIONS (MUST FOLLOW) ===\n" + "\n".join(f"- {i}" for i in instructions) + "\n"
@@ -1439,6 +1502,7 @@ CRITICAL RULES:
 8. WHEN JOINING TABLES: Always qualify column names with table alias (e.g., cd."companyName" not just "companyName")
 9. Use short aliases like ed, cd, pd for tables
 10. If EXPLICIT COLUMN INSTRUCTIONS are provided above, you MUST follow them exactly
+11. DATE COLUMNS ARE OFTEN STORED AS VARCHAR - Always use CAST("column" AS DATE) or TRY_CAST("column" AS DATE) when using YEAR(), EXTRACT(), or date comparisons
 
 EXAMPLE with JOIN:
 SELECT cd."companyName", COUNT(*) AS count
@@ -1446,6 +1510,12 @@ FROM "employment_table" AS ed
 JOIN "company_table" AS cd ON ed."companyId" = cd."companyId"
 WHERE ed."status" = 'A'
 GROUP BY cd."companyName"
+
+EXAMPLE with DATE:
+SELECT EXTRACT(YEAR FROM CAST("hireDate" AS DATE)) AS year, COUNT(*) AS count
+FROM "employees"
+WHERE CAST("hireDate" AS DATE) <= '2025-12-31'
+GROUP BY EXTRACT(YEAR FROM CAST("hireDate" AS DATE))
 
 SQL:"""
         
