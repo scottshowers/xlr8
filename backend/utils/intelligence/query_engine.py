@@ -894,6 +894,9 @@ class ContextAssembler:
         """Find tables that match the detected entities and filters."""
         tables = []
         
+        # VERSION MARKER: v2024.01.24.2 - PIT table selection fix
+        logger.warning(f"[CONTEXT] _find_relevant_tables v2024.01.24.2 - question='{question[:50]}...'")
+        
         try:
             # Get all tables for this project
             result = self.conn.execute("""
@@ -936,19 +939,30 @@ class ContextAssembler:
                         if filter_key in [fc.lower() for fc in filter_cols]:
                             score += 3
                 
-                # TEMPORAL BOOST: For PIT/headcount queries, strongly prefer tables with hire/term dates
-                # This ensures employment_details/employee_changes are selected over compensation_details
-                is_temporal_query = filters.get('year') or any(e in ['hired', 'terminated', 'tenure', 'headcount', 'active'] for e in entities)
-                if is_temporal_query or 'active' in question.lower() or 'hired' in question.lower() or 'terminated' in question.lower():
-                    # Check for HIRE/TERM specific date columns (strong boost)
+                # TEMPORAL/PIT QUERY HANDLING
+                # For queries about "active", "hired", "terminated" + a date, we NEED hire/term date columns
+                q_lower = question.lower()
+                is_pit_query = (
+                    ('active' in q_lower and filters.get('year')) or
+                    'headcount' in q_lower or
+                    ('hired' in q_lower and ('in' in q_lower or 'during' in q_lower or filters.get('year'))) or
+                    ('terminated' in q_lower and ('in' in q_lower or 'during' in q_lower or filters.get('year')))
+                )
+                
+                if is_pit_query:
                     hire_term_cols = self._get_hire_term_columns(table_name)
                     if hire_term_cols:
-                        score += 15  # Very strong boost for tables with hire/term dates
-                        logger.warning(f"[CONTEXT]   HIRE/TERM BOOST for '{table_name}': {hire_term_cols[:3]}")
-                    # Also check for employment/job_history in table name (strong indicator)
-                    elif any(kw in table_lower for kw in ['employment', 'employee_change', 'job_history']):
-                        score += 10
-                        logger.warning(f"[CONTEXT]   TABLE NAME BOOST for '{table_name}'")
+                        # Tables with hire/term columns get MASSIVE boost for PIT queries
+                        score += 50
+                        logger.warning(f"[CONTEXT]   PIT BOOST +50 for '{table_name}': has {hire_term_cols}")
+                    elif 'employment' in table_lower or 'employee_change' in table_lower:
+                        # Employment tables get strong boost even without exact column match
+                        score += 30
+                        logger.warning(f"[CONTEXT]   EMPLOYMENT TABLE BOOST +30 for '{table_name}'")
+                    else:
+                        # Other tables get PENALIZED for PIT queries - we don't want compensation_details
+                        score -= 20
+                        logger.warning(f"[CONTEXT]   PIT PENALTY -20 for '{table_name}': no hire/term columns")
                 
                 if score > 0:
                     scored_tables.append((table_name, score, info['row_count']))
