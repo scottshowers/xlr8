@@ -170,6 +170,7 @@ INTENT_PATTERNS = {
         "triggers": [
             r"\bas\s+of\s+",
             r"\bon\s+\d{1,2}[/-]\d{1,2}",
+            r"\bon\s+(?:january|february|march|april|may|june|july|august|september|october|november|december)\s+\d{1,2}",
             r"\bat\s+(?:end|start)\s+of",
             r"\bpoint\s+in\s+time\b",
         ],
