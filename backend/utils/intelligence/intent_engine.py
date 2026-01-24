@@ -864,13 +864,27 @@ class IntentEngine:
             r'as\s+of\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',  # as of 12/31/2025
             r'as\s+of\s+(\d{4}[/-]\d{1,2}[/-]\d{1,2})',    # as of 2025-12-31
             r'on\s+(\d{1,2}[/-]\d{1,2}[/-]\d{2,4})',       # on 12/31/2025
+            r'on\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+(\d{4})',  # on January 1, 2024
+            r'as\s+of\s+(january|february|march|april|may|june|july|august|september|october|november|december)\s+(\d{1,2}),?\s+(\d{4})',  # as of January 1, 2024
         ]
         for date_pattern in date_patterns:
             match = re.search(date_pattern, q_lower)
             if match:
-                date_str = match.group(1)
-                # Normalize date format to YYYY-MM-DD for SQL
-                merged_params['as_of_date'] = self._normalize_date(date_str)
+                groups = match.groups()
+                # Handle spelled-out month format
+                if len(groups) == 3:
+                    month_name, day, year = groups
+                    month_map = {
+                        'january': '01', 'february': '02', 'march': '03', 'april': '04',
+                        'may': '05', 'june': '06', 'july': '07', 'august': '08',
+                        'september': '09', 'october': '10', 'november': '11', 'december': '12'
+                    }
+                    month = month_map.get(month_name, '01')
+                    merged_params['as_of_date'] = f"{year}-{month}-{day.zfill(2)}"
+                else:
+                    # Numeric date format
+                    date_str = groups[0]
+                    merged_params['as_of_date'] = self._normalize_date(date_str)
                 logger.warning(f"[INTENT] Extracted date from question: {merged_params['as_of_date']}")
                 break
         
