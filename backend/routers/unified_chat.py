@@ -1134,7 +1134,7 @@ async def unified_chat(request: UnifiedChatRequest):
         
         # ASK THE INTELLIGENCE ENGINE (only if not already answered by intent confirmation)
         if answer is None:
-            answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None)
+            answer = engine.ask(message, mode=mode, context={'learned_sql': learned_sql} if learned_sql else None, session_id=session_id)
         
         # Check if we can skip clarification using learning
         # BUT only after the first interaction in a session (let users see clarification first)
@@ -1159,7 +1159,7 @@ async def unified_chat(request: UnifiedChatRequest):
                         logger.info(f"[UNIFIED] Auto-applying learned answers: {learned_answers}")
                         engine.confirmed_facts.update(learned_answers)
                         auto_applied_facts = learned_answers.copy()
-                        answer = engine.ask(message, mode=mode)
+                        answer = engine.ask(message, mode=mode, session_id=session_id)
                         
                 except Exception as e:
                     logger.warning(f"[UNIFIED] Skip clarification error: {e}")
@@ -2034,6 +2034,129 @@ async def end_session(session_id: str):
     return {"success": True}
 
 
+# =============================================================================
+# WORKFLOW CAPTURE ENDPOINTS
+# =============================================================================
+
+@router.get("/chat/unified/workflow/{session_id}")
+async def get_workflow_steps(session_id: str, project: str = None):
+    """
+    Get recorded workflow steps for a session.
+    
+    Returns the sequence of steps captured during the session,
+    which can be used for playbook extraction.
+    """
+    try:
+        # Get project from session if not provided
+        if session_id in unified_sessions and not project:
+            project = unified_sessions[session_id].get('project')
+        
+        if not project:
+            return {"steps": [], "message": "No project context"}
+        
+        # Get handler for project
+        handler = get_structured_handler_for_customer(project)
+        if not handler or not handler.conn:
+            return {"steps": [], "message": "No database connection"}
+        
+        # Query workflow steps
+        result = handler.conn.execute("""
+            SELECT 
+                step_order,
+                feature_category,
+                intent_category,
+                intent_description,
+                question,
+                parameters,
+                created_at
+            FROM _workflow_steps
+            WHERE project = ? AND session_id = ?
+            ORDER BY step_order ASC
+        """, [project.lower(), session_id]).fetchall()
+        
+        steps = []
+        for row in result:
+            params = {}
+            try:
+                import json
+                params = json.loads(row[5]) if row[5] else {}
+            except:
+                pass
+                
+            steps.append({
+                "step": row[0],
+                "feature_category": row[1],
+                "intent_category": row[2],
+                "description": row[3],
+                "question": row[4],
+                "parameters": params,
+                "created_at": str(row[6]) if row[6] else None
+            })
+        
+        return {
+            "session_id": session_id,
+            "project": project,
+            "step_count": len(steps),
+            "steps": steps,
+            "can_save_as_playbook": len(steps) >= 3  # Suggest playbook after 3+ steps
+        }
+        
+    except Exception as e:
+        logger.error(f"[WORKFLOW] Error getting workflow steps: {e}")
+        return {"steps": [], "error": str(e)}
+
+
+@router.get("/chat/unified/workflow/project/{project}")
+async def get_all_project_workflows(project: str, limit: int = 10):
+    """
+    Get all workflow sessions for a project.
+    
+    Returns summaries of recent workflow sessions that could
+    be candidates for playbook extraction.
+    """
+    try:
+        handler = get_structured_handler_for_customer(project)
+        if not handler or not handler.conn:
+            return {"workflows": [], "message": "No database connection"}
+        
+        # Get distinct sessions with step counts
+        result = handler.conn.execute("""
+            SELECT 
+                session_id,
+                COUNT(*) as step_count,
+                MIN(created_at) as started_at,
+                MAX(created_at) as last_step_at,
+                STRING_AGG(DISTINCT feature_category, ', ') as categories
+            FROM _workflow_steps
+            WHERE project = ?
+            GROUP BY session_id
+            ORDER BY MAX(created_at) DESC
+            LIMIT ?
+        """, [project.lower(), limit]).fetchall()
+        
+        workflows = []
+        for row in result:
+            workflows.append({
+                "session_id": row[0],
+                "step_count": row[1],
+                "started_at": str(row[2]) if row[2] else None,
+                "last_step_at": str(row[3]) if row[3] else None,
+                "categories_used": row[4],
+                "playbook_candidate": row[1] >= 3
+            })
+        
+        return {
+            "project": project,
+            "workflow_count": len(workflows),
+            "workflows": workflows,
+            "playbook_candidates": sum(1 for w in workflows if w["playbook_candidate"])
+        }
+        
+    except Exception as e:
+        logger.error(f"[WORKFLOW] Error getting project workflows: {e}")
+        return {"workflows": [], "error": str(e)}
+
+
 @router.post("/chat/unified/clarify")
 async def submit_clarification(request: ClarificationAnswer):
     """Submit answers to clarification questions."""
@@ -2148,7 +2271,7 @@ async def submit_clarification(request: ClarificationAnswer):
     # Re-ask the original question (with rules now applied)
     # Pass skip_confirmation if user confirmed a rule
     skip_confirm = session.pop('skip_rule_confirmation', False)
-    answer = engine.ask(request.original_question, skip_confirmation=skip_confirm)
+    answer = engine.ask(request.original_question, skip_confirmation=skip_confirm, session_id=request.session_id)
     
     # Clear skip flag
     session.pop('skip_rule_confirmation', None)
