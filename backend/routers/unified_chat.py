@@ -2331,20 +2331,21 @@ async def reset_preferences(request: ResetPreferencesRequest):
         
         elif request.reset_type == "project":
             # Clear project intents from DuckDB (_project_intents table)
-            if request.project:
+            project_key = request.customer_id or request.project
+            if project_key:
                 try:
-                    handler = get_structured_handler_for_customer(request.project)
+                    handler = get_structured_handler_for_customer(project_key)
                     if handler and handler.conn:
-                        # Get count before delete for feedback
+                        # Get count before delete for feedback - try both UUID and lowercase name
                         count_result = handler.conn.execute("""
-                            SELECT COUNT(*) FROM _project_intents WHERE project = ?
-                        """, [request.project.lower()]).fetchone()
+                            SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
+                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
                         deleted_count = count_result[0] if count_result else 0
                         
                         # Delete all project intents
                         handler.conn.execute("""
-                            DELETE FROM _project_intents WHERE project = ?
-                        """, [request.project.lower()])
+                            DELETE FROM _project_intents WHERE project = ? OR project = ?
+                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
                         handler.conn.execute("CHECKPOINT")
                         
                         # Also clear session if provided
@@ -2366,7 +2367,7 @@ async def reset_preferences(request: ResetPreferencesRequest):
                     result["message"] = f"Database error: {e}"
                     logger.error(f"[RESET] Project reset error: {e}")
             else:
-                result["message"] = "Project name required for project reset"
+                result["message"] = "Project name or customer_id required for project reset"
         
         elif request.reset_type == "all":
             # Clear everything - session, learned, and project intents
@@ -2381,16 +2382,23 @@ async def reset_preferences(request: ResetPreferencesRequest):
                     session['skip_learning'] = True
                     messages.append("Session cleared")
             
-            # Clear project intents
-            if request.project:
+            # Clear project intents - use customer_id (UUID) as that's how they're stored
+            project_key = request.customer_id or request.project
+            if project_key:
                 try:
-                    handler = get_structured_handler_for_customer(request.project)
+                    handler = get_structured_handler_for_customer(project_key)
                     if handler and handler.conn:
+                        # Try both UUID and lowercase name
+                        count_result = handler.conn.execute("""
+                            SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
+                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
+                        deleted_count = count_result[0] if count_result else 0
+                        
                         handler.conn.execute("""
-                            DELETE FROM _project_intents WHERE project = ?
-                        """, [request.project.lower()])
+                            DELETE FROM _project_intents WHERE project = ? OR project = ?
+                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
                         handler.conn.execute("CHECKPOINT")
-                        messages.append("Project preferences cleared")
+                        messages.append(f"Project preferences cleared ({deleted_count} items)")
                         
                         # Reload intent engine cache
                         if request.session_id and request.session_id in unified_sessions:
@@ -2400,6 +2408,7 @@ async def reset_preferences(request: ResetPreferencesRequest):
                                 engine.intent_engine._project_memory = {}
                 except Exception as e:
                     messages.append(f"Project clear failed: {e}")
+                    logger.error(f"[RESET] Project clear error: {e}")
             
             # Clear learned
             if LEARNING_AVAILABLE and SUPABASE_AVAILABLE and request.project:
