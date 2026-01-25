@@ -125,11 +125,11 @@ export default function Chat({ functionalAreas = [] }) {
     }
   }
 
-  const resetPreferences = async (resetType = 'session') => {
+  const resetPreferences = async (resetType = 'all') => {
     try {
       const response = await api.post('/chat/unified/reset-preferences', {
         session_id: sessionId,
-        customer_id: customerId || null,  // Send ID, not name
+        project: activeProject,
         reset_type: resetType
       })
       
@@ -137,9 +137,7 @@ export default function Chat({ functionalAreas = [] }) {
         setMessages(prev => [...prev, {
           role: 'assistant',
           type: 'system',
-          content: resetType === 'learned' 
-            ? 'Preferences cleared. I\'ll ask clarifying questions again.'
-            : 'Session filters reset. Ask your question again.',
+          content: '✓ Preferences cleared. I\'ll ask clarifying questions again.',
           timestamp: new Date().toISOString()
         }])
       }
@@ -296,29 +294,6 @@ export default function Chat({ functionalAreas = [] }) {
   const clearChat = () => {
     setMessages([])
     setPendingClarification(null)
-  }
-
-  const resetPreferences = async () => {
-    try {
-      const response = await api.post('/chat/unified/reset-preferences', {
-        reset_type: 'all',
-        session_id: sessionId,
-        project: activeProject
-      })
-      
-      if (response.data?.success) {
-        // Add a system message to show it worked
-        setMessages(prev => [...prev, {
-          role: 'assistant',
-          content: '✓ Preferences cleared. I\'ll ask clarifying questions again.',
-          type: 'system'
-        }])
-      } else {
-        console.error('Reset failed:', response.data?.message)
-      }
-    } catch (error) {
-      console.error('Reset preferences error:', error)
-    }
   }
 
   const handleFeedback = (messageIndex, feedbackType) => {
