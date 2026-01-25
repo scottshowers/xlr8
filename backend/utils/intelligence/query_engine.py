@@ -2392,10 +2392,6 @@ class QueryEngine:
                     logger.warning(f"[ENGINE]   Category: {resolved_intent.category.value}")
                     logger.warning(f"[ENGINE]   Parameters: {resolved_intent.parameters}")
                     logger.warning(f"[ENGINE]   Confidence: {resolved_intent.confidence}")
-                    
-                    # Record step for workflow capture
-                    if session_id:
-                        self.intent_engine.record_step(session_id, resolved_intent, question)
                 else:
                     logger.warning(f"[ENGINE] STEP 1.5 COMPLETE: No specific intent patterns detected")
             
@@ -2441,6 +2437,26 @@ class QueryEngine:
                 logger.error(f"[ENGINE] STEP 3 FAILED: {result.error}")
             else:
                 logger.warning(f"[ENGINE] STEP 3 COMPLETE: {result.row_count} rows returned")
+                
+                # WORKFLOW CAPTURE: Record successful query for playbook extraction
+                if session_id and self.intent_engine:
+                    try:
+                        # Use resolved_intent if available, otherwise create synthetic
+                        intent_for_recording = resolved_intent
+                        if not intent_for_recording:
+                            intent_for_recording = self.intent_engine.create_synthetic_intent(question)
+                            logger.warning(f"[WORKFLOW] Created synthetic intent: {intent_for_recording.category.value}")
+                        
+                        self.intent_engine.record_step(
+                            session_id=session_id,
+                            intent=intent_for_recording,
+                            question=question,
+                            sql=sql,
+                            row_count=result.row_count,
+                            success=True
+                        )
+                    except Exception as e:
+                        logger.warning(f"[WORKFLOW] Recording failed (non-fatal): {e}")
             
             # Step 4: Synthesize response
             logger.warning(f"[ENGINE] STEP 4: Synthesizing response...")

@@ -1009,8 +1009,19 @@ class IntentEngine:
     # WORKFLOW CAPTURE (for playbook extraction)
     # =========================================================================
     
-    def record_step(self, session_id: str, intent: ResolvedIntent, question: str):
-        """Record a step for potential playbook extraction."""
+    def record_step(self, session_id: str, intent: ResolvedIntent, question: str, 
+                    sql: str = None, row_count: int = None, success: bool = True):
+        """
+        Record a workflow step for potential playbook extraction.
+        
+        Args:
+            session_id: Session identifier
+            intent: Resolved intent (or synthetic for non-pattern queries)
+            question: Original user question
+            sql: SQL that was executed (optional)
+            row_count: Number of rows returned (optional)
+            success: Whether the query succeeded
+        """
         if not self.conn or not self.project:
             return
         
@@ -1022,6 +1033,14 @@ class IntentEngine:
             """, [self.project, session_id]).fetchone()
             
             next_order = (result[0] or 0) + 1
+            
+            # Combine parameters with execution metadata
+            params = intent.parameters.copy() if intent.parameters else {}
+            if sql:
+                params['_sql'] = sql[:500]  # Truncate long SQL
+            if row_count is not None:
+                params['_row_count'] = row_count
+            params['_success'] = success
             
             self.conn.execute("""
                 INSERT INTO _workflow_steps 
@@ -1036,13 +1055,62 @@ class IntentEngine:
                 intent.category.value,
                 intent.description,
                 question,
-                json.dumps(intent.parameters)
+                json.dumps(params)
             ])
             
-            logger.info(f"[INTENT] Recorded workflow step {next_order}: {intent.description}")
+            logger.warning(f"[WORKFLOW] Recorded step {next_order}: {intent.category.value} - {question[:50]}...")
             
         except Exception as e:
-            logger.warning(f"[INTENT] Could not record workflow step: {e}")
+            logger.warning(f"[WORKFLOW] Could not record step: {e}")
+    
+    def create_synthetic_intent(self, question: str, detected_intent: str = None) -> ResolvedIntent:
+        """
+        Create a synthetic intent for queries without explicit pattern matches.
+        
+        This ensures ALL queries get recorded for workflow capture, not just
+        those that triggered clarification patterns.
+        
+        Args:
+            question: The original question
+            detected_intent: Optional detected intent type (count, list, etc.)
+            
+        Returns:
+            ResolvedIntent with inferred category and description
+        """
+        q_lower = question.lower()
+        
+        # Infer category from question keywords
+        if any(word in q_lower for word in ['how many', 'count', 'total', 'number of']):
+            category = IntentCategory.COUNT
+            description = "Count query"
+        elif any(word in q_lower for word in ['list', 'show', 'display', 'give me', 'what are']):
+            category = IntentCategory.FIND
+            description = "List/find query"
+        elif any(word in q_lower for word in ['compare', 'vs', 'versus', 'difference']):
+            category = IntentCategory.COMPARE
+            description = "Comparison query"
+        elif any(word in q_lower for word in ['trend', 'over time', 'by month', 'by year']):
+            category = IntentCategory.TREND
+            description = "Trend analysis"
+        elif any(word in q_lower for word in ['average', 'sum', 'total', 'max', 'min']):
+            category = IntentCategory.ANALYZE
+            description = "Aggregation query"
+        else:
+            category = IntentCategory.ANALYZE
+            description = "General analysis"
+        
+        # Map to feature category (most queries are ANALYZE)
+        feature_category = FeatureCategory.ANALYZE
+        
+        return ResolvedIntent(
+            category=category,
+            feature_category=feature_category,
+            description=description,
+            parameters={},
+            clarifications_used=[],
+            confidence=0.7,  # Lower confidence for synthetic
+            original_question=question
+        )
     
     # =========================================================================
     # COMPATIBILITY
