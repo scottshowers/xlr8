@@ -2329,8 +2329,94 @@ async def reset_preferences(request: ResetPreferencesRequest):
             else:
                 result["message"] = "Learning/Supabase not available"
         
+        elif request.reset_type == "project":
+            # Clear project intents from DuckDB (_project_intents table)
+            if request.project:
+                try:
+                    handler = get_structured_handler_for_customer(request.project)
+                    if handler and handler.conn:
+                        # Get count before delete for feedback
+                        count_result = handler.conn.execute("""
+                            SELECT COUNT(*) FROM _project_intents WHERE project = ?
+                        """, [request.project.lower()]).fetchone()
+                        deleted_count = count_result[0] if count_result else 0
+                        
+                        # Delete all project intents
+                        handler.conn.execute("""
+                            DELETE FROM _project_intents WHERE project = ?
+                        """, [request.project.lower()])
+                        handler.conn.execute("CHECKPOINT")
+                        
+                        # Also clear session if provided
+                        if request.session_id and request.session_id in unified_sessions:
+                            session = unified_sessions[request.session_id]
+                            engine = session.get('engine')
+                            if engine:
+                                engine.confirmed_facts.clear()
+                                # Reload intent engine to clear cached memory
+                                if hasattr(engine, 'intent_engine') and engine.intent_engine:
+                                    engine.intent_engine._project_memory = {}
+                        
+                        result["success"] = True
+                        result["message"] = f"Cleared {deleted_count} project preferences. Clarifying questions will now appear again."
+                        result["deleted_count"] = deleted_count
+                    else:
+                        result["message"] = "Could not connect to project database"
+                except Exception as e:
+                    result["message"] = f"Database error: {e}"
+                    logger.error(f"[RESET] Project reset error: {e}")
+            else:
+                result["message"] = "Project name required for project reset"
+        
+        elif request.reset_type == "all":
+            # Clear everything - session, learned, and project intents
+            messages = []
+            
+            # Clear session
+            if request.session_id and request.session_id in unified_sessions:
+                session = unified_sessions[request.session_id]
+                engine = session.get('engine')
+                if engine:
+                    engine.confirmed_facts.clear()
+                    session['skip_learning'] = True
+                    messages.append("Session cleared")
+            
+            # Clear project intents
+            if request.project:
+                try:
+                    handler = get_structured_handler_for_customer(request.project)
+                    if handler and handler.conn:
+                        handler.conn.execute("""
+                            DELETE FROM _project_intents WHERE project = ?
+                        """, [request.project.lower()])
+                        handler.conn.execute("CHECKPOINT")
+                        messages.append("Project preferences cleared")
+                        
+                        # Reload intent engine cache
+                        if request.session_id and request.session_id in unified_sessions:
+                            session = unified_sessions[request.session_id]
+                            engine = session.get('engine')
+                            if engine and hasattr(engine, 'intent_engine') and engine.intent_engine:
+                                engine.intent_engine._project_memory = {}
+                except Exception as e:
+                    messages.append(f"Project clear failed: {e}")
+            
+            # Clear learned
+            if LEARNING_AVAILABLE and SUPABASE_AVAILABLE and request.project:
+                try:
+                    supabase = get_supabase()
+                    supabase.table('clarification_choices').delete().eq(
+                        'project', request.project
+                    ).execute()
+                    messages.append("Learned preferences cleared")
+                except Exception as e:
+                    messages.append(f"Learned clear failed: {e}")
+            
+            result["success"] = True
+            result["message"] = "; ".join(messages) if messages else "Reset complete"
+        
         else:
-            result["message"] = f"Unknown reset_type: {request.reset_type}"
+            result["message"] = f"Unknown reset_type: {request.reset_type}. Valid types: session, learned, project, all"
             
     except Exception as e:
         result["message"] = f"Error: {e}"
