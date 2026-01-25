@@ -2334,38 +2334,74 @@ async def reset_preferences(request: ResetPreferencesRequest):
             project_key = request.customer_id or request.project
             if project_key:
                 try:
-                    handler = get_structured_handler()
-                    if handler and handler.conn:
-                        # Get count before delete for feedback - try both UUID and lowercase name
-                        count_result = handler.conn.execute("""
-                            SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
-                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
-                        deleted_count = count_result[0] if count_result else 0
-                        
-                        # Delete all project intents
-                        handler.conn.execute("""
-                            DELETE FROM _project_intents WHERE project = ? OR project = ?
-                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
-                        handler.conn.execute("CHECKPOINT")
-                        
-                        # Also clear session if provided
-                        if request.session_id and request.session_id in unified_sessions:
-                            session = unified_sessions[request.session_id]
-                            engine = session.get('engine')
-                            if engine:
-                                engine.confirmed_facts.clear()
-                                # Reload intent engine to clear cached memory
-                                if hasattr(engine, 'intent_engine') and engine.intent_engine:
-                                    engine.intent_engine._project_memory = {}
-                        
-                        result["success"] = True
-                        result["message"] = f"Cleared {deleted_count} project preferences. Clarifying questions will now appear again."
-                        result["deleted_count"] = deleted_count
-                    else:
-                        result["message"] = "Could not connect to project database"
+                    # First try to clear via the session's IntentEngine (best method)
+                    cleared_via_engine = False
+                    if request.session_id and request.session_id in unified_sessions:
+                        session = unified_sessions[request.session_id]
+                        engine = session.get('engine')
+                        if engine and hasattr(engine, 'intent_engine') and engine.intent_engine:
+                            logger.warning(f"[RESET] Clearing via IntentEngine for project: {engine.intent_engine.project}")
+                            clear_result = engine.intent_engine.clear_project_memory()
+                            if clear_result["success"]:
+                                result["success"] = True
+                                result["message"] = clear_result["message"]
+                                result["deleted_count"] = clear_result["deleted_count"]
+                                result["cleared_caches"] = clear_result.get("cleared_caches", {})
+                                cleared_via_engine = True
+                                logger.warning(f"[RESET] SUCCESS via IntentEngine: {clear_result}")
+                            else:
+                                logger.error(f"[RESET] IntentEngine clear failed: {clear_result}")
+                    
+                    # Fallback: Direct DB delete if no IntentEngine or it failed
+                    if not cleared_via_engine:
+                        handler = get_structured_handler()
+                        if handler and handler.conn:
+                            logger.warning(f"[RESET] Falling back to direct DB delete for project_key: {project_key}")
+                            
+                            # Get count before delete for feedback - try both UUID and lowercase name
+                            count_result = handler.conn.execute("""
+                                SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
+                            """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
+                            deleted_count = count_result[0] if count_result else 0
+                            
+                            logger.warning(f"[RESET] Found {deleted_count} intents to delete")
+                            
+                            # Delete all project intents
+                            handler.conn.execute("""
+                                DELETE FROM _project_intents WHERE project = ? OR project = ?
+                            """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
+                            handler.conn.execute("CHECKPOINT")
+                            
+                            # Verify deletion worked
+                            verify_result = handler.conn.execute("""
+                                SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
+                            """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
+                            remaining = verify_result[0] if verify_result else 0
+                            
+                            if remaining > 0:
+                                logger.error(f"[RESET] DELETE FAILED! Still have {remaining} intents after delete")
+                                result["message"] = f"Delete failed - {remaining} items remain in DB"
+                            else:
+                                # Also clear session engine's cache if it exists
+                                if request.session_id and request.session_id in unified_sessions:
+                                    session = unified_sessions[request.session_id]
+                                    engine = session.get('engine')
+                                    if engine:
+                                        engine.confirmed_facts.clear() if hasattr(engine, 'confirmed_facts') else None
+                                        if hasattr(engine, 'intent_engine') and engine.intent_engine:
+                                            engine.intent_engine._project_memory = {}
+                                            engine.intent_engine._confirmed_intents = {}
+                                            engine.intent_engine._session_intents = []
+                                            logger.warning("[RESET] Cleared in-memory caches on existing IntentEngine")
+                                
+                                result["success"] = True
+                                result["message"] = f"Cleared {deleted_count} project preferences. Clarifying questions will now appear again."
+                                result["deleted_count"] = deleted_count
+                        else:
+                            result["message"] = "Could not connect to project database"
                 except Exception as e:
                     result["message"] = f"Database error: {e}"
-                    logger.error(f"[RESET] Project reset error: {e}")
+                    logger.error(f"[RESET] Project reset error: {e}", exc_info=True)
             else:
                 result["message"] = "Project name or customer_id required for project reset"
         
@@ -2378,39 +2414,54 @@ async def reset_preferences(request: ResetPreferencesRequest):
                 session = unified_sessions[request.session_id]
                 engine = session.get('engine')
                 if engine:
-                    engine.confirmed_facts.clear()
+                    if hasattr(engine, 'confirmed_facts'):
+                        engine.confirmed_facts.clear()
                     session['skip_learning'] = True
                     messages.append("Session cleared")
             
-            # Clear project intents - use customer_id (UUID) as that's how they're stored
+            # Clear project intents - use IntentEngine method if available
             project_key = request.customer_id or request.project
             if project_key:
                 try:
-                    handler = get_structured_handler()
-                    if handler and handler.conn:
-                        # Try both UUID and lowercase name
-                        count_result = handler.conn.execute("""
-                            SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
-                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
-                        deleted_count = count_result[0] if count_result else 0
-                        
-                        handler.conn.execute("""
-                            DELETE FROM _project_intents WHERE project = ? OR project = ?
-                        """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
-                        handler.conn.execute("CHECKPOINT")
-                        messages.append(f"Project preferences cleared ({deleted_count} items)")
-                        
-                        # Reload intent engine cache
-                        if request.session_id and request.session_id in unified_sessions:
-                            session = unified_sessions[request.session_id]
-                            engine = session.get('engine')
-                            if engine and hasattr(engine, 'intent_engine') and engine.intent_engine:
-                                engine.intent_engine._project_memory = {}
+                    cleared_via_engine = False
+                    if request.session_id and request.session_id in unified_sessions:
+                        session = unified_sessions[request.session_id]
+                        engine = session.get('engine')
+                        if engine and hasattr(engine, 'intent_engine') and engine.intent_engine:
+                            clear_result = engine.intent_engine.clear_project_memory()
+                            if clear_result["success"]:
+                                messages.append(f"Project preferences cleared ({clear_result['deleted_count']} items)")
+                                cleared_via_engine = True
+                                logger.warning(f"[RESET ALL] Cleared via IntentEngine: {clear_result}")
+                    
+                    # Fallback to direct DB if needed
+                    if not cleared_via_engine:
+                        handler = get_structured_handler()
+                        if handler and handler.conn:
+                            count_result = handler.conn.execute("""
+                                SELECT COUNT(*) FROM _project_intents WHERE project = ? OR project = ?
+                            """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchone()
+                            deleted_count = count_result[0] if count_result else 0
+                            
+                            handler.conn.execute("""
+                                DELETE FROM _project_intents WHERE project = ? OR project = ?
+                            """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key])
+                            handler.conn.execute("CHECKPOINT")
+                            messages.append(f"Project preferences cleared ({deleted_count} items)")
+                            
+                            # Clear in-memory caches on existing engine
+                            if request.session_id and request.session_id in unified_sessions:
+                                session = unified_sessions[request.session_id]
+                                engine = session.get('engine')
+                                if engine and hasattr(engine, 'intent_engine') and engine.intent_engine:
+                                    engine.intent_engine._project_memory = {}
+                                    engine.intent_engine._confirmed_intents = {}
+                                    engine.intent_engine._session_intents = []
                 except Exception as e:
                     messages.append(f"Project clear failed: {e}")
                     logger.error(f"[RESET] Project clear error: {e}")
             
-            # Clear learned
+            # Clear learned (Supabase)
             if LEARNING_AVAILABLE and SUPABASE_AVAILABLE and request.project:
                 try:
                     supabase = get_supabase()
@@ -2464,6 +2515,85 @@ async def get_preferences(session_id: str = None, project: str = None):
                 }
         except Exception as e:
             result["learning_error"] = str(e)
+    
+    return result
+
+
+@router.get("/chat/unified/debug-intents")
+async def debug_intents(session_id: str = None, customer_id: str = None, project: str = None):
+    """
+    Debug endpoint to check the state of project intents.
+    
+    Returns:
+        - DB intents: What's stored in _project_intents table
+        - Engine cache: What's in the IntentEngine's in-memory cache
+        - Session info: Whether session exists and has an engine
+    """
+    result = {
+        "db_intents": [],
+        "engine_cache": {},
+        "session_exists": False,
+        "engine_exists": False,
+        "intent_engine_exists": False,
+        "project_key_checked": None,
+        "errors": []
+    }
+    
+    # Check session and engine
+    if session_id and session_id in unified_sessions:
+        result["session_exists"] = True
+        session = unified_sessions[session_id]
+        engine = session.get('engine')
+        
+        if engine:
+            result["engine_exists"] = True
+            result["engine_type"] = session.get('engine_type', 'unknown')
+            
+            if hasattr(engine, 'intent_engine') and engine.intent_engine:
+                result["intent_engine_exists"] = True
+                ie = engine.intent_engine
+                result["engine_cache"] = {
+                    "project": ie.project,
+                    "project_memory": dict(ie._project_memory) if ie._project_memory else {},
+                    "confirmed_intents": dict(ie._confirmed_intents) if ie._confirmed_intents else {},
+                    "session_intents_count": len(ie._session_intents) if ie._session_intents else 0
+                }
+    
+    # Check DB directly
+    project_key = customer_id or project
+    result["project_key_checked"] = project_key
+    
+    if project_key:
+        try:
+            handler = get_structured_handler()
+            if handler and handler.conn:
+                # Check if table exists
+                try:
+                    rows = handler.conn.execute("""
+                        SELECT project, pattern_key, resolved_value, resolved_description, use_count, last_used
+                        FROM _project_intents
+                        WHERE project = ? OR project = ?
+                        ORDER BY use_count DESC
+                    """, [project_key, project_key.lower() if isinstance(project_key, str) else project_key]).fetchall()
+                    
+                    result["db_intents"] = [
+                        {
+                            "project": r[0],
+                            "pattern_key": r[1],
+                            "resolved_value": r[2],
+                            "resolved_description": r[3],
+                            "use_count": r[4],
+                            "last_used": str(r[5]) if r[5] else None
+                        }
+                        for r in rows
+                    ]
+                    result["db_intent_count"] = len(rows)
+                except Exception as e:
+                    result["errors"].append(f"Query error: {e}")
+            else:
+                result["errors"].append("No handler or connection")
+        except Exception as e:
+            result["errors"].append(f"Handler error: {e}")
     
     return result
 
