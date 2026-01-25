@@ -41,11 +41,20 @@
 - Project memory (DuckDB) - foundation in place via `_project_intents`
 - Global memory (cross-project) - not implemented
 
-### 🔲 Phase 3: Workflow Capture (NOT STARTED)
+### 🟡 Phase 3: Workflow Capture (IN PROGRESS)
 
-- `_workflow_steps` table exists but not actively recording
-- Playbook extraction from workflows - not implemented
-- GUIDE mode - not implemented
+**Completed January 24, 2026:**
+- `_workflow_steps` table actively recording all successful queries ✅
+- `session_id` wired through entire chat flow ✅
+- `IntentEngine.record_step()` captures: question, SQL, row_count, intent, feature category ✅
+- Synthetic intents for non-pattern queries (ensures complete capture) ✅
+- API endpoints for workflow retrieval ✅
+
+**Still needed:**
+- Variable detection (which parts of a workflow are parameterizable)
+- Playbook extraction from workflows
+- Workflow review UI
+- GUIDE mode
 
 ### 🔲 Enhanced Synthesis (NOT STARTED)
 
@@ -61,10 +70,10 @@
 
 ### Recommended Next Steps
 
-1. **Test remaining patterns** - temporal_analysis, data_comparison need production validation
-2. **Chat quality sprint** - Address feedback on response formatting (P5 task, 6h estimated)
-3. **Phase 2 memory** - Build session/global memory layers when ready
-4. **Workflow capture** - Start recording steps for playbook extraction
+1. **Test workflow capture** - Verify steps are being recorded in production
+2. **Workflow review UI** - Simple UI to view recorded steps and flag playbook candidates
+3. **Variable detection** - Identify which parameters vary across similar workflows
+4. **Playbook extraction** - "Save as playbook" functionality
 
 ---
 
@@ -976,6 +985,10 @@ The clarification system is query augmentation AND memory capture simultaneously
 
 | Date | Change |
 |------|--------|
+| 2026-01-24 | **Phase 3 Started** - Workflow capture now recording all successful queries |
+| 2026-01-24 | Added: `session_id` passed through chat flow to enable workflow tracking |
+| 2026-01-24 | Added: Synthetic intents for non-pattern queries (complete capture) |
+| 2026-01-24 | Added: API endpoints `/chat/unified/workflow/{session_id}` and `/chat/unified/workflow/project/{project}` |
 | 2026-01-24 | **Phase 1 COMPLETE** - IntentEngine deployed and tested in production |
 | 2026-01-24 | Fixed: Radio button options format mismatch (backend `{display,value}` → frontend `{id,label}`) |
 | 2026-01-24 | Fixed: IntentEngine session persistence (was recreating on every request) |
