@@ -416,18 +416,28 @@ export default function Chat({ functionalAreas = [] }) {
           </Tooltip>
 
           <button
-            onClick={() => resetPreferences()}
-            title="Reset Preferences - Clear saved answers"
+            type="button"
+            onClick={() => {
+              console.log('Reset clicked');
+              resetPreferences();
+            }}
+            title="Reset Preferences"
             style={{
-              padding: '0.5rem',
-              background: 'transparent',
-              border: 'none',
-              borderRadius: 8,
+              padding: '0.4rem 0.6rem',
+              background: colors.primaryLight || '#e8f5e9',
+              border: `1px solid ${colors.primary || '#83b16d'}`,
+              borderRadius: 6,
               cursor: 'pointer',
-              color: colors.textMuted,
+              color: colors.primary || '#83b16d',
+              fontSize: '0.75rem',
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.25rem',
             }}
           >
-            <RefreshCw size={18} />
+            <RefreshCw size={14} />
+            Reset
           </button>
         </div>
       </div>
