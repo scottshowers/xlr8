@@ -129,7 +129,7 @@ export default function Chat({ functionalAreas = [] }) {
     try {
       const response = await api.post('/chat/unified/reset-preferences', {
         session_id: sessionId,
-        project: activeProject,
+        project: activeProject?.code || activeProject?.name || projectName,
         reset_type: resetType
       })
       
