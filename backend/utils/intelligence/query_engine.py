@@ -2297,15 +2297,27 @@ class QueryEngine:
         logger.warning(f"[ENGINE] Initialized for project: {self.project}, vendor: {self.vendor}, product: {self.product}")
     
     def set_vendor_product(self, vendor: str = None, product: str = None):
-        """Set vendor/product after initialization (for dynamic loading)."""
-        from backend.utils.intelligence.intent_engine import IntentEngine
+        """Set vendor/product after initialization (for dynamic loading).
         
+        NOTE: This does NOT recreate the IntentEngine to preserve learned intents
+        and session memory. It only updates the vendor/product attributes.
+        """
         if vendor:
             self.vendor = vendor
         if product:
             self.product = product
-        # Reinitialize intent engine with new values
-        if self.conn and (vendor or product):
+        
+        # Update existing IntentEngine's vendor/product - DO NOT RECREATE
+        # Recreating would reload intents from DB, undoing any reset
+        if self.intent_engine:
+            if vendor:
+                self.intent_engine.vendor = vendor
+            if product:
+                self.intent_engine.product = product
+            logger.warning(f"[ENGINE] Updated vendor/product on existing IntentEngine: {self.vendor}/{self.product}")
+        else:
+            # Only create if we don't have one yet
+            from backend.utils.intelligence.intent_engine import IntentEngine
             self.intent_engine = IntentEngine(
                 conn=self.conn,
                 project=self.project,
@@ -2313,7 +2325,7 @@ class QueryEngine:
                 product=self.product
             )
             self.rule_interpreter = self.intent_engine  # Backward compatibility
-            logger.info(f"[ENGINE] Updated vendor/product: {self.vendor}/{self.product}")
+            logger.warning(f"[ENGINE] Created IntentEngine with vendor/product: {self.vendor}/{self.product}")
     
     def load_context(self, structured_handler=None, **kwargs):
         """

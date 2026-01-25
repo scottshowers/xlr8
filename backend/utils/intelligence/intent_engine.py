@@ -518,6 +518,74 @@ class IntentEngine:
         except Exception as e:
             logger.warning(f"[INTENT] Could not load schema columns: {e}")
     
+    def clear_project_memory(self) -> Dict[str, Any]:
+        """
+        Clear all learned intents for this project from BOTH database AND memory cache.
+        
+        Returns:
+            Dict with success status and count of deleted items
+        """
+        result = {"success": False, "deleted_count": 0, "message": ""}
+        
+        if not self.conn or not self.project:
+            result["message"] = "No connection or project set"
+            return result
+        
+        try:
+            # First, count what we're about to delete
+            count_result = self.conn.execute("""
+                SELECT COUNT(*) FROM _project_intents WHERE project = ?
+            """, [self.project]).fetchone()
+            count_before = count_result[0] if count_result else 0
+            
+            logger.warning(f"[INTENT] Clearing project memory for {self.project}: {count_before} items to delete")
+            
+            # Delete from database
+            self.conn.execute("""
+                DELETE FROM _project_intents WHERE project = ?
+            """, [self.project])
+            
+            # Force commit
+            self.conn.execute("CHECKPOINT")
+            
+            # Verify deletion
+            verify_result = self.conn.execute("""
+                SELECT COUNT(*) FROM _project_intents WHERE project = ?
+            """, [self.project]).fetchone()
+            count_after = verify_result[0] if verify_result else 0
+            
+            if count_after > 0:
+                logger.error(f"[INTENT] DELETE FAILED! Still have {count_after} items after delete")
+                result["message"] = f"Delete failed - {count_after} items remain"
+                return result
+            
+            # Clear ALL in-memory caches
+            old_memory = dict(self._project_memory)
+            old_confirmed = dict(self._confirmed_intents)
+            old_session = list(self._session_intents)
+            
+            self._project_memory = {}
+            self._confirmed_intents = {}
+            self._session_intents = []
+            
+            logger.warning(f"[INTENT] Cleared memory caches: project_memory={len(old_memory)}, confirmed={len(old_confirmed)}, session={len(old_session)}")
+            
+            result["success"] = True
+            result["deleted_count"] = count_before
+            result["message"] = f"Deleted {count_before} items from DB, cleared all caches"
+            result["cleared_caches"] = {
+                "project_memory": list(old_memory.keys()),
+                "confirmed_intents": list(old_confirmed.keys()),
+                "session_intents": len(old_session)
+            }
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"[INTENT] Error clearing project memory: {e}")
+            result["message"] = f"Error: {e}"
+            return result
+
     def _find_matching_columns(self, keywords: List[str]) -> List[Dict[str, str]]:
         """Find columns matching any of the keywords."""
         matches = []
