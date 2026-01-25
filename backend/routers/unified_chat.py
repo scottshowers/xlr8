@@ -2334,7 +2334,7 @@ async def reset_preferences(request: ResetPreferencesRequest):
             project_key = request.customer_id or request.project
             if project_key:
                 try:
-                    handler = get_structured_handler_for_customer(project_key)
+                    handler = get_structured_handler()
                     if handler and handler.conn:
                         # Get count before delete for feedback - try both UUID and lowercase name
                         count_result = handler.conn.execute("""
@@ -2386,7 +2386,7 @@ async def reset_preferences(request: ResetPreferencesRequest):
             project_key = request.customer_id or request.project
             if project_key:
                 try:
-                    handler = get_structured_handler_for_customer(project_key)
+                    handler = get_structured_handler()
                     if handler and handler.conn:
                         # Try both UUID and lowercase name
                         count_result = handler.conn.execute("""
