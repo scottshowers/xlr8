@@ -1786,7 +1786,7 @@ CRITICAL RULES:
 1. You can ONLY use columns that are listed above. Do NOT invent column names.
 2. ALWAYS wrap table names in double quotes: "table_name"
 3. ALWAYS wrap column names in double quotes: "column_name"
-4. For "how many" questions, use COUNT(*) to count ALL rows
+4. For employee/headcount questions, ALWAYS use COUNT(DISTINCT "employeeId") - tables often have multiple rows per employee (job history, etc.)
 5. For "by X" questions, use GROUP BY with the appropriate column
 6. Use the join relationships provided above
 7. Return ONLY the SQL, no explanations, no markdown, no code fences
@@ -1794,16 +1794,17 @@ CRITICAL RULES:
 9. Use short aliases like ed, cd, pd for tables
 10. If EXPLICIT COLUMN INSTRUCTIONS are provided above, you MUST follow them exactly
 11. DATE COLUMNS ARE OFTEN STORED AS VARCHAR - Always use CAST("column" AS DATE) or TRY_CAST("column" AS DATE) when using YEAR(), EXTRACT(), or date comparisons
+12. NEVER use COUNT(*) for employee counts - always COUNT(DISTINCT "employeeId")
 
-EXAMPLE with JOIN:
-SELECT cd."companyName", COUNT(*) AS count
+EXAMPLE with JOIN (note COUNT DISTINCT):
+SELECT cd."companyName", COUNT(DISTINCT ed."employeeId") AS employee_count
 FROM "employment_table" AS ed
 JOIN "company_table" AS cd ON ed."companyId" = cd."companyId"
 WHERE ed."status" = 'A'
 GROUP BY cd."companyName"
 
-EXAMPLE with DATE:
-SELECT EXTRACT(YEAR FROM CAST("hireDate" AS DATE)) AS year, COUNT(*) AS count
+EXAMPLE with DATE (note COUNT DISTINCT):
+SELECT EXTRACT(YEAR FROM CAST("hireDate" AS DATE)) AS year, COUNT(DISTINCT "employeeId") AS employee_count
 FROM "employees"
 WHERE CAST("hireDate" AS DATE) <= '2025-12-31'
 GROUP BY EXTRACT(YEAR FROM CAST("hireDate" AS DATE))
@@ -1854,6 +1855,18 @@ SQL:"""
         
         # Final cleanup - remove any remaining newlines at start
         sql = sql.lstrip('\n').strip()
+        
+        # SAFETY NET: Convert COUNT(*) to COUNT(DISTINCT "employeeId") for employee tables
+        # This catches cases where LLM ignores our instructions
+        if 'COUNT(*)' in sql.upper():
+            # Check if this is an employee-related table
+            employee_table_patterns = ['employee', 'emp_', '_emp', 'worker', 'staff', 'personnel']
+            sql_lower = sql.lower()
+            if any(pattern in sql_lower for pattern in employee_table_patterns):
+                # Replace COUNT(*) with COUNT(DISTINCT "employeeId")
+                # Handle both upper and lower case and variations
+                sql = re.sub(r'COUNT\s*\(\s*\*\s*\)', 'COUNT(DISTINCT "employeeId")', sql, flags=re.IGNORECASE)
+                logger.warning(f"[SQL_GEN] SAFETY NET: Converted COUNT(*) to COUNT(DISTINCT employeeId)")
         
         logger.warning(f"[SQL_GEN] Cleaned SQL: {sql}")
         
