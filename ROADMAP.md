@@ -91,22 +91,29 @@ Replaced `BusinessRuleInterpreter` with `IntentEngine` - asks business questions
 
 ---
 
-## Phase 3: Workflow Capture 🔲 NOT STARTED
+## Phase 3: Workflow Capture 🟡 IN PROGRESS
 
 **Goal:** Automatically record what consultants do for playbook extraction
 
-| Component | Description | Hours |
-|-----------|-------------|-------|
-| 3.1 | Step Recording | 4-5 |
-| 3.2 | Feature Category Classification | 3-4 |
-| 3.3 | Variable Detection | 4-5 |
-| 3.4 | Session Boundary Detection | 2-3 |
-| 3.5 | Workflow Review UI | 2-3 |
+| Component | Description | Hours | Status |
+|-----------|-------------|-------|--------|
+| 3.1 | Step Recording | 4-5 | ✅ COMPLETE |
+| 3.2 | Feature Category Classification | 3-4 | ✅ Included in 3.1 |
+| 3.3 | Variable Detection | 4-5 | 🔲 NOT STARTED |
+| 3.4 | Session Boundary Detection | 2-3 | 🔲 NOT STARTED |
+| 3.5 | Workflow Review UI | 2-3 | 🔲 NOT STARTED |
+
+**Completed January 24, 2026:**
+- `_workflow_steps` table captures all successful queries
+- `record_step()` records: question, SQL, row_count, intent category, feature category
+- Synthetic intents created for non-pattern queries (ensures ALL queries recorded)
+- API endpoints: `/chat/unified/workflow/{session_id}`, `/chat/unified/workflow/project/{project}`
+- `can_save_as_playbook` flag when session has 3+ steps
 
 **Infrastructure exists:**
-- `_workflow_steps` table created
-- `IntentEngine.record_step()` method exists
-- Not actively calling it yet
+- `_workflow_steps` table created ✅
+- `IntentEngine.record_step()` method enhanced ✅
+- `session_id` passed through chat flow ✅
 
 **Feature Categories (from vision):**
 - INGEST - Data ingestion
