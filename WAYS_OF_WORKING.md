@@ -25,11 +25,12 @@ Every decision, every line of code, every architecture choice is made with the u
 - No patches, no diffs, no "add this at line X"
 - Every code change = complete working file
 
-### 3. LLM for Synthesis, Not Generation
-- SQL generation: **Deterministic lookup** (TermIndex + SQLAssembler)
+### 3. Context-Driven SQL Generation
+- SQL generation: **LLM with assembled context** (query_engine.py)
+- Deterministic patterns: **For well-defined queries** (PIT headcount, status filters)
 - Data retrieval: **Direct queries** (DuckDB, ChromaDB)
-- LLM role: **Synthesis and explanation only**
-- Why: Hallucinations kill trust, non-determinism kills debugging
+- LLM role: **SQL generation with full schema context + synthesis**
+- Why: LLM is good at SQL when given exact tables/columns; deterministic for known patterns
 
 ### 4. Local First, Cloud Fallback
 - Primary: Local LLMs via Ollama (DeepSeek for SQL, Mistral for synthesis)
@@ -123,16 +124,21 @@ All analysis triangulates across:
 /xlr8-main
 ├── ARCHITECTURE.md          # Current system state
 ├── WAYS_OF_WORKING.md       # This file
-├── ROADMAP.md               # Phase overview
+├── ROADMAP.md               # Phase overview (Chat Architecture)
+├── PARKING_LOT.md           # Technical debt tracking
+├── INTELLIGENCE_REBUILD.md  # Query engine rebuild status
 ├── /doc
-│   ├── PHASE_01_SQL.md      # SQL evolutions detail
-│   ├── PHASE_02_VECTOR.md   # Vector retrieval detail
-│   ├── PHASE_03_SYNTHESIS.md
-│   ├── PHASE_04_PRESENTATION.md
-│   └── PHASE_05_API.md
+│   ├── CHAT_ARCHITECTURE_VISION.md  # ⭐ Authoritative architecture doc
+│   ├── PHASE_01_SQL.md      # SQL evolutions (complete)
+│   ├── PHASE_02_VECTOR.md   # Vector retrieval (complete)
+│   ├── PHASE_03_SYNTHESIS.md # Synthesis (complete)
+│   └── ...
 ├── /backend                  # FastAPI on Railway
+│   └── /utils/intelligence
+│       ├── query_engine.py   # NEW - Main SQL generation
+│       └── intent_engine.py  # NEW - Consultative clarification
 ├── /frontend                 # React on Vercel
-└── /mnt/skills              # Claude skills
+└── /config                   # Domain schemas (44 products)
 ```
 
 ---
@@ -233,12 +239,14 @@ When facing a technical decision:
 | Don't | Do Instead |
 |-------|------------|
 | Stub things out "for later" | Build it complete or don't build it |
-| Use LLM to generate SQL | Use TermIndex + SQLAssembler |
+| Generate SQL without context | Assemble full schema context, then generate |
 | Hardcode domain knowledge | Upload standards, use Learning layer |
 | Fix symptoms | Fix root causes |
 | Leave dead code | Delete immediately |
 | Assume context persists | Document in repo |
 | Build features before foundation | Foundation → plumbing → features |
+| Build playbooks manually | Let playbooks emerge from work |
+| Ask technical questions | Ask business questions (consultative) |
 
 ---
 
@@ -246,5 +254,8 @@ When facing a technical decision:
 
 | Date | Change |
 |------|--------|
+| 2026-01-24 | Updated for Chat Architecture Vision - SQL generation now uses LLM with context |
+| 2026-01-24 | Added emergent playbooks to anti-patterns |
+| 2026-01-24 | Updated file organization to reflect current structure |
 | 2026-01-15 | Added Frontend Development principles - design system, component reusability, page-by-page strategy |
 | 2026-01-11 | Initial version - extracted from evolved practices |

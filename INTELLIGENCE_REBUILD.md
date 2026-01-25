@@ -122,7 +122,7 @@ The current `backend/utils/intelligence/` folder tried to generate SQL determini
 
 ### Session 1 - January 22, 2026
 
-**Time:** Started
+**Status:** ✅ COMPLETE
 
 - [x] Step 1: Create `query_engine.py` skeleton
 - [x] Step 2: Implement `ContextAssembler`
@@ -131,17 +131,9 @@ The current `backend/utils/intelligence/` folder tried to generate SQL determini
 - [x] Step 5: Implement `ResponseSynthesizer`
 - [x] Step 6: Implement `QueryEngine` orchestrator
 - [x] Step 7: Wire into `unified_chat.py`
-- [ ] Step 8: Test with real query
-- [ ] Step 9: Archive old files
+- [x] Step 8: Test with real query
+- [ ] Step 9: Archive old files (deferred - code still in tree but unused)
 - [ ] Step 10: Final cleanup
-
-**Completed:**
-- Created `backend/utils/intelligence/query_engine.py` (~650 lines)
-- Added QueryEngine to `__init__.py` exports
-- Modified `unified_chat.py` to use QueryEngine when `USE_QUERY_ENGINE=true`
-- Added compatibility properties to SynthesizedResponse for old interface
-- **REMOVED ALL FALLBACKS** - Succeed or fail clearly
-- **ALL LOGGING NOW AT WARNING LEVEL** - Visible in Railway logs
 
 **Files Created:**
 - `/backend/utils/intelligence/query_engine.py` - The new simplified engine
@@ -150,9 +142,33 @@ The current `backend/utils/intelligence/` folder tried to generate SQL determini
 - `/backend/utils/intelligence/__init__.py` - Added QueryEngine exports
 - `/backend/routers/unified_chat.py` - Added QueryEngine creation path
 
-**Environment Variable:**
-- `USE_QUERY_ENGINE=true` (default) - Uses new QueryEngine
-- `USE_QUERY_ENGINE=false` - Falls back to IntelligenceEngineV2
+### Session 2 - January 24, 2026 (PIT Query Fixes)
+
+**Status:** ✅ COMPLETE
+
+Fixed cascading bugs in point-in-time queries:
+
+| Bug | Fix |
+|-----|-----|
+| Table selection replaced by term mapping | `_find_relevant_tables()` - filter_value mappings don't replace tables |
+| Date extraction missed spelled-out months | `_build_resolved_intent()` - regex for "January 1, 2024" format |
+| TRY_CAST couldn't parse M/D/YYYY H:MM:SS AM | `_get_deterministic_sql()` - TRY_STRPTIME fallback |
+| Status column matched date columns | `_map_intent_to_columns()` - excludes `*date*`, `*start*` columns |
+| LLM output had garbage SELECT prefix | `_clean_sql()` - removes double SELECT |
+
+**Version:** query_engine.py v2024.01.24.7
+
+**Verified Working:**
+```
+"How many employees were active on January 1, 2024?" → 2,897 ✅
+"How many employees were active on 12/31/2023?" → 2,895 ✅
+"How many active employees?" → Returns result ✅
+Clarification flows → Working ✅
+```
+
+**Known Issues (not fixed):**
+- LLM uses `COUNT(*)` instead of `COUNT(DISTINCT employeeId)` - inflates counts
+- Terminated queries don't filter by year after clarification answer
 
 **Logging Tags (look for these in Railway):**
 - `[ENGINE]` - Main orchestrator steps
