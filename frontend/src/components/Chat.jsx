@@ -298,6 +298,29 @@ export default function Chat({ functionalAreas = [] }) {
     setPendingClarification(null)
   }
 
+  const resetPreferences = async () => {
+    try {
+      const response = await api.post('/chat/unified/reset-preferences', {
+        reset_type: 'all',
+        session_id: sessionId,
+        project: activeProject
+      })
+      
+      if (response.data?.success) {
+        // Add a system message to show it worked
+        setMessages(prev => [...prev, {
+          role: 'assistant',
+          content: '✓ Preferences cleared. I\'ll ask clarifying questions again.',
+          type: 'system'
+        }])
+      } else {
+        console.error('Reset failed:', response.data?.message)
+      }
+    } catch (error) {
+      console.error('Reset preferences error:', error)
+    }
+  }
+
   const handleFeedback = (messageIndex, feedbackType) => {
     setMessages(prev => prev.map((msg, idx) => 
       idx === messageIndex ? { ...msg, feedbackGiven: feedbackType } : msg
@@ -414,6 +437,22 @@ export default function Chat({ functionalAreas = [] }) {
               }}
             >
               <Trash2 size={18} />
+            </button>
+          </Tooltip>
+
+          <Tooltip title="Reset Preferences" detail="Clear saved answers so I'll ask clarifying questions again." action="Re-learn">
+            <button
+              onClick={resetPreferences}
+              style={{
+                padding: '0.5rem',
+                background: 'transparent',
+                border: 'none',
+                borderRadius: 8,
+                cursor: 'pointer',
+                color: colors.textMuted,
+              }}
+            >
+              <RefreshCw size={18} />
             </button>
           </Tooltip>
         </div>
